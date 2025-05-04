@@ -2,8 +2,8 @@
 -- Description: Create OTP verification table for signup flow
 
 -- UP MIGRATION
-CREATE TYPE otp_type_enum AS ENUM ('mobile', 'email');
-CREATE TYPE otp_status_enum AS ENUM ('pending', 'verified', 'expired', 'failed');
+CREATE TYPE otp_type_enum AS ENUM ('mobile', 'email', 'password_reset');
+CREATE TYPE otp_status_enum AS ENUM ('pending', 'verified', 'expired', 'failed', 'used');
 
 CREATE TABLE otp_verifications (
     id SERIAL PRIMARY KEY,
