@@ -30,7 +30,7 @@ func (r *CustomerSessionRepositoryImpl) BySessionToken(ctx context.Context, toke
 	err := db.Where("session_token = ? AND is_active = ? AND expires_at > ?",
 		token, true, time.Now()).
 		Preload("Customer").
-		First(&session).Error
+		Last(&session).Error
 
 	if err != nil {
 		if err.Error() == "record not found" { // GORM error check
@@ -50,7 +50,7 @@ func (r *CustomerSessionRepositoryImpl) ByRefreshToken(ctx context.Context, toke
 	err := db.Where("refresh_token = ? AND is_active = ? AND expires_at > ?",
 		token, true, time.Now()).
 		Preload("Customer").
-		First(&session).Error
+		Last(&session).Error
 
 	if err != nil {
 		if err.Error() == "record not found" { // GORM error check

@@ -44,7 +44,7 @@ func (r *OTPVerificationRepositoryImpl) ByTargetAndType(ctx context.Context, tar
 	var otp models.OTPVerification
 	err := db.Where("target_value = ? AND otp_type = ?", targetValue, otpType).
 		Order("created_at DESC").
-		First(&otp).Error
+		Last(&otp).Error
 
 	if err != nil {
 		if err.Error() == "record not found" { // GORM error check
