@@ -35,7 +35,7 @@ CREATE TABLE audit_log (
     ip_address INET,
     user_agent TEXT,
     request_id VARCHAR(255), -- For correlating with application logs
-    
+        
     -- Additional data (JSON for flexibility)
     metadata JSONB,
     
