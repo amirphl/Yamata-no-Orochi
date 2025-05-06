@@ -105,3 +105,107 @@ func (r *AuditLogRepositoryImpl) ListSecurityEvents(ctx context.Context, limit, 
 
 	return logs, nil
 }
+
+// ByFilter retrieves audit logs based on filter criteria
+func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.AuditLogFilter) ([]*models.AuditLog, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.AuditLog{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.CustomerID != nil {
+		query = query.Where("customer_id = ?", *filter.CustomerID)
+	}
+
+	if filter.Action != nil {
+		query = query.Where("action = ?", *filter.Action)
+	}
+
+	if filter.Success != nil {
+		query = query.Where("success = ?", *filter.Success)
+	}
+
+	if filter.IPAddress != nil {
+		query = query.Where("ip_address = ?", *filter.IPAddress)
+	}
+
+	if filter.RequestID != nil {
+		query = query.Where("request_id = ?", *filter.RequestID)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	var logs []*models.AuditLog
+	err := query.Find(&logs).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to find audit logs by filter: %w", err)
+	}
+
+	return logs, nil
+}
+
+// Count returns the number of audit logs matching the filter
+func (r *AuditLogRepositoryImpl) Count(ctx context.Context, filter models.AuditLogFilter) (int64, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.AuditLog{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.CustomerID != nil {
+		query = query.Where("customer_id = ?", *filter.CustomerID)
+	}
+
+	if filter.Action != nil {
+		query = query.Where("action = ?", *filter.Action)
+	}
+
+	if filter.Success != nil {
+		query = query.Where("success = ?", *filter.Success)
+	}
+
+	if filter.IPAddress != nil {
+		query = query.Where("ip_address = ?", *filter.IPAddress)
+	}
+
+	if filter.RequestID != nil {
+		query = query.Where("request_id = ?", *filter.RequestID)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	var count int64
+	err := query.Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to count audit logs: %w", err)
+	}
+
+	return count, nil
+}
+
+// Exists checks if any audit log matching the filter exists
+func (r *AuditLogRepositoryImpl) Exists(ctx context.Context, filter models.AuditLogFilter) (bool, error) {
+	count, err := r.Count(ctx, filter)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
