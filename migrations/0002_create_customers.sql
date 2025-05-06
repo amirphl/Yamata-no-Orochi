@@ -10,10 +10,10 @@ CREATE TABLE customers (
     
     -- Company fields (required for independent_company and marketing_agency)
     company_name VARCHAR(60),
-    national_id CHAR(11), -- 11 digits exactly
+    national_id VARCHAR(20), -- 20 digits (e.g. 12345678901234567890)
     company_phone VARCHAR(20), -- Various phone formats
     company_address VARCHAR(255),
-    postal_code CHAR(10), -- 10 digits exactly
+    postal_code VARCHAR(20), -- 20 digits (e.g. 12345678901234567890)
     
     -- Representative/Individual fields (required for all types)
     representative_first_name VARCHAR(255) NOT NULL,
@@ -47,8 +47,8 @@ CREATE TABLE customers (
     CONSTRAINT chk_representative_last_name_format CHECK (representative_last_name ~ '^[A-Za-z\s]+$'),
     CONSTRAINT chk_representative_mobile_format CHECK (representative_mobile ~ '^\+989[0-9]{9}$'),
     CONSTRAINT chk_company_phone_format CHECK (company_phone IS NULL OR length(company_phone) >= 10),
-    CONSTRAINT chk_national_id_format CHECK (national_id IS NULL OR national_id ~ '^[0-9]{11}$'),
-    CONSTRAINT chk_postal_code_format CHECK (postal_code IS NULL OR postal_code ~ '^[0-9]{10}$'),
+    CONSTRAINT chk_national_id_format CHECK (national_id IS NULL OR national_id ~ '^[0-9]{10,20}$'),
+    CONSTRAINT chk_postal_code_format CHECK (postal_code IS NULL OR postal_code ~ '^[0-9]{10,20}$'),
     CONSTRAINT chk_email_format CHECK (email ~ '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$')
 );
 
