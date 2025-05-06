@@ -16,7 +16,7 @@ type AuditLog struct {
 	UserAgent    *string         `gorm:"type:text" json:"user_agent,omitempty"`
 	RequestID    *string         `gorm:"size:255;index:idx_audit_request_id" json:"request_id,omitempty"`
 	Metadata     json.RawMessage `gorm:"type:jsonb;index:idx_audit_metadata,type:gin" json:"metadata,omitempty"`
-	Success      bool            `gorm:"default:true;index:idx_audit_success" json:"success"`
+	Success      *bool           `gorm:"default:true;index:idx_audit_success" json:"success"`
 	ErrorMessage *string         `gorm:"type:text" json:"error_message,omitempty"`
 	CreatedAt    time.Time       `gorm:"default:CURRENT_TIMESTAMP;index:idx_audit_created_at" json:"created_at"`
 }
@@ -62,7 +62,7 @@ type AuditLogFilter struct {
 }
 
 func (a *AuditLog) IsFailed() bool {
-	return !a.Success
+	return a.Success != nil && !*a.Success
 }
 
 func (a *AuditLog) IsSecurityEvent() bool {
