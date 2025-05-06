@@ -42,4 +42,4 @@ CREATE INDEX idx_sessions_ip_address ON customer_sessions(ip_address) WHERE ip_a
 -- Create composite indexes for common queries
 CREATE INDEX idx_sessions_customer_active ON customer_sessions(customer_id, is_active);
 CREATE INDEX idx_sessions_active_not_expired ON customer_sessions(is_active, expires_at) 
-    WHERE is_active = TRUE AND expires_at > CURRENT_TIMESTAMP; 
+    WHERE is_active = TRUE;

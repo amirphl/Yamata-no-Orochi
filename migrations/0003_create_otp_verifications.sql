@@ -51,4 +51,4 @@ CREATE INDEX idx_otp_ip_address ON otp_verifications(ip_address) WHERE ip_addres
 -- Create composite indexes for common queries
 CREATE INDEX idx_otp_customer_type_status ON otp_verifications(customer_id, otp_type, status);
 CREATE INDEX idx_otp_active_codes ON otp_verifications(target_value, otp_type, status) 
-    WHERE status = 'pending' AND expires_at > CURRENT_TIMESTAMP; 
+    WHERE status = 'pending';

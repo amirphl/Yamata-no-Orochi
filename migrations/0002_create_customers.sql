@@ -39,20 +39,9 @@ CREATE TABLE customers (
     mobile_verified_at TIMESTAMP WITH TIME ZONE,
     last_login_at TIMESTAMP WITH TIME ZONE,
     
-    -- Constraints
-    CONSTRAINT chk_company_fields_for_business CHECK (
-        (account_type_id = (SELECT id FROM account_types WHERE type_name = 'individual') AND 
-         company_name IS NULL AND national_id IS NULL AND company_phone IS NULL AND 
-         company_address IS NULL AND postal_code IS NULL) OR
-        (account_type_id IN (SELECT id FROM account_types WHERE type_name IN ('independent_company', 'marketing_agency')) AND 
-         company_name IS NOT NULL AND national_id IS NOT NULL AND company_phone IS NOT NULL AND 
-         company_address IS NOT NULL AND postal_code IS NOT NULL)
-    ),
-    
-    CONSTRAINT chk_agency_referrer CHECK (
-        referrer_agency_id IS NULL OR 
-        referrer_agency_id IN (SELECT id FROM customers WHERE account_type_id = (SELECT id FROM account_types WHERE type_name = 'marketing_agency'))
-    ),
+    -- Constraints (business logic validation moved to application layer)
+    -- Note: Complex business rules for company fields and agency referrer validation
+    -- are handled in the application layer to avoid subquery constraints
     
     CONSTRAINT chk_representative_first_name_format CHECK (representative_first_name ~ '^[A-Za-z\s]+$'),
     CONSTRAINT chk_representative_last_name_format CHECK (representative_last_name ~ '^[A-Za-z\s]+$'),
