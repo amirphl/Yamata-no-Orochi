@@ -5,8 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
-	"time"
 
 	"gorm.io/gorm"
 )
@@ -63,19 +61,19 @@ func (r *BaseRepository[T, F]) ByID(ctx context.Context, id uint) (*T, error) {
 }
 
 // ByFilter retrieves entities based on filter criteria
-func (r *BaseRepository[T, F]) ByFilter(ctx context.Context, filter F) ([]*T, error) {
-	db := r.getDB(ctx)
+// func (r *BaseRepository[T, F]) ByFilter(ctx context.Context, filter F) ([]*T, error) {
+// 	db := r.getDB(ctx)
 
-	var entities []*T
-	query := r.applyFilter(db, filter)
+// 	var entities []*T
+// 	query := r.applyFilter(db, filter)
 
-	err := query.Find(&entities).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to find entities by filter: %w", err)
-	}
+// 	err := query.Find(&entities).Error
+// 	if err != nil {
+// 		return nil, fmt.Errorf("failed to find entities by filter: %w", err)
+// 	}
 
-	return entities, nil
-}
+// 	return entities, nil
+// }
 
 // Save inserts a new entity
 func (r *BaseRepository[T, F]) Save(ctx context.Context, entity *T) error {
@@ -132,157 +130,199 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 }
 
 // Count returns the number of entities matching the filter
-func (r *BaseRepository[T, F]) Count(ctx context.Context, filter F) (int64, error) {
-	db := r.getDB(ctx)
+// func (r *BaseRepository[T, F]) Count(ctx context.Context, filter F) (int64, error) {
+// 	db := r.getDB(ctx)
 
-	var count int64
-	var entity T
-	query := r.applyFilter(db.Model(&entity), filter)
+// 	var count int64
+// 	var entity T
+// 	query := r.applyFilter(db.Model(&entity), filter)
 
-	err := query.Count(&count).Error
-	if err != nil {
-		return 0, fmt.Errorf("failed to count entities: %w", err)
-	}
+// 	err := query.Count(&count).Error
+// 	if err != nil {
+// 		return 0, fmt.Errorf("failed to count entities: %w", err)
+// 	}
 
-	return count, nil
-}
+// 	return count, nil
+// }
 
 // Exists checks if any entity matching the filter exists
-func (r *BaseRepository[T, F]) Exists(ctx context.Context, filter F) (bool, error) {
-	count, err := r.Count(ctx, filter)
-	if err != nil {
-		return false, err
-	}
+// func (r *BaseRepository[T, F]) Exists(ctx context.Context, filter F) (bool, error) {
+// 	count, err := r.Count(ctx, filter)
+// 	if err != nil {
+// 		return false, err
+// 	}
 
-	return count > 0, nil
-}
+// 	return count > 0, nil
+// }
 
 // applyFilter applies filter conditions to the GORM query
-func (r *BaseRepository[T, F]) applyFilter(db *gorm.DB, filter F) *gorm.DB {
-	filterValue := reflect.ValueOf(filter)
-	filterType := reflect.TypeOf(filter)
+// func (r *BaseRepository[T, F]) applyFilter(db *gorm.DB, filter F) *gorm.DB {
+// 	filterValue := reflect.ValueOf(filter)
+// 	filterType := reflect.TypeOf(filter)
 
-	// Handle pointer to struct
-	if filterType.Kind() == reflect.Ptr {
-		if filterValue.IsNil() {
-			return db
-		}
-		filterValue = filterValue.Elem()
-		filterType = filterType.Elem()
-	}
+// 	// Handle pointer to struct
+// 	if filterType.Kind() == reflect.Ptr {
+// 		if filterValue.IsNil() {
+// 			return db
+// 		}
+// 		filterValue = filterValue.Elem()
+// 		filterType = filterType.Elem()
+// 	}
 
-	// Apply filters based on field names and values
-	for i := 0; i < filterValue.NumField(); i++ {
-		field := filterValue.Field(i)
-		fieldType := filterType.Field(i)
+// 	// Apply filters based on field names and values
+// 	for i := 0; i < filterValue.NumField(); i++ {
+// 		field := filterValue.Field(i)
+// 		fieldType := filterType.Field(i)
 
-		if !field.IsValid() || field.IsZero() {
-			continue
-		}
+// 		if !field.IsValid() || field.IsZero() {
+// 			continue
+// 		}
 
-		// Handle pointer fields
-		if field.Kind() == reflect.Ptr {
-			if field.IsNil() {
-				continue
-			}
-			field = field.Elem()
-		}
+// 		// Handle pointer fields
+// 		if field.Kind() == reflect.Ptr {
+// 			if field.IsNil() {
+// 				continue
+// 			}
+// 			field = field.Elem()
+// 		}
 
-		fieldName := fieldType.Name
-		dbColumnName := r.getDBColumnName(fieldName)
+// 		fieldName := fieldType.Name
+// 		dbColumnName := r.getDBColumnName(fieldName)
 
-		// Apply specific filter logic based on field type and name
-		switch fieldName {
-		case "CreatedAfter":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("created_at >= ?", t)
-			}
-		case "CreatedBefore":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("created_at <= ?", t)
-			}
-		case "LastLoginAfter":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("last_login_at >= ?", t)
-			}
-		case "LastLoginBefore":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("last_login_at <= ?", t)
-			}
-		case "ExpiresAfter":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("expires_at >= ?", t)
-			}
-		case "ExpiresBefore":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("expires_at <= ?", t)
-			}
-		case "AccessedAfter":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("last_accessed_at >= ?", t)
-			}
-		case "AccessedBefore":
-			if t, ok := field.Interface().(time.Time); ok {
-				db = db.Where("last_accessed_at <= ?", t)
-			}
-		case "IsActive":
-			if field.Kind() == reflect.Bool {
-				// Special handling for active filter in OTP verifications
-				if field.Bool() {
-					// Check if we're dealing with OTP table by looking for status field
-					var testEntity T
-					entityType := reflect.TypeOf(testEntity)
-					if entityType.Kind() == reflect.Ptr {
-						entityType = entityType.Elem()
-					}
-					if entityType.Name() == "OTPVerification" {
-						db = db.Where("status = ? AND expires_at > ?", "pending", time.Now())
-					} else {
-						db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
-					}
-				} else {
-					db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
-				}
-			} else {
-				db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
-			}
-		case "IsExpired":
-			if field.Kind() == reflect.Bool && field.Bool() {
-				db = db.Where("expires_at <= ?", time.Now())
-			}
-		case "AccountTypeName":
-			// Join with account_types table for type name filtering
-			db = db.Joins("JOIN account_types ON customers.account_type_id = account_types.id").
-				Where("account_types.type_name = ?", field.Interface())
-		default:
-			// Standard equality filter
-			db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
-		}
-	}
+// 		// Apply specific filter logic based on field type and name
+// 		switch fieldName {
+// 		case "CreatedAfter":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("created_at >= ?", t)
+// 			}
+// 		case "CreatedBefore":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("created_at <= ?", t)
+// 			}
+// 		case "LastLoginAfter":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("last_login_at >= ?", t)
+// 			}
+// 		case "LastLoginBefore":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("last_login_at <= ?", t)
+// 			}
+// 		case "ExpiresAfter":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("expires_at >= ?", t)
+// 			}
+// 		case "ExpiresBefore":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("expires_at <= ?", t)
+// 			}
+// 		case "AccessedAfter":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("last_accessed_at >= ?", t)
+// 			}
+// 		case "AccessedBefore":
+// 			if t, ok := field.Interface().(time.Time); ok {
+// 				db = db.Where("last_accessed_at <= ?", t)
+// 			}
+// 		case "IsActive":
+// 			if field.Kind() == reflect.Bool {
+// 				// Special handling for active filter in OTP verifications
+// 				if field.Bool() {
+// 					// Check if we're dealing with OTP table by looking for status field
+// 					var testEntity T
+// 					entityType := reflect.TypeOf(testEntity)
+// 					if entityType.Kind() == reflect.Ptr {
+// 						entityType = entityType.Elem()
+// 					}
+// 					if entityType.Name() == "OTPVerification" {
+// 						db = db.Where("status = ? AND expires_at > ?", "pending", time.Now())
+// 					} else {
+// 						db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
+// 					}
+// 				} else {
+// 					db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
+// 				}
+// 			} else {
+// 				db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
+// 			}
+// 		case "IsExpired":
+// 			if field.Kind() == reflect.Bool && field.Bool() {
+// 				db = db.Where("expires_at <= ?", time.Now())
+// 			}
+// 		case "AccountTypeName":
+// 			// Join with account_types table for type name filtering
+// 			db = db.Joins("JOIN account_types ON customers.account_type_id = account_types.id").
+// 				Where("account_types.type_name = ?", field.Interface())
+// 		default:
+// 			// Standard equality filter
+// 			db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
+// 		}
+// 	}
 
-	return db
-}
+// 	return db
+// }
 
 // getDBColumnName converts Go field name to database column name (snake_case)
-func (r *BaseRepository[T, F]) getDBColumnName(fieldName string) string {
-	// Convert PascalCase to snake_case
-	var result []rune
-	for i, r := range fieldName {
-		if i > 0 && r >= 'A' && r <= 'Z' {
-			result = append(result, '_')
-		}
-		result = append(result, r)
-	}
+// func (r *BaseRepository[T, F]) getDBColumnName(fieldName string) string {
+// 	// Common abbreviations that should be treated as single units
+// 	abbreviations := map[string]string{
+// 		"ID":   "id",
+// 		"URL":  "url",
+// 		"API":  "api",
+// 		"HTTP": "http",
+// 		"JSON": "json",
+// 		"XML":  "xml",
+// 		"HTML": "html",
+// 		"CSS":  "css",
+// 		"SQL":  "sql",
+// 		"JWT":  "jwt",
+// 		"OTP":  "otp",
+// 	}
 
-	// Convert to lowercase
-	for i, r := range result {
-		if r >= 'A' && r <= 'Z' {
-			result[i] = r + 32
-		}
-	}
+// 	// Check if the entire field name is an abbreviation
+// 	if abbr, exists := abbreviations[fieldName]; exists {
+// 		return abbr
+// 	}
 
-	return string(result)
-}
+// 	// Convert PascalCase to snake_case, handling abbreviations
+// 	var result []rune
+// 	for i := 0; i < len(fieldName); i++ {
+// 		r := rune(fieldName[i])
+
+// 		// Check if we have a potential abbreviation (2+ consecutive uppercase letters)
+// 		if r >= 'A' && r <= 'Z' {
+// 			// Look ahead to see if we have consecutive uppercase letters
+// 			abbrEnd := i
+// 			for j := i + 1; j < len(fieldName) && fieldName[j] >= 'A' && fieldName[j] <= 'Z'; j++ {
+// 				abbrEnd = j
+// 			}
+
+// 			// If we found consecutive uppercase letters, treat as abbreviation
+// 			if abbrEnd > i {
+// 				abbr := fieldName[i : abbrEnd+1]
+// 				if abbrLower, exists := abbreviations[abbr]; exists {
+// 					// Add underscore before abbreviation if not at start
+// 					if i > 0 {
+// 						result = append(result, '_')
+// 					}
+// 					result = append(result, []rune(abbrLower)...)
+// 					i = abbrEnd // Skip the processed characters
+// 					continue
+// 				}
+// 			}
+
+// 			// Single uppercase letter - add underscore and convert to lowercase
+// 			if i > 0 {
+// 				result = append(result, '_')
+// 			}
+// 			result = append(result, r+32) // Convert to lowercase
+// 		} else {
+// 			// Lowercase letter - just add it
+// 			result = append(result, r)
+// 		}
+// 	}
+
+// 	return string(result)
+// }
 
 // WithTransaction executes a function within a database transaction
 func WithTransaction(db *gorm.DB, fn func(context.Context) error) error {
