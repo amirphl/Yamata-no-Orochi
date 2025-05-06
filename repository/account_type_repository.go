@@ -38,3 +38,75 @@ func (r *AccountTypeRepositoryImpl) ByTypeName(ctx context.Context, typeName str
 
 	return &accountType, nil
 }
+
+// ByFilter retrieves account types based on filter criteria
+func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.AccountType) ([]*models.AccountType, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.AccountType{})
+
+	// Apply filters based on provided values
+	if filter.ID != 0 {
+		query = query.Where("id = ?", filter.ID)
+	}
+
+	if filter.TypeName != "" {
+		query = query.Where("type_name = ?", filter.TypeName)
+	}
+
+	if filter.DisplayName != "" {
+		query = query.Where("display_name = ?", filter.DisplayName)
+	}
+
+	if filter.Description != nil {
+		query = query.Where("description = ?", *filter.Description)
+	}
+
+	var accountTypes []*models.AccountType
+	err := query.Find(&accountTypes).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to find account types by filter: %w", err)
+	}
+
+	return accountTypes, nil
+}
+
+// Count returns the number of account types matching the filter
+func (r *AccountTypeRepositoryImpl) Count(ctx context.Context, filter models.AccountType) (int64, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.AccountType{})
+
+	// Apply filters based on provided values
+	if filter.ID != 0 {
+		query = query.Where("id = ?", filter.ID)
+	}
+
+	if filter.TypeName != "" {
+		query = query.Where("type_name = ?", filter.TypeName)
+	}
+
+	if filter.DisplayName != "" {
+		query = query.Where("display_name = ?", filter.DisplayName)
+	}
+
+	if filter.Description != nil {
+		query = query.Where("description = ?", *filter.Description)
+	}
+
+	var count int64
+	err := query.Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to count account types: %w", err)
+	}
+
+	return count, nil
+}
+
+// Exists checks if any account type matching the filter exists
+func (r *AccountTypeRepositoryImpl) Exists(ctx context.Context, filter models.AccountType) (bool, error) {
+	count, err := r.Count(ctx, filter)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
