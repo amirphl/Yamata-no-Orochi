@@ -233,3 +233,133 @@ func (r *CustomerSessionRepositoryImpl) CleanupExpiredSessions(ctx context.Conte
 
 	return nil
 }
+
+// ByFilter retrieves customer sessions based on filter criteria
+func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerSessionFilter) ([]*models.CustomerSession, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.CustomerSession{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.CustomerID != nil {
+		query = query.Where("customer_id = ?", *filter.CustomerID)
+	}
+
+	if filter.IsActive != nil {
+		query = query.Where("is_active = ?", *filter.IsActive)
+	}
+
+	if filter.IPAddress != nil {
+		query = query.Where("ip_address = ?", *filter.IPAddress)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	if filter.ExpiresAfter != nil {
+		query = query.Where("expires_at >= ?", *filter.ExpiresAfter)
+	}
+
+	if filter.ExpiresBefore != nil {
+		query = query.Where("expires_at <= ?", *filter.ExpiresBefore)
+	}
+
+	if filter.AccessedAfter != nil {
+		query = query.Where("last_accessed_at >= ?", *filter.AccessedAfter)
+	}
+
+	if filter.AccessedBefore != nil {
+		query = query.Where("last_accessed_at <= ?", *filter.AccessedBefore)
+	}
+
+	// Special handling for IsExpired - filter expired sessions
+	if filter.IsExpired != nil && *filter.IsExpired {
+		query = query.Where("expires_at <= ?", time.Now())
+	}
+
+	var sessions []*models.CustomerSession
+	err := query.Find(&sessions).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to find customer sessions by filter: %w", err)
+	}
+
+	return sessions, nil
+}
+
+// Count returns the number of customer sessions matching the filter
+func (r *CustomerSessionRepositoryImpl) Count(ctx context.Context, filter models.CustomerSessionFilter) (int64, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.CustomerSession{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.CustomerID != nil {
+		query = query.Where("customer_id = ?", *filter.CustomerID)
+	}
+
+	if filter.IsActive != nil {
+		query = query.Where("is_active = ?", *filter.IsActive)
+	}
+
+	if filter.IPAddress != nil {
+		query = query.Where("ip_address = ?", *filter.IPAddress)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	if filter.ExpiresAfter != nil {
+		query = query.Where("expires_at >= ?", *filter.ExpiresAfter)
+	}
+
+	if filter.ExpiresBefore != nil {
+		query = query.Where("expires_at <= ?", *filter.ExpiresBefore)
+	}
+
+	if filter.AccessedAfter != nil {
+		query = query.Where("last_accessed_at >= ?", *filter.AccessedAfter)
+	}
+
+	if filter.AccessedBefore != nil {
+		query = query.Where("last_accessed_at <= ?", *filter.AccessedBefore)
+	}
+
+	// Special handling for IsExpired - filter expired sessions
+	if filter.IsExpired != nil && *filter.IsExpired {
+		query = query.Where("expires_at <= ?", time.Now())
+	}
+
+	var count int64
+	err := query.Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to count customer sessions: %w", err)
+	}
+
+	return count, nil
+}
+
+// Exists checks if any customer session matching the filter exists
+func (r *CustomerSessionRepositoryImpl) Exists(ctx context.Context, filter models.CustomerSessionFilter) (bool, error) {
+	count, err := r.Count(ctx, filter)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
