@@ -123,3 +123,133 @@ func (r *OTPVerificationRepositoryImpl) ExpireOldOTPs(ctx context.Context, custo
 
 	return nil
 }
+
+// ByFilter retrieves OTP verifications based on filter criteria
+func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter models.OTPVerificationFilter) ([]*models.OTPVerification, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.OTPVerification{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.CustomerID != nil {
+		query = query.Where("customer_id = ?", *filter.CustomerID)
+	}
+
+	if filter.OTPType != nil {
+		query = query.Where("otp_type = ?", *filter.OTPType)
+	}
+
+	if filter.TargetValue != nil {
+		query = query.Where("target_value = ?", *filter.TargetValue)
+	}
+
+	if filter.Status != nil {
+		query = query.Where("status = ?", *filter.Status)
+	}
+
+	if filter.IPAddress != nil {
+		query = query.Where("ip_address = ?", *filter.IPAddress)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	if filter.ExpiresAfter != nil {
+		query = query.Where("expires_at >= ?", *filter.ExpiresAfter)
+	}
+
+	if filter.ExpiresBefore != nil {
+		query = query.Where("expires_at <= ?", *filter.ExpiresBefore)
+	}
+
+	// Special handling for IsActive - filter non-expired pending OTPs
+	if filter.IsActive != nil && *filter.IsActive {
+		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, time.Now())
+	}
+
+	var otps []*models.OTPVerification
+	err := query.Find(&otps).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to find OTP verifications by filter: %w", err)
+	}
+
+	return otps, nil
+}
+
+// Count returns the number of OTP verifications matching the filter
+func (r *OTPVerificationRepositoryImpl) Count(ctx context.Context, filter models.OTPVerificationFilter) (int64, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.OTPVerification{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.CustomerID != nil {
+		query = query.Where("customer_id = ?", *filter.CustomerID)
+	}
+
+	if filter.OTPType != nil {
+		query = query.Where("otp_type = ?", *filter.OTPType)
+	}
+
+	if filter.TargetValue != nil {
+		query = query.Where("target_value = ?", *filter.TargetValue)
+	}
+
+	if filter.Status != nil {
+		query = query.Where("status = ?", *filter.Status)
+	}
+
+	if filter.IPAddress != nil {
+		query = query.Where("ip_address = ?", *filter.IPAddress)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	if filter.ExpiresAfter != nil {
+		query = query.Where("expires_at >= ?", *filter.ExpiresAfter)
+	}
+
+	if filter.ExpiresBefore != nil {
+		query = query.Where("expires_at <= ?", *filter.ExpiresBefore)
+	}
+
+	// Special handling for IsActive - filter non-expired pending OTPs
+	if filter.IsActive != nil && *filter.IsActive {
+		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, time.Now())
+	}
+
+	var count int64
+	err := query.Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to count OTP verifications: %w", err)
+	}
+
+	return count, nil
+}
+
+// Exists checks if any OTP verification matching the filter exists
+func (r *OTPVerificationRepositoryImpl) Exists(ctx context.Context, filter models.OTPVerificationFilter) (bool, error) {
+	count, err := r.Count(ctx, filter)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
