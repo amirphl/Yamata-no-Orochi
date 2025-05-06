@@ -99,3 +99,167 @@ func (r *CustomerRepositoryImpl) ListActiveCustomers(ctx context.Context, limit,
 
 	return customers, nil
 }
+
+// ByFilter retrieves customers based on filter criteria
+func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerFilter) ([]*models.Customer, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.Customer{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.AccountTypeID != nil {
+		query = query.Where("account_type_id = ?", *filter.AccountTypeID)
+	}
+
+	if filter.Email != nil {
+		query = query.Where("email = ?", *filter.Email)
+	}
+
+	if filter.RepresentativeMobile != nil {
+		query = query.Where("representative_mobile = ?", *filter.RepresentativeMobile)
+	}
+
+	if filter.CompanyName != nil {
+		query = query.Where("company_name = ?", *filter.CompanyName)
+	}
+
+	if filter.NationalID != nil {
+		query = query.Where("national_id = ?", *filter.NationalID)
+	}
+
+	if filter.ReferrerAgencyID != nil {
+		query = query.Where("referrer_agency_id = ?", *filter.ReferrerAgencyID)
+	}
+
+	if filter.IsEmailVerified != nil {
+		query = query.Where("is_email_verified = ?", *filter.IsEmailVerified)
+	}
+
+	if filter.IsMobileVerified != nil {
+		query = query.Where("is_mobile_verified = ?", *filter.IsMobileVerified)
+	}
+
+	if filter.IsActive != nil {
+		query = query.Where("is_active = ?", *filter.IsActive)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	if filter.LastLoginAfter != nil {
+		query = query.Where("last_login_at >= ?", *filter.LastLoginAfter)
+	}
+
+	if filter.LastLoginBefore != nil {
+		query = query.Where("last_login_at <= ?", *filter.LastLoginBefore)
+	}
+
+	// Special handling for AccountTypeName - join with account_types table
+	if filter.AccountTypeName != nil {
+		query = query.Joins("JOIN account_types ON customers.account_type_id = account_types.id").
+			Where("account_types.type_name = ?", *filter.AccountTypeName)
+	}
+
+	var customers []*models.Customer
+	err := query.Find(&customers).Error
+	if err != nil {
+		return nil, fmt.Errorf("failed to find customers by filter: %w", err)
+	}
+
+	return customers, nil
+}
+
+// Count returns the number of customers matching the filter
+func (r *CustomerRepositoryImpl) Count(ctx context.Context, filter models.CustomerFilter) (int64, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.Customer{})
+
+	// Apply filters based on provided values
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.AccountTypeID != nil {
+		query = query.Where("account_type_id = ?", *filter.AccountTypeID)
+	}
+
+	if filter.Email != nil {
+		query = query.Where("email = ?", *filter.Email)
+	}
+
+	if filter.RepresentativeMobile != nil {
+		query = query.Where("representative_mobile = ?", *filter.RepresentativeMobile)
+	}
+
+	if filter.CompanyName != nil {
+		query = query.Where("company_name = ?", *filter.CompanyName)
+	}
+
+	if filter.NationalID != nil {
+		query = query.Where("national_id = ?", *filter.NationalID)
+	}
+
+	if filter.ReferrerAgencyID != nil {
+		query = query.Where("referrer_agency_id = ?", *filter.ReferrerAgencyID)
+	}
+
+	if filter.IsEmailVerified != nil {
+		query = query.Where("is_email_verified = ?", *filter.IsEmailVerified)
+	}
+
+	if filter.IsMobileVerified != nil {
+		query = query.Where("is_mobile_verified = ?", *filter.IsMobileVerified)
+	}
+
+	if filter.IsActive != nil {
+		query = query.Where("is_active = ?", *filter.IsActive)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	if filter.LastLoginAfter != nil {
+		query = query.Where("last_login_at >= ?", *filter.LastLoginAfter)
+	}
+
+	if filter.LastLoginBefore != nil {
+		query = query.Where("last_login_at <= ?", *filter.LastLoginBefore)
+	}
+
+	// Special handling for AccountTypeName - join with account_types table
+	if filter.AccountTypeName != nil {
+		query = query.Joins("JOIN account_types ON customers.account_type_id = account_types.id").
+			Where("account_types.type_name = ?", *filter.AccountTypeName)
+	}
+
+	var count int64
+	err := query.Count(&count).Error
+	if err != nil {
+		return 0, fmt.Errorf("failed to count customers: %w", err)
+	}
+
+	return count, nil
+}
+
+// Exists checks if any customer matching the filter exists
+func (r *CustomerRepositoryImpl) Exists(ctx context.Context, filter models.CustomerFilter) (bool, error) {
+	count, err := r.Count(ctx, filter)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}
