@@ -19,7 +19,7 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// TestDBConfig holds configuration for test database connections
+// TestDBConfig holds database configuration for testing
 type TestDBConfig struct {
 	Host     string
 	Port     int
@@ -28,16 +28,15 @@ type TestDBConfig struct {
 	SSLMode  string
 }
 
-// GetTestDBConfig loads test database configuration from environment variables
+// GetTestDBConfig returns test database configuration from environment variables
 func GetTestDBConfig() *TestDBConfig {
-	config := &TestDBConfig{
+	return &TestDBConfig{
 		Host:     getEnv("TEST_DB_HOST", "localhost"),
 		Port:     getEnvAsInt("TEST_DB_PORT", 5432),
 		User:     getEnv("TEST_DB_USER", "postgres"),
 		Password: getEnv("TEST_DB_PASSWORD", "postgres"),
 		SSLMode:  getEnv("TEST_DB_SSL_MODE", "disable"),
 	}
-	return config
 }
 
 // TestDB represents a test database instance
@@ -47,14 +46,16 @@ type TestDB struct {
 	config *TestDBConfig
 }
 
-// SetupTestDB creates a new test database with a unique name and runs migrations
+// SetupTestDB creates a new test database with a unique name
 func SetupTestDB() (*TestDB, error) {
 	config := GetTestDBConfig()
 
-	// Generate unique database name using timestamp and random number
-	dbName := fmt.Sprintf("yamata_test_%d_%d", time.Now().Unix(), rand.Intn(10000))
+	// Generate unique database name
+	timestamp := time.Now().UnixNano()
+	randomSuffix := rand.Intn(10000)
+	dbName := fmt.Sprintf("yamata_test_%d_%d", timestamp, randomSuffix)
 
-	// Connect to PostgreSQL server (without specific database)
+	// Connect to PostgreSQL server to create test database
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s sslmode=%s",
 		config.Host, config.Port, config.User, config.Password, config.SSLMode)
 
@@ -75,7 +76,7 @@ func SetupTestDB() (*TestDB, error) {
 	sqlDB, _ := adminDB.DB()
 	sqlDB.Close()
 
-	// Connect to the new test database
+	// Connect to the test database
 	testDSN := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		config.Host, config.Port, config.User, config.Password, dbName, config.SSLMode)
 
@@ -239,6 +240,8 @@ func runTestMigrations(databaseURL, dbName string) error {
 		"0004_create_customer_sessions.sql",
 		"0005_create_audit_log.sql",
 		"0006_update_customer_fields.sql",
+		"0007_add_missing_audit_actions.sql",
+		"0008_update_audit_log_success_field.sql",
 	}
 
 	// Execute each migration file
