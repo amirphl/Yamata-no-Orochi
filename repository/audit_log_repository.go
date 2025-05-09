@@ -107,7 +107,7 @@ func (r *AuditLogRepositoryImpl) ListSecurityEvents(ctx context.Context, limit, 
 }
 
 // ByFilter retrieves audit logs based on filter criteria
-func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.AuditLogFilter) ([]*models.AuditLog, error) {
+func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.AuditLogFilter, orderBy string, limit, offset int) ([]*models.AuditLog, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.AuditLog{})
 
@@ -142,6 +142,20 @@ func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.Aud
 
 	if filter.CreatedBefore != nil {
 		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+	}
+
+	// Apply ordering (default to id DESC)
+	if orderBy == "" {
+		orderBy = "id DESC"
+	}
+	query = query.Order(orderBy)
+
+	// Apply pagination
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
 	}
 
 	var logs []*models.AuditLog

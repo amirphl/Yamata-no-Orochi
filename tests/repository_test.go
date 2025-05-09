@@ -7,6 +7,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	testingutil "github.com/amirphl/Yamata-no-Orochi/testing"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -41,12 +42,12 @@ func TestAccountTypeRepository(t *testing.T) {
 
 		t.Run("ByFilter", func(t *testing.T) {
 			// Test with empty filter (should return all)
-			accountTypes, err := repo.ByFilter(ctx, models.AccountType{})
+			accountTypes, err := repo.ByFilter(ctx, models.AccountType{}, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(accountTypes), 3) // At least the 3 default types
 
 			// Test with specific filter
-			accountTypes, err = repo.ByFilter(ctx, models.AccountType{TypeName: models.AccountTypeIndividual})
+			accountTypes, err = repo.ByFilter(ctx, models.AccountType{TypeName: models.AccountTypeIndividual}, "", 0, 0)
 			require.NoError(t, err)
 			assert.Len(t, accountTypes, 1)
 			assert.Equal(t, models.AccountTypeIndividual, accountTypes[0].TypeName)
@@ -147,7 +148,7 @@ func TestCustomerRepository(t *testing.T) {
 			// Test filter by email
 			email := customers[0].Email
 			filter := models.CustomerFilter{Email: &email}
-			result, err := repo.ByFilter(ctx, filter)
+			result, err := repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.Len(t, result, 1)
 			assert.Equal(t, customers[0].Email, result[0].Email)
@@ -155,14 +156,14 @@ func TestCustomerRepository(t *testing.T) {
 			// Test filter by IsActive
 			isActive := true
 			filter = models.CustomerFilter{IsActive: &isActive}
-			result, err = repo.ByFilter(ctx, filter)
+			result, err = repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(result), 3)
 
 			// Test filter by AccountTypeName
 			accountTypeName := models.AccountTypeIndividual
 			filter = models.CustomerFilter{AccountTypeName: &accountTypeName}
-			result, err = repo.ByFilter(ctx, filter)
+			result, err = repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(result), 1)
 		})
@@ -178,7 +179,7 @@ func TestCustomerRepository(t *testing.T) {
 
 			// All returned customers should be active
 			for _, customer := range customers {
-				assert.True(t, customer.IsActive)
+				assert.True(t, utils.IsTrue(customer.IsActive))
 			}
 		})
 
@@ -380,7 +381,7 @@ func TestOTPVerificationRepository(t *testing.T) {
 				Status:     &otpStatus,
 			}
 
-			expiredOTPs, err := repo.ByFilter(ctx, filter)
+			expiredOTPs, err := repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(expiredOTPs), 2)
 
@@ -403,7 +404,7 @@ func TestOTPVerificationRepository(t *testing.T) {
 
 			// Filter by customer ID
 			filter := models.OTPVerificationFilter{CustomerID: &customer.ID}
-			otps, err := repo.ByFilter(ctx, filter)
+			otps, err := repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(otps), 1)
 
@@ -413,7 +414,7 @@ func TestOTPVerificationRepository(t *testing.T) {
 				CustomerID: &customer.ID,
 				OTPType:    &otpType,
 			}
-			otps, err = repo.ByFilter(ctx, filter)
+			otps, err = repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(otps), 1)
 
@@ -530,7 +531,7 @@ func TestCustomerSessionRepository(t *testing.T) {
 			refreshToken, err = testingutil.GenerateSecureToken(32)
 			require.NoError(t, err)
 			session3.RefreshToken = stringPtr(refreshToken)
-			session3.IsActive = false
+			session3.IsActive = utils.ToPtr(false)
 			err = testDB.DB.Save(session3).Error
 			require.NoError(t, err)
 
@@ -540,7 +541,7 @@ func TestCustomerSessionRepository(t *testing.T) {
 
 			// All returned sessions should be active
 			for _, session := range sessions {
-				assert.True(t, session.IsActive)
+				assert.True(t, utils.IsTrue(session.IsActive))
 				assert.Equal(t, customer.ID, session.CustomerID)
 			}
 
@@ -563,7 +564,7 @@ func TestCustomerSessionRepository(t *testing.T) {
 
 			// Filter by customer ID
 			filter := models.CustomerSessionFilter{CustomerID: &customer.ID}
-			sessions, err := repo.ByFilter(ctx, filter)
+			sessions, err := repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(sessions), 1)
 
@@ -573,7 +574,7 @@ func TestCustomerSessionRepository(t *testing.T) {
 				CustomerID: &customer.ID,
 				IsActive:   &isActive,
 			}
-			sessions, err = repo.ByFilter(ctx, filter)
+			sessions, err = repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(sessions), 1)
 
@@ -634,7 +635,7 @@ func TestAuditLogRepository(t *testing.T) {
 
 			// Filter by customer ID
 			filter := models.AuditLogFilter{CustomerID: &customer.ID}
-			audits, err := repo.ByFilter(ctx, filter)
+			audits, err := repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(audits), 2)
 
@@ -644,7 +645,7 @@ func TestAuditLogRepository(t *testing.T) {
 				CustomerID: &customer.ID,
 				Success:    &success,
 			}
-			audits, err = repo.ByFilter(ctx, filter)
+			audits, err = repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(audits), 1)
 
@@ -665,7 +666,7 @@ func TestAuditLogRepository(t *testing.T) {
 				CustomerID: &customer.ID,
 				Action:     &action,
 			}
-			audits, err = repo.ByFilter(ctx, filter)
+			audits, err = repo.ByFilter(ctx, filter, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(audits), 1)
 

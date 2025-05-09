@@ -4,6 +4,8 @@ package models
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 )
 
 type CustomerSession struct {
@@ -15,7 +17,7 @@ type CustomerSession struct {
 	DeviceInfo     json.RawMessage `gorm:"type:jsonb" json:"device_info,omitempty"`
 	IPAddress      *string         `gorm:"type:inet;index:idx_sessions_ip_address" json:"ip_address,omitempty"`
 	UserAgent      *string         `gorm:"type:text" json:"user_agent,omitempty"`
-	IsActive       bool            `gorm:"default:true;index:idx_sessions_is_active" json:"is_active"`
+	IsActive       *bool           `gorm:"default:true;index:idx_sessions_is_active" json:"is_active"`
 	CreatedAt      time.Time       `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
 	LastAccessedAt time.Time       `gorm:"default:CURRENT_TIMESTAMP;index:idx_sessions_last_accessed" json:"last_accessed_at"`
 	ExpiresAt      time.Time       `gorm:"not null;index:idx_sessions_expires_at" json:"expires_at"`
@@ -45,7 +47,7 @@ func (s *CustomerSession) IsExpired() bool {
 }
 
 func (s *CustomerSession) IsValid() bool {
-	return s.IsActive && !s.IsExpired()
+	return utils.IsTrue(s.IsActive) && !s.IsExpired()
 }
 
 // DeviceInfo represents the structure for device information

@@ -4,6 +4,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"gorm.io/gorm"
@@ -24,7 +25,7 @@ func NewCustomerRepository(db *gorm.DB) CustomerRepository {
 // ByEmail retrieves a customer by email address
 func (r *CustomerRepositoryImpl) ByEmail(ctx context.Context, email string) (*models.Customer, error) {
 	filter := models.CustomerFilter{Email: &email}
-	customers, err := r.ByFilter(ctx, filter)
+	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find customer by email: %w", err)
 	}
@@ -39,7 +40,7 @@ func (r *CustomerRepositoryImpl) ByEmail(ctx context.Context, email string) (*mo
 // ByMobile retrieves a customer by mobile number
 func (r *CustomerRepositoryImpl) ByMobile(ctx context.Context, mobile string) (*models.Customer, error) {
 	filter := models.CustomerFilter{RepresentativeMobile: &mobile}
-	customers, err := r.ByFilter(ctx, filter)
+	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find customer by mobile: %w", err)
 	}
@@ -54,7 +55,7 @@ func (r *CustomerRepositoryImpl) ByMobile(ctx context.Context, mobile string) (*
 // ByNationalID retrieves a customer by national ID
 func (r *CustomerRepositoryImpl) ByNationalID(ctx context.Context, nationalID string) (*models.Customer, error) {
 	filter := models.CustomerFilter{NationalID: &nationalID}
-	customers, err := r.ByFilter(ctx, filter)
+	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find customer by national ID: %w", err)
 	}
@@ -73,7 +74,7 @@ func (r *CustomerRepositoryImpl) ListByAgency(ctx context.Context, agencyID uint
 		IsActive:         &[]bool{true}[0], // Active customers only
 	}
 
-	customers, err := r.ByFilter(ctx, filter)
+	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list customers by agency: %w", err)
 	}
@@ -101,7 +102,7 @@ func (r *CustomerRepositoryImpl) ListActiveCustomers(ctx context.Context, limit,
 }
 
 // ByFilter retrieves customers based on filter criteria
-func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerFilter) ([]*models.Customer, error) {
+func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerFilter, orderBy string, limit, offset int) ([]*models.Customer, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.Customer{})
 
@@ -166,6 +167,20 @@ func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.Cus
 	if filter.AccountTypeName != nil {
 		query = query.Joins("JOIN account_types ON customers.account_type_id = account_types.id").
 			Where("account_types.type_name = ?", *filter.AccountTypeName)
+	}
+
+	// Apply ordering (default to id DESC)
+	if orderBy == "" {
+		orderBy = "id DESC"
+	}
+	query = query.Order(orderBy)
+
+	// Apply pagination
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
 	}
 
 	var customers []*models.Customer
@@ -262,4 +277,64 @@ func (r *CustomerRepositoryImpl) Exists(ctx context.Context, filter models.Custo
 	}
 
 	return count > 0, nil
+}
+
+// UpdatePassword updates the password hash for an existing customer
+// This is a special case that allows updating the password while maintaining referential integrity
+func (r *CustomerRepositoryImpl) UpdatePassword(ctx context.Context, customerID uint, passwordHash string) error {
+	db := r.getDB(ctx)
+
+	// Use direct SQL update to change only the password hash
+	result := db.Model(&models.Customer{}).
+		Where("id = ?", customerID).
+		Update("password_hash", passwordHash)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to update password: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("customer not found with ID: %d", customerID)
+	}
+
+	return nil
+}
+
+// UpdateVerificationStatus updates verification fields for an existing customer
+// This is a special case that allows updating verification status while maintaining referential integrity
+func (r *CustomerRepositoryImpl) UpdateVerificationStatus(ctx context.Context, customerID uint, isMobileVerified, isEmailVerified *bool, mobileVerifiedAt, emailVerifiedAt *time.Time) error {
+	db := r.getDB(ctx)
+
+	updates := make(map[string]interface{})
+
+	if isMobileVerified != nil {
+		updates["is_mobile_verified"] = *isMobileVerified
+	}
+	if isEmailVerified != nil {
+		updates["is_email_verified"] = *isEmailVerified
+	}
+	if mobileVerifiedAt != nil {
+		updates["mobile_verified_at"] = *mobileVerifiedAt
+	}
+	if emailVerifiedAt != nil {
+		updates["email_verified_at"] = *emailVerifiedAt
+	}
+
+	if len(updates) == 0 {
+		return nil // No updates needed
+	}
+
+	result := db.Model(&models.Customer{}).
+		Where("id = ?", customerID).
+		Updates(updates)
+
+	if result.Error != nil {
+		return fmt.Errorf("failed to update verification status: %w", result.Error)
+	}
+
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("customer not found with ID: %d", customerID)
+	}
+
+	return nil
 }

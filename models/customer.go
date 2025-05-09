@@ -31,9 +31,9 @@ type Customer struct {
 	ReferrerAgency   *Customer `gorm:"foreignKey:ReferrerAgencyID;references:ID" json:"referrer_agency,omitempty"`
 
 	// Status and verification
-	IsEmailVerified  bool `gorm:"default:false" json:"is_email_verified"`
-	IsMobileVerified bool `gorm:"default:false" json:"is_mobile_verified"`
-	IsActive         bool `gorm:"default:true;index:idx_customers_is_active" json:"is_active"`
+	IsEmailVerified  *bool `gorm:"default:false" json:"is_email_verified"`
+	IsMobileVerified *bool `gorm:"default:false" json:"is_mobile_verified"`
+	IsActive         *bool `gorm:"default:true;index:idx_customers_is_active" json:"is_active"`
 
 	// Timestamps
 	CreatedAt        time.Time  `gorm:"default:CURRENT_TIMESTAMP;index:idx_customers_created_at" json:"created_at"`

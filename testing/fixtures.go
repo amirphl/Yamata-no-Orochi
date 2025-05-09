@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -46,9 +47,9 @@ func (tf *TestFixtures) CreateTestCustomer(accountTypeName string) (*models.Cust
 		RepresentativeMobile:    fmt.Sprintf("+989%s", randomDigits),
 		Email:                   fmt.Sprintf("john.doe.%d.%s@example.com", accountType.ID, randomDigits),
 		PasswordHash:            string(hashedPassword),
-		IsActive:                true,
-		IsEmailVerified:         false,
-		IsMobileVerified:        false,
+		IsActive:                utils.ToPtr(true),
+		IsEmailVerified:         utils.ToPtr(false),
+		IsMobileVerified:        utils.ToPtr(false),
 	}
 
 	// Set account-specific fields
@@ -128,7 +129,7 @@ func (tf *TestFixtures) CreateTestSession(customerID uint) (*models.CustomerSess
 		SessionToken: sessionToken,
 		RefreshToken: &refreshToken,
 		ExpiresAt:    time.Now().Add(24 * time.Hour),
-		IsActive:     true,
+		IsActive:     utils.ToPtr(true),
 		IPAddress:    &ipAddress,
 		UserAgent:    &userAgent,
 	}

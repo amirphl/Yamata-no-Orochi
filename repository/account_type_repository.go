@@ -40,7 +40,7 @@ func (r *AccountTypeRepositoryImpl) ByTypeName(ctx context.Context, typeName str
 }
 
 // ByFilter retrieves account types based on filter criteria
-func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.AccountType) ([]*models.AccountType, error) {
+func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.AccountType, orderBy string, limit, offset int) ([]*models.AccountType, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.AccountType{})
 
@@ -59,6 +59,20 @@ func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.
 
 	if filter.Description != nil {
 		query = query.Where("description = ?", *filter.Description)
+	}
+
+	// Apply ordering (default to id DESC)
+	if orderBy == "" {
+		orderBy = "id DESC"
+	}
+	query = query.Order(orderBy)
+
+	// Apply pagination
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
 	}
 
 	var accountTypes []*models.AccountType

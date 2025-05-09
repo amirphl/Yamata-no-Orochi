@@ -233,4 +233,7 @@ load-test-results/
 # Migration files that are environment-specific
 migrations/local_*
 migrations/dev_*
-migrations/custom_* 
+migrations/custom_*
+
+app/services/jwt_private.pem
+app/services/jwt_public.pem

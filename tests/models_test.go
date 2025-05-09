@@ -7,6 +7,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	testingutil "github.com/amirphl/Yamata-no-Orochi/testing"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -40,9 +41,9 @@ func TestCustomer(t *testing.T) {
 			assert.NotZero(t, customer.ID)
 			assert.Equal(t, "John", customer.RepresentativeFirstName)
 			assert.Equal(t, "Doe", customer.RepresentativeLastName)
-			assert.True(t, customer.IsActive)
-			assert.False(t, customer.IsEmailVerified)
-			assert.False(t, customer.IsMobileVerified)
+			assert.True(t, utils.IsTrue(customer.IsActive))
+			assert.False(t, utils.IsTrue(customer.IsEmailVerified))
+			assert.False(t, utils.IsTrue(customer.IsMobileVerified))
 			assert.NotNil(t, customer.NationalID)
 			assert.Nil(t, customer.CompanyName)
 		})
@@ -99,7 +100,7 @@ func TestCustomer(t *testing.T) {
 				RepresentativeMobile:    "+989123456788", // Different mobile
 				Email:                   customer1.Email, // Same email
 				PasswordHash:            "hashedpassword",
-				IsActive:                true,
+				IsActive:                utils.ToPtr(true),
 			}
 
 			err = testDB.DB.Create(customer2).Error
@@ -113,7 +114,7 @@ func TestCustomer(t *testing.T) {
 				RepresentativeMobile:    customer1.RepresentativeMobile, // Same mobile
 				Email:                   "jane@example.com",             // Different email
 				PasswordHash:            "hashedpassword",
-				IsActive:                true,
+				IsActive:                utils.ToPtr(true),
 			}
 
 			err = testDB.DB.Create(customer3).Error
@@ -215,7 +216,7 @@ func TestCustomerSession(t *testing.T) {
 			assert.NotZero(t, session.ID)
 			assert.Equal(t, customer.ID, session.CustomerID)
 			assert.NotNil(t, session.RefreshToken)
-			assert.True(t, session.IsActive)
+			assert.True(t, utils.IsTrue(session.IsActive))
 			assert.True(t, session.ExpiresAt.After(time.Now()))
 			assert.NotNil(t, session.IPAddress)
 			assert.NotNil(t, session.UserAgent)
@@ -232,11 +233,11 @@ func TestCustomerSession(t *testing.T) {
 			assert.True(t, session.IsValid())
 
 			// Inactive session should be invalid
-			session.IsActive = false
+			session.IsActive = utils.ToPtr(false)
 			assert.False(t, session.IsValid())
 
 			// Reset to active
-			session.IsActive = true
+			session.IsActive = utils.ToPtr(true)
 			assert.True(t, session.IsValid())
 
 			// Expired session should be invalid

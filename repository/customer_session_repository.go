@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"gorm.io/gorm"
 )
 
@@ -69,7 +70,7 @@ func (r *CustomerSessionRepositoryImpl) ListActiveSessionsByCustomer(ctx context
 		IsActive:   &[]bool{true}[0],
 	}
 
-	sessions, err := r.ByFilter(ctx, filter)
+	sessions, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active sessions by customer: %w", err)
 	}
@@ -118,7 +119,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireSession(ctx context.Context, sessi
 		DeviceInfo:     session.DeviceInfo,
 		IPAddress:      session.IPAddress,
 		UserAgent:      session.UserAgent,
-		IsActive:       false,
+		IsActive:       utils.ToPtr(false),
 		CreatedAt:      session.CreatedAt,
 		LastAccessedAt: time.Now(),
 		ExpiresAt:      time.Now(), // Mark as expired now
@@ -168,7 +169,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireAllCustomerSessions(ctx context.Co
 			DeviceInfo:     session.DeviceInfo,
 			IPAddress:      session.IPAddress,
 			UserAgent:      session.UserAgent,
-			IsActive:       false,
+			IsActive:       utils.ToPtr(false),
 			CreatedAt:      session.CreatedAt,
 			LastAccessedAt: now,
 			ExpiresAt:      now, // Mark as expired now
@@ -219,7 +220,7 @@ func (r *CustomerSessionRepositoryImpl) CleanupExpiredSessions(ctx context.Conte
 			DeviceInfo:     session.DeviceInfo,
 			IPAddress:      session.IPAddress,
 			UserAgent:      session.UserAgent,
-			IsActive:       false,
+			IsActive:       utils.ToPtr(false),
 			CreatedAt:      session.CreatedAt,
 			LastAccessedAt: session.LastAccessedAt,
 			ExpiresAt:      session.ExpiresAt,
@@ -235,7 +236,7 @@ func (r *CustomerSessionRepositoryImpl) CleanupExpiredSessions(ctx context.Conte
 }
 
 // ByFilter retrieves customer sessions based on filter criteria
-func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerSessionFilter) ([]*models.CustomerSession, error) {
+func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerSessionFilter, orderBy string, limit, offset int) ([]*models.CustomerSession, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.CustomerSession{})
 
@@ -283,6 +284,20 @@ func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	// Special handling for IsExpired - filter expired sessions
 	if filter.IsExpired != nil && *filter.IsExpired {
 		query = query.Where("expires_at <= ?", time.Now())
+	}
+
+	// Apply ordering (default to id DESC)
+	if orderBy == "" {
+		orderBy = "id DESC"
+	}
+	query = query.Order(orderBy)
+
+	// Apply pagination
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
 	}
 
 	var sessions []*models.CustomerSession

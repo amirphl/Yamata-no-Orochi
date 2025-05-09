@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 )
@@ -14,7 +15,7 @@ const TxContextKey contextKey = "tx"
 
 type Repository[T any, F any] interface {
 	ByID(ctx context.Context, id uint) (*T, error)
-	ByFilter(ctx context.Context, filter F) ([]*T, error)
+	ByFilter(ctx context.Context, filter F, orderBy string, limit, offset int) ([]*T, error)
 	Save(ctx context.Context, entity *T) error
 	SaveBatch(ctx context.Context, entities []*T) error
 	Count(ctx context.Context, filter F) (int64, error)
@@ -35,6 +36,8 @@ type CustomerRepository interface {
 	ByNationalID(ctx context.Context, nationalID string) (*models.Customer, error)
 	ListByAgency(ctx context.Context, agencyID uint) ([]*models.Customer, error)
 	ListActiveCustomers(ctx context.Context, limit, offset int) ([]*models.Customer, error)
+	UpdatePassword(ctx context.Context, customerID uint, passwordHash string) error
+	UpdateVerificationStatus(ctx context.Context, customerID uint, isMobileVerified, isEmailVerified *bool, mobileVerifiedAt, emailVerifiedAt *time.Time) error
 }
 
 // OTPVerificationRepository defines operations for OTP verifications

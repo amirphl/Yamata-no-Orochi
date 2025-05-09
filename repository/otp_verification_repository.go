@@ -29,7 +29,7 @@ func (r *OTPVerificationRepositoryImpl) ByCustomerAndType(ctx context.Context, c
 		OTPType:    &otpType,
 	}
 
-	otps, err := r.ByFilter(ctx, filter)
+	otps, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find OTPs by customer and type: %w", err)
 	}
@@ -64,7 +64,7 @@ func (r *OTPVerificationRepositoryImpl) ListActiveOTPs(ctx context.Context, cust
 		IsActive:   &[]bool{true}[0], // This will filter non-expired pending OTPs
 	}
 
-	otps, err := r.ByFilter(ctx, filter)
+	otps, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active OTPs: %w", err)
 	}
@@ -125,7 +125,7 @@ func (r *OTPVerificationRepositoryImpl) ExpireOldOTPs(ctx context.Context, custo
 }
 
 // ByFilter retrieves OTP verifications based on filter criteria
-func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter models.OTPVerificationFilter) ([]*models.OTPVerification, error) {
+func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter models.OTPVerificationFilter, orderBy string, limit, offset int) ([]*models.OTPVerification, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.OTPVerification{})
 
@@ -173,6 +173,20 @@ func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	// Special handling for IsActive - filter non-expired pending OTPs
 	if filter.IsActive != nil && *filter.IsActive {
 		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, time.Now())
+	}
+
+	// Apply ordering (default to id DESC)
+	if orderBy == "" {
+		orderBy = "id DESC"
+	}
+	query = query.Order(orderBy)
+
+	// Apply pagination
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
 	}
 
 	var otps []*models.OTPVerification
