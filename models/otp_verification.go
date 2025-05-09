@@ -3,10 +3,13 @@ package models
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type OTPVerification struct {
 	ID            uint       `gorm:"primaryKey" json:"id"`
+	CorrelationID uuid.UUID  `gorm:"type:uuid;not null;index:idx_otp_correlation_id" json:"correlation_id"` // Groups related OTP records
 	CustomerID    uint       `gorm:"not null;index:idx_otp_customer_id" json:"customer_id"`
 	Customer      Customer   `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
 	OTPCode       string     `gorm:"size:6;not null" json:"-"` // Never serialize OTP code

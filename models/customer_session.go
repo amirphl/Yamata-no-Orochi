@@ -6,10 +6,12 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 )
 
 type CustomerSession struct {
 	ID             uint            `gorm:"primaryKey" json:"id"`
+	CorrelationID  uuid.UUID       `gorm:"type:uuid;not null;index:idx_sessions_correlation_id" json:"correlation_id"` // Groups related session records
 	CustomerID     uint            `gorm:"not null;index:idx_sessions_customer_id" json:"customer_id"`
 	Customer       Customer        `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
 	SessionToken   string          `gorm:"size:255;not null;uniqueIndex:idx_sessions_session_token" json:"-"` // Never serialize token
