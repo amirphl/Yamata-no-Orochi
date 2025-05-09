@@ -9,6 +9,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -82,6 +83,7 @@ func (tf *TestFixtures) CreateTestCustomer(accountTypeName string) (*models.Cust
 // CreateTestOTP creates a test OTP verification record
 func (tf *TestFixtures) CreateTestOTP(customerID uint, otpType, otpCode string) (*models.OTPVerification, error) {
 	otp := &models.OTPVerification{
+		CorrelationID: uuid.New(), // Generate new UUID for correlation
 		CustomerID:    customerID,
 		OTPCode:       otpCode,
 		OTPType:       otpType,
@@ -125,13 +127,14 @@ func (tf *TestFixtures) CreateTestSession(customerID uint) (*models.CustomerSess
 	userAgent := "Test User Agent"
 
 	session := &models.CustomerSession{
-		CustomerID:   customerID,
-		SessionToken: sessionToken,
-		RefreshToken: &refreshToken,
-		ExpiresAt:    time.Now().Add(24 * time.Hour),
-		IsActive:     utils.ToPtr(true),
-		IPAddress:    &ipAddress,
-		UserAgent:    &userAgent,
+		CorrelationID: uuid.New(), // Generate new UUID for correlation
+		CustomerID:    customerID,
+		SessionToken:  sessionToken,
+		RefreshToken:  &refreshToken,
+		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		IsActive:      utils.ToPtr(true),
+		IPAddress:     &ipAddress,
+		UserAgent:     &userAgent,
 	}
 
 	err = tf.DB.DB.Create(session).Error
