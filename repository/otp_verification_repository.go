@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -102,6 +103,7 @@ func (r *OTPVerificationRepositoryImpl) ExpireOldOTPs(ctx context.Context, custo
 	// Create new expired records for each old OTP (immutable approach)
 	for _, oldOTP := range oldOTPs {
 		expiredOTP := models.OTPVerification{
+			CorrelationID: oldOTP.CorrelationID, // Use same correlation ID
 			CustomerID:    oldOTP.CustomerID,
 			OTPCode:       oldOTP.OTPCode,
 			OTPType:       oldOTP.OTPType,
@@ -266,4 +268,39 @@ func (r *OTPVerificationRepositoryImpl) Exists(ctx context.Context, filter model
 	}
 
 	return count > 0, nil
+}
+
+// GetLatestByCorrelationID retrieves the latest OTP record for a given correlation ID
+func (r *OTPVerificationRepositoryImpl) GetLatestByCorrelationID(ctx context.Context, correlationID uuid.UUID) (*models.OTPVerification, error) {
+	db := r.getDB(ctx)
+
+	var otp models.OTPVerification
+	err := db.Where("correlation_id = ?", correlationID).
+		Order("id DESC").
+		First(&otp).Error
+
+	if err != nil {
+		if err.Error() == "record not found" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find latest OTP by correlation ID: %w", err)
+	}
+
+	return &otp, nil
+}
+
+// GetHistoryByCorrelationID retrieves all OTP records for a given correlation ID (full history)
+func (r *OTPVerificationRepositoryImpl) GetHistoryByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.OTPVerification, error) {
+	db := r.getDB(ctx)
+
+	var otps []*models.OTPVerification
+	err := db.Where("correlation_id = ?", correlationID).
+		Order("id DESC").
+		Find(&otps).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to find OTP history by correlation ID: %w", err)
+	}
+
+	return otps, nil
 }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/google/uuid"
 )
 
 // RepositoryContext key for transaction in context
@@ -47,6 +48,8 @@ type OTPVerificationRepository interface {
 	ByTargetAndType(ctx context.Context, targetValue, otpType string) (*models.OTPVerification, error)
 	ListActiveOTPs(ctx context.Context, customerID uint) ([]*models.OTPVerification, error)
 	ExpireOldOTPs(ctx context.Context, customerID uint, otpType string) error
+	GetLatestByCorrelationID(ctx context.Context, correlationID uuid.UUID) (*models.OTPVerification, error)
+	GetHistoryByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.OTPVerification, error)
 }
 
 // CustomerSessionRepository defines operations for customer sessions
@@ -58,6 +61,8 @@ type CustomerSessionRepository interface {
 	ExpireSession(ctx context.Context, sessionID uint) error
 	ExpireAllCustomerSessions(ctx context.Context, customerID uint) error
 	CleanupExpiredSessions(ctx context.Context) error
+	GetLatestByCorrelationID(ctx context.Context, correlationID uuid.UUID) (*models.CustomerSession, error)
+	GetHistoryByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.CustomerSession, error)
 }
 
 // AuditLogRepository defines operations for audit logs

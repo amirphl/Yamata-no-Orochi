@@ -8,6 +8,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -113,6 +114,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireSession(ctx context.Context, sessi
 
 	// Create new expired session record
 	expiredSession := models.CustomerSession{
+		CorrelationID:  session.CorrelationID, // Use same correlation ID
 		CustomerID:     session.CustomerID,
 		SessionToken:   session.SessionToken + "_expired",
 		RefreshToken:   nil, // Clear refresh token on expiration
@@ -163,6 +165,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireAllCustomerSessions(ctx context.Co
 	now := time.Now()
 	for _, session := range sessions {
 		expiredSession := models.CustomerSession{
+			CorrelationID:  session.CorrelationID, // Use same correlation ID
 			CustomerID:     session.CustomerID,
 			SessionToken:   session.SessionToken + "_expired",
 			RefreshToken:   nil, // Clear refresh token on expiration
@@ -377,4 +380,39 @@ func (r *CustomerSessionRepositoryImpl) Exists(ctx context.Context, filter model
 	}
 
 	return count > 0, nil
+}
+
+// GetLatestByCorrelationID retrieves the latest session record for a given correlation ID
+func (r *CustomerSessionRepositoryImpl) GetLatestByCorrelationID(ctx context.Context, correlationID uuid.UUID) (*models.CustomerSession, error) {
+	db := r.getDB(ctx)
+
+	var session models.CustomerSession
+	err := db.Where("correlation_id = ?", correlationID).
+		Order("id DESC").
+		First(&session).Error
+
+	if err != nil {
+		if err.Error() == "record not found" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find latest session by correlation ID: %w", err)
+	}
+
+	return &session, nil
+}
+
+// GetHistoryByCorrelationID retrieves all session records for a given correlation ID (full history)
+func (r *CustomerSessionRepositoryImpl) GetHistoryByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.CustomerSession, error) {
+	db := r.getDB(ctx)
+
+	var sessions []*models.CustomerSession
+	err := db.Where("correlation_id = ?", correlationID).
+		Order("id DESC").
+		Find(&sessions).Error
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to find session history by correlation ID: %w", err)
+	}
+
+	return sessions, nil
 }
