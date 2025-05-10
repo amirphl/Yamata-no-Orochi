@@ -9,8 +9,8 @@ CREATE TABLE customer_sessions (
     customer_id INTEGER NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
     
     -- Session details
-    session_token VARCHAR(255) NOT NULL UNIQUE,
-    refresh_token VARCHAR(255) UNIQUE,
+    session_token TEXT NOT NULL,
+    refresh_token TEXT,
     
     -- Device and location info
     device_info JSONB,
