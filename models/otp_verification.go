@@ -48,6 +48,7 @@ const (
 // OTPVerificationFilter represents filter criteria for OTP verification queries
 type OTPVerificationFilter struct {
 	ID            *uint
+	CorrelationID *uuid.UUID
 	CustomerID    *uint
 	OTPType       *string
 	TargetValue   *string
@@ -57,7 +58,7 @@ type OTPVerificationFilter struct {
 	CreatedBefore *time.Time
 	ExpiresAfter  *time.Time
 	ExpiresBefore *time.Time
-	IsActive      *bool // Helper to filter non-expired pending OTPs
+	IsActive      *bool
 }
 
 func (o *OTPVerification) IsExpired() bool {

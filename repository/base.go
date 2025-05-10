@@ -325,7 +325,7 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 // }
 
 // WithTransaction executes a function within a database transaction
-func WithTransaction(db *gorm.DB, fn func(context.Context) error) error {
+func WithTransaction(ctx context.Context, db *gorm.DB, fn func(context.Context) error) error {
 	tx := db.Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("failed to begin transaction: %w", tx.Error)
@@ -338,7 +338,7 @@ func WithTransaction(db *gorm.DB, fn func(context.Context) error) error {
 		}
 	}()
 
-	ctx := context.WithValue(context.Background(), TxContextKey, tx)
+	ctx = context.WithValue(ctx, TxContextKey, tx)
 
 	if err := fn(ctx); err != nil {
 		tx.Rollback()
