@@ -8,6 +8,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	testingutil "github.com/amirphl/Yamata-no-Orochi/testing"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -202,6 +203,57 @@ func TestOTPVerification(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestOTPVerificationCorrelationID(t *testing.T) {
+	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
+		fixtures := testingutil.NewTestFixtures(testDB)
+
+		t.Run("CorrelationIDGeneration", func(t *testing.T) {
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otp, err := fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, "123456")
+			require.NoError(t, err)
+
+			// Verify correlation ID is generated and not zero
+			assert.NotEqual(t, uuid.Nil, otp.CorrelationID)
+			assert.NotEmpty(t, otp.CorrelationID.String())
+		})
+
+		t.Run("CorrelationIDUniqueness", func(t *testing.T) {
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otp1, err := fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, "123456")
+			require.NoError(t, err)
+
+			otp2, err := fixtures.CreateTestOTP(customer.ID, models.OTPTypeEmail, "654321")
+			require.NoError(t, err)
+
+			// Verify different OTPs have different correlation IDs
+			assert.NotEqual(t, otp1.CorrelationID, otp2.CorrelationID)
+		})
+
+		t.Run("CorrelationIDPersistence", func(t *testing.T) {
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otp, err := fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, "123456")
+			require.NoError(t, err)
+
+			// Reload from database
+			var reloadedOTP models.OTPVerification
+			err = testDB.DB.First(&reloadedOTP, otp.ID).Error
+			require.NoError(t, err)
+
+			// Verify correlation ID persists
+			assert.Equal(t, otp.CorrelationID, reloadedOTP.CorrelationID)
+		})
+
+		return nil
+	})
+	require.NoError(t, err)
+}
+
 func TestCustomerSession(t *testing.T) {
 	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
 		fixtures := testingutil.NewTestFixtures(testDB)
@@ -248,6 +300,57 @@ func TestCustomerSession(t *testing.T) {
 		t.Run("TableName", func(t *testing.T) {
 			session := &models.CustomerSession{}
 			assert.Equal(t, "customer_sessions", session.TableName())
+		})
+
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestCustomerSessionCorrelationID(t *testing.T) {
+	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
+		fixtures := testingutil.NewTestFixtures(testDB)
+
+		t.Run("CorrelationIDGeneration", func(t *testing.T) {
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			session, err := fixtures.CreateTestSession(customer.ID)
+			require.NoError(t, err)
+
+			// Verify correlation ID is generated and not zero
+			assert.NotEqual(t, uuid.Nil, session.CorrelationID)
+			assert.NotEmpty(t, session.CorrelationID.String())
+		})
+
+		t.Run("CorrelationIDUniqueness", func(t *testing.T) {
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			session1, err := fixtures.CreateTestSession(customer.ID)
+			require.NoError(t, err)
+
+			session2, err := fixtures.CreateTestSession(customer.ID)
+			require.NoError(t, err)
+
+			// Verify different sessions have different correlation IDs
+			assert.NotEqual(t, session1.CorrelationID, session2.CorrelationID)
+		})
+
+		t.Run("CorrelationIDPersistence", func(t *testing.T) {
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			session, err := fixtures.CreateTestSession(customer.ID)
+			require.NoError(t, err)
+
+			// Reload from database
+			var reloadedSession models.CustomerSession
+			err = testDB.DB.First(&reloadedSession, session.ID).Error
+			require.NoError(t, err)
+
+			// Verify correlation ID persists
+			assert.Equal(t, session.CorrelationID, reloadedSession.CorrelationID)
 		})
 
 		return nil
