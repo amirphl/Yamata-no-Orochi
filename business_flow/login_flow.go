@@ -136,6 +136,9 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, request *dto.LoginRequest, i
 		if err != nil {
 			return nil, fmt.Errorf("failed to get account type: %w", err)
 		}
+		if accountType == nil {
+			return nil, fmt.Errorf("account type not found")
+		}
 
 		// Create new session
 		session, err := lf.CreateSession(ctx, customer.ID, ipAddress, userAgent)
@@ -265,6 +268,13 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 				ErrorMessage: "Customer not found",
 			}, nil
 		}
+		if customer == nil {
+			return &LoginResult{
+				Success:      false,
+				ErrorCode:    dto.ErrorUserNotFound,
+				ErrorMessage: "Customer not found",
+			}, nil
+		}
 
 		// Find and verify OTP
 		otpFilter := models.OTPVerificationFilter{
@@ -350,6 +360,9 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 		accountType, err := lf.accountTypeRepo.ByID(ctx, customer.AccountTypeID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get account type: %w", err)
+		}
+		if accountType == nil {
+			return nil, fmt.Errorf("account type not found")
 		}
 
 		// Create new session for the user
