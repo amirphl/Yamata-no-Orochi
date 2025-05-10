@@ -51,6 +51,7 @@ type OTPVerificationFilter struct {
 	CorrelationID *uuid.UUID
 	CustomerID    *uint
 	OTPType       *string
+	OTPCode       *string
 	TargetValue   *string
 	Status        *string
 	IPAddress     *string

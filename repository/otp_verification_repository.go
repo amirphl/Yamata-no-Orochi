@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -61,8 +62,8 @@ func (r *OTPVerificationRepositoryImpl) ByTargetAndType(ctx context.Context, tar
 func (r *OTPVerificationRepositoryImpl) ListActiveOTPs(ctx context.Context, customerID uint) ([]*models.OTPVerification, error) {
 	filter := models.OTPVerificationFilter{
 		CustomerID: &customerID,
-		Status:     &[]string{models.OTPStatusPending}[0],
-		IsActive:   &[]bool{true}[0], // This will filter non-expired pending OTPs
+		Status:     utils.ToPtr(models.OTPStatusPending),
+		IsActive:   utils.ToPtr(true), // This will filter non-expired pending OTPs
 	}
 
 	otps, err := r.ByFilter(ctx, filter, "", 0, 0)
@@ -144,6 +145,10 @@ func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter mod
 		query = query.Where("otp_type = ?", *filter.OTPType)
 	}
 
+	if filter.OTPCode != nil {
+		query = query.Where("otp_code = ?", *filter.OTPCode)
+	}
+
 	if filter.TargetValue != nil {
 		query = query.Where("target_value = ?", *filter.TargetValue)
 	}
@@ -216,6 +221,10 @@ func (r *OTPVerificationRepositoryImpl) Count(ctx context.Context, filter models
 
 	if filter.OTPType != nil {
 		query = query.Where("otp_type = ?", *filter.OTPType)
+	}
+
+	if filter.OTPCode != nil {
+		query = query.Where("otp_code = ?", *filter.OTPCode)
 	}
 
 	if filter.TargetValue != nil {
