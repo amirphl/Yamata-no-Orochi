@@ -1,5 +1,5 @@
-// Package business_flow contains the core business logic and use cases for authentication workflows
-package business_flow
+// Package businessflow contains the core business logic and use cases for authentication workflows
+package businessflow
 
 import (
 	"context"
