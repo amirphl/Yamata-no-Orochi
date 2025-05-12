@@ -243,6 +243,7 @@ func runTestMigrations(databaseURL, dbName string) error {
 		"0007_add_missing_audit_actions.sql",
 		"0008_update_audit_log_success_field.sql",
 		"0009_add_correlation_ids.sql",
+		"0010_add_customer_uuid_and_agency_id.sql",
 	}
 
 	// Execute each migration file

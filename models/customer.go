@@ -3,12 +3,16 @@ package models
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type Customer struct {
-	ID            uint        `gorm:"primaryKey" json:"id"`
-	AccountTypeID uint        `gorm:"not null;index:idx_customers_account_type_id" json:"account_type_id"`
-	AccountType   AccountType `gorm:"foreignKey:AccountTypeID;references:ID" json:"account_type,omitempty"`
+	ID                uint        `gorm:"primaryKey" json:"id"`
+	UUID              uuid.UUID   `gorm:"type:uuid;not null;uniqueIndex:uk_customers_uuid;index:idx_customers_uuid" json:"uuid"`
+	AgencyRefererCode int64       `gorm:"not null;uniqueIndex:uk_customers_agency_referer_code;index:idx_customers_agency_referer_code" json:"agency_referer_code"`
+	AccountTypeID     uint        `gorm:"not null;index:idx_customers_account_type_id" json:"account_type_id"`
+	AccountType       AccountType `gorm:"foreignKey:AccountTypeID;references:ID" json:"account_type,omitempty"`
 
 	// Company fields (required for independent_company and marketing_agency)
 	CompanyName    *string `gorm:"size:60" json:"company_name,omitempty"`
@@ -55,6 +59,8 @@ func (Customer) TableName() string {
 // CustomerFilter represents filter criteria for customer queries
 type CustomerFilter struct {
 	ID                   *uint
+	UUID                 *uuid.UUID
+	AgencyRefererCode    *int64
 	AccountTypeID        *uint
 	AccountTypeName      *string
 	Email                *string

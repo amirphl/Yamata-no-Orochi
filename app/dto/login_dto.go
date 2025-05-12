@@ -28,6 +28,7 @@ type LoginResponse struct {
 // UserInfo represents user information returned in login response
 type UserInfo struct {
 	ID                      uint   `json:"id" example:"123"`
+	UUID                    string `json:"uuid" example:"550e8400-e29b-41d4-a716-446655440000"`
 	Email                   string `json:"email" example:"user@example.com"`
 	RepresentativeFirstName string `json:"representative_first_name" example:"John"`
 	RepresentativeLastName  string `json:"representative_last_name" example:"Doe"`
@@ -91,9 +92,10 @@ const (
 	ErrorTooManyAttempts   = "TOO_MANY_ATTEMPTS"
 )
 
-func (dto *LoginResponse) SetUserInfo(customerID uint, email, firstName, lastName, mobile, accountType string, companyName *string, isActive *bool, createdAt time.Time) {
+func (dto *LoginResponse) SetUserInfo(customerID uint, uuid, email, firstName, lastName, mobile, accountType string, companyName *string, isActive *bool, createdAt time.Time) {
 	dto.Data.User = UserInfo{
 		ID:                      customerID,
+		UUID:                    uuid,
 		Email:                   email,
 		RepresentativeFirstName: firstName,
 		RepresentativeLastName:  lastName,

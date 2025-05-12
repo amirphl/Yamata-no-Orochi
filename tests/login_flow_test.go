@@ -8,7 +8,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
-	"github.com/amirphl/Yamata-no-Orochi/business_flow"
+	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	testingutil "github.com/amirphl/Yamata-no-Orochi/testing"
@@ -39,7 +39,7 @@ func TestLoginFlow(t *testing.T) {
 		)
 
 		// Initialize business flow
-		loginFlow := business_flow.NewLoginFlow(
+		loginFlow := businessflow.NewLoginFlow(
 			customerRepo,
 			sessionRepo,
 			otpRepo,
@@ -396,7 +396,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 		)
 
 		// Initialize business flow
-		loginFlow := business_flow.NewLoginFlow(
+		loginFlow := businessflow.NewLoginFlow(
 			customerRepo,
 			sessionRepo,
 			otpRepo,
@@ -413,21 +413,21 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			// Test finding by email
-			foundCustomer, err := loginFlow.(*business_flow.LoginFlowImpl).FindCustomerByIdentifier(context.Background(), customer.Email)
+			foundCustomer, err := loginFlow.(*businessflow.LoginFlowImpl).FindCustomerByIdentifier(context.Background(), customer.Email)
 			require.NoError(t, err)
 			require.NotNil(t, foundCustomer)
 			assert.Equal(t, customer.ID, foundCustomer.ID)
 			assert.Equal(t, customer.Email, foundCustomer.Email)
 
 			// Test finding by mobile
-			foundCustomer, err = loginFlow.(*business_flow.LoginFlowImpl).FindCustomerByIdentifier(context.Background(), customer.RepresentativeMobile)
+			foundCustomer, err = loginFlow.(*businessflow.LoginFlowImpl).FindCustomerByIdentifier(context.Background(), customer.RepresentativeMobile)
 			require.NoError(t, err)
 			require.NotNil(t, foundCustomer)
 			assert.Equal(t, customer.ID, foundCustomer.ID)
 			assert.Equal(t, customer.RepresentativeMobile, foundCustomer.RepresentativeMobile)
 
 			// Test non-existent identifier
-			foundCustomer, err = loginFlow.(*business_flow.LoginFlowImpl).FindCustomerByIdentifier(context.Background(), "nonexistent@example.com")
+			foundCustomer, err = loginFlow.(*businessflow.LoginFlowImpl).FindCustomerByIdentifier(context.Background(), "nonexistent@example.com")
 			require.Error(t, err)
 			assert.Nil(t, foundCustomer)
 		})
@@ -438,7 +438,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			// Create session
-			session, err := loginFlow.(*business_flow.LoginFlowImpl).CreateSession(context.Background(), customer.ID, "127.0.0.1", "Test User Agent")
+			session, err := loginFlow.(*businessflow.LoginFlowImpl).CreateSession(context.Background(), customer.ID, "127.0.0.1", "Test User Agent")
 			require.NoError(t, err)
 			require.NotNil(t, session)
 
@@ -459,7 +459,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			// Log successful login attempt
-			err = loginFlow.(*business_flow.LoginFlowImpl).LogLoginAttempt(context.Background(), customer, models.AuditActionLoginSuccessful, "test description", true, nil, "127.0.0.1", "Test User Agent")
+			err = loginFlow.(*businessflow.LoginFlowImpl).LogLoginAttempt(context.Background(), customer, models.AuditActionLoginSuccessful, "test description", true, nil, "127.0.0.1", "Test User Agent")
 			require.NoError(t, err)
 
 			// Check audit log was created
@@ -492,7 +492,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			// Invalidate all sessions
-			err = loginFlow.(*business_flow.LoginFlowImpl).InvalidateAllSessions(context.Background(), customer.ID)
+			err = loginFlow.(*businessflow.LoginFlowImpl).InvalidateAllSessions(context.Background(), customer.ID)
 			require.NoError(t, err)
 
 			// Verify both sessions have expired records with same correlation IDs
@@ -535,7 +535,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 		)
 
 		// Initialize business flow
-		loginFlow := business_flow.NewLoginFlow(
+		loginFlow := businessflow.NewLoginFlow(
 			customerRepo,
 			sessionRepo,
 			otpRepo,
@@ -917,7 +917,7 @@ func TestResetPasswordFlow(t *testing.T) {
 		)
 
 		// Initialize business flow
-		loginFlow := business_flow.NewLoginFlow(
+		loginFlow := businessflow.NewLoginFlow(
 			customerRepo,
 			sessionRepo,
 			otpRepo,

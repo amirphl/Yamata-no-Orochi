@@ -41,7 +41,13 @@ func (tf *TestFixtures) CreateTestCustomer(accountTypeName string) (*models.Cust
 	// create random number containin exactly 9 digits
 	randomDigits := fmt.Sprintf("%09d", rand.Intn(900000000)+100000000)
 
+	// Generate UUID and random 10-digit agency_referer_code
+	customerUUID := uuid.New()
+	agencyRefererCode := utils.GenerateRandomAgencyRefererCode()
+
 	customer := &models.Customer{
+		UUID:                    customerUUID,
+		AgencyRefererCode:       agencyRefererCode,
 		AccountTypeID:           accountType.ID,
 		RepresentativeFirstName: "John",
 		RepresentativeLastName:  "Doe",

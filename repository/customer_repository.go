@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"gorm.io/gorm"
 )
 
@@ -43,6 +44,41 @@ func (r *CustomerRepositoryImpl) ByMobile(ctx context.Context, mobile string) (*
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to find customer by mobile: %w", err)
+	}
+
+	if len(customers) == 0 {
+		return nil, nil
+	}
+
+	return customers[0], nil
+}
+
+// ByUUID retrieves a customer by UUID
+func (r *CustomerRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.Customer, error) {
+	parsedUUID, err := utils.ParseUUID(uuid)
+	if err != nil {
+		return nil, fmt.Errorf("invalid UUID format: %w", err)
+	}
+
+	filter := models.CustomerFilter{UUID: &parsedUUID}
+	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find customer by UUID: %w", err)
+	}
+
+	if len(customers) == 0 {
+		return nil, nil
+	}
+
+	return customers[0], nil
+}
+
+// ByAgencyRefererCode retrieves a customer by agency referer code
+func (r *CustomerRepositoryImpl) ByAgencyRefererCode(ctx context.Context, agencyRefererCode int64) (*models.Customer, error) {
+	filter := models.CustomerFilter{AgencyRefererCode: &agencyRefererCode}
+	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find customer by agency referer code: %w", err)
 	}
 
 	if len(customers) == 0 {
@@ -111,6 +147,10 @@ func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.Cus
 		query = query.Where("id = ?", *filter.ID)
 	}
 
+	if filter.UUID != nil {
+		query = query.Where("uuid = ?", *filter.UUID)
+	}
+
 	if filter.AccountTypeID != nil {
 		query = query.Where("account_type_id = ?", *filter.AccountTypeID)
 	}
@@ -131,8 +171,8 @@ func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.Cus
 		query = query.Where("national_id = ?", *filter.NationalID)
 	}
 
-	if filter.ReferrerAgencyID != nil {
-		query = query.Where("referrer_agency_id = ?", *filter.ReferrerAgencyID)
+	if filter.AgencyRefererCode != nil {
+		query = query.Where("agency_referer_code = ?", *filter.AgencyRefererCode)
 	}
 
 	if filter.IsEmailVerified != nil {
@@ -202,6 +242,10 @@ func (r *CustomerRepositoryImpl) Count(ctx context.Context, filter models.Custom
 		query = query.Where("id = ?", *filter.ID)
 	}
 
+	if filter.UUID != nil {
+		query = query.Where("uuid = ?", *filter.UUID)
+	}
+
 	if filter.AccountTypeID != nil {
 		query = query.Where("account_type_id = ?", *filter.AccountTypeID)
 	}
@@ -222,8 +266,8 @@ func (r *CustomerRepositoryImpl) Count(ctx context.Context, filter models.Custom
 		query = query.Where("national_id = ?", *filter.NationalID)
 	}
 
-	if filter.ReferrerAgencyID != nil {
-		query = query.Where("referrer_agency_id = ?", *filter.ReferrerAgencyID)
+	if filter.AgencyRefererCode != nil {
+		query = query.Where("agency_referer_code = ?", *filter.AgencyRefererCode)
 	}
 
 	if filter.IsEmailVerified != nil {

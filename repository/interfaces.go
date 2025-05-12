@@ -34,6 +34,8 @@ type CustomerRepository interface {
 	Repository[models.Customer, models.CustomerFilter]
 	ByEmail(ctx context.Context, email string) (*models.Customer, error)
 	ByMobile(ctx context.Context, mobile string) (*models.Customer, error)
+	ByUUID(ctx context.Context, uuid string) (*models.Customer, error)
+	ByAgencyRefererCode(ctx context.Context, agencyRefererCode int64) (*models.Customer, error)
 	ByNationalID(ctx context.Context, nationalID string) (*models.Customer, error)
 	ListByAgency(ctx context.Context, agencyID uint) ([]*models.Customer, error)
 	ListActiveCustomers(ctx context.Context, limit, offset int) ([]*models.Customer, error)
