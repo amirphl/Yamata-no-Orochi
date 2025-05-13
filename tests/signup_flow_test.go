@@ -12,6 +12,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	testingutil "github.com/amirphl/Yamata-no-Orochi/testing"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -492,6 +493,427 @@ func TestInitiateSignup(t *testing.T) {
 			// Verify mobile number is masked in response
 			assert.Contains(t, result.OTPTarget, "****")
 			assert.NotEqual(t, req.RepresentativeMobile, result.OTPTarget)
+		})
+
+		return nil
+	})
+
+	require.NoError(t, err)
+}
+
+func TestVerifyOTP(t *testing.T) {
+	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
+		fixtures := testingutil.NewTestFixtures(testDB)
+
+		// Initialize repositories
+		customerRepo := repository.NewCustomerRepository(testDB.DB)
+		accountTypeRepo := repository.NewAccountTypeRepository(testDB.DB)
+		otpRepo := repository.NewOTPVerificationRepository(testDB.DB)
+		sessionRepo := repository.NewCustomerSessionRepository(testDB.DB)
+		auditRepo := repository.NewAuditLogRepository(testDB.DB)
+
+		// Initialize services
+		tokenService, err := services.NewTokenService(1*time.Hour, 24*time.Hour, "test-issuer", "test-audience")
+		require.NoError(t, err)
+
+		notificationService := services.NewNotificationService(
+			services.NewMockSMSProvider(),
+			services.NewMockEmailProvider(),
+		)
+
+		// Initialize business flow
+		signupFlow := businessflow.NewSignupFlow(
+			customerRepo,
+			accountTypeRepo,
+			otpRepo,
+			sessionRepo,
+			auditRepo,
+			tokenService,
+			notificationService,
+		)
+
+		t.Run("SuccessfulMobileOTPVerification", func(t *testing.T) {
+			// Create customer and OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "123456"
+			_, err = fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, otpCode)
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    otpCode,
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(t, "Signup completed successfully!", result.Message)
+			assert.NotEmpty(t, result.Token)
+			assert.NotEmpty(t, result.RefreshToken)
+			assert.NotNil(t, result.Customer)
+			assert.Equal(t, customer.ID, result.Customer.ID)
+
+			// Verify customer verification status was updated
+			updatedCustomer, err := customerRepo.ByID(context.Background(), customer.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updatedCustomer)
+			assert.True(t, utils.IsTrue(updatedCustomer.IsMobileVerified))
+			assert.False(t, utils.IsTrue(updatedCustomer.IsEmailVerified))
+
+			// Verify OTP status was updated
+			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
+				CustomerID: &customer.ID,
+				OTPType:    utils.ToPtr(models.OTPTypeMobile),
+			}, "", 0, 0)
+			require.NoError(t, err)
+			require.Len(t, otps, 2) // Original pending + new verified
+
+			// Check that one is verified and one is pending
+			statuses := make(map[string]int)
+			for _, o := range otps {
+				statuses[o.Status]++
+			}
+			assert.Equal(t, 1, statuses[models.OTPStatusVerified])
+			assert.Equal(t, 1, statuses[models.OTPStatusPending])
+
+			// Verify session was created
+			sessions, err := sessionRepo.ByFilter(context.Background(), models.CustomerSessionFilter{
+				CustomerID: &customer.ID,
+			}, "", 0, 0)
+			require.NoError(t, err)
+			require.Len(t, sessions, 1)
+			assert.True(t, utils.IsTrue(sessions[0].IsActive))
+			assert.True(t, sessions[0].ExpiresAt.After(time.Now()))
+
+			// Verify audit logs were created
+			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
+				CustomerID: &customer.ID,
+			}, "", 0, 0)
+			require.NoError(t, err)
+			require.Len(t, auditLogs, 2) // OTP verified + signup completed
+
+			actions := make(map[string]int)
+			for _, log := range auditLogs {
+				actions[log.Action]++
+			}
+			assert.Equal(t, 1, actions[models.AuditActionOTPVerified])
+			assert.Equal(t, 1, actions[models.AuditActionSignupCompleted])
+		})
+
+		t.Run("SuccessfulEmailOTPVerification", func(t *testing.T) {
+			// Create customer and OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "654321"
+			_, err = fixtures.CreateTestOTP(customer.ID, models.OTPTypeEmail, otpCode)
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    otpCode,
+				OTPType:    models.OTPTypeEmail,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Verify customer verification status was updated
+			updatedCustomer, err := customerRepo.ByID(context.Background(), customer.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updatedCustomer)
+			assert.True(t, utils.IsTrue(updatedCustomer.IsEmailVerified))
+			assert.False(t, utils.IsTrue(updatedCustomer.IsMobileVerified))
+		})
+
+		t.Run("CustomerNotFound", func(t *testing.T) {
+			req := &dto.OTPVerificationRequest{
+				CustomerID: 99999, // Non-existent customer
+				OTPCode:    "123456",
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+			assert.Contains(t, err.Error(), "customer not found")
+		})
+
+		t.Run("NoValidOTPFound", func(t *testing.T) {
+			// Create customer without OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    "123456",
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+			assert.Contains(t, err.Error(), "no valid OTP found")
+		})
+
+		t.Run("InvalidOTPCode", func(t *testing.T) {
+			// Create customer and OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "123456"
+			_, err = fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, otpCode)
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    "999999", // Wrong code
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+			assert.Contains(t, err.Error(), "invalid OTP code")
+
+			// Verify failed OTP record was created
+			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
+				CustomerID: &customer.ID,
+				OTPType:    utils.ToPtr(models.OTPTypeMobile),
+			}, "", 0, 0)
+			require.NoError(t, err)
+			require.Len(t, otps, 2) // Original pending + new failed
+
+			// Check that one is failed and one is pending
+			statuses := make(map[string]int)
+			for _, o := range otps {
+				statuses[o.Status]++
+			}
+			assert.Equal(t, 1, statuses[models.OTPStatusFailed])
+			assert.Equal(t, 1, statuses[models.OTPStatusPending])
+		})
+
+		t.Run("ExpiredOTP", func(t *testing.T) {
+			// Create customer and expired OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "123456"
+			expiredOTP := &models.OTPVerification{
+				CorrelationID: uuid.New(),
+				CustomerID:    customer.ID,
+				OTPCode:       otpCode,
+				OTPType:       models.OTPTypeMobile,
+				TargetValue:   customer.RepresentativeMobile,
+				Status:        models.OTPStatusPending,
+				AttemptsCount: 0,
+				MaxAttempts:   3,
+				ExpiresAt:     time.Now().Add(-1 * time.Hour), // Expired
+			}
+			err = testDB.DB.Create(expiredOTP).Error
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    otpCode,
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+			assert.Contains(t, err.Error(), "no valid OTP found")
+		})
+
+		t.Run("OTPExceededMaxAttempts", func(t *testing.T) {
+			// Create customer and OTP with max attempts exceeded
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "123456"
+			exceededOTP := &models.OTPVerification{
+				CorrelationID: uuid.New(),
+				CustomerID:    customer.ID,
+				OTPCode:       otpCode,
+				OTPType:       models.OTPTypeMobile,
+				TargetValue:   customer.RepresentativeMobile,
+				Status:        models.OTPStatusPending,
+				AttemptsCount: 3, // Max attempts reached
+				MaxAttempts:   3,
+				ExpiresAt:     time.Now().Add(5 * time.Minute),
+			}
+			err = testDB.DB.Create(exceededOTP).Error
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    otpCode,
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+			assert.Contains(t, err.Error(), "no valid OTP found")
+		})
+
+		t.Run("MultipleOTPsForSameCustomer", func(t *testing.T) {
+			// Create customer with multiple OTPs
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			// Create multiple OTPs
+			_, err = fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, "111111")
+			require.NoError(t, err)
+			_, err = fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, "222222")
+			require.NoError(t, err)
+
+			// Verify with second OTP
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    "222222",
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Verify only one OTP was marked as verified
+			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
+				CustomerID: &customer.ID,
+				OTPType:    utils.ToPtr(models.OTPTypeMobile),
+			}, "", 0, 0)
+			require.NoError(t, err)
+			require.Len(t, otps, 3) // 2 original + 1 verified
+
+			statuses := make(map[string]int)
+			for _, o := range otps {
+				statuses[o.Status]++
+			}
+			assert.Equal(t, 1, statuses[models.OTPStatusVerified])
+			assert.Equal(t, 2, statuses[models.OTPStatusPending])
+		})
+
+		t.Run("InvalidOTPType", func(t *testing.T) {
+			// Create customer and OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "123456"
+			_, err = fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, otpCode)
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    otpCode,
+				OTPType:    "invalid_type",
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+			assert.Contains(t, err.Error(), "no valid OTP found")
+		})
+
+		t.Run("FailedVerificationAuditLog", func(t *testing.T) {
+			// Create customer without OTP to cause failure
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    "123456",
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+
+			// Verify audit log was created for failed verification
+			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
+				CustomerID: &customer.ID,
+				Action:     utils.ToPtr(models.AuditActionOTPFailed),
+			}, "", 0, 0)
+			require.NoError(t, err)
+			require.Len(t, auditLogs, 1)
+			assert.False(t, utils.IsTrue(auditLogs[0].Success))
+			assert.Contains(t, *auditLogs[0].Description, "OTP verification failed")
+		})
+
+		t.Run("CorrelationIDPreservation", func(t *testing.T) {
+			// Create customer and OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "123456"
+			otp, err := fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, otpCode)
+			require.NoError(t, err)
+
+			originalCorrelationID := otp.CorrelationID
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    otpCode,
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+
+			// Verify correlation ID was preserved in verified OTP
+			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
+				CustomerID: &customer.ID,
+				OTPType:    utils.ToPtr(models.OTPTypeMobile),
+			}, "", 0, 0)
+			require.NoError(t, err)
+
+			var verifiedOTP *models.OTPVerification
+			for _, o := range otps {
+				if o.Status == models.OTPStatusVerified {
+					verifiedOTP = o
+					break
+				}
+			}
+			require.NotNil(t, verifiedOTP)
+			assert.Equal(t, originalCorrelationID, verifiedOTP.CorrelationID)
+		})
+
+		t.Run("TransactionRollbackOnFailure", func(t *testing.T) {
+			// Create customer and OTP
+			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
+			require.NoError(t, err)
+
+			otpCode := "123456"
+			_, err = fixtures.CreateTestOTP(customer.ID, models.OTPTypeMobile, otpCode)
+			require.NoError(t, err)
+
+			// Store initial verification status
+			initialMobileVerified := customer.IsMobileVerified
+			initialEmailVerified := customer.IsEmailVerified
+
+			req := &dto.OTPVerificationRequest{
+				CustomerID: customer.ID,
+				OTPCode:    "999999", // Wrong code to cause failure
+				OTPType:    models.OTPTypeMobile,
+			}
+
+			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			require.Error(t, err)
+			require.Nil(t, result)
+
+			// Verify customer verification status was not changed (transaction rolled back)
+			updatedCustomer, err := customerRepo.ByID(context.Background(), customer.ID)
+			require.NoError(t, err)
+			require.NotNil(t, updatedCustomer)
+			assert.Equal(t, initialMobileVerified, updatedCustomer.IsMobileVerified)
+			assert.Equal(t, initialEmailVerified, updatedCustomer.IsEmailVerified)
 		})
 
 		return nil
