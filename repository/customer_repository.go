@@ -107,7 +107,7 @@ func (r *CustomerRepositoryImpl) ByNationalID(ctx context.Context, nationalID st
 func (r *CustomerRepositoryImpl) ListByAgency(ctx context.Context, agencyID uint) ([]*models.Customer, error) {
 	filter := models.CustomerFilter{
 		ReferrerAgencyID: &agencyID,
-		IsActive:         &[]bool{true}[0], // Active customers only
+		IsActive:         utils.ToPtr(true), // Active customers only
 	}
 
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
@@ -224,7 +224,7 @@ func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.Cus
 	}
 
 	var customers []*models.Customer
-	err := query.Find(&customers).Error
+	err := query.Preload("AccountType").Find(&customers).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to find customers by filter: %w", err)
 	}
