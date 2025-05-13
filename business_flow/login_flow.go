@@ -540,11 +540,11 @@ func (lf *LoginFlowImpl) LogLoginAttempt(ctx context.Context, customer *models.C
 		ErrorMessage: errMsg,
 	}
 
-	traceID := ctx.Value(TraceIDKey)
-	if traceID != nil {
-		traceIDStr, ok := traceID.(string)
+	requestID := ctx.Value(RequestIDKey)
+	if requestID != nil {
+		requestIDStr, ok := requestID.(string)
 		if ok {
-			audit.RequestID = &traceIDStr
+			audit.RequestID = &requestIDStr
 		}
 	}
 
@@ -567,11 +567,11 @@ func (lf *LoginFlowImpl) LogPasswordResetAttempt(ctx context.Context, customer *
 		ErrorMessage: errMsg,
 	}
 
-	traceID := ctx.Value(TraceIDKey)
-	if traceID != nil {
-		traceIDStr, ok := traceID.(string)
+	requestID := ctx.Value(RequestIDKey)
+	if requestID != nil {
+		requestIDStr, ok := requestID.(string)
 		if ok {
-			audit.RequestID = &traceIDStr
+			audit.RequestID = &requestIDStr
 		}
 	}
 
