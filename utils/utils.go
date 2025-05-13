@@ -2,7 +2,9 @@
 package utils
 
 import (
-	"math/rand"
+	"crypto/rand"
+	"math/big"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -23,5 +25,14 @@ func ParseUUID(uuidStr string) (uuid.UUID, error) {
 // GenerateRandomAgencyRefererCode generates a random 10-digit integer for agency_referer_code
 func GenerateRandomAgencyRefererCode() int64 {
 	// Generate random number between 1000000000 and 9999999999
-	return int64(rand.Intn(9000000000) + 1000000000)
+	max := big.NewInt(9999999999)
+	min := big.NewInt(1000000000)
+
+	n, err := rand.Int(rand.Reader, new(big.Int).Sub(max, min))
+	if err != nil {
+		// Fallback to a simple random number if crypto/rand fails
+		return 1000000000 + time.Now().UnixNano()%9000000000
+	}
+
+	return new(big.Int).Add(n, min).Int64()
 }
