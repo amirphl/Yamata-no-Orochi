@@ -1,0 +1,315 @@
+run:
+  timeout: 5m
+  issues-exit-code: 1
+  tests: true
+  skip-dirs:
+    - vendor
+    - scripts
+    - docker
+  skip-files:
+    - ".*\\.pb\\.go$"
+    - ".*_test\\.go$"
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+linters-settings:
+  dupl:
+    threshold: 100
+
+  errcheck:
+    check-type-assertions: true
+    check-blank: false
+
+  exhaustive:
+    check-generated: false
+    default-signifies-exhaustive: false
+
+  funlen:
+    lines: 100
+    statements: 50
+
+  gocognit:
+    min-complexity: 15
+
+  goconst:
+    min-len: 2
+    min-occurrences: 3
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - dupImport # https://github.com/go-critic/go-critic/issues/845
+      - ifElseChain
+      - octalLiteral
+      - whyNoLint
+
+  gocyclo:
+    min-complexity: 15
+
+  godot:
+    scope: declarations
+    capital: false
+
+  gofmt:
+    simplify: true
+
+  goimports:
+    local-prefixes: github.com/amirphl/Yamata-no-Orochi
+
+  golint:
+    min-confidence: 0
+
+  gomnd:
+    checks:
+      - argument
+      - case
+      - condition
+      - return
+    ignored-numbers:
+      - "0"
+      - "1"
+      - "2"
+      - "3"
+    ignored-functions:
+      - strings.SplitN
+
+  gomodguard:
+    allowed:
+      modules: []
+      domains: []
+    blocked:
+      modules: []
+
+  govet:
+    check-shadowing: true
+    settings:
+      printf:
+        funcs:
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Infof
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Warnf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Errorf
+          - (github.com/golangci/golangci-lint/pkg/logutils.Log).Fatalf
+
+  lll:
+    line-length: 140
+
+  maligned:
+    suggest-new: true
+
+  misspell:
+    locale: US
+
+  nakedret:
+    max-func-lines: 30
+
+  nestif:
+    min-complexity: 4
+
+  nolintlint:
+    allow-leading-space: true
+    allow-unused: false
+    require-explanation: false
+    require-specific: false
+
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: false
+
+  revive:
+    min-confidence: 0
+    rules:
+      - name: atomic
+      - name: line-length-limit
+        severity: error
+        arguments: [140]
+      - name: argument-limit
+        severity: warning
+        arguments: [8]
+      - name: cyclomatic
+        severity: error
+        arguments: [15]
+      - name: function-result-limit
+        severity: error
+        arguments: [5]
+      - name: function-length
+        severity: error
+        arguments: [100, 0]
+
+  rowserrcheck:
+    packages:
+      - github.com/jmoiron/sqlx
+
+  staticcheck:
+    go: "1.21"
+    checks: ["all"]
+
+  structcheck:
+    exported-fields: false
+
+  tagliatelle:
+    case:
+      rules:
+        json: snake
+
+  tenv:
+    all: false
+
+  testpackage:
+    skip-regexp: (export|internal)_test\.go
+
+  thelper:
+    test:
+      first: true
+      name: true
+      begin: true
+    benchmark:
+      first: true
+      name: true
+      begin: true
+
+  unparam:
+    check-exported: false
+
+  unused:
+    go: "1.21"
+
+  varcheck:
+    exported-fields: false
+
+  whitespace:
+    multi-if: false
+    multi-func: false
+
+  wrapcheck:
+    ignoreSigs:
+      - .Errorf(
+      - errors.New(
+      - errors.Unwrap(
+      - .Wrap(
+      - .Wrapf(
+
+  wsl:
+    strict-append: true
+    allow-assign-and-call: true
+    allow-multiline-assign: true
+    allow-cuddle-declarations: false
+    allow-trailing-comment: false
+    force-case-trailing-whitespace: 0
+    force-err-cuddling: false
+    allow-separated-leading-comment: false
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - deadcode
+    - depguard
+    - dogsled
+    - dupl
+    - errcheck
+    - exportloopref
+    - exhaustive
+    - funlen
+    - gochecknoinits
+    - goconst
+    - gocritic
+    - gocyclo
+    - gofmt
+    - goimports
+    - gomnd
+    - goprintffuncname
+    - gosec
+    - gosimple
+    - govet
+    - ineffassign
+    - lll
+    - misspell
+    - nakedret
+    - noctx
+    - nolintlint
+    - rowserrcheck
+    - staticcheck
+    - structcheck
+    - stylecheck
+    - typecheck
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    - whitespace
+    - asciicheck
+    - gochecknoglobals
+    - gocognit
+    - godot
+    - godox
+    - goerr113
+    - nestif
+    - prealloc
+    - testpackage
+    - revive
+    - wsl
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - gomnd
+        - funlen
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - gochecknoglobals
+        - lll
+
+    - path: cmd/
+      linters:
+        - gochecknoglobals
+
+    - path: main\.go
+      linters:
+        - gochecknoglobals
+
+    - linters:
+        - lll
+      source: "^//go:generate "
+
+  exclude:
+    # errcheck: Almost all programs ignore errors on these functions and in most cases it's ok
+    - Error return value of .((os\.)?std(out|err)\..*|.*Close|.*Flush|os\.Remove(All)?|.*print.*|os\.(Un)?Setenv). is not checked
+
+    # govet: Common false positives
+    - (possible misuse of unsafe.Pointer|should have signature)
+
+    # staticcheck: Developers tend to write in C-style with an explicit 'break' in a 'switch', so it's ok to ignore
+    - ineffective break statement. Did you mean to break out of the outer loop
+
+    # gosec: Too many false-positives on 'unsafe' usage
+    - (subprocess launched with variable|possible hardcoded credentials|subprocess launched with function call as argument)
+
+    # gosec: Too many false-positives for parametrized shell calls
+    - Audit the use of (ssh\.)?Command
+
+    # gosec: Disable G108: Profiling endpoint automatically exposed on /debug/pprof
+    - Profiling endpoint is automatically exposed on /debug/pprof
+
+    # gosec: These only make sense when really building a web server
+    - (Potential file inclusion via variable|Use of unsafe calls should be audited)
+
+  max-issues-per-linter: 50
+  max-same-issues: 3
+
+severity:
+  default-severity: error
+  case-sensitive: false 
