@@ -6,11 +6,20 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+)
+
+// Token service error constants
+var (
+	ErrTokenExpired = errors.New("token has expired")
+	ErrTokenInvalid = errors.New("invalid token")
+	ErrTokenRevoked = errors.New("token has been revoked")
 )
 
 // TokenService handles JWT token generation and validation
@@ -20,6 +29,7 @@ type TokenService interface {
 	RefreshToken(refreshToken string) (newAccessToken, newRefreshToken string, err error)
 	RevokeToken(token string) error
 	GetTokenClaims(token string) (*TokenClaims, error)
+	IsTokenRevoked(token string) bool
 }
 
 // TokenClaims represents the claims in a JWT token
@@ -196,42 +206,51 @@ func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse token: %w", err)
+		// Check if the error is due to token expiration
+		if strings.Contains(err.Error(), "expired") || strings.Contains(err.Error(), "exp") {
+			return nil, ErrTokenExpired
+		}
+		return nil, ErrTokenInvalid
 	}
 
 	if !parsedToken.Valid {
-		return nil, fmt.Errorf("invalid token")
+		return nil, ErrTokenInvalid
 	}
 
 	claims, ok := parsedToken.Claims.(jwt.MapClaims)
 	if !ok {
-		return nil, fmt.Errorf("invalid token claims")
+		return nil, ErrTokenInvalid
 	}
 
 	// Extract claims
 	customerID, ok := claims["customer_id"].(float64)
 	if !ok {
-		return nil, fmt.Errorf("invalid customer_id claim")
+		return nil, ErrTokenInvalid
 	}
 
 	tokenType, ok := claims["token_type"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid token_type claim")
+		return nil, ErrTokenInvalid
 	}
 
 	tokenID, ok := claims["jti"].(string)
 	if !ok {
-		return nil, fmt.Errorf("invalid jti claim")
+		return nil, ErrTokenInvalid
 	}
 
 	issuedAt, ok := claims["iat"].(float64)
 	if !ok {
-		return nil, fmt.Errorf("invalid iat claim")
+		return nil, ErrTokenInvalid
 	}
 
 	expiresAt, ok := claims["exp"].(float64)
 	if !ok {
-		return nil, fmt.Errorf("invalid exp claim")
+		return nil, ErrTokenInvalid
+	}
+
+	// Check if token has expired
+	if time.Now().After(time.Unix(int64(expiresAt), 0)) {
+		return nil, ErrTokenExpired
 	}
 
 	return &TokenClaims{
@@ -332,6 +351,15 @@ func (s *TokenServiceImpl) GetTokenClaims(token string) (*TokenClaims, error) {
 		IssuedAt:   time.Unix(int64(issuedAt), 0),
 		ExpiresAt:  time.Unix(int64(expiresAt), 0),
 	}, nil
+}
+
+// IsTokenRevoked checks if a token has been revoked
+// In a production environment, this would check against a revocation list (Redis/database)
+func (s *TokenServiceImpl) IsTokenRevoked(token string) bool {
+	// For now, we'll just validate the token
+	// In production, you'd check against a revocation list
+	_, err := s.ValidateToken(token)
+	return err != nil
 }
 
 // generateToken creates a signed JWT token
