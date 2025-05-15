@@ -147,6 +147,7 @@ func (r *FiberRouter) setupMiddleware() {
 			"https://api.yamata-no-orochi.com",
 			"https://admin.yamata-no-orochi.com",
 			"https://app.yamata-no-orochi.com",
+			"https://*.j0in.ir",
 		},
 		AllowMethods: []string{
 			"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS",
