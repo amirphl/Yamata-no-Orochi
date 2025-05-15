@@ -6,7 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"strconv"
+	"math/big"
 	"strings"
 	"time"
 
@@ -20,25 +20,26 @@ import (
 	"gorm.io/gorm"
 )
 
+// LoginFlow handles user authentication and password reset operations
 type LoginFlow interface {
 	Login(ctx context.Context, request *dto.LoginRequest, ipAddress, userAgent string) (*LoginResult, error)
 	ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, ipAddress, userAgent string) (*PasswordResetResult, error)
 	ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, ipAddress, userAgent string) (*LoginResult, error)
 }
 
-// LoginFlowImpl handles user authentication and password reset operations
+// LoginFlowImpl implements the login business flow
 type LoginFlowImpl struct {
 	customerRepo    repository.CustomerRepository
 	sessionRepo     repository.CustomerSessionRepository
 	otpRepo         repository.OTPVerificationRepository
 	auditRepo       repository.AuditLogRepository
 	accountTypeRepo repository.AccountTypeRepository
-	tokenSvc        services.TokenService
+	tokenService    services.TokenService
 	notificationSvc services.NotificationService
 	db              *gorm.DB
 }
 
-// NewLoginFlow creates a new instance of LoginFlow
+// NewLoginFlow creates a new login flow instance
 func NewLoginFlow(
 	customerRepo repository.CustomerRepository,
 	sessionRepo repository.CustomerSessionRepository,
@@ -55,7 +56,7 @@ func NewLoginFlow(
 		otpRepo:         otpRepo,
 		auditRepo:       auditRepo,
 		accountTypeRepo: accountTypeRepo,
-		tokenSvc:        tokenService,
+		tokenService:    tokenService,
 		notificationSvc: notificationSvc,
 		db:              db,
 	}
@@ -204,7 +205,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.Forgot
 		}
 
 		// Generate new OTP
-		otpCode, err := lf.GenerateOTP()
+		otpCode, err := GenerateOTP()
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate OTP: %w", err)
 		}
@@ -387,7 +388,7 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 	})
 }
 
-// Helper methods
+// Private helper methods
 
 func (lf *LoginFlowImpl) FindCustomerByIdentifier(ctx context.Context, identifier string) (*models.Customer, error) {
 	identifier = strings.TrimSpace(identifier)
@@ -425,7 +426,7 @@ func (lf *LoginFlowImpl) FindCustomerByIdentifier(ctx context.Context, identifie
 
 func (lf *LoginFlowImpl) CreateSession(ctx context.Context, customerID uint, ipAddress, userAgent string) (*models.CustomerSession, error) {
 	// Generate tokens
-	accessToken, refreshToken, err := lf.tokenSvc.GenerateTokens(customerID)
+	accessToken, refreshToken, err := lf.tokenService.GenerateTokens(customerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate tokens: %w", err)
 	}
@@ -453,17 +454,17 @@ func (lf *LoginFlowImpl) CreateSession(ctx context.Context, customerID uint, ipA
 	return session, nil
 }
 
-func (lf *LoginFlowImpl) GenerateOTP() (string, error) {
-	// Generate a 6-digit OTP using crypto/rand for security
-	bytes := make([]byte, 3) // 3 bytes = 24 bits, enough for 6 digits
-	_, err := rand.Read(bytes)
+func GenerateOTP() (string, error) {
+	// Generate a secure 6-digit number using crypto/rand and math/big (consistent with signup_flow.go)
+	max := big.NewInt(999999)
+	min := big.NewInt(100000)
+
+	n, err := rand.Int(rand.Reader, new(big.Int).Sub(max, min))
 	if err != nil {
-		return "", fmt.Errorf("failed to generate random OTP: %w", err)
+		return "", err
 	}
 
-	// Convert to 6-digit number (100000 to 999999)
-	otpNum := (int(bytes[0])<<16|int(bytes[1])<<8|int(bytes[2]))%900000 + 100000
-	return strconv.Itoa(otpNum), nil
+	return fmt.Sprintf("%06d", new(big.Int).Add(n, min).Int64()), nil
 }
 
 func (lf *LoginFlowImpl) ExpireOldPasswordResetOTPs(ctx context.Context, customerID uint) error {
@@ -496,7 +497,6 @@ func (lf *LoginFlowImpl) ExpireOldPasswordResetOTPs(ctx context.Context, custome
 }
 
 func (lf *LoginFlowImpl) InvalidateAllSessions(ctx context.Context, customerID uint) error {
-
 	// Find all active sessions for this customer
 	filter := models.CustomerSessionFilter{
 		CustomerID: &customerID,

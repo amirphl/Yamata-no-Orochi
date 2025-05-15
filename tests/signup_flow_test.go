@@ -46,6 +46,7 @@ func TestInitiateSignup(t *testing.T) {
 			auditRepo,
 			tokenService,
 			notificationService,
+			testDB.DB,
 		)
 
 		t.Run("SuccessfulIndividualSignup", func(t *testing.T) {
@@ -530,6 +531,7 @@ func TestVerifyOTP(t *testing.T) {
 			auditRepo,
 			tokenService,
 			notificationService,
+			testDB.DB,
 		)
 
 		t.Run("SuccessfulMobileOTPVerification", func(t *testing.T) {

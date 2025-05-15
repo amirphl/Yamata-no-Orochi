@@ -429,6 +429,7 @@ func initializeApplication(config *Config) (*Application, error) {
 		auditRepo,
 		tokenService,
 		notificationService,
+		db,
 	)
 
 	loginFlow := businessflow.NewLoginFlow(

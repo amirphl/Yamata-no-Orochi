@@ -3,10 +3,8 @@ package businessflow
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -17,6 +15,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // SignupFlow handles the complete signup business logic
@@ -35,6 +34,7 @@ type SignupFlowImpl struct {
 	auditRepo       repository.AuditLogRepository
 	tokenService    services.TokenService
 	notificationSvc services.NotificationService
+	db              *gorm.DB
 }
 
 // NewSignupFlow creates a new signup flow instance
@@ -46,6 +46,7 @@ func NewSignupFlow(
 	auditRepo repository.AuditLogRepository,
 	tokenService services.TokenService,
 	notificationSvc services.NotificationService,
+	db *gorm.DB,
 ) SignupFlow {
 	return &SignupFlowImpl{
 		customerRepo:    customerRepo,
@@ -55,6 +56,7 @@ func NewSignupFlow(
 		auditRepo:       auditRepo,
 		tokenService:    tokenService,
 		notificationSvc: notificationSvc,
+		db:              db,
 	}
 }
 
@@ -69,7 +71,7 @@ func (s *SignupFlowImpl) InitiateSignup(ctx context.Context, req *dto.SignupRequ
 	var customer *models.Customer
 	var otpCode string
 
-	err := repository.WithTransaction(ctx, s.customerRepo.(*repository.CustomerRepositoryImpl).BaseRepository.DB, func(txCtx context.Context) error {
+	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		// Create customer
 		var err error
 		customer, err = s.createCustomer(txCtx, req)
@@ -120,7 +122,7 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 		refresh string
 	}
 
-	err := repository.WithTransaction(ctx, s.customerRepo.(*repository.CustomerRepositoryImpl).BaseRepository.DB, func(txCtx context.Context) error {
+	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		// Find customer
 		var err error
 		customer, err = s.customerRepo.ByID(txCtx, req.CustomerID)
@@ -330,7 +332,7 @@ func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequ
 
 func (s *SignupFlowImpl) generateAndSaveOTP(ctx context.Context, customerID uint, target, otpType string) (string, error) {
 	// Generate 6-digit OTP
-	otpCode, err := s.generateOTPCode()
+	otpCode, err := GenerateOTP()
 	if err != nil {
 		return "", err
 	}
@@ -354,19 +356,6 @@ func (s *SignupFlowImpl) generateAndSaveOTP(ctx context.Context, customerID uint
 	}
 
 	return otpCode, nil
-}
-
-func (s *SignupFlowImpl) generateOTPCode() (string, error) {
-	// Generate a secure 6-digit number
-	max := big.NewInt(999999)
-	min := big.NewInt(100000)
-
-	n, err := rand.Int(rand.Reader, new(big.Int).Sub(max, min))
-	if err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%06d", new(big.Int).Add(n, min).Int64()), nil
 }
 
 func (s *SignupFlowImpl) verifyOTPCode(ctx context.Context, customerID uint, code, otpType string) error {
