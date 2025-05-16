@@ -3,7 +3,6 @@
 
 -- UP MIGRATION
 -- Add missing audit actions to the enum
-ALTER TYPE audit_action_enum ADD VALUE 'login_successful';
 ALTER TYPE audit_action_enum ADD VALUE 'password_reset_requested';
 ALTER TYPE audit_action_enum ADD VALUE 'password_reset_completed';
 ALTER TYPE audit_action_enum ADD VALUE 'password_reset_failed';

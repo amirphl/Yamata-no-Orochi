@@ -149,7 +149,7 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, request *dto.LoginRequest, i
 
 		// Log successful login
 		msg := fmt.Sprintf("User logged in successfully: %d", customer.ID)
-		err = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginSuccessful, msg, true, nil, ipAddress, userAgent)
+		err = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginSuccess, msg, true, nil, ipAddress, userAgent)
 		if err != nil {
 			return nil, fmt.Errorf("failed to log login attempt: %w", err)
 		}

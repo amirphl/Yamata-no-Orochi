@@ -21,6 +21,15 @@ CREATE INDEX idx_sessions_correlation_id ON customer_sessions(correlation_id);
 UPDATE otp_verifications SET correlation_id = uuid_generate_v4() WHERE correlation_id IS NULL;
 UPDATE customer_sessions SET correlation_id = uuid_generate_v4() WHERE correlation_id IS NULL;
 
--- Make correlation_id NOT NULL after populating
-ALTER TABLE otp_verifications ALTER COLUMN correlation_id SET NOT NULL;
-ALTER TABLE customer_sessions ALTER COLUMN correlation_id SET NOT NULL; 
+-- Make correlation_id NOT NULL after populating (only if no NULL values exist)
+DO $$
+BEGIN
+    -- Check if all records have correlation_id
+    IF NOT EXISTS (SELECT 1 FROM otp_verifications WHERE correlation_id IS NULL) THEN
+        ALTER TABLE otp_verifications ALTER COLUMN correlation_id SET NOT NULL;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM customer_sessions WHERE correlation_id IS NULL) THEN
+        ALTER TABLE customer_sessions ALTER COLUMN correlation_id SET NOT NULL;
+    END IF;
+END $$;

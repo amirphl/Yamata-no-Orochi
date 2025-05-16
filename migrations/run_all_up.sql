@@ -21,5 +21,17 @@
 \echo 'Running 0006_update_customer_fields.sql...'
 \i migrations/0006_update_customer_fields.sql
 
+\echo 'Running 0007_add_missing_audit_actions.sql...'
+\i migrations/0007_add_missing_audit_actions.sql
+
+\echo 'Running 0008_update_audit_log_success_field.sql...'
+\i migrations/0008_update_audit_log_success_field.sql
+
+\echo 'Running 0009_add_correlation_ids.sql...'
+\i migrations/0009_add_correlation_ids.sql
+
+\echo 'Running 0010_add_customer_uuid_and_agency_id.sql...'
+\i migrations/0010_add_customer_uuid_and_agency_id.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi signup system.' 

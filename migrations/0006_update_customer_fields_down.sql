@@ -7,7 +7,7 @@
 ALTER TABLE customers DROP CONSTRAINT IF EXISTS chk_representative_mobile_format;
 ALTER TABLE customers DROP CONSTRAINT IF EXISTS chk_company_phone_format;
 
--- Revert column sizes
+-- Revert column sizes to original values
 ALTER TABLE customers ALTER COLUMN representative_first_name TYPE VARCHAR(30);
 ALTER TABLE customers ALTER COLUMN representative_last_name TYPE VARCHAR(30);
 ALTER TABLE customers ALTER COLUMN representative_mobile TYPE CHAR(11);

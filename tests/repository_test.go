@@ -831,7 +831,7 @@ func TestAuditLogRepository(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
 			require.NoError(t, err)
 
-			audit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccessful, true)
+			audit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccess, true)
 			require.NoError(t, err)
 			assert.NotZero(t, audit.ID)
 		})
@@ -840,7 +840,7 @@ func TestAuditLogRepository(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
 			require.NoError(t, err)
 
-			originalAudit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccessful, true)
+			originalAudit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccess, true)
 			require.NoError(t, err)
 
 			audit, err := repo.ByID(ctx, originalAudit.ID)
@@ -854,7 +854,7 @@ func TestAuditLogRepository(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
 			require.NoError(t, err)
 
-			audit1, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccessful, true)
+			audit1, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccess, true)
 			require.NoError(t, err)
 
 			audit2, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginFailed, false)
@@ -925,7 +925,7 @@ func TestAuditLogRepository(t *testing.T) {
 			audits := []*models.AuditLog{
 				{
 					CustomerID:  &customer.ID,
-					Action:      models.AuditActionLoginSuccessful,
+					Action:      models.AuditActionLoginSuccess,
 					Description: &description1,
 					Success:     boolPtr(true),
 					IPAddress:   &ipAddress,
@@ -953,7 +953,7 @@ func TestAuditLogRepository(t *testing.T) {
 			// Verify they can be retrieved
 			saved, err := repo.ByID(ctx, audits[0].ID)
 			require.NoError(t, err)
-			assert.Equal(t, models.AuditActionLoginSuccessful, saved.Action)
+			assert.Equal(t, models.AuditActionLoginSuccess, saved.Action)
 
 			saved, err = repo.ByID(ctx, audits[1].ID)
 			require.NoError(t, err)
@@ -964,7 +964,7 @@ func TestAuditLogRepository(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
 			require.NoError(t, err)
 
-			_, err = fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccessful, true)
+			_, err = fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccess, true)
 			require.NoError(t, err)
 
 			count, err := repo.Count(ctx, models.AuditLogFilter{CustomerID: &customer.ID})
@@ -976,7 +976,7 @@ func TestAuditLogRepository(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
 			require.NoError(t, err)
 
-			_, err = fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccessful, true)
+			_, err = fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccess, true)
 			require.NoError(t, err)
 
 			exists, err := repo.Exists(ctx, models.AuditLogFilter{CustomerID: &customer.ID})

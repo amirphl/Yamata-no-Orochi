@@ -366,12 +366,12 @@ func TestAuditLog(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
 			require.NoError(t, err)
 
-			audit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccessful, true)
+			audit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccess, true)
 			require.NoError(t, err)
 
 			assert.NotZero(t, audit.ID)
 			assert.Equal(t, customer.ID, *audit.CustomerID)
-			assert.Equal(t, models.AuditActionLoginSuccessful, audit.Action)
+			assert.Equal(t, models.AuditActionLoginSuccess, audit.Action)
 			assert.True(t, *audit.Success)
 			assert.NotNil(t, audit.Description)
 			assert.NotNil(t, audit.IPAddress)
@@ -391,7 +391,7 @@ func TestAuditLog(t *testing.T) {
 		t.Run("AuditActionConstants", func(t *testing.T) {
 			assert.Equal(t, "signup_initiated", models.AuditActionSignupInitiated)
 			assert.Equal(t, "signup_completed", models.AuditActionSignupCompleted)
-			assert.Equal(t, "login_successful", models.AuditActionLoginSuccessful)
+			assert.Equal(t, "login_success", models.AuditActionLoginSuccess)
 			assert.Equal(t, "login_failed", models.AuditActionLoginFailed)
 			assert.Equal(t, "password_reset_requested", models.AuditActionPasswordResetRequested)
 			assert.Equal(t, "password_reset_completed", models.AuditActionPasswordResetCompleted)
@@ -471,7 +471,7 @@ func TestModelRelationships(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
 			require.NoError(t, err)
 
-			audit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccessful, true)
+			audit, err := fixtures.CreateTestAuditLog(&customer.ID, models.AuditActionLoginSuccess, true)
 			require.NoError(t, err)
 
 			// Load customer with audit logs

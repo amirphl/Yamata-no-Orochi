@@ -225,7 +225,7 @@ func TestLoginFlow(t *testing.T) {
 			// Check audit logs were created
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
 				CustomerID: &customer.ID,
-				Action:     utils.ToPtr(models.AuditActionLoginSuccessful),
+				Action:     utils.ToPtr(models.AuditActionLoginSuccess),
 			}, "", 0, 0)
 			require.NoError(t, err)
 			require.Len(t, auditLogs, 1)
@@ -233,7 +233,7 @@ func TestLoginFlow(t *testing.T) {
 			// Verify audit log
 			auditLog := auditLogs[0]
 			assert.Equal(t, customer.ID, *auditLog.CustomerID)
-			assert.Equal(t, models.AuditActionLoginSuccessful, auditLog.Action)
+			assert.Equal(t, models.AuditActionLoginSuccess, auditLog.Action)
 			assert.True(t, utils.IsTrue(auditLog.Success))
 			assert.NotNil(t, auditLog.IPAddress)
 			assert.NotNil(t, auditLog.UserAgent)
@@ -459,13 +459,13 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			// Log successful login attempt
-			err = loginFlow.(*businessflow.LoginFlowImpl).LogLoginAttempt(context.Background(), customer, models.AuditActionLoginSuccessful, "test description", true, nil, "127.0.0.1", "Test User Agent")
+			err = loginFlow.(*businessflow.LoginFlowImpl).LogLoginAttempt(context.Background(), customer, models.AuditActionLoginSuccess, "test description", true, nil, "127.0.0.1", "Test User Agent")
 			require.NoError(t, err)
 
 			// Check audit log was created
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
 				CustomerID: &customer.ID,
-				Action:     utils.ToPtr(models.AuditActionLoginSuccessful),
+				Action:     utils.ToPtr(models.AuditActionLoginSuccess),
 			}, "", 0, 0)
 			require.NoError(t, err)
 			require.Len(t, auditLogs, 1)
@@ -473,7 +473,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			// Verify audit log
 			auditLog := auditLogs[0]
 			assert.Equal(t, customer.ID, *auditLog.CustomerID)
-			assert.Equal(t, models.AuditActionLoginSuccessful, auditLog.Action)
+			assert.Equal(t, models.AuditActionLoginSuccess, auditLog.Action)
 			assert.True(t, utils.IsTrue(auditLog.Success))
 			assert.NotNil(t, auditLog.IPAddress)
 			assert.NotNil(t, auditLog.UserAgent)

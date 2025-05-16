@@ -3,6 +3,18 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0010_add_customer_uuid_and_agency_id_down.sql...'
+\i migrations/0010_add_customer_uuid_and_agency_id_down.sql
+
+\echo 'Running 0009_add_correlation_ids_down.sql...'
+\i migrations/0009_add_correlation_ids_down.sql
+
+\echo 'Running 0008_update_audit_log_success_field_down.sql...'
+\i migrations/0008_update_audit_log_success_field_down.sql
+
+\echo 'Running 0007_add_missing_audit_actions_down.sql...'
+\i migrations/0007_add_missing_audit_actions_down.sql
+
 \echo 'Running 0006_update_customer_fields_down.sql...'
 \i migrations/0006_update_customer_fields_down.sql
 

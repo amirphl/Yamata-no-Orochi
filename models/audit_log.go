@@ -32,7 +32,6 @@ const (
 	AuditActionEmailVerified          = "email_verified"
 	AuditActionMobileVerified         = "mobile_verified"
 	AuditActionLoginSuccess           = "login_success"
-	AuditActionLoginSuccessful        = "login_successful"
 	AuditActionLoginFailed            = "login_failed"
 	AuditActionLogout                 = "logout"
 	AuditActionPasswordChanged        = "password_changed"
