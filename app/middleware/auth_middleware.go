@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
 	"github.com/gofiber/fiber/v3"
 )
@@ -27,22 +28,22 @@ func (m *AuthMiddleware) Authenticate() fiber.Handler {
 		// Get the Authorization header
 		authHeader := c.Get("Authorization")
 		if authHeader == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"message": "Authorization header is required",
-				"error": fiber.Map{
-					"code": "MISSING_AUTHORIZATION_HEADER",
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Authorization header is required",
+				Error: dto.ErrorDetail{
+					Code: "MISSING_AUTHORIZATION_HEADER",
 				},
 			})
 		}
 
 		// Check if the header starts with "Bearer "
 		if !strings.HasPrefix(authHeader, "Bearer ") {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"message": "Invalid authorization header format. Expected 'Bearer <token>'",
-				"error": fiber.Map{
-					"code": "INVALID_AUTHORIZATION_FORMAT",
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Invalid authorization header format. Expected 'Bearer <token>'",
+				Error: dto.ErrorDetail{
+					Code: "INVALID_AUTHORIZATION_FORMAT",
 				},
 			})
 		}
@@ -50,16 +51,16 @@ func (m *AuthMiddleware) Authenticate() fiber.Handler {
 		// Extract the token (remove "Bearer " prefix)
 		token := strings.TrimPrefix(authHeader, "Bearer ")
 		if token == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"message": "Access token is required",
-				"error": fiber.Map{
-					"code": "MISSING_ACCESS_TOKEN",
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Access token is required",
+				Error: dto.ErrorDetail{
+					Code: "MISSING_ACCESS_TOKEN",
 				},
 			})
 		}
 
-		// Validate the token
+		// Validate the token (this already checks for revocation)
 		claims, err := m.tokenService.ValidateToken(token)
 		if err != nil {
 			var errorCode string
@@ -80,22 +81,11 @@ func (m *AuthMiddleware) Authenticate() fiber.Handler {
 				message = "Token validation failed"
 			}
 
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"message": message,
-				"error": fiber.Map{
-					"code": errorCode,
-				},
-			})
-		}
-
-		// Check if token is revoked
-		if m.tokenService.IsTokenRevoked(token) {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"success": false,
-				"message": "Access token has been revoked",
-				"error": fiber.Map{
-					"code": "TOKEN_REVOKED",
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: message,
+				Error: dto.ErrorDetail{
+					Code: errorCode,
 				},
 			})
 		}
@@ -104,6 +94,11 @@ func (m *AuthMiddleware) Authenticate() fiber.Handler {
 		c.Locals("customer_id", claims.CustomerID)
 		c.Locals("token_id", claims.TokenID)
 		c.Locals("token_claims", claims)
+
+		// Store RequestID for audit logging
+		if requestID := c.Get("X-Request-ID"); requestID != "" {
+			c.Locals("request_id", requestID)
+		}
 
 		// Continue to the next handler
 		return c.Next()
@@ -133,16 +128,10 @@ func (m *AuthMiddleware) OptionalAuth() fiber.Handler {
 			return c.Next()
 		}
 
-		// Try to validate the token
+		// Try to validate the token (this already checks for revocation)
 		claims, err := m.tokenService.ValidateToken(token)
 		if err != nil {
 			// Token is invalid, but this is optional auth, so continue
-			return c.Next()
-		}
-
-		// Check if token is revoked
-		if m.tokenService.IsTokenRevoked(token) {
-			// Token is revoked, but this is optional auth, so continue
 			return c.Next()
 		}
 
@@ -150,6 +139,11 @@ func (m *AuthMiddleware) OptionalAuth() fiber.Handler {
 		c.Locals("customer_id", claims.CustomerID)
 		c.Locals("token_id", claims.TokenID)
 		c.Locals("token_claims", claims)
+
+		// Store RequestID for audit logging
+		if requestID := c.Get("X-Request-ID"); requestID != "" {
+			c.Locals("request_id", requestID)
+		}
 
 		// Continue to the next handler
 		return c.Next()
@@ -172,22 +166,22 @@ func GetTokenClaimsFromContext(c fiber.Ctx) (*services.TokenClaims, bool) {
 func RequireAuth(c fiber.Ctx) error {
 	customerID, exists := GetCustomerIDFromContext(c)
 	if !exists {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"message": "Authentication required",
-			"error": fiber.Map{
-				"code": "AUTHENTICATION_REQUIRED",
+		return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Authentication required",
+			Error: dto.ErrorDetail{
+				Code: "AUTHENTICATION_REQUIRED",
 			},
 		})
 	}
 
 	// Check if customer ID is valid
 	if customerID == 0 {
-		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"success": false,
-			"message": "Invalid customer ID",
-			"error": fiber.Map{
-				"code": "INVALID_CUSTOMER_ID",
+		return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Invalid customer ID",
+			Error: dto.ErrorDetail{
+				Code: "INVALID_CUSTOMER_ID",
 			},
 		})
 	}
