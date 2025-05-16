@@ -31,7 +31,10 @@ func main() {
 	log.Println("Starting Yamata no Orochi application...")
 
 	// Load production configuration
-	cfg := config.LoadProductionConfig()
+	cfg, err := config.LoadProductionConfig()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
 
 	// Initialize application
 	app, err := initializeApplication(cfg)
