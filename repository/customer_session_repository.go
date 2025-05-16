@@ -248,6 +248,10 @@ func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter mod
 		query = query.Where("id = ?", *filter.ID)
 	}
 
+	if filter.CorrelationID != nil {
+		query = query.Where("correlation_id = ?", *filter.CorrelationID)
+	}
+
 	if filter.CustomerID != nil {
 		query = query.Where("customer_id = ?", *filter.CustomerID)
 	}
@@ -320,6 +324,10 @@ func (r *CustomerSessionRepositoryImpl) Count(ctx context.Context, filter models
 	// Apply filters based on provided values
 	if filter.ID != nil {
 		query = query.Where("id = ?", *filter.ID)
+	}
+
+	if filter.CorrelationID != nil {
+		query = query.Where("correlation_id = ?", *filter.CorrelationID)
 	}
 
 	if filter.CustomerID != nil {

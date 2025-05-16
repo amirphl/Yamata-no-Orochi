@@ -20,9 +20,9 @@ import (
 
 // SignupFlow handles the complete signup business logic
 type SignupFlow interface {
-	InitiateSignup(ctx context.Context, req *dto.SignupRequest) (*dto.SignupResponse, error)
-	VerifyOTP(ctx context.Context, req *dto.OTPVerificationRequest) (*dto.OTPVerificationResponse, error)
-	ResendOTP(ctx context.Context, customerID uint, otpType string) error
+	InitiateSignup(ctx context.Context, req *dto.SignupRequest, metadata *ClientMetadata) (*dto.SignupResponse, error)
+	VerifyOTP(ctx context.Context, req *dto.OTPVerificationRequest, metadata *ClientMetadata) (*dto.OTPVerificationResponse, error)
+	ResendOTP(ctx context.Context, customerID uint, otpType string, metadata *ClientMetadata) error
 }
 
 // SignupFlowImpl implements the signup business flow
@@ -61,7 +61,7 @@ func NewSignupFlow(
 }
 
 // InitiateSignup handles the complete signup process
-func (s *SignupFlowImpl) InitiateSignup(ctx context.Context, req *dto.SignupRequest) (*dto.SignupResponse, error) {
+func (s *SignupFlowImpl) InitiateSignup(ctx context.Context, req *dto.SignupRequest, metadata *ClientMetadata) (*dto.SignupResponse, error) {
 	// Validate business rules
 	if err := s.validateSignupRequest(ctx, req); err != nil {
 		return nil, err
@@ -86,23 +86,22 @@ func (s *SignupFlowImpl) InitiateSignup(ctx context.Context, req *dto.SignupRequ
 		}
 
 		// Create audit log
-		return s.createAuditLog(txCtx, &customer.ID, models.AuditActionSignupInitiated, "Signup initiated successfully", true, nil)
+		return s.createAuditLog(txCtx, &customer.ID, models.AuditActionSignupInitiated, "Signup initiated successfully", true, nil, metadata)
 	})
 
 	if err != nil {
 		// Log failed signup attempt
 		errMsg := err.Error()
-		s.createAuditLog(ctx, nil, models.AuditActionSignupInitiated, "Signup initiation failed", false, &errMsg)
+		s.createAuditLog(ctx, nil, models.AuditActionSignupInitiated, "Signup initiation failed", false, &errMsg, metadata)
 		return nil, fmt.Errorf("signup failed: %w", err)
 	}
 
 	// Send OTP via SMS (outside transaction to avoid rollback on SMS failure)
 	go func() {
-		message := fmt.Sprintf("Your verification code is: %s. Valid for 5 minutes.", otpCode)
-		if err := s.notificationSvc.SendSMS(customer.RepresentativeMobile, message); err != nil {
-			// Log SMS failure but don't fail the signup
-			errMsg := err.Error()
-			s.createAuditLog(context.Background(), &customer.ID, models.AuditActionOTPGenerated, "SMS sending failed", false, &errMsg)
+		err := s.notificationSvc.SendSMS(customer.RepresentativeMobile, fmt.Sprintf("Your verification code is: %s", otpCode))
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to send SMS: %v", err)
+			s.createAuditLog(context.Background(), &customer.ID, models.AuditActionOTPGenerated, "SMS sending failed", false, &errMsg, metadata)
 		}
 	}()
 
@@ -115,7 +114,7 @@ func (s *SignupFlowImpl) InitiateSignup(ctx context.Context, req *dto.SignupRequ
 }
 
 // VerifyOTP handles OTP verification and completes signup
-func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerificationRequest) (*dto.OTPVerificationResponse, error) {
+func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerificationRequest, metadata *ClientMetadata) (*dto.OTPVerificationResponse, error) {
 	var customer *models.Customer
 	var tokens struct {
 		access  string
@@ -150,21 +149,21 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 		}
 
 		// Create session
-		if err := s.createSession(txCtx, customer.ID, tokens.access, tokens.refresh); err != nil {
+		if err := s.createSession(txCtx, customer.ID, tokens.access, tokens.refresh, metadata); err != nil {
 			return err
 		}
 
 		// Create audit logs
-		if err := s.createAuditLog(txCtx, &customer.ID, models.AuditActionOTPVerified, "OTP verified successfully", true, nil); err != nil {
+		if err := s.createAuditLog(txCtx, &customer.ID, models.AuditActionOTPVerified, "OTP verified successfully", true, nil, metadata); err != nil {
 			return err
 		}
 
-		return s.createAuditLog(txCtx, &customer.ID, models.AuditActionSignupCompleted, "Signup completed successfully", true, nil)
+		return s.createAuditLog(txCtx, &customer.ID, models.AuditActionSignupCompleted, "Signup completed successfully", true, nil, metadata)
 	})
 
 	if err != nil {
 		errMsg := err.Error()
-		s.createAuditLog(ctx, &req.CustomerID, models.AuditActionOTPFailed, "OTP verification failed", false, &errMsg)
+		s.createAuditLog(ctx, &req.CustomerID, models.AuditActionOTPFailed, "OTP verification failed", false, &errMsg, metadata)
 		return nil, fmt.Errorf("OTP verification failed: %w", err)
 	}
 
@@ -177,7 +176,7 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 }
 
 // ResendOTP generates and sends a new OTP
-func (s *SignupFlowImpl) ResendOTP(ctx context.Context, customerID uint, otpType string) error {
+func (s *SignupFlowImpl) ResendOTP(ctx context.Context, customerID uint, otpType string, metadata *ClientMetadata) error {
 	customer, err := s.customerRepo.ByID(ctx, customerID)
 	if err != nil {
 		return err
@@ -418,12 +417,21 @@ func (s *SignupFlowImpl) completeSignup(ctx context.Context, customer *models.Cu
 	return s.customerRepo.UpdateVerificationStatus(ctx, customer.ID, isMobileVerified, isEmailVerified, mobileVerifiedAt, emailVerifiedAt)
 }
 
-func (s *SignupFlowImpl) createSession(ctx context.Context, customerID uint, accessToken, refreshToken string) error {
+func (s *SignupFlowImpl) createSession(ctx context.Context, customerID uint, accessToken, refreshToken string, metadata *ClientMetadata) error {
+	ipAddress := "127.0.0.1"
+	userAgent := ""
+	if metadata != nil {
+		ipAddress = metadata.IPAddress
+		userAgent = metadata.UserAgent
+	}
+
 	session := &models.CustomerSession{
 		CorrelationID: uuid.New(),
 		CustomerID:    customerID,
 		SessionToken:  accessToken,
 		RefreshToken:  &refreshToken,
+		IPAddress:     &ipAddress,
+		UserAgent:     &userAgent,
 		IsActive:      utils.ToPtr(true),
 		ExpiresAt:     time.Now().Add(24 * time.Hour),
 	}
@@ -431,13 +439,31 @@ func (s *SignupFlowImpl) createSession(ctx context.Context, customerID uint, acc
 	return s.sessionRepo.Save(ctx, session)
 }
 
-func (s *SignupFlowImpl) createAuditLog(ctx context.Context, customerID *uint, action, description string, success bool, errorMsg *string) error {
+func (s *SignupFlowImpl) createAuditLog(ctx context.Context, customerID *uint, action, description string, success bool, errorMsg *string, metadata *ClientMetadata) error {
+	ipAddress := "127.0.0.1"
+	userAgent := ""
+	if metadata != nil {
+		ipAddress = metadata.IPAddress
+		userAgent = metadata.UserAgent
+	}
+
 	audit := &models.AuditLog{
 		CustomerID:   customerID,
 		Action:       action,
 		Description:  &description,
 		Success:      utils.ToPtr(success),
+		IPAddress:    &ipAddress,
+		UserAgent:    &userAgent,
 		ErrorMessage: errorMsg,
+	}
+
+	// Extract request ID from context if available
+	requestID := ctx.Value(RequestIDKey)
+	if requestID != nil {
+		requestIDStr, ok := requestID.(string)
+		if ok {
+			audit.RequestID = &requestIDStr
+		}
 	}
 
 	return s.auditRepo.Save(ctx, audit)

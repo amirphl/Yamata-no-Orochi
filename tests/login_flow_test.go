@@ -62,7 +62,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -98,7 +98,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -114,7 +114,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.False(t, loginResult.Success)
@@ -136,7 +136,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.False(t, loginResult.Success)
@@ -163,7 +163,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.False(t, loginResult.Success)
@@ -185,7 +185,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -217,7 +217,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -247,7 +247,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.False(t, loginResult.Success)
@@ -271,7 +271,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -304,13 +304,13 @@ func TestLoginFlow(t *testing.T) {
 				Password:   "TestPass123!",
 			}
 
-			loginResult1, err := loginFlow.Login(context.Background(), loginReq1, "127.0.0.1", "Test User Agent")
+			loginResult1, err := loginFlow.Login(context.Background(), loginReq1, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult1)
 			assert.True(t, loginResult1.Success)
 
 			// Create second login
-			loginResult2, err := loginFlow.Login(context.Background(), loginReq1, "127.0.0.1", "Test User Agent")
+			loginResult2, err := loginFlow.Login(context.Background(), loginReq1, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult2)
 			assert.True(t, loginResult2.Success)
@@ -335,7 +335,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -360,7 +360,7 @@ func TestLoginFlow(t *testing.T) {
 			}
 
 			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -459,7 +459,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			// Log successful login attempt
-			err = loginFlow.(*businessflow.LoginFlowImpl).LogLoginAttempt(context.Background(), customer, models.AuditActionLoginSuccess, "test description", true, nil, "127.0.0.1", "Test User Agent")
+			err = loginFlow.(*businessflow.LoginFlowImpl).LogLoginAttempt(context.Background(), customer, models.AuditActionLoginSuccess, "test description", true, nil, nil)
 			require.NoError(t, err)
 
 			// Check audit log was created
@@ -557,7 +557,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -595,7 +595,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -610,7 +610,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.False(t, result.Success)
@@ -636,7 +636,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.False(t, result.Success)
@@ -674,7 +674,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -707,7 +707,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -745,7 +745,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -774,7 +774,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.False(t, result.Success)
@@ -796,13 +796,13 @@ func TestForgotPasswordFlow(t *testing.T) {
 				Identifier: customer.Email,
 			}
 
-			result1, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result1, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result1)
 			assert.True(t, result1.Success)
 
 			// Create second forgot password request
-			result2, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result2, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result2)
 			assert.True(t, result2.Success)
@@ -831,7 +831,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -853,7 +853,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -876,7 +876,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			}
 
 			// Perform forgot password (SMS might fail in test environment, but OTP should still be created)
-			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -959,7 +959,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -1006,7 +1006,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.False(t, result.Success)
@@ -1048,7 +1048,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.False(t, result.Success)
@@ -1090,7 +1090,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.False(t, result.Success)
@@ -1135,7 +1135,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -1151,7 +1151,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Password:   "NewSecurePass123!",
 			}
 
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, "127.0.0.1", "Test User Agent")
+			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
 			assert.True(t, loginResult.Success)
@@ -1195,7 +1195,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -1243,7 +1243,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -1303,7 +1303,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -1339,7 +1339,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.False(t, result.Success)
@@ -1392,7 +1392,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -1433,7 +1433,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)
@@ -1494,7 +1494,7 @@ func TestResetPasswordFlow(t *testing.T) {
 			}
 
 			// Perform password reset
-			result, err := loginFlow.ResetPassword(context.Background(), resetReq, "127.0.0.1", "Test User Agent")
+			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.Success)

@@ -18,6 +18,16 @@ func (AccountType) TableName() string {
 	return "account_types"
 }
 
+// AccountTypeFilter represents filter criteria for account type queries
+type AccountTypeFilter struct {
+	ID            *uint
+	TypeName      *string
+	DisplayName   *string
+	Description   *string
+	CreatedAfter  *time.Time
+	CreatedBefore *time.Time
+}
+
 // Account type constants
 const (
 	AccountTypeIndividual         = "individual"

@@ -20,7 +20,7 @@ func NewHandlerSignupFlowAdapter(signupFlow businessflow.SignupFlow) handlers.Si
 }
 
 // InitiateSignup converts handler DTOs to business flow DTOs and calls the business flow
-func (a *HandlerSignupFlowAdapter) InitiateSignup(ctx context.Context, req *handlers.SignupRequest) (*handlers.SignupResponse, error) {
+func (a *HandlerSignupFlowAdapter) InitiateSignup(ctx context.Context, req *handlers.SignupRequest, ipAddress, userAgent string) (*handlers.SignupResponse, error) {
 	// Convert handler DTO to business flow DTO
 	dtoReq := &dto.SignupRequest{
 		AccountType:             req.AccountType,
@@ -38,8 +38,11 @@ func (a *HandlerSignupFlowAdapter) InitiateSignup(ctx context.Context, req *hand
 		ReferrerAgencyCode:      req.ReferrerAgencyRefererCode, // Map to correct field
 	}
 
+	// Create client metadata
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+
 	// Call business flow
-	dtoResp, err := a.signupFlow.InitiateSignup(ctx, dtoReq)
+	dtoResp, err := a.signupFlow.InitiateSignup(ctx, dtoReq, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +56,7 @@ func (a *HandlerSignupFlowAdapter) InitiateSignup(ctx context.Context, req *hand
 }
 
 // VerifyOTP converts handler DTOs to business flow DTOs and calls the business flow
-func (a *HandlerSignupFlowAdapter) VerifyOTP(ctx context.Context, req *handlers.OTPVerificationRequest) (*handlers.OTPVerificationResponse, error) {
+func (a *HandlerSignupFlowAdapter) VerifyOTP(ctx context.Context, req *handlers.OTPVerificationRequest, ipAddress, userAgent string) (*handlers.OTPVerificationResponse, error) {
 	// Convert handler DTO to business flow DTO
 	dtoReq := &dto.OTPVerificationRequest{
 		CustomerID: req.CustomerID,
@@ -61,8 +64,11 @@ func (a *HandlerSignupFlowAdapter) VerifyOTP(ctx context.Context, req *handlers.
 		OTPType:    req.OTPType,
 	}
 
+	// Create client metadata
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+
 	// Call business flow
-	dtoResp, err := a.signupFlow.VerifyOTP(ctx, dtoReq)
+	dtoResp, err := a.signupFlow.VerifyOTP(ctx, dtoReq, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -76,8 +82,10 @@ func (a *HandlerSignupFlowAdapter) VerifyOTP(ctx context.Context, req *handlers.
 }
 
 // ResendOTP delegates to the business flow
-func (a *HandlerSignupFlowAdapter) ResendOTP(ctx context.Context, customerID uint, otpType string) error {
-	return a.signupFlow.ResendOTP(ctx, customerID, otpType)
+func (a *HandlerSignupFlowAdapter) ResendOTP(ctx context.Context, customerID uint, otpType string, ipAddress, userAgent string) error {
+	// Create client metadata
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+	return a.signupFlow.ResendOTP(ctx, customerID, otpType, metadata)
 }
 
 // HandlerLoginFlowAdapter adapts business flow LoginFlow to handler LoginFlow
@@ -98,8 +106,11 @@ func (a *HandlerLoginFlowAdapter) Login(ctx context.Context, req *handlers.Login
 		Password:   req.Password,
 	}
 
+	// Create client metadata
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+
 	// Call business flow
-	dtoResp, err := a.loginFlow.Login(ctx, dtoReq, ipAddress, userAgent)
+	dtoResp, err := a.loginFlow.Login(ctx, dtoReq, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -122,8 +133,11 @@ func (a *HandlerLoginFlowAdapter) ForgotPassword(ctx context.Context, req *handl
 		Identifier: req.Identifier,
 	}
 
+	// Create client metadata
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+
 	// Call business flow
-	dtoResp, err := a.loginFlow.ForgotPassword(ctx, dtoReq, ipAddress, userAgent)
+	dtoResp, err := a.loginFlow.ForgotPassword(ctx, dtoReq, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -149,8 +163,11 @@ func (a *HandlerLoginFlowAdapter) ResetPassword(ctx context.Context, req *handle
 		ConfirmPassword: req.ConfirmPassword,
 	}
 
+	// Create client metadata
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+
 	// Call business flow
-	dtoResp, err := a.loginFlow.ResetPassword(ctx, dtoReq, ipAddress, userAgent)
+	dtoResp, err := a.loginFlow.ResetPassword(ctx, dtoReq, metadata)
 	if err != nil {
 		return nil, err
 	}

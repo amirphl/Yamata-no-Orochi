@@ -32,6 +32,7 @@ func (CustomerSession) TableName() string {
 // CustomerSessionFilter represents filter criteria for session queries
 type CustomerSessionFilter struct {
 	ID             *uint
+	CorrelationID  *uuid.UUID
 	CustomerID     *uint
 	IsActive       *bool
 	IPAddress      *string

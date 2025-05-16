@@ -20,9 +20,9 @@ type AuthHandler struct {
 
 // SignupFlow interface for business logic
 type SignupFlow interface {
-	InitiateSignup(ctx context.Context, req *SignupRequest) (*SignupResponse, error)
-	VerifyOTP(ctx context.Context, req *OTPVerificationRequest) (*OTPVerificationResponse, error)
-	ResendOTP(ctx context.Context, customerID uint, otpType string) error
+	InitiateSignup(ctx context.Context, req *SignupRequest, ipAddress, userAgent string) (*SignupResponse, error)
+	VerifyOTP(ctx context.Context, req *OTPVerificationRequest, ipAddress, userAgent string) (*OTPVerificationResponse, error)
+	ResendOTP(ctx context.Context, customerID uint, otpType string, ipAddress, userAgent string) error
 }
 
 // LoginFlow interface for business logic
@@ -178,8 +178,12 @@ func (h *AuthHandler) Signup(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 
+	// Get client information
+	ipAddress := c.IP()
+	userAgent := c.Get("User-Agent")
+
 	// Call business logic
-	result, err := h.signupFlow.InitiateSignup(context.Background(), &req)
+	result, err := h.signupFlow.InitiateSignup(context.Background(), &req, ipAddress, userAgent)
 	if err != nil {
 		if errors.Is(err, errors.New("user already exists")) {
 			return h.ErrorResponse(c, fiber.StatusConflict, "User already exists", "USER_EXISTS", nil)
@@ -218,8 +222,12 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 
+	// Get client information
+	ipAddress := c.IP()
+	userAgent := c.Get("User-Agent")
+
 	// Call business logic
-	result, err := h.signupFlow.VerifyOTP(context.Background(), &req)
+	result, err := h.signupFlow.VerifyOTP(context.Background(), &req, ipAddress, userAgent)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "OTP verification failed", "OTP_VERIFICATION_FAILED", err.Error())
 	}
@@ -250,8 +258,12 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	// For now, we'll resend mobile OTP
 	otpType := "mobile"
 
+	// Get client information
+	ipAddress := c.IP()
+	userAgent := c.Get("User-Agent")
+
 	// Call business logic
-	err = h.signupFlow.ResendOTP(context.Background(), uint(customerID), otpType)
+	err = h.signupFlow.ResendOTP(context.Background(), uint(customerID), otpType, ipAddress, userAgent)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to resend OTP", "RESEND_OTP_FAILED", err.Error())
 	}

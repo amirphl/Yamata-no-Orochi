@@ -60,7 +60,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -123,7 +123,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -161,7 +161,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -191,7 +191,7 @@ func TestInitiateSignup(t *testing.T) {
 				ReferrerAgencyCode:      &agency.AgencyRefererCode,
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -218,7 +218,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "email already exists")
@@ -246,7 +246,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "mobile number already exists")
@@ -272,7 +272,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "national ID already exists")
@@ -290,7 +290,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "company fields are required")
@@ -310,7 +310,7 @@ func TestInitiateSignup(t *testing.T) {
 				ReferrerAgencyCode:      &invalidAgencyCode,
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "referrer agency not found")
@@ -332,7 +332,7 @@ func TestInitiateSignup(t *testing.T) {
 				ReferrerAgencyCode:      &company.AgencyRefererCode,
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "referrer must be a marketing agency")
@@ -400,7 +400,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -427,7 +427,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -457,7 +457,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 
@@ -487,7 +487,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req)
+			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -549,7 +549,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.Equal(t, "Signup completed successfully!", result.Message)
@@ -620,7 +620,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeEmail,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -639,7 +639,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "customer not found")
@@ -656,7 +656,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "no valid OTP found")
@@ -677,7 +677,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "invalid OTP code")
@@ -725,7 +725,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "no valid OTP found")
@@ -757,7 +757,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "no valid OTP found")
@@ -781,7 +781,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -816,7 +816,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    "invalid_type",
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "no valid OTP found")
@@ -833,7 +833,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 
@@ -865,7 +865,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -906,7 +906,7 @@ func TestVerifyOTP(t *testing.T) {
 				OTPType:    models.OTPTypeMobile,
 			}
 
-			result, err := signupFlow.VerifyOTP(context.Background(), req)
+			result, err := signupFlow.VerifyOTP(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 

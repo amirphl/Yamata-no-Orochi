@@ -11,13 +11,13 @@ import (
 
 // AccountTypeRepositoryImpl implements AccountTypeRepository interface
 type AccountTypeRepositoryImpl struct {
-	*BaseRepository[models.AccountType, models.AccountType]
+	*BaseRepository[models.AccountType, models.AccountTypeFilter]
 }
 
 // NewAccountTypeRepository creates a new account type repository
 func NewAccountTypeRepository(db *gorm.DB) AccountTypeRepository {
 	return &AccountTypeRepositoryImpl{
-		BaseRepository: NewBaseRepository[models.AccountType, models.AccountType](db),
+		BaseRepository: NewBaseRepository[models.AccountType, models.AccountTypeFilter](db),
 	}
 }
 
@@ -40,25 +40,33 @@ func (r *AccountTypeRepositoryImpl) ByTypeName(ctx context.Context, typeName str
 }
 
 // ByFilter retrieves account types based on filter criteria
-func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.AccountType, orderBy string, limit, offset int) ([]*models.AccountType, error) {
+func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.AccountTypeFilter, orderBy string, limit, offset int) ([]*models.AccountType, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.AccountType{})
 
 	// Apply filters based on provided values
-	if filter.ID != 0 {
-		query = query.Where("id = ?", filter.ID)
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
 	}
 
-	if filter.TypeName != "" {
-		query = query.Where("type_name = ?", filter.TypeName)
+	if filter.TypeName != nil {
+		query = query.Where("type_name = ?", *filter.TypeName)
 	}
 
-	if filter.DisplayName != "" {
-		query = query.Where("display_name = ?", filter.DisplayName)
+	if filter.DisplayName != nil {
+		query = query.Where("display_name = ?", *filter.DisplayName)
 	}
 
 	if filter.Description != nil {
 		query = query.Where("description = ?", *filter.Description)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
 	}
 
 	// Apply ordering (default to id DESC)
@@ -85,25 +93,33 @@ func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.
 }
 
 // Count returns the number of account types matching the filter
-func (r *AccountTypeRepositoryImpl) Count(ctx context.Context, filter models.AccountType) (int64, error) {
+func (r *AccountTypeRepositoryImpl) Count(ctx context.Context, filter models.AccountTypeFilter) (int64, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.AccountType{})
 
 	// Apply filters based on provided values
-	if filter.ID != 0 {
-		query = query.Where("id = ?", filter.ID)
+	if filter.ID != nil {
+		query = query.Where("id = ?", *filter.ID)
 	}
 
-	if filter.TypeName != "" {
-		query = query.Where("type_name = ?", filter.TypeName)
+	if filter.TypeName != nil {
+		query = query.Where("type_name = ?", *filter.TypeName)
 	}
 
-	if filter.DisplayName != "" {
-		query = query.Where("display_name = ?", filter.DisplayName)
+	if filter.DisplayName != nil {
+		query = query.Where("display_name = ?", *filter.DisplayName)
 	}
 
 	if filter.Description != nil {
 		query = query.Where("description = ?", *filter.Description)
+	}
+
+	if filter.CreatedAfter != nil {
+		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+	}
+
+	if filter.CreatedBefore != nil {
+		query = query.Where("created_at <= ?", *filter.CreatedBefore)
 	}
 
 	var count int64
@@ -116,7 +132,7 @@ func (r *AccountTypeRepositoryImpl) Count(ctx context.Context, filter models.Acc
 }
 
 // Exists checks if any account type matching the filter exists
-func (r *AccountTypeRepositoryImpl) Exists(ctx context.Context, filter models.AccountType) (bool, error) {
+func (r *AccountTypeRepositoryImpl) Exists(ctx context.Context, filter models.AccountTypeFilter) (bool, error) {
 	count, err := r.Count(ctx, filter)
 	if err != nil {
 		return false, err

@@ -25,7 +25,7 @@ type Repository[T any, F any] interface {
 
 // AccountTypeRepository defines operations for account types
 type AccountTypeRepository interface {
-	Repository[models.AccountType, models.AccountType]
+	Repository[models.AccountType, models.AccountTypeFilter]
 	ByTypeName(ctx context.Context, typeName string) (*models.AccountType, error)
 }
 

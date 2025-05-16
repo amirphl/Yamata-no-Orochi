@@ -45,25 +45,25 @@ func TestAccountTypeRepository(t *testing.T) {
 
 		t.Run("ByFilter", func(t *testing.T) {
 			// Test with empty filter (should return all)
-			accountTypes, err := repo.ByFilter(ctx, models.AccountType{}, "", 0, 0)
+			accountTypes, err := repo.ByFilter(ctx, models.AccountTypeFilter{}, "", 0, 0)
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, len(accountTypes), 3) // At least the 3 default types
 
 			// Test with specific filter
-			accountTypes, err = repo.ByFilter(ctx, models.AccountType{TypeName: models.AccountTypeIndividual}, "", 0, 0)
+			accountTypes, err = repo.ByFilter(ctx, models.AccountTypeFilter{TypeName: utils.ToPtr(models.AccountTypeIndividual)}, "", 0, 0)
 			require.NoError(t, err)
 			assert.Len(t, accountTypes, 1)
 			assert.Equal(t, models.AccountTypeIndividual, accountTypes[0].TypeName)
 		})
 
 		t.Run("Count", func(t *testing.T) {
-			count, err := repo.Count(ctx, models.AccountType{})
+			count, err := repo.Count(ctx, models.AccountTypeFilter{})
 			require.NoError(t, err)
 			assert.GreaterOrEqual(t, count, int64(3))
 		})
 
 		t.Run("Exists", func(t *testing.T) {
-			exists, err := repo.Exists(ctx, models.AccountType{TypeName: models.AccountTypeIndividual})
+			exists, err := repo.Exists(ctx, models.AccountTypeFilter{TypeName: utils.ToPtr(models.AccountTypeIndividual)})
 			require.NoError(t, err)
 			assert.True(t, exists)
 		})
