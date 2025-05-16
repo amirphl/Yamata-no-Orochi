@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cache"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -30,21 +32,11 @@ type Router interface {
 // FiberRouter implements Router using Fiber v3
 type FiberRouter struct {
 	app         *fiber.App
-	authHandler AuthHandler
-}
-
-// AuthHandler interface for authentication endpoints
-type AuthHandler interface {
-	Signup(c fiber.Ctx) error
-	VerifyOTP(c fiber.Ctx) error
-	ResendOTP(c fiber.Ctx) error
-	Login(c fiber.Ctx) error
-	ForgotPassword(c fiber.Ctx) error
-	ResetPassword(c fiber.Ctx) error
+	authHandler handlers.AuthHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
-func NewFiberRouter(authHandler AuthHandler) Router {
+func NewFiberRouter(authHandler handlers.AuthHandlerInterface) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "Yamata no Orochi API",
@@ -88,9 +80,12 @@ func (r *FiberRouter) SetupRoutes() {
 			return c.IP() // Rate limit by IP
 		},
 		LimitReached: func(c fiber.Ctx) error {
-			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
-				"error":   "rate_limit_exceeded",
-				"message": "Too many requests. Please try again later.",
+			return c.Status(fiber.StatusTooManyRequests).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Too many requests. Please try again later.",
+				Error: dto.ErrorDetail{
+					Code: "RATE_LIMIT_EXCEEDED",
+				},
 			})
 		},
 	}))
@@ -244,9 +239,12 @@ func (r *FiberRouter) securityMiddleware(c fiber.Ctx) error {
 
 	for _, blockedIP := range blockedIPs {
 		if clientIP == blockedIP {
-			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
-				"error":   "access_denied",
-				"message": "Access denied from this IP address",
+			return c.Status(fiber.StatusForbidden).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Access denied from this IP address",
+				Error: dto.ErrorDetail{
+					Code: "ACCESS_DENIED",
+				},
 			})
 		}
 	}
@@ -268,9 +266,12 @@ func (r *FiberRouter) apiKeyMiddleware(c fiber.Ctx) error {
 	if requireAPIKey {
 		apiKey := c.Get("X-API-Key")
 		if apiKey == "" {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error":   "missing_api_key",
-				"message": "API key is required",
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "API key is required",
+				Error: dto.ErrorDetail{
+					Code: "MISSING_API_KEY",
+				},
 			})
 		}
 
@@ -288,9 +289,12 @@ func (r *FiberRouter) apiKeyMiddleware(c fiber.Ctx) error {
 		}
 
 		if !isValid {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-				"error":   "invalid_api_key",
-				"message": "Invalid API key",
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Invalid API key",
+				Error: dto.ErrorDetail{
+					Code: "INVALID_API_KEY",
+				},
 			})
 		}
 	}
@@ -311,32 +315,48 @@ func (r *FiberRouter) GetApp() *fiber.App {
 
 // Health check endpoint
 func (r *FiberRouter) healthCheck(c fiber.Ctx) error {
-	return c.JSON(fiber.Map{
-		"status":    "ok",
-		"timestamp": time.Now().Unix(),
-		"version":   "1.0.0",
-		"service":   "yamata-no-orochi-api",
+	return c.JSON(dto.APIResponse{
+		Success: true,
+		Message: "Service is healthy",
+		Data: fiber.Map{
+			"status":    "ok",
+			"timestamp": time.Now().Unix(),
+			"version":   "1.0.0",
+			"service":   "yamata-no-orochi-api",
+		},
 	})
 }
 
 // API documentation endpoint
 func (r *FiberRouter) getAPIDocumentation(c fiber.Ctx) error {
 	docs := GetRouteDocumentation()
-	return c.JSON(fiber.Map{
-		"title":       "Yamata no Orochi API Documentation",
-		"version":     "1.0.0",
-		"description": "Customer signup and authentication API",
-		"endpoints":   docs,
+	return c.JSON(dto.APIResponse{
+		Success: true,
+		Message: "API documentation retrieved successfully",
+		Data: fiber.Map{
+			"title":       "Yamata no Orochi API Documentation",
+			"version":     "1.0.0",
+			"description": "Customer signup and authentication API",
+			"endpoints":   docs,
+		},
 	})
 }
 
 // Not found handler
 func (r *FiberRouter) notFoundHandler(c fiber.Ctx) error {
-	return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-		"error":   "not_found",
-		"message": "The requested resource was not found",
-		"path":    c.Path(),
-		"method":  c.Method(),
+	requestID := c.Locals("requestid")
+
+	return c.Status(fiber.StatusNotFound).JSON(dto.APIResponse{
+		Success: false,
+		Message: "The requested resource was not found",
+		Error: dto.ErrorDetail{
+			Code: "NOT_FOUND",
+			Details: fiber.Map{
+				"path":       c.Path(),
+				"method":     c.Method(),
+				"request_id": requestID,
+			},
+		},
 	})
 }
 
@@ -353,11 +373,20 @@ func errorHandler(c fiber.Ctx, err error) error {
 	// Log the error
 	log.Printf("Error %d: %v", code, err)
 
+	// Get RequestID for tracing
+	requestID := c.Locals("requestid")
+
 	// Return JSON error response
-	return c.Status(code).JSON(fiber.Map{
-		"error":     "internal_error",
-		"message":   "An internal server error occurred",
-		"timestamp": time.Now().Unix(),
+	return c.Status(code).JSON(dto.APIResponse{
+		Success: false,
+		Message: "An internal server error occurred",
+		Error: dto.ErrorDetail{
+			Code: "INTERNAL_ERROR",
+			Details: fiber.Map{
+				"timestamp":  time.Now().Unix(),
+				"request_id": requestID,
+			},
+		},
 	})
 }
 

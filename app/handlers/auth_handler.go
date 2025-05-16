@@ -13,6 +13,16 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
+// AuthHandlerInterface defines the contract for authentication handlers
+type AuthHandlerInterface interface {
+	Signup(c fiber.Ctx) error
+	VerifyOTP(c fiber.Ctx) error
+	ResendOTP(c fiber.Ctx) error
+	Login(c fiber.Ctx) error
+	ForgotPassword(c fiber.Ctx) error
+	ResetPassword(c fiber.Ctx) error
+}
+
 // AuthHandler handles authentication-related HTTP requests
 type AuthHandler struct {
 	signupFlow businessflow.SignupFlow
