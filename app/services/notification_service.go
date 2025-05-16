@@ -4,6 +4,7 @@ package services
 import (
 	"fmt"
 	"log"
+	"strings"
 )
 
 // NotificationService handles sending notifications via SMS and email
@@ -56,9 +57,9 @@ func (s *NotificationServiceImpl) SendEmail(email, subject, message string) erro
 		return fmt.Errorf("email provider not configured")
 	}
 
-	// Basic email validation
-	if len(email) == 0 || !contains(email, "@") {
-		return fmt.Errorf("invalid email address: %s", email)
+	// Improved email validation
+	if err := validateEmail(email); err != nil {
+		return fmt.Errorf("invalid email address: %w", err)
 	}
 
 	return s.emailProvider.SendEmail(email, subject, message)
@@ -152,4 +153,80 @@ func contains(str, substr string) bool {
 		}
 	}
 	return false
+}
+
+// validateEmail performs basic email validation
+func validateEmail(email string) error {
+	if len(email) == 0 {
+		return fmt.Errorf("email cannot be empty")
+	}
+
+	if len(email) > 254 {
+		return fmt.Errorf("email too long")
+	}
+
+	// Check for @ symbol
+	atIndex := strings.Index(email, "@")
+	if atIndex == -1 {
+		return fmt.Errorf("missing @ symbol")
+	}
+
+	// Check local part (before @)
+	localPart := email[:atIndex]
+	if len(localPart) == 0 {
+		return fmt.Errorf("local part cannot be empty")
+	}
+	if len(localPart) > 64 {
+		return fmt.Errorf("local part too long")
+	}
+
+	// Check domain part (after @)
+	domainPart := email[atIndex+1:]
+	if len(domainPart) == 0 {
+		return fmt.Errorf("domain part cannot be empty")
+	}
+	if len(domainPart) > 253 {
+		return fmt.Errorf("domain part too long")
+	}
+
+	// Check for valid characters in local part
+	for _, char := range localPart {
+		if !isValidEmailChar(char) {
+			return fmt.Errorf("invalid character in local part")
+		}
+	}
+
+	// Check for valid characters in domain part
+	for _, char := range domainPart {
+		if !isValidDomainChar(char) {
+			return fmt.Errorf("invalid character in domain part")
+		}
+	}
+
+	// Check for at least one dot in domain
+	if !strings.Contains(domainPart, ".") {
+		return fmt.Errorf("domain must contain at least one dot")
+	}
+
+	return nil
+}
+
+// isValidEmailChar checks if a character is valid in email local part
+func isValidEmailChar(char rune) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '.' || char == '!' || char == '#' || char == '$' ||
+		char == '%' || char == '&' || char == '\'' || char == '*' ||
+		char == '+' || char == '-' || char == '/' || char == '=' ||
+		char == '?' || char == '^' || char == '_' || char == '`' ||
+		char == '{' || char == '|' || char == '}' || char == '~'
+}
+
+// isValidDomainChar checks if a character is valid in domain part
+func isValidDomainChar(char rune) bool {
+	return (char >= 'a' && char <= 'z') ||
+		(char >= 'A' && char <= 'Z') ||
+		(char >= '0' && char <= '9') ||
+		char == '.' || char == '-'
 }

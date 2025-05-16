@@ -9,7 +9,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/amirphl/Yamata-no-Orochi/app/adapters"
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
 	"github.com/amirphl/Yamata-no-Orochi/app/router"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
@@ -177,12 +176,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		db,
 	)
 
-	// Create adapters for handlers
-	signupFlowAdapter := adapters.NewHandlerSignupFlowAdapter(signupFlow)
-	loginFlowAdapter := adapters.NewHandlerLoginFlowAdapter(loginFlow)
-
 	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(signupFlowAdapter, loginFlowAdapter)
+	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 
 	// Initialize router
 	appRouter := router.NewFiberRouter(authHandler)

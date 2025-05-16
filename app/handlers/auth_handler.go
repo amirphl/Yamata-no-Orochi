@@ -7,105 +7,20 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
 )
 
 // AuthHandler handles authentication-related HTTP requests
 type AuthHandler struct {
-	signupFlow SignupFlow
-	loginFlow  LoginFlow
+	signupFlow businessflow.SignupFlow
+	loginFlow  businessflow.LoginFlow
 	validator  *validator.Validate
 }
 
-// SignupFlow interface for business logic
-type SignupFlow interface {
-	InitiateSignup(ctx context.Context, req *SignupRequest, ipAddress, userAgent string) (*SignupResponse, error)
-	VerifyOTP(ctx context.Context, req *OTPVerificationRequest, ipAddress, userAgent string) (*OTPVerificationResponse, error)
-	ResendOTP(ctx context.Context, customerID uint, otpType string, ipAddress, userAgent string) error
-}
-
-// LoginFlow interface for business logic
-type LoginFlow interface {
-	Login(ctx context.Context, req *LoginRequest, ipAddress, userAgent string) (*LoginResult, error)
-	ForgotPassword(ctx context.Context, req *ForgotPasswordRequest, ipAddress, userAgent string) (*PasswordResetResult, error)
-	ResetPassword(ctx context.Context, req *ResetPasswordRequest, ipAddress, userAgent string) (*LoginResult, error)
-}
-
-// DTOs for this handler (avoiding import issues)
-
-type LoginRequest struct {
-	Identifier string `json:"identifier" validate:"required,min=3,max=255"`
-	Password   string `json:"password" validate:"required,min=8,max=100"`
-}
-
-type LoginResult struct {
-	Success      bool
-	Customer     any
-	AccountType  any
-	Session      any
-	ErrorCode    string
-	ErrorMessage string
-}
-
-type ForgotPasswordRequest struct {
-	Identifier string `json:"identifier" validate:"required,min=3,max=255"`
-}
-
-type PasswordResetResult struct {
-	Success      bool
-	CustomerID   uint
-	MaskedPhone  string
-	OTPExpiry    time.Time
-	ErrorCode    string
-	ErrorMessage string
-}
-
-type ResetPasswordRequest struct {
-	CustomerID      uint   `json:"customer_id" validate:"required"`
-	OTPCode         string `json:"otp_code" validate:"required,len=6,numeric"`
-	NewPassword     string `json:"new_password" validate:"required,min=8,max=100"`
-	ConfirmPassword string `json:"confirm_password" validate:"required,eqfield=NewPassword"`
-}
-
-type SignupRequest struct {
-	AccountType               string  `json:"account_type" validate:"required,oneof=individual independent_company marketing_agency"`
-	CompanyName               *string `json:"company_name,omitempty" validate:"omitempty,max=60"`
-	NationalID                *string `json:"national_id,omitempty" validate:"omitempty,len=11,numeric"`
-	CompanyRegistrationCode   *string `json:"company_registration_code,omitempty" validate:"omitempty,max=20"`
-	CompanyEconomicCode       *string `json:"company_economic_code,omitempty" validate:"omitempty,max=20"`
-	CompanyPhone              *string `json:"company_phone,omitempty" validate:"omitempty"`
-	CompanyFax                *string `json:"company_fax,omitempty" validate:"omitempty,max=20"`
-	CompanyAddress            *string `json:"company_address,omitempty" validate:"omitempty,max=255"`
-	CompanyPostalCode         *string `json:"company_postal_code,omitempty" validate:"omitempty,len=10,numeric"`
-	RepresentativeFirstName   string  `json:"representative_first_name" validate:"required,max=255,alpha_space"`
-	RepresentativeLastName    string  `json:"representative_last_name" validate:"required,max=255,alpha_space"`
-	RepresentativeMobile      string  `json:"representative_mobile" validate:"required,mobile_format"`
-	Email                     string  `json:"email" validate:"required,email,max=100"`
-	Password                  string  `json:"password" validate:"required,min=8,max=100,password_strength"`
-	ConfirmPassword           string  `json:"confirm_password" validate:"required,eqfield=Password"`
-	AgreeToTerms              bool    `json:"agree_to_terms" validate:"required,eq=true"`
-	ReferrerAgencyRefererCode *int64  `json:"referrer_agency_referer_code,omitempty" validate:"omitempty"`
-}
-
-type SignupResponse struct {
-	Success    bool   `json:"success"`
-	Message    string `json:"message"`
-	CustomerID uint   `json:"customer_id,omitempty"`
-}
-
-type OTPVerificationRequest struct {
-	CustomerID uint   `json:"customer_id" validate:"required"`
-	OTPCode    string `json:"otp_code" validate:"required,len=6,numeric"`
-	OTPType    string `json:"otp_type" validate:"required,oneof=mobile email"`
-}
-
-type OTPVerificationResponse struct {
-	Success     bool   `json:"success"`
-	Message     string `json:"message"`
-	AccessToken string `json:"access_token,omitempty"`
-}
-
+// APIResponse represents the standard API response structure
 type APIResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
@@ -113,6 +28,7 @@ type APIResponse struct {
 	Error   any    `json:"error,omitempty"`
 }
 
+// ErrorDetail represents error details in API responses
 type ErrorDetail struct {
 	Code    string `json:"code"`
 	Details any    `json:"details,omitempty"`
@@ -138,7 +54,7 @@ func (h *AuthHandler) SuccessResponse(c fiber.Ctx, statusCode int, message strin
 }
 
 // NewAuthHandler creates a new authentication handler
-func NewAuthHandler(signupFlow SignupFlow, loginFlow LoginFlow) *AuthHandler {
+func NewAuthHandler(signupFlow businessflow.SignupFlow, loginFlow businessflow.LoginFlow) *AuthHandler {
 	handler := &AuthHandler{
 		signupFlow: signupFlow,
 		loginFlow:  loginFlow,
@@ -157,14 +73,14 @@ func NewAuthHandler(signupFlow SignupFlow, loginFlow LoginFlow) *AuthHandler {
 // @Tags authentication
 // @Accept json
 // @Produce json
-// @Param request body SignupRequest true "User registration data"
-// @Success 200 {object} SignupResponse "Registration successful"
-// @Failure 400 {object} APIResponse "Validation error"
-// @Failure 409 {object} APIResponse "User already exists"
-// @Failure 500 {object} APIResponse "Internal server error"
+// @Param request body dto.SignupRequest true "User registration data"
+// @Success 200 {object} dto.SignupResponse "Registration successful"
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 409 {object} dto.APIResponse "User already exists"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /auth/signup [post]
 func (h *AuthHandler) Signup(c fiber.Ctx) error {
-	var req SignupRequest
+	var req dto.SignupRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
@@ -181,9 +97,10 @@ func (h *AuthHandler) Signup(c fiber.Ctx) error {
 	// Get client information
 	ipAddress := c.IP()
 	userAgent := c.Get("User-Agent")
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	result, err := h.signupFlow.InitiateSignup(context.Background(), &req, ipAddress, userAgent)
+	result, err := h.signupFlow.InitiateSignup(context.Background(), &req, metadata)
 	if err != nil {
 		if errors.Is(err, errors.New("user already exists")) {
 			return h.ErrorResponse(c, fiber.StatusConflict, "User already exists", "USER_EXISTS", nil)
@@ -202,13 +119,13 @@ func (h *AuthHandler) Signup(c fiber.Ctx) error {
 // @Tags authentication
 // @Accept json
 // @Produce json
-// @Param request body OTPVerificationRequest true "OTP verification data"
-// @Success 200 {object} OTPVerificationResponse "OTP verified successfully"
-// @Failure 400 {object} APIResponse "Invalid OTP or request"
-// @Failure 500 {object} APIResponse "Internal server error"
+// @Param request body dto.OTPVerificationRequest true "OTP verification data"
+// @Success 200 {object} dto.OTPVerificationResponse "OTP verified successfully"
+// @Failure 400 {object} dto.APIResponse "Invalid OTP or request"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /auth/verify [post]
 func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
-	var req OTPVerificationRequest
+	var req dto.OTPVerificationRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
@@ -225,15 +142,18 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 	// Get client information
 	ipAddress := c.IP()
 	userAgent := c.Get("User-Agent")
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	result, err := h.signupFlow.VerifyOTP(context.Background(), &req, ipAddress, userAgent)
+	result, err := h.signupFlow.VerifyOTP(context.Background(), &req, metadata)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "OTP verification failed", "OTP_VERIFICATION_FAILED", err.Error())
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, result.Message, fiber.Map{
-		"access_token": result.AccessToken,
+		"token":         result.Token,
+		"refresh_token": result.RefreshToken,
+		"customer":      result.Customer,
 	})
 }
 
@@ -244,9 +164,9 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 // @Accept json
 // @Produce json
 // @Param customer_id path uint true "Customer ID"
-// @Success 200 {object} APIResponse "OTP resent successfully"
-// @Failure 400 {object} APIResponse "Invalid request"
-// @Failure 500 {object} APIResponse "Internal server error"
+// @Success 200 {object} dto.APIResponse "OTP resent successfully"
+// @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /auth/resend-otp/{customer_id} [post]
 func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	customerIDStr := c.Params("customer_id")
@@ -261,9 +181,10 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	// Get client information
 	ipAddress := c.IP()
 	userAgent := c.Get("User-Agent")
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	err = h.signupFlow.ResendOTP(context.Background(), uint(customerID), otpType, ipAddress, userAgent)
+	err = h.signupFlow.ResendOTP(context.Background(), uint(customerID), otpType, metadata)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to resend OTP", "RESEND_OTP_FAILED", err.Error())
 	}
@@ -377,14 +298,14 @@ func getValidationErrorMessage(err validator.FieldError) string {
 // @Tags authentication
 // @Accept json
 // @Produce json
-// @Param request body LoginRequest true "Login credentials"
-// @Success 200 {object} APIResponse "Successful login"
-// @Failure 400 {object} APIResponse "Invalid request"
-// @Failure 401 {object} APIResponse "Authentication failed"
-// @Failure 500 {object} APIResponse "Internal server error"
+// @Param request body dto.LoginRequest true "Login credentials"
+// @Success 200 {object} dto.APIResponse "Successful login"
+// @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 401 {object} dto.APIResponse "Authentication failed"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /auth/login [post]
 func (h *AuthHandler) Login(c fiber.Ctx) error {
-	var req LoginRequest
+	var req dto.LoginRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
@@ -401,9 +322,10 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	// Get client information
 	ipAddress := c.IP()
 	userAgent := c.Get("User-Agent")
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	result, err := h.loginFlow.Login(context.Background(), &req, ipAddress, userAgent)
+	result, err := h.loginFlow.Login(context.Background(), &req, metadata)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Internal server error", "INTERNAL_ERROR", err.Error())
 	}
@@ -430,14 +352,14 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 // @Tags authentication
 // @Accept json
 // @Produce json
-// @Param request body ForgotPasswordRequest true "User identifier"
-// @Success 200 {object} APIResponse "OTP sent successfully"
-// @Failure 400 {object} APIResponse "Invalid request"
-// @Failure 404 {object} APIResponse "User not found"
-// @Failure 500 {object} APIResponse "Internal server error"
+// @Param request body dto.ForgotPasswordRequest true "User identifier"
+// @Success 200 {object} dto.APIResponse "OTP sent successfully"
+// @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 404 {object} dto.APIResponse "User not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /auth/forgot-password [post]
 func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
-	var req ForgotPasswordRequest
+	var req dto.ForgotPasswordRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
@@ -454,9 +376,10 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 	// Get client information
 	ipAddress := c.IP()
 	userAgent := c.Get("User-Agent")
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	result, err := h.loginFlow.ForgotPassword(context.Background(), &req, ipAddress, userAgent)
+	result, err := h.loginFlow.ForgotPassword(context.Background(), &req, metadata)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Internal server error", "INTERNAL_ERROR", err.Error())
 	}
@@ -485,13 +408,13 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 // @Tags authentication
 // @Accept json
 // @Produce json
-// @Param request body ResetPasswordRequest true "Password reset data"
-// @Success 200 {object} APIResponse "Password reset successful"
-// @Failure 400 {object} APIResponse "Invalid request or OTP"
-// @Failure 500 {object} APIResponse "Internal server error"
+// @Param request body dto.ResetPasswordRequest true "Password reset data"
+// @Success 200 {object} dto.APIResponse "Password reset successful"
+// @Failure 400 {object} dto.APIResponse "Invalid request or OTP"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /auth/reset [post]
 func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
-	var req ResetPasswordRequest
+	var req dto.ResetPasswordRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
@@ -508,9 +431,10 @@ func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 	// Get client information
 	ipAddress := c.IP()
 	userAgent := c.Get("User-Agent")
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	result, err := h.loginFlow.ResetPassword(context.Background(), &req, ipAddress, userAgent)
+	result, err := h.loginFlow.ResetPassword(context.Background(), &req, metadata)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Internal server error", "INTERNAL_ERROR", err.Error())
 	}

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -50,6 +51,8 @@ type TokenServiceImpl struct {
 	publicKey       *rsa.PublicKey
 	issuer          string
 	audience        string
+	revokedTokens   map[string]bool // In-memory map for revoked tokens
+	mu              sync.RWMutex    // Mutex for concurrent access to revokedTokens
 }
 
 // NewTokenService creates a new token service
@@ -68,6 +71,7 @@ func NewTokenService(accessTokenTTL, refreshTokenTTL time.Duration, issuer, audi
 		publicKey:       publicKey,
 		issuer:          issuer,
 		audience:        audience,
+		revokedTokens:   make(map[string]bool),
 	}, nil
 }
 
@@ -253,6 +257,11 @@ func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
 		return nil, ErrTokenExpired
 	}
 
+	// Check if token has been revoked
+	if s.IsTokenRevoked(token) {
+		return nil, ErrTokenRevoked
+	}
+
 	return &TokenClaims{
 		CustomerID: uint(customerID),
 		TokenType:  tokenType,
@@ -284,6 +293,9 @@ func (s *TokenServiceImpl) RefreshToken(refreshToken string) (newAccessToken, ne
 
 // RevokeToken marks a token as revoked (in a real implementation, you'd store this in a database)
 func (s *TokenServiceImpl) RevokeToken(token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	// In a production environment, you would:
 	// 1. Validate the token
 	// 2. Extract the token ID (jti)
@@ -297,69 +309,31 @@ func (s *TokenServiceImpl) RevokeToken(token string) error {
 
 	// For now, we'll just validate the token
 	// In production, you'd add the token ID to a revocation list
-	_ = claims
+	s.revokedTokens[claims.TokenID] = true
 
 	return nil
 }
 
 // GetTokenClaims extracts claims from a token without full validation
 func (s *TokenServiceImpl) GetTokenClaims(token string) (*TokenClaims, error) {
-	// Parse token without validation (for debugging/logging purposes)
-	parsedToken, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
-		return s.publicKey, nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse token: %w", err)
-	}
-
-	claims, ok := parsedToken.Claims.(jwt.MapClaims)
-	if !ok {
-		return nil, fmt.Errorf("invalid token claims")
-	}
-
-	// Extract claims (same as ValidateToken but without validation checks)
-	customerID, ok := claims["customer_id"].(float64)
-	if !ok {
-		return nil, fmt.Errorf("invalid customer_id claim")
-	}
-
-	tokenType, ok := claims["token_type"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid token_type claim")
-	}
-
-	tokenID, ok := claims["jti"].(string)
-	if !ok {
-		return nil, fmt.Errorf("invalid jti claim")
-	}
-
-	issuedAt, ok := claims["iat"].(float64)
-	if !ok {
-		return nil, fmt.Errorf("invalid iat claim")
-	}
-
-	expiresAt, ok := claims["exp"].(float64)
-	if !ok {
-		return nil, fmt.Errorf("invalid exp claim")
-	}
-
-	return &TokenClaims{
-		CustomerID: uint(customerID),
-		TokenType:  tokenType,
-		TokenID:    tokenID,
-		IssuedAt:   time.Unix(int64(issuedAt), 0),
-		ExpiresAt:  time.Unix(int64(expiresAt), 0),
-	}, nil
+	// Use ValidateToken to ensure proper validation and security
+	return s.ValidateToken(token)
 }
 
 // IsTokenRevoked checks if a token has been revoked
 // In a production environment, this would check against a revocation list (Redis/database)
 func (s *TokenServiceImpl) IsTokenRevoked(token string) bool {
-	// For now, we'll just validate the token
-	// In production, you'd check against a revocation list
-	_, err := s.ValidateToken(token)
-	return err != nil
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Extract token ID from the token
+	claims, err := s.GetTokenClaims(token)
+	if err != nil {
+		return true // Consider invalid tokens as revoked
+	}
+
+	_, exists := s.revokedTokens[claims.TokenID]
+	return exists
 }
 
 // generateToken creates a signed JWT token
