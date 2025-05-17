@@ -1,0 +1,277 @@
+#!/bin/bash
+
+# Generate Nginx configuration from environment variables
+# This script reads environment variables and generates the appropriate nginx configuration
+
+set -e
+
+# Source environment variables
+if [ -f .env ]; then
+    export $(cat .env | grep -v '^#' | xargs)
+fi
+
+# Default values
+DOMAIN=${DOMAIN:-your-domain.com}
+API_DOMAIN=${API_DOMAIN:-api.your-domain.com}
+MONITORING_DOMAIN=${MONITORING_DOMAIN:-monitoring.your-domain.com}
+
+# Create generated directory if it doesn't exist
+mkdir -p /etc/nginx/sites-available/generated
+
+# Generate the nginx configuration
+cat > /etc/nginx/sites-available/generated/yamata.conf << EOF
+# Generated Nginx Configuration for Yamata no Orochi
+# Generated on: $(date)
+# Environment: ${APP_ENV:-production}
+
+# HTTP Server - Redirect to HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${DOMAIN} www.${DOMAIN} ${API_DOMAIN};
+    
+    # Allow Let's Encrypt verification
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        allow all;
+    }
+
+    # Redirect all other traffic to HTTPS
+    location / {
+        return 301 https://\$server_name\$request_uri;
+    }
+}
+
+# HTTPS Main Application Server
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${DOMAIN} www.${DOMAIN};
+    
+    # SSL Configuration
+    ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+    ssl_trusted_certificate /etc/letsencrypt/live/${DOMAIN}/chain.pem;
+    
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=${HSTS_MAX_AGE:-31536000}; includeSubDomains; preload" always;
+    add_header X-Real-IP \$remote_addr;
+    add_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    add_header X-Forwarded-Proto \$scheme;
+    
+    # Connection limiting
+    limit_conn conn_limit_per_ip 20;
+    
+    # Health check endpoint (no rate limiting)
+    location = /health {
+        access_log off;
+        proxy_pass http://yamata_backend/api/v1/health;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_connect_timeout 5s;
+        proxy_send_timeout 5s;
+        proxy_read_timeout 5s;
+    }
+    
+    # API routes with rate limiting
+    location /api/ {
+        # Rate limiting for API endpoints
+        limit_req zone=api burst=${GLOBAL_RATE_LIMIT:-1000} nodelay;
+        
+        # Special rate limiting for auth endpoints
+        location /api/v1/auth/ {
+            limit_req zone=auth burst=${AUTH_RATE_LIMIT:-10} nodelay;
+            proxy_pass http://yamata_backend;
+            include /etc/nginx/proxy.conf;
+        }
+        
+        # Default API handling
+        proxy_pass http://yamata_backend;
+        include /etc/nginx/proxy.conf;
+    }
+    
+    # Static files (if any)
+    location /static/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options nosniff;
+        
+        # Security: Prevent execution of scripts
+        location ~* \.(php|jsp|cgi|pl|sh)\$ {
+            deny all;
+        }
+    }
+    
+    # Favicon
+    location = /favicon.ico {
+        access_log off;
+        log_not_found off;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # Robots.txt
+    location = /robots.txt {
+        access_log off;
+        log_not_found off;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # Security: Deny access to sensitive files
+    location ~ /\. {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+    
+    location ~ \.(sql|conf|bak|backup|swp|tmp)\$ {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+    
+    # Default location - redirect to API docs
+    location = / {
+        return 301 https://\$server_name/api/v1/docs;
+    }
+    
+    # Catch-all for unmatched routes
+    location / {
+        limit_req zone=general burst=20 nodelay;
+        proxy_pass http://yamata_backend;
+        include /etc/nginx/proxy.conf;
+    }
+}
+
+# API Subdomain Server
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${API_DOMAIN};
+    
+    # SSL Configuration (use same certificate or separate one)
+    ssl_certificate /etc/letsencrypt/live/${API_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${API_DOMAIN}/privkey.pem;
+    ssl_trusted_certificate /etc/letsencrypt/live/${API_DOMAIN}/chain.pem;
+    
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=${HSTS_MAX_AGE:-31536000}; includeSubDomains; preload" always;
+    add_header X-Real-IP \$remote_addr;
+    add_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+    add_header X-Forwarded-Proto \$scheme;
+    
+    # Connection limiting
+    limit_conn conn_limit_per_ip 20;
+    
+    # Health check endpoint (no rate limiting)
+    location = /health {
+        access_log off;
+        proxy_pass http://yamata_backend/api/v1/health;
+        include /etc/nginx/proxy.conf;
+    }
+    
+    # Metrics endpoint (restricted access)
+    location /metrics {
+        # Allow only specific IPs (configure as needed)
+        allow 127.0.0.1;
+        allow 172.20.0.0/24;  # Docker network
+        allow 10.0.0.0/8;     # Private networks
+        allow 192.168.0.0/16; # Private networks
+        deny all;
+        
+        proxy_pass http://yamata_metrics;
+        include /etc/nginx/proxy.conf;
+    }
+    
+    # Auth endpoints with strict rate limiting
+    location /api/v1/auth/ {
+        limit_req zone=auth burst=${AUTH_RATE_LIMIT:-10} nodelay;
+        proxy_pass http://yamata_backend;
+        include /etc/nginx/proxy.conf;
+        
+        # Additional security for auth endpoints
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Request-ID \$request_id;
+    }
+    
+    # All API routes
+    location /api/ {
+        limit_req zone=api burst=${GLOBAL_RATE_LIMIT:-1000} nodelay;
+        proxy_pass http://yamata_backend;
+        include /etc/nginx/proxy.conf;
+    }
+    
+    # Root redirect to API docs
+    location = / {
+        return 301 https://\$server_name/api/v1/docs;
+    }
+    
+    # Catch-all
+    location / {
+        limit_req zone=general burst=20 nodelay;
+        proxy_pass http://yamata_backend;
+        include /etc/nginx/proxy.conf;
+    }
+}
+
+# Monitoring Server (Internal/Admin access)
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ${MONITORING_DOMAIN};
+    
+    # SSL Configuration
+    ssl_certificate /etc/letsencrypt/live/${MONITORING_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${MONITORING_DOMAIN}/privkey.pem;
+    ssl_trusted_certificate /etc/letsencrypt/live/${MONITORING_DOMAIN}/chain.pem;
+    
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=${HSTS_MAX_AGE:-31536000}; includeSubDomains; preload" always;
+    
+    # Restrict access to monitoring tools
+    allow 127.0.0.1;
+    allow 172.20.0.0/24;  # Docker network
+    allow 10.0.0.0/8;     # Private networks (configure as needed)
+    allow 192.168.0.0/16; # Private networks (configure as needed)
+    deny all;
+    
+    # Prometheus
+    location /prometheus/ {
+        proxy_pass http://yamata-prometheus:9090/;
+        include /etc/nginx/proxy.conf;
+    }
+    
+    # Grafana
+    location /grafana/ {
+        proxy_pass http://yamata-grafana:3000/;
+        include /etc/nginx/proxy.conf;
+        
+        # WebSocket support for Grafana
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    
+    # Application metrics
+    location /metrics/ {
+        proxy_pass http://yamata_metrics/;
+        include /etc/nginx/proxy.conf;
+    }
+    
+    # Nginx status
+    location /nginx_status {
+        stub_status on;
+        access_log off;
+    }
+}
+EOF
+
+echo "Generated nginx configuration for domains:"
+echo "  Main: ${DOMAIN}"
+echo "  API: ${API_DOMAIN}"
+echo "  Monitoring: ${MONITORING_DOMAIN}"
+echo "Configuration saved to /etc/nginx/sites-available/generated/yamata.conf" 
