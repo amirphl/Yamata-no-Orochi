@@ -74,7 +74,7 @@ func (r *FiberRouter) SetupRoutes() {
 
 	// Apply rate limiting to auth endpoints
 	auth.Use(limiter.New(limiter.Config{
-		Max:        30,              // Maximum 10 requests
+		Max:        30,              // Maximum 30 requests
 		Expiration: 1 * time.Minute, // Per minute
 		KeyGenerator: func(c fiber.Ctx) string {
 			return c.IP() // Rate limit by IP
