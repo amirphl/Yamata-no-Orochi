@@ -1,0 +1,62 @@
+# Environment files with sensitive data
+.env
+.env.*
+config.env.template
+
+# Git directory (contains commit history)
+.git/
+.gitignore
+
+# SSL certificates and keys
+*.key
+*.pem
+*.crt
+docker/nginx/ssl/
+
+# Log files
+logs/
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Node modules (if any frontend)
+node_modules/
+
+# Build artifacts
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
+
+# Docker files (not needed in container)
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentation (not needed in container)
+docs/
+README.md
+LICENSE
+
+# Scripts (not needed in container)
+scripts/
+
+# Tests (not needed in production)
+tests/
+testing/
+
+# Docker directory (not needed in container)
+docker/
+
+# Deployment files
+deployments/ 
