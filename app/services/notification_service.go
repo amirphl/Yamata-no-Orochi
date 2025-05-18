@@ -145,16 +145,6 @@ func (p *SMTPEmailProvider) SendEmail(email, subject, message string) error {
 	return nil
 }
 
-// Helper function
-func contains(str, substr string) bool {
-	for i := 0; i <= len(str)-len(substr); i++ {
-		if str[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
 // validateEmail performs basic email validation
 func validateEmail(email string) error {
 	if len(email) == 0 {

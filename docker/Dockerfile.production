@@ -19,23 +19,22 @@ RUN echo "=== BUILDER STAGE PROXY CONFIG ===" && \
     echo "=================================="
 
 # Install security updates and required packages
-RUN apk update && apk add --no-cache \
-    ca-certificates \
-    git \
-    tzdata \
-    && rm -rf /var/cache/apk/*
-
-# Create non-root user for building
-RUN adduser -D -s /bin/sh builder
+RUN apk update && \
+    apk add --no-cache \
+        ca-certificates \
+        curl \
+        tzdata \
+        git \
+        && rm -rf /var/cache/apk/*
 
 # Set working directory
 WORKDIR /app
 
-# Copy dependency files first for better layer caching
+# Copy go mod files
 COPY go.mod go.sum ./
 
 # Download dependencies
-RUN go mod download && go mod verify
+RUN go mod download
 
 # Copy source code
 # Copy only necessary source code (excludes sensitive files via .dockerignore)

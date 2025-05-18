@@ -55,8 +55,11 @@ scripts/
 tests/
 testing/
 
+# Migrations (handled separately)
+migrations/
+
 # Docker directory (not needed in container)
 docker/
 
 # Deployment files
-deployments/ 
+deployments/
