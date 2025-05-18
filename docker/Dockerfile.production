@@ -27,6 +27,9 @@ RUN apk update && \
         git \
         && rm -rf /var/cache/apk/*
 
+# Create non-root user for building
+RUN adduser -D -s /bin/sh builder
+
 # Set working directory
 WORKDIR /app
 
