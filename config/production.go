@@ -372,7 +372,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Cache: CacheConfig{
 			Enabled:         getEnvBool("CACHE_ENABLED", true),
 			Provider:        getEnvString("CACHE_PROVIDER", "redis"),
-			RedisURL:        getEnvString("CACHE_REDIS_URL", "redis://localhost:6379"),
+			RedisURL:        getEnvString("CACHE_REDIS_URL", "redis://redis:6379"),
 			RedisDB:         getEnvInt("CACHE_REDIS_DB", 0),
 			RedisPrefix:     getEnvString("CACHE_REDIS_PREFIX", "yamata:"),
 			DefaultTTL:      getEnvDuration("CACHE_DEFAULT_TTL", 1*time.Hour),

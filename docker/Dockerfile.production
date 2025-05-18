@@ -1,6 +1,23 @@
 # Multi-stage build for production
 FROM golang:1.24.5-alpine AS builder
 
+# Build arguments for proxy configuration
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY=localhost,127.0.0.1
+
+# Set HTTP proxy for apk and go mod
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
+
+# Debug: Print proxy configuration
+RUN echo "=== BUILDER STAGE PROXY CONFIG ===" && \
+    echo "HTTP_PROXY: ${HTTP_PROXY}" && \
+    echo "HTTPS_PROXY: ${HTTPS_PROXY}" && \
+    echo "NO_PROXY: ${NO_PROXY}" && \
+    echo "=================================="
+
 # Install security updates and required packages
 RUN apk update && apk add --no-cache \
     ca-certificates \
@@ -21,7 +38,14 @@ COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 
 # Copy source code
-COPY . .
+# Copy only necessary source code (excludes sensitive files via .dockerignore)
+COPY app/ ./app/
+COPY business_flow/ ./business_flow/
+COPY config/ ./config/
+COPY models/ ./models/
+COPY repository/ ./repository/
+COPY utils/ ./utils/
+COPY main.go ./
 
 # Change ownership to builder user
 RUN chown -R builder:builder /app
@@ -35,7 +59,24 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     main.go
 
 # Production image
-FROM alpine:3.20
+FROM alpine:3.22
+
+# Build arguments for proxy configuration
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY=localhost,127.0.0.1
+
+# Set HTTP proxy for apk
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
+
+# Debug: Print proxy configuration
+RUN echo "=== PRODUCTION STAGE PROXY CONFIG ===" && \
+    echo "HTTP_PROXY: ${HTTP_PROXY}" && \
+    echo "HTTPS_PROXY: ${HTTPS_PROXY}" && \
+    echo "NO_PROXY: ${NO_PROXY}" && \
+    echo "====================================="
 
 # Install CA certificates and timezone data
 RUN apk add --no-cache ca-certificates tzdata curl

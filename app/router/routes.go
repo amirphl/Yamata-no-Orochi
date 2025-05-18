@@ -141,6 +141,7 @@ func (r *FiberRouter) setupMiddleware() {
 			"https://yamata-no-orochi.com",
 			"https://api.yamata-no-orochi.com",
 			"https://admin.yamata-no-orochi.com",
+			"https://monitoring.yamata-no-orochi.com",
 			"https://app.yamata-no-orochi.com",
 			"https://*.j0in.ir",
 		},

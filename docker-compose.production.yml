@@ -1,5 +1,3 @@
-version: '3.8'
-
 networks:
   yamata-network:
     driver: bridge
@@ -80,11 +78,15 @@ services:
     tmpfs:
       - /tmp
 
-  # Main Application
+  # Application
   app:
     build:
       context: .
       dockerfile: docker/Dockerfile.production
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1}
     # image: yamata-no-orochi:latest
     container_name: yamata-app
     restart: unless-stopped
