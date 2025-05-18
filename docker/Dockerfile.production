@@ -1,0 +1,85 @@
+# Multi-stage build for production
+FROM golang:1.24.5-alpine AS builder
+
+# Install security updates and required packages
+RUN apk update && apk add --no-cache \
+    ca-certificates \
+    git \
+    tzdata \
+    && rm -rf /var/cache/apk/*
+
+# Create non-root user for building
+RUN adduser -D -s /bin/sh builder
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files first for better layer caching
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download && go mod verify
+
+# Copy source code
+COPY . .
+
+# Change ownership to builder user
+RUN chown -R builder:builder /app
+USER builder
+
+# Build the application with optimizations
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -ldflags='-w -s -extldflags "-static"' \
+    -a -installsuffix cgo \
+    -o yamata-no-orochi \
+    main.go
+
+# Production image
+FROM alpine:3.20
+
+# Install CA certificates and timezone data
+RUN apk add --no-cache ca-certificates tzdata curl
+
+# Create non-root user
+RUN adduser -D -s /bin/sh appuser
+
+# Copy compiled binary
+COPY --from=builder /app/yamata-no-orochi /usr/local/bin/yamata-no-orochi
+
+# Create directories for logs and temp files
+RUN mkdir -p /var/log/yamata /tmp /var/cache
+
+# Set ownership for log directories
+RUN chown -R appuser:appuser /var/log/yamata /tmp /var/cache
+
+# Expose port
+EXPOSE 8080
+
+# Health check - HTTP request to health endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8080/api/v1/health || exit 1
+
+# Security labels
+LABEL \
+    org.opencontainers.image.title="Yamata no Orochi API" \
+    org.opencontainers.image.description="Production customer signup API" \
+    org.opencontainers.image.vendor="Yamata no Orochi" \
+    org.opencontainers.image.version="1.0.0" \
+    security.compliance="SOC2" \
+    security.scan.required="true"
+
+# Run as non-root user
+USER appuser
+
+# Set environment variables for production
+ENV \
+    GIN_MODE=release \
+    LOG_LEVEL=info \
+    LOG_FORMAT=json \
+    TLS_ENABLED=false \
+    DB_SSL_MODE=require \
+    BCRYPT_COST=12 \
+    TZ=UTC
+
+# Start the application
+ENTRYPOINT ["/usr/local/bin/yamata-no-orochi"] 
