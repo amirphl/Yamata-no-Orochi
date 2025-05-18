@@ -42,6 +42,9 @@ func main() {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
 
+	// Setup routes
+	app.router.SetupRoutes()
+
 	// Setup graceful shutdown
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
