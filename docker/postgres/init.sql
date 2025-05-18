@@ -5,9 +5,17 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
--- Create application user with limited privileges
--- Note: The main application user is created by PostgreSQL with environment variables
--- This script creates additional roles if needed
+-- Create pg_stat_statements extension (requires shared_preload_libraries)
+-- This will only work if the extension was loaded at server startup
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_available_extensions 
+        WHERE name = 'pg_stat_statements' AND installed_version IS NOT NULL
+    ) THEN
+        CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
+    END IF;
+END $$;
 
 -- Create audit schema for enhanced security logging
 CREATE SCHEMA IF NOT EXISTS audit;
@@ -32,22 +40,44 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Performance and monitoring views
-CREATE OR REPLACE VIEW pg_stat_statements_top AS
-SELECT 
-    query,
-    calls,
-    total_time,
-    mean_time,
-    stddev_time,
-    rows,
-    100.0 * shared_blks_hit / nullif(shared_blks_hit + shared_blks_read, 0) AS hit_percent
-FROM pg_stat_statements 
-ORDER BY total_time DESC 
-LIMIT 20;
+-- Apply all migrations
+\echo 'Starting database migration...'
+
+\echo 'Running 0001_create_account_types.sql...'
+\i /migrations/0001_create_account_types.sql
+
+\echo 'Running 0002_create_customers.sql...'
+\i /migrations/0002_create_customers.sql
+
+\echo 'Running 0003_create_otp_verifications.sql...'
+\i /migrations/0003_create_otp_verifications.sql
+
+\echo 'Running 0004_create_customer_sessions.sql...'
+\i /migrations/0004_create_customer_sessions.sql
+
+\echo 'Running 0005_create_audit_log.sql...'
+\i /migrations/0005_create_audit_log.sql
+
+\echo 'Running 0006_update_customer_fields.sql...'
+\i /migrations/0006_update_customer_fields.sql
+
+\echo 'Running 0007_add_missing_audit_actions.sql...'
+\i /migrations/0007_add_missing_audit_actions.sql
+
+\echo 'Running 0008_update_audit_log_success_field.sql...'
+\i /migrations/0008_update_audit_log_success_field.sql
+
+\echo 'Running 0009_add_correlation_ids.sql...'
+\i /migrations/0009_add_correlation_ids.sql
+
+\echo 'Running 0010_add_customer_uuid_and_agency_id.sql...'
+\i /migrations/0010_add_customer_uuid_and_agency_id.sql
+
+\echo 'All migrations completed successfully!'
+\echo 'Database schema is now ready for the Yamata no Orochi signup system.'
 
 -- Database settings for production
-ALTER SYSTEM SET shared_preload_libraries = 'pg_stat_statements';
+-- Note: pg_stat_statements extension is loaded via shared_preload_libraries in postgresql.conf
 ALTER SYSTEM SET pg_stat_statements.track = 'all';
 ALTER SYSTEM SET pg_stat_statements.max = 10000;
 
