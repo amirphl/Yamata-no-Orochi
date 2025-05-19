@@ -2,13 +2,26 @@
 package services
 
 import (
-	"os"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// createTestTokenService creates a token service for testing with symmetric key
+func createTestTokenService() (TokenService, error) {
+	return NewTokenService(
+		15*time.Minute,
+		7*24*time.Hour,
+		"test-issuer",
+		"test-audience",
+		false, // useRSAKeys
+		"",    // privateKeyPEM
+		"",    // publicKeyPEM
+		"test-secret-key-for-jwt-signing-32-chars", // secretKey
+	)
+}
 
 func TestNewTokenService(t *testing.T) {
 	tests := []struct {
@@ -17,23 +30,35 @@ func TestNewTokenService(t *testing.T) {
 		refreshTokenTTL time.Duration
 		issuer          string
 		audience        string
+		useRSAKeys      bool
+		privateKeyPEM   string
+		publicKeyPEM    string
+		secretKey       string
 		expectError     bool
 	}{
 		{
-			name:            "valid configuration",
+			name:            "valid symmetric key configuration",
 			accessTokenTTL:  15 * time.Minute,
 			refreshTokenTTL: 7 * 24 * time.Hour,
 			issuer:          "test-issuer",
 			audience:        "test-audience",
+			useRSAKeys:      false,
+			privateKeyPEM:   "",
+			publicKeyPEM:    "",
+			secretKey:       "test-secret-key-for-jwt-signing-32-chars",
 			expectError:     false,
 		},
 		{
-			name:            "zero TTL values",
-			accessTokenTTL:  0,
-			refreshTokenTTL: 0,
+			name:            "missing secret key",
+			accessTokenTTL:  15 * time.Minute,
+			refreshTokenTTL: 7 * 24 * time.Hour,
 			issuer:          "test-issuer",
 			audience:        "test-audience",
-			expectError:     false, // Should not error, just use zero duration
+			useRSAKeys:      false,
+			privateKeyPEM:   "",
+			publicKeyPEM:    "",
+			secretKey:       "",
+			expectError:     true,
 		},
 		{
 			name:            "empty issuer and audience",
@@ -41,13 +66,26 @@ func TestNewTokenService(t *testing.T) {
 			refreshTokenTTL: 7 * 24 * time.Hour,
 			issuer:          "",
 			audience:        "",
+			useRSAKeys:      false,
+			privateKeyPEM:   "",
+			publicKeyPEM:    "",
+			secretKey:       "test-secret-key-for-jwt-signing-32-chars",
 			expectError:     false, // Should not error, just use empty strings
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			service, err := NewTokenService(tt.accessTokenTTL, tt.refreshTokenTTL, tt.issuer, tt.audience)
+			service, err := NewTokenService(
+				tt.accessTokenTTL,
+				tt.refreshTokenTTL,
+				tt.issuer,
+				tt.audience,
+				tt.useRSAKeys,
+				tt.privateKeyPEM,
+				tt.publicKeyPEM,
+				tt.secretKey,
+			)
 
 			if tt.expectError {
 				assert.Error(t, err)
@@ -61,7 +99,7 @@ func TestNewTokenService(t *testing.T) {
 }
 
 func TestGenerateTokens(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -112,7 +150,7 @@ func TestGenerateTokens(t *testing.T) {
 }
 
 func TestValidateToken(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	// Generate valid tokens for testing
@@ -194,7 +232,7 @@ func TestValidateToken(t *testing.T) {
 }
 
 func TestRefreshToken(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	// Generate valid tokens for testing
@@ -254,7 +292,7 @@ func TestRefreshToken(t *testing.T) {
 }
 
 func TestRevokeToken(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	// Generate valid token for testing
@@ -297,7 +335,7 @@ func TestRevokeToken(t *testing.T) {
 }
 
 func TestGetTokenClaims(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	// Generate valid token for testing
@@ -358,7 +396,7 @@ func TestGetTokenClaims(t *testing.T) {
 
 func TestTokenExpiration(t *testing.T) {
 	// Create service with very short TTL for testing expiration
-	service, err := NewTokenService(1*time.Second, 2*time.Second, "test-issuer", "test-audience")
+	service, err := NewTokenService(1*time.Second, 2*time.Second, "test-issuer", "test-audience", false, "", "", "test-secret-key-for-jwt-signing-32-chars")
 	require.NoError(t, err)
 
 	// Generate tokens
@@ -385,16 +423,11 @@ func TestTokenExpiration(t *testing.T) {
 }
 
 func TestTokenSecurity(t *testing.T) {
-	// Create services with different key files to ensure different RSA keys
-	service1, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "issuer1", "audience1")
+	// Create services with different configurations to ensure different keys
+	service1, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "issuer1", "audience1", false, "", "", "test-secret-key-1-for-jwt-signing-32-chars")
 	require.NoError(t, err)
 
-	// Remove the key files so service2 generates new ones
-	// This ensures different RSA keys for each service
-	os.Remove("jwt_private.pem")
-	os.Remove("jwt_public.pem")
-
-	service2, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "issuer2", "audience2")
+	service2, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "issuer2", "audience2", false, "", "", "test-secret-key-2-for-jwt-signing-32-chars")
 	require.NoError(t, err)
 
 	// Generate tokens with different services
@@ -418,7 +451,7 @@ func TestTokenSecurity(t *testing.T) {
 }
 
 func TestTokenClaimsStructure(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	accessToken, refreshToken, err := service.GenerateTokens(456)
@@ -445,7 +478,7 @@ func TestTokenClaimsStructure(t *testing.T) {
 }
 
 func TestConcurrentTokenGeneration(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	// Test concurrent token generation
@@ -481,7 +514,7 @@ func TestConcurrentTokenGeneration(t *testing.T) {
 }
 
 func TestTokenValidationEdgeCases(t *testing.T) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -521,7 +554,7 @@ func TestTokenValidationEdgeCases(t *testing.T) {
 }
 
 func BenchmarkGenerateTokens(b *testing.B) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(b, err)
 
 	b.ResetTimer()
@@ -532,7 +565,7 @@ func BenchmarkGenerateTokens(b *testing.B) {
 }
 
 func BenchmarkValidateToken(b *testing.B) {
-	service, err := NewTokenService(15*time.Minute, 7*24*time.Hour, "test-issuer", "test-audience")
+	service, err := createTestTokenService()
 	require.NoError(b, err)
 
 	token, _, err := service.GenerateTokens(123)

@@ -109,6 +109,9 @@ type SecurityConfig struct {
 
 type JWTConfig struct {
 	SecretKey       string        `json:"secret_key"`
+	PrivateKey      string        `json:"private_key"`  // RSA private key in PEM format
+	PublicKey       string        `json:"public_key"`   // RSA public key in PEM format
+	UseRSAKeys      bool          `json:"use_rsa_keys"` // Whether to use RSA keys instead of secret key
 	AccessTokenTTL  time.Duration `json:"access_token_ttl"`
 	RefreshTokenTTL time.Duration `json:"refresh_token_ttl"`
 	Issuer          string        `json:"issuer"`
@@ -307,6 +310,9 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		},
 		JWT: JWTConfig{
 			SecretKey:       getEnvString("JWT_SECRET_KEY", ""),
+			PrivateKey:      getEnvString("JWT_PRIVATE_KEY", ""),
+			PublicKey:       getEnvString("JWT_PUBLIC_KEY", ""),
+			UseRSAKeys:      getEnvBool("JWT_USE_RSA_KEYS", false),
 			AccessTokenTTL:  getEnvDuration("JWT_ACCESS_TOKEN_TTL", 15*time.Minute),
 			RefreshTokenTTL: getEnvDuration("JWT_REFRESH_TOKEN_TTL", 7*24*time.Hour),
 			Issuer:          getEnvString("JWT_ISSUER", "yamata-no-orochi"),

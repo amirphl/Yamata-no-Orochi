@@ -32,7 +32,7 @@ type TestDBConfig struct {
 func GetTestDBConfig() *TestDBConfig {
 	return &TestDBConfig{
 		Host:     getEnv("TEST_DB_HOST", "localhost"),
-		Port:     getEnvAsInt("TEST_DB_PORT", 5432),
+		Port:     getEnvAsInt("TEST_DB_PORT", 5433),
 		User:     getEnv("TEST_DB_USER", "postgres"),
 		Password: getEnv("TEST_DB_PASSWORD", "postgres"),
 		SSLMode:  getEnv("TEST_DB_SSL_MODE", "disable"),

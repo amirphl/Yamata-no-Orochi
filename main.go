@@ -149,6 +149,10 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cfg.JWT.RefreshTokenTTL,
 		cfg.JWT.Issuer,
 		cfg.JWT.Audience,
+		cfg.JWT.UseRSAKeys,
+		cfg.JWT.PrivateKey,
+		cfg.JWT.PublicKey,
+		cfg.JWT.SecretKey,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token service: %w", err)

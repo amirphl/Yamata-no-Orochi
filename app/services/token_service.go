@@ -8,7 +8,6 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -49,6 +48,8 @@ type TokenServiceImpl struct {
 	signingMethod   jwt.SigningMethod
 	privateKey      *rsa.PrivateKey
 	publicKey       *rsa.PublicKey
+	secretKey       []byte
+	useRSAKeys      bool
 	issuer          string
 	audience        string
 	revokedTokens   map[string]bool // In-memory map for revoked tokens
@@ -56,96 +57,77 @@ type TokenServiceImpl struct {
 }
 
 // NewTokenService creates a new token service
-func NewTokenService(accessTokenTTL, refreshTokenTTL time.Duration, issuer, audience string) (TokenService, error) {
-	// Load or generate RSA key pair
-	privateKey, publicKey, err := loadOrGenerateRSAKeys()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load/generate RSA keys: %w", err)
+func NewTokenService(accessTokenTTL, refreshTokenTTL time.Duration, issuer, audience string, useRSAKeys bool, privateKeyPEM, publicKeyPEM, secretKey string) (TokenService, error) {
+	var privateKey *rsa.PrivateKey
+	var publicKey *rsa.PublicKey
+	var secretKeyBytes []byte
+	var signingMethod jwt.SigningMethod
+
+	if useRSAKeys {
+		// Use RSA keys
+		var err error
+		privateKey, publicKey, err = parseRSAKeys(privateKeyPEM, publicKeyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse RSA keys: %w", err)
+		}
+		signingMethod = jwt.SigningMethodRS256
+	} else {
+		// Use symmetric key
+		if secretKey == "" {
+			return nil, fmt.Errorf("secret key is required when not using RSA keys")
+		}
+		secretKeyBytes = []byte(secretKey)
+		signingMethod = jwt.SigningMethodHS256
 	}
 
 	return &TokenServiceImpl{
 		accessTokenTTL:  accessTokenTTL,
 		refreshTokenTTL: refreshTokenTTL,
-		signingMethod:   jwt.SigningMethodRS256,
+		signingMethod:   signingMethod,
 		privateKey:      privateKey,
 		publicKey:       publicKey,
+		secretKey:       secretKeyBytes,
+		useRSAKeys:      useRSAKeys,
 		issuer:          issuer,
 		audience:        audience,
 		revokedTokens:   make(map[string]bool),
 	}, nil
 }
 
-// loadOrGenerateRSAKeys loads existing RSA keys or generates new ones
-func loadOrGenerateRSAKeys() (*rsa.PrivateKey, *rsa.PublicKey, error) {
-	privateKeyPath := "jwt_private.pem"
-	publicKeyPath := "jwt_public.pem"
-
-	// Try to load existing keys
-	if privateKeyBytes, err := os.ReadFile(privateKeyPath); err == nil {
-		if publicKeyBytes, err := os.ReadFile(publicKeyPath); err == nil {
-			// Load private key
-			privateKeyBlock, _ := pem.Decode(privateKeyBytes)
-			if privateKeyBlock == nil {
-				return nil, nil, fmt.Errorf("failed to decode private key")
-			}
-
-			privateKey, err := x509.ParsePKCS1PrivateKey(privateKeyBlock.Bytes)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to parse private key: %w", err)
-			}
-
-			// Load public key
-			publicKeyBlock, _ := pem.Decode(publicKeyBytes)
-			if publicKeyBlock == nil {
-				return nil, nil, fmt.Errorf("failed to decode public key")
-			}
-
-			publicKey, err := x509.ParsePKIXPublicKey(publicKeyBlock.Bytes)
-			if err != nil {
-				return nil, nil, fmt.Errorf("failed to parse public key: %w", err)
-			}
-
-			rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
-			if !ok {
-				return nil, nil, fmt.Errorf("public key is not RSA")
-			}
-
-			return privateKey, rsaPublicKey, nil
-		}
+// parseRSAKeys parses RSA private and public keys from PEM format
+func parseRSAKeys(privateKeyPEM, publicKeyPEM string) (*rsa.PrivateKey, *rsa.PublicKey, error) {
+	if privateKeyPEM == "" || publicKeyPEM == "" {
+		return nil, nil, fmt.Errorf("both private and public keys are required")
 	}
 
-	// Generate new keys
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	// Parse private key
+	privateKeyBlock, _ := pem.Decode([]byte(privateKeyPEM))
+	if privateKeyBlock == nil {
+		return nil, nil, fmt.Errorf("failed to decode private key")
+	}
+
+	privateKey, err := x509.ParsePKCS1PrivateKey(privateKeyBlock.Bytes)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate RSA key: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse private key: %w", err)
 	}
 
-	// Save private key
-	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
-	})
-
-	if err := os.WriteFile(privateKeyPath, privateKeyPEM, 0600); err != nil {
-		return nil, nil, fmt.Errorf("failed to save private key: %w", err)
+	// Parse public key
+	publicKeyBlock, _ := pem.Decode([]byte(publicKeyPEM))
+	if publicKeyBlock == nil {
+		return nil, nil, fmt.Errorf("failed to decode public key")
 	}
 
-	// Save public key
-	publicKeyBytes, err := x509.MarshalPKIXPublicKey(&privateKey.PublicKey)
+	publicKey, err := x509.ParsePKIXPublicKey(publicKeyBlock.Bytes)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to marshal public key: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse public key: %w", err)
 	}
 
-	publicKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "PUBLIC KEY",
-		Bytes: publicKeyBytes,
-	})
-
-	if err := os.WriteFile(publicKeyPath, publicKeyPEM, 0644); err != nil {
-		return nil, nil, fmt.Errorf("failed to save public key: %w", err)
+	rsaPublicKey, ok := publicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, nil, fmt.Errorf("public key is not RSA")
 	}
 
-	return privateKey, &privateKey.PublicKey, nil
+	return privateKey, rsaPublicKey, nil
 }
 
 // GenerateTokens generates access and refresh tokens for a customer
@@ -200,14 +182,28 @@ func (s *TokenServiceImpl) GenerateTokens(customerID uint) (accessToken, refresh
 
 // ValidateToken validates a JWT token and returns claims
 func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
-	parsedToken, err := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
-		// Validate signing method
-		if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
+	var err error
+	var parsedToken *jwt.Token
 
-		return s.publicKey, nil
-	})
+	if s.useRSAKeys {
+		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+			// Validate signing method
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+
+			return s.publicKey, nil
+		})
+	} else {
+		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+			// Validate signing method
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+
+			return s.secretKey, nil
+		})
+	}
 
 	if err != nil {
 		// Check if the error is due to token expiration
@@ -339,7 +335,21 @@ func (s *TokenServiceImpl) IsTokenRevoked(token string) bool {
 // generateToken creates a signed JWT token
 func (s *TokenServiceImpl) generateToken(claims jwt.MapClaims) (string, error) {
 	token := jwt.NewWithClaims(s.signingMethod, claims)
-	return token.SignedString(s.privateKey)
+
+	var signedString string
+	var err error
+
+	if s.useRSAKeys {
+		signedString, err = token.SignedString(s.privateKey)
+	} else {
+		signedString, err = token.SignedString(s.secretKey)
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to sign token: %w", err)
+	}
+
+	return signedString, nil
 }
 
 // generateTokenID generates a unique token ID

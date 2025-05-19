@@ -29,7 +29,7 @@ func TestInitiateSignup(t *testing.T) {
 		auditRepo := repository.NewAuditLogRepository(testDB.DB)
 
 		// Initialize services
-		tokenService, err := services.NewTokenService(1*time.Hour, 24*time.Hour, "test-issuer", "test-audience")
+		tokenService, err := services.NewTokenService(1*time.Hour, 24*time.Hour, "test-issuer", "test-audience", false, "", "", "test-secret-key-for-jwt-signing-32-chars")
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
@@ -514,7 +514,7 @@ func TestVerifyOTP(t *testing.T) {
 		auditRepo := repository.NewAuditLogRepository(testDB.DB)
 
 		// Initialize services
-		tokenService, err := services.NewTokenService(1*time.Hour, 24*time.Hour, "test-issuer", "test-audience")
+		tokenService, err := services.NewTokenService(1*time.Hour, 24*time.Hour, "test-issuer", "test-audience", false, "", "", "test-secret-key-for-jwt-signing-32-chars")
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
