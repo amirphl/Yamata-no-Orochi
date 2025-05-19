@@ -130,19 +130,20 @@ generate_nginx_config() {
         envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$NGINX_CONF_DIR/generated/yamata.conf"
         
         # Replace SSL certificate paths for local development
-        sed -i "s|/etc/letsencrypt/live/\${DOMAIN}/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/\${DOMAIN}/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/\${DOMAIN}/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        # Replace main domain SSL paths
+        sed -i "s|/etc/letsencrypt/live/$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
         
         # Replace API domain SSL paths
-        sed -i "s|/etc/letsencrypt/live/\${API_DOMAIN}/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/\${API_DOMAIN}/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/\${API_DOMAIN}/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/api.$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/api.$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/api.$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
         
         # Replace monitoring domain SSL paths
-        sed -i "s|/etc/letsencrypt/live/\${MONITORING_DOMAIN}/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/\${MONITORING_DOMAIN}/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/\${MONITORING_DOMAIN}/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
         
         print_success "Nginx configuration generated from template"
     else
@@ -636,7 +637,10 @@ main() {
     
     # Source environment variables for database initialization
     if [ -f "$ENV_FILE" ]; then
-        export $(grep -v '^#' "$ENV_FILE" | xargs)
+        # Use set -a to automatically export variables, then source the file
+        set -a
+        source "$ENV_FILE"
+        set +a
     fi
     
     if ./scripts/init-database.sh; then
