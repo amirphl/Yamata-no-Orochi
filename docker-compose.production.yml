@@ -60,8 +60,8 @@ services:
     volumes:
       - redis_data:/data
       # - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    ports:
-      - "127.0.0.1:6379:6379"  # Only accessible from localhost
+    # ports:
+    #   - "127.0.0.1:6379:6379"  # Only accessible from localhost
     networks:
       yamata-network:
         ipv4_address: 172.20.0.11
@@ -261,9 +261,9 @@ services:
 
     volumes:
       - app_logs:/var/log/yamata
-    ports:
-      - "127.0.0.1:8080:8080"  # Only accessible from localhost
-      - "127.0.0.1:9090:9090"  # Metrics port
+    # ports:
+    #   - "127.0.0.1:8080:8080"  # Only accessible from localhost
+    #   - "127.0.0.1:9090:9090"  # Metrics port
     networks:
       yamata-network:
         ipv4_address: 172.20.0.20
@@ -305,7 +305,7 @@ services:
       yamata-network:
         ipv4_address: 172.20.0.30
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      test: ["CMD", "curl", "-f", "--noproxy", "app", "http://app:8080/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -326,8 +326,8 @@ services:
     # volumes:
     #   - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     #   - ./docker/prometheus/rules:/etc/prometheus/rules:ro
-    ports:
-      - "127.0.0.1:9091:9090"  # Only accessible from localhost
+    # ports:
+    #   - "127.0.0.1:9091:9090"  # Only accessible from localhost
     networks:
       yamata-network:
         ipv4_address: 172.20.0.40
@@ -356,8 +356,8 @@ services:
     # volumes:
     #   - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
     #   - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "127.0.0.1:3000:3000"  # Only accessible from localhost
+    # ports:
+    #   - "127.0.0.1:3000:3000"  # Only accessible from localhost
     networks:
       yamata-network:
         ipv4_address: 172.20.0.50
