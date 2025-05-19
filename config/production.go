@@ -2,6 +2,7 @@
 package config
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -229,6 +230,11 @@ type DeploymentConfig struct {
 
 // LoadProductionConfig loads and validates configuration from environment variables
 func LoadProductionConfig() (*ProductionConfig, error) {
+	// Load environment variables from .env file
+	if err := loadEnvFile(); err != nil {
+		return nil, fmt.Errorf("failed to load .env file: %w", err)
+	}
+
 	cfg := &ProductionConfig{
 		Database: DatabaseConfig{
 			Host:            getEnvString("DB_HOST", "localhost"),
@@ -419,6 +425,61 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// loadEnvFile loads environment variables from .env file if it exists
+func loadEnvFile() error {
+	envFile := ".env"
+
+	// Check if .env file exists
+	if _, err := os.Stat(envFile); os.IsNotExist(err) {
+		// .env file doesn't exist, continue with environment variables
+		return nil
+	}
+
+	// Open .env file
+	file, err := os.Open(envFile)
+	if err != nil {
+		return fmt.Errorf("failed to open .env file: %w", err)
+	}
+	defer file.Close()
+
+	// Read file line by line
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Skip empty lines and comments
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// Parse key=value pairs
+		if strings.Contains(line, "=") {
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+
+				// Remove quotes if present
+				if (strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`)) ||
+					(strings.HasPrefix(value, `'`) && strings.HasSuffix(value, `'`)) {
+					value = value[1 : len(value)-1]
+				}
+
+				// Set environment variable if not already set
+				if os.Getenv(key) == "" {
+					os.Setenv(key, value)
+				}
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading .env file: %w", err)
+	}
+
+	return nil
 }
 
 // Helper functions for environment variable parsing
