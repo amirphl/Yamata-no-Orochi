@@ -6,11 +6,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
+	_ "github.com/amirphl/Yamata-no-Orochi/docs"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cache"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -69,6 +71,15 @@ func (r *FiberRouter) SetupRoutes() {
 	// Health check route (no rate limiting)
 	api.Get("/health", r.healthCheck)
 
+	// API documentation route (development only)
+	if os.Getenv("APP_ENV") == "development" || os.Getenv("APP_ENV") == "local" {
+		api.Get("/docs", r.getAPIDocumentation)
+		api.Get("/swagger.json", r.serveSwaggerJSON)
+		// Serve Swagger UI
+		r.app.Get("/swagger", r.serveSwaggerUI)
+		log.Println("API documentation enabled for development")
+	}
+
 	// Auth routes with rate limiting
 	auth := api.Group("/auth")
 
@@ -97,9 +108,6 @@ func (r *FiberRouter) SetupRoutes() {
 	auth.Post("/login", r.authHandler.Login)
 	auth.Post("/forgot-password", r.authHandler.ForgotPassword)
 	auth.Post("/reset", r.authHandler.ResetPassword)
-
-	// API documentation route
-	api.Get("/docs", r.getAPIDocumentation)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
@@ -341,6 +349,80 @@ func (r *FiberRouter) getAPIDocumentation(c fiber.Ctx) error {
 			"endpoints":   docs,
 		},
 	})
+}
+
+// Serve Swagger UI HTML page
+func (r *FiberRouter) serveSwaggerUI(c fiber.Ctx) error {
+	htmlContent := `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yamata no Orochi API - Swagger UI</title>
+    <link rel="stylesheet" type="text/css" href="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui.css" />
+    <style>
+        html {
+            box-sizing: border-box;
+            overflow: -moz-scrollbars-vertical;
+            overflow-y: scroll;
+        }
+        *, *:before, *:after {
+            box-sizing: inherit;
+        }
+        body {
+            margin:0;
+            background: #fafafa;
+        }
+    </style>
+</head>
+<body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-bundle.js"></script>
+    <script src="https://unpkg.com/swagger-ui-dist@5.9.0/swagger-ui-standalone-preset.js"></script>
+    <script>
+        window.onload = function() {
+            const ui = SwaggerUIBundle({
+                url: '/api/v1/swagger.json',
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                validatorUrl: null,
+                onComplete: function() {
+                    console.log("Swagger UI loaded successfully");
+                }
+            });
+        };
+    </script>
+</body>
+</html>`
+
+	c.Set("Content-Type", "text/html")
+	return c.SendString(htmlContent)
+}
+
+// Serve Swagger JSON specification
+func (r *FiberRouter) serveSwaggerJSON(c fiber.Ctx) error {
+	// Read the generated swagger.json file
+	swaggerData, err := os.ReadFile("docs/swagger.json")
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Failed to load Swagger documentation",
+			Error: dto.ErrorDetail{
+				Code: "SWAGGER_LOAD_ERROR",
+			},
+		})
+	}
+
+	c.Set("Content-Type", "application/json")
+	return c.Send(swaggerData)
 }
 
 // Not found handler

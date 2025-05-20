@@ -14,6 +14,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
 	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
 	"github.com/amirphl/Yamata-no-Orochi/config"
+	_ "github.com/amirphl/Yamata-no-Orochi/docs"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/gofiber/fiber/v3"
 	"gorm.io/driver/postgres"
