@@ -44,8 +44,9 @@ server {
 
 # HTTPS Main Application Server
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name ${DOMAIN} www.${DOMAIN};
     
     # SSL Configuration
@@ -78,11 +79,11 @@ server {
     # API routes with rate limiting
     location /api/ {
         # Rate limiting for API endpoints
-        limit_req zone=api burst=${GLOBAL_RATE_LIMIT:-1000} nodelay;
+        limit_req zone=api burst=50 nodelay;
         
         # Special rate limiting for auth endpoints
         location /api/v1/auth/ {
-            limit_req zone=auth burst=${AUTH_RATE_LIMIT:-10} nodelay;
+            limit_req zone=auth burst=10 nodelay;
             proxy_pass http://yamata_backend;
             include /etc/nginx/proxy.conf;
         }
@@ -148,8 +149,9 @@ server {
 
 # API Subdomain Server
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name ${API_DOMAIN};
     
     # SSL Configuration (use same certificate or separate one)
@@ -188,7 +190,7 @@ server {
     
     # Auth endpoints with strict rate limiting
     location /api/v1/auth/ {
-        limit_req zone=auth burst=${AUTH_RATE_LIMIT:-10} nodelay;
+        limit_req zone=auth burst=5 nodelay;
         proxy_pass http://yamata_backend;
         include /etc/nginx/proxy.conf;
         
@@ -200,7 +202,7 @@ server {
     
     # All API routes
     location /api/ {
-        limit_req zone=api burst=${GLOBAL_RATE_LIMIT:-1000} nodelay;
+        limit_req zone=api burst=50 nodelay;
         proxy_pass http://yamata_backend;
         include /etc/nginx/proxy.conf;
     }
@@ -220,8 +222,9 @@ server {
 
 # Monitoring Server (Internal/Admin access)
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name ${MONITORING_DOMAIN};
     
     # SSL Configuration
@@ -249,11 +252,6 @@ server {
     location /grafana/ {
         proxy_pass http://yamata-grafana:3000/;
         include /etc/nginx/proxy.conf;
-        
-        # WebSocket support for Grafana
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
     }
     
     # Application metrics
@@ -269,6 +267,29 @@ server {
     }
 }
 EOF
+
+# Handle SSL certificate paths for local development
+if [ "${APP_ENV:-production}" = "development" ] || [ "${APP_ENV:-production}" = "local" ]; then
+    echo "Development environment detected - updating SSL paths for local certificates"
+    
+    # Replace SSL certificate paths for local development
+    # Replace main domain SSL paths
+    sed -i "s|/etc/letsencrypt/live/${DOMAIN}/fullchain.pem|/etc/nginx/ssl/${DOMAIN}.crt|g" /etc/nginx/sites-available/generated/yamata.conf
+    sed -i "s|/etc/letsencrypt/live/${DOMAIN}/privkey.pem|/etc/nginx/ssl/${DOMAIN}.key|g" /etc/nginx/sites-available/generated/yamata.conf
+    sed -i "s|/etc/letsencrypt/live/${DOMAIN}/chain.pem|/etc/nginx/ssl/${DOMAIN}.crt|g" /etc/nginx/sites-available/generated/yamata.conf
+    
+    # Replace API domain SSL paths
+    sed -i "s|/etc/letsencrypt/live/${API_DOMAIN}/fullchain.pem|/etc/nginx/ssl/${DOMAIN}.crt|g" /etc/nginx/sites-available/generated/yamata.conf
+    sed -i "s|/etc/letsencrypt/live/${API_DOMAIN}/privkey.pem|/etc/nginx/ssl/${DOMAIN}.key|g" /etc/nginx/sites-available/generated/yamata.conf
+    sed -i "s|/etc/letsencrypt/live/${API_DOMAIN}/chain.pem|/etc/nginx/ssl/${DOMAIN}.crt|g" /etc/nginx/sites-available/generated/yamata.conf
+    
+    # Replace monitoring domain SSL paths
+    sed -i "s|/etc/letsencrypt/live/${MONITORING_DOMAIN}/fullchain.pem|/etc/nginx/ssl/${DOMAIN}.crt|g" /etc/nginx/sites-available/generated/yamata.conf
+    sed -i "s|/etc/letsencrypt/live/${MONITORING_DOMAIN}/privkey.pem|/etc/nginx/ssl/${DOMAIN}.key|g" /etc/nginx/sites-available/generated/yamata.conf
+    sed -i "s|/etc/letsencrypt/live/${MONITORING_DOMAIN}/chain.pem|/etc/nginx/ssl/${DOMAIN}.crt|g" /etc/nginx/sites-available/generated/yamata.conf
+    
+    echo "SSL paths updated for local development"
+fi
 
 echo "Generated nginx configuration for domains:"
 echo "  Main: ${DOMAIN}"
