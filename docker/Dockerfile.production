@@ -27,6 +27,9 @@ RUN apk update && \
         git \
         && rm -rf /var/cache/apk/*
 
+# Install swag for Swagger documentation generation
+RUN go install github.com/swaggo/swag/cmd/swag@latest
+
 # Create non-root user for building
 RUN adduser -D -s /bin/sh builder
 
@@ -48,6 +51,15 @@ COPY models/ ./models/
 COPY repository/ ./repository/
 COPY utils/ ./utils/
 COPY main.go ./
+
+# Generate Swagger documentation
+RUN if command -v swag >/dev/null 2>&1; then \
+        swag init -g main.go -o docs; \
+    elif [ -f "$(go env GOPATH)/bin/swag" ]; then \
+        $(go env GOPATH)/bin/swag init -g main.go -o docs; \
+    else \
+        echo "swag not found, skipping Swagger generation"; \
+    fi
 
 # Change ownership to builder user
 RUN chown -R builder:builder /app

@@ -44,7 +44,7 @@ docker-compose*
 .dockerignore
 
 # Documentation (not needed in container)
-docs/
+# docs/  # Commented out - needed for Swagger UI
 README.md
 LICENSE
 
