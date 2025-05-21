@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yamata no Orochi API - Interactive Testing</title>
+    <link rel="stylesheet" type="text/css" href="swagger-ui-assets/swagger-ui.css" />
+    <style>
+        html {
+            box-sizing: border-box;
+            overflow: -moz-scrollbars-vertical;
+            overflow-y: scroll;
+        }
+
+        *,
+        *:before,
+        *:after {
+            box-sizing: inherit;
+        }
+
+        body {
+            margin: 0;
+            background: #fafafa;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 2em;
+        }
+
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.8;
+        }
+
+        .server-selector {
+            background: #34495e;
+            padding: 15px;
+            text-align: center;
+        }
+
+        .server-selector select {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+
+        .server-selector button {
+            padding: 8px 15px;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .server-selector button:hover {
+            background: #2980b9;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .instructions {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px;
+            color: #856404;
+        }
+
+        .instructions h3 {
+            margin-top: 0;
+            color: #856404;
+        }
+
+        .instructions ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        .instructions li {
+            margin: 5px 0;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="header">
+        <h1>🐉 Yamata no Orochi API</h1>
+        <p>Interactive API Testing Interface</p>
+    </div>
+
+    <div class="server-selector">
+        <label for="server-select">API Server:</label>
+        <select id="server-select">
+            <option value="http://localhost:8080">Development (localhost:8080)</option>
+            <option value="https://yamata-no-orochi.com">Production (yamata-no-orochi.com)</option>
+            <option value="https://api.yamata-no-orochi.com">API Subdomain (api.yamata-no-orochi.com)</option>
+            <option value="http://localhost:3000">Custom Server</option>
+        </select>
+        <button onclick="updateServer()">Update Server</button>
+        <button onclick="testConnection()">Test Connection</button>
+    </div>
+
+    <div id="connection-status" class="status disconnected">
+        ⚠️ Server connection not tested
+    </div>
+
+    <div class="instructions">
+        <h3>📋 How to Use This Interface</h3>
+        <ul>
+            <li><strong>Select Server:</strong> Choose your API server from the dropdown above</li>
+            <li><strong>Test Connection:</strong> Click "Test Connection" to verify the server is running</li>
+            <li><strong>Browse APIs:</strong> Scroll down to see all available API endpoints</li>
+            <li><strong>Fill Parameters:</strong> Click "Try it out" on any endpoint to fill in parameters</li>
+            <li><strong>Execute:</strong> Click "Execute" to send the request and see the response</li>
+            <li><strong>Authentication:</strong> Use the "Authorize" button to set JWT tokens for protected endpoints
+            </li>
+        </ul>
+        <p><strong>💡 Tip:</strong> Start the development server with <code>make run-dev-simple</code> to test locally!
+        </p>
+    </div>
+
+    <div id="swagger-ui"></div>
+
+    <script src="swagger-ui-assets/swagger-ui-bundle.js"></script>
+    <script src="swagger-ui-assets/swagger-ui-standalone-preset.js"></script>
+    <script>
+        let currentServer = 'http://localhost:8080';
+        let swaggerSpec = null;
+
+        // Function to update server URL
+        function updateServer() {
+            const select = document.getElementById('server-select');
+            currentServer = select.value;
+
+            if (currentServer === 'http://localhost:3000') {
+                currentServer = prompt('Enter custom server URL:', 'http://localhost:8080');
+                if (!currentServer) return;
+            }
+
+            loadSwaggerUI();
+            testConnection();
+        }
+
+        // Function to test server connection
+        async function testConnection() {
+            const statusDiv = document.getElementById('connection-status');
+            statusDiv.className = 'status disconnected';
+            statusDiv.innerHTML = '🔄 Testing connection...';
+
+            try {
+                const response = await fetch(`${currentServer}/api/v1/health`, {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    statusDiv.className = 'status connected';
+                    statusDiv.innerHTML = `✅ Connected to ${currentServer} - Status: ${data.data?.status || 'OK'}`;
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                statusDiv.className = 'status disconnected';
+                statusDiv.innerHTML = `❌ Cannot connect to ${currentServer} - ${error.message}`;
+            }
+        }
+
+        // Function to load Swagger UI
+        function loadSwaggerUI() {
+            const swaggerUrl = `${currentServer}/api/v1/swagger.json`;
+
+            // Create a basic Swagger spec if we can't load from server
+            const fallbackSpec = {
+                openapi: "3.0.0",
+                info: {
+                    title: "Yamata no Orochi API",
+                    version: "1.0.0",
+                    description: "Customer signup and authentication API"
+                },
+                servers: [
+                    {
+                        url: currentServer,
+                        description: "API Server"
+                    }
+                ],
+                paths: {
+                    "/api/v1/health": {
+                        get: {
+                            summary: "Health Check",
+                            description: "Check the health status of the API",
+                            tags: ["Health"],
+                            responses: {
+                                "200": {
+                                    description: "Service is healthy",
+                                    content: {
+                                        "application/json": {
+                                            schema: {
+                                                type: "object",
+                                                properties: {
+                                                    success: { type: "boolean" },
+                                                    message: { type: "string" },
+                                                    data: { type: "object" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+
+            const ui = SwaggerUIBundle({
+                url: swaggerUrl,
+                dom_id: '#swagger-ui',
+                deepLinking: true,
+                presets: [
+                    SwaggerUIBundle.presets.apis,
+                    SwaggerUIStandalonePreset
+                ],
+                plugins: [
+                    SwaggerUIBundle.plugins.DownloadUrl
+                ],
+                layout: "StandaloneLayout",
+                validatorUrl: null,
+                onComplete: function () {
+                    console.log("Swagger UI loaded successfully");
+                },
+                onFailure: function (data) {
+                    console.log("Failed to load Swagger spec from server, using fallback");
+                    // Load fallback spec
+                    const fallbackUI = SwaggerUIBundle({
+                        spec: fallbackSpec,
+                        dom_id: '#swagger-ui',
+                        deepLinking: true,
+                        presets: [
+                            SwaggerUIBundle.presets.apis,
+                            SwaggerUIStandalonePreset
+                        ],
+                        plugins: [
+                            SwaggerUIBundle.plugins.DownloadUrl
+                        ],
+                        layout: "StandaloneLayout",
+                        validatorUrl: null
+                    });
+                }
+            });
+        }
+
+        // Initialize on page load
+        window.onload = function () {
+            loadSwaggerUI();
+            testConnection();
+        };
+    </script>
+</body>
+
+</html>

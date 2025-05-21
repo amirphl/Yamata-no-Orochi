@@ -1,0 +1,532 @@
+definitions:
+  dto.APIResponse:
+    properties:
+      data: {}
+      error: {}
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
+  dto.CustomerDTO:
+    properties:
+      account_type:
+        type: string
+      company_address:
+        type: string
+      company_name:
+        type: string
+      company_phone:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      is_email_verified:
+        type: boolean
+      is_mobile_verified:
+        type: boolean
+      national_id:
+        type: string
+      postal_code:
+        type: string
+      referrer_agency_id:
+        type: integer
+      representative_first_name:
+        type: string
+      representative_last_name:
+        type: string
+      representative_mobile:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.ForgotPasswordRequest:
+    properties:
+      identifier:
+        example: user@example.com or +989123456789
+        maxLength: 255
+        minLength: 3
+        type: string
+    required:
+    - identifier
+    type: object
+  dto.ForgotPasswordResponse:
+    properties:
+      data:
+        properties:
+          customer_id:
+            example: 123
+            type: integer
+          expires_in:
+            example: 300
+            type: integer
+          masked_phone:
+            example: +9891234*****
+            type: string
+        type: object
+      message:
+        example: Password reset OTP sent to your mobile number
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.LoginRequest:
+    properties:
+      identifier:
+        example: user@example.com or +989123456789
+        maxLength: 255
+        minLength: 3
+        type: string
+      password:
+        example: SecurePass123!
+        maxLength: 100
+        minLength: 8
+        type: string
+    required:
+    - identifier
+    - password
+    type: object
+  dto.LoginResponse:
+    properties:
+      data:
+        properties:
+          access_token:
+            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            type: string
+          expires_at:
+            example: "2024-01-15T16:30:00Z"
+            type: string
+          expires_in:
+            example: 3600
+            type: integer
+          refresh_token:
+            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+            type: string
+          token_type:
+            example: Bearer
+            type: string
+          user:
+            $ref: '#/definitions/dto.UserInfo'
+        type: object
+      message:
+        example: Login successful
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.OTPVerificationRequest:
+    properties:
+      customer_id:
+        type: integer
+      otp_code:
+        type: string
+      otp_type:
+        enum:
+        - mobile
+        - email
+        type: string
+    required:
+    - customer_id
+    - otp_code
+    - otp_type
+    type: object
+  dto.OTPVerificationResponse:
+    properties:
+      customer:
+        $ref: '#/definitions/dto.CustomerDTO'
+      message:
+        type: string
+      refresh_token:
+        type: string
+      token:
+        type: string
+    type: object
+  dto.ResetPasswordRequest:
+    properties:
+      confirm_password:
+        example: NewSecurePass123!
+        type: string
+      customer_id:
+        example: 123
+        type: integer
+      new_password:
+        example: NewSecurePass123!
+        maxLength: 100
+        minLength: 8
+        type: string
+      otp_code:
+        example: "123456"
+        type: string
+    required:
+    - confirm_password
+    - customer_id
+    - new_password
+    - otp_code
+    type: object
+  dto.ResetPasswordResponse:
+    properties:
+      data:
+        properties:
+          password_changed_at:
+            example: "2024-01-15T16:30:00Z"
+            type: string
+        type: object
+      message:
+        example: New password saved
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
+  dto.SignupRequest:
+    properties:
+      account_type:
+        description: Account type selection
+        enum:
+        - individual
+        - independent_company
+        - marketing_agency
+        type: string
+      company_address:
+        maxLength: 255
+        type: string
+      company_name:
+        description: Company fields (required for independent_company and marketing_agency)
+        maxLength: 60
+        type: string
+      company_phone:
+        minLength: 10
+        type: string
+      confirm_password:
+        type: string
+      email:
+        description: Common fields (required for all types)
+        maxLength: 255
+        type: string
+      national_id:
+        type: string
+      password:
+        minLength: 8
+        type: string
+      postal_code:
+        type: string
+      referrer_agency_code:
+        description: Optional agency referral
+        type: integer
+      representative_first_name:
+        description: Representative/Individual fields (required for all types)
+        maxLength: 255
+        type: string
+      representative_last_name:
+        maxLength: 255
+        type: string
+      representative_mobile:
+        type: string
+    required:
+    - account_type
+    - confirm_password
+    - email
+    - password
+    - representative_first_name
+    - representative_last_name
+    - representative_mobile
+    type: object
+  dto.SignupResponse:
+    properties:
+      customer_id:
+        type: integer
+      message:
+        type: string
+      otp_sent:
+        type: boolean
+      otp_target:
+        description: Mobile number (masked for security)
+        type: string
+    type: object
+  dto.UserInfo:
+    properties:
+      account_type:
+        example: individual
+        type: string
+      company_name:
+        example: Tech Company Ltd
+        type: string
+      created_at:
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      email:
+        example: user@example.com
+        type: string
+      id:
+        example: 123
+        type: integer
+      is_active:
+        example: true
+        type: boolean
+      representative_first_name:
+        example: John
+        type: string
+      representative_last_name:
+        example: Doe
+        type: string
+      representative_mobile:
+        example: "+989123456789"
+        type: string
+      uuid:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
+    type: object
+info:
+  contact: {}
+paths:
+  /api/v1/auth/forgot-password:
+    post:
+      consumes:
+      - application/json
+      description: Initiate password reset by sending OTP to registered mobile
+      parameters:
+      - description: Password reset request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ForgotPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OTP sent successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ForgotPasswordResponse'
+              type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Forgot Password
+      tags:
+      - Authentication
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user with email/mobile and password
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.LoginResponse'
+              type: object
+        "400":
+          description: Invalid credentials
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Authentication failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: User Login
+      tags:
+      - Authentication
+  /api/v1/auth/resend-otp/{customer_id}:
+    post:
+      consumes:
+      - application/json
+      description: Resend OTP code to user's mobile number
+      parameters:
+      - description: Customer ID
+        in: path
+        name: customer_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OTP resent successfully
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Resend OTP
+      tags:
+      - Authentication
+  /api/v1/auth/reset:
+    post:
+      consumes:
+      - application/json
+      description: Complete password reset with OTP verification
+      parameters:
+      - description: Password reset data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ResetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Password reset successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ResetPasswordResponse'
+              type: object
+        "400":
+          description: Invalid request or OTP
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Reset Password
+      tags:
+      - Authentication
+  /api/v1/auth/signup:
+    post:
+      consumes:
+      - application/json
+      description: Register a new user account with email verification
+      parameters:
+      - description: User registration data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SignupRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Registration initiated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SignupResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: User already exists
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: User Registration
+      tags:
+      - Authentication
+  /api/v1/auth/verify:
+    post:
+      consumes:
+      - application/json
+      description: Verify OTP code sent to user's mobile number
+      parameters:
+      - description: OTP verification data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.OTPVerificationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OTP verified successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.OTPVerificationResponse'
+              type: object
+        "400":
+          description: Invalid OTP or request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Verify OTP
+      tags:
+      - Authentication
+  /api/v1/health:
+    get:
+      consumes:
+      - application/json
+      description: Check the health status of the API
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Health Check
+      tags:
+      - Health
+swagger: "2.0"

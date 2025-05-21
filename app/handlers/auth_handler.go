@@ -88,7 +88,7 @@ func NewAuthHandler(signupFlow businessflow.SignupFlow, loginFlow businessflow.L
 // @Failure 400 {object} dto.APIResponse "Validation error"
 // @Failure 409 {object} dto.APIResponse "User already exists"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /auth/signup [post]
+// @Router /api/v1/auth/signup [post]
 func (h *AuthHandler) Signup(c fiber.Ctx) error {
 	var req dto.SignupRequest
 	if err := c.Bind().JSON(&req); err != nil {
@@ -123,17 +123,18 @@ func (h *AuthHandler) Signup(c fiber.Ctx) error {
 	})
 }
 
-// VerifyOTP handles OTP verification for signup completion
+// VerifyOTP handles OTP verification for user registration
 // @Summary Verify OTP
-// @Description Verify OTP to complete registration
+// @Description Verify OTP code sent to user's mobile number
 // @Tags Authentication
 // @Accept json
 // @Produce json
 // @Param request body dto.OTPVerificationRequest true "OTP verification data"
 // @Success 200 {object} dto.APIResponse{data=dto.OTPVerificationResponse} "OTP verified successfully"
 // @Failure 400 {object} dto.APIResponse "Invalid OTP or request"
+// @Failure 404 {object} dto.APIResponse "User not found"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /auth/verify [post]
+// @Router /api/v1/auth/verify [post]
 func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 	var req dto.OTPVerificationRequest
 	if err := c.Bind().JSON(&req); err != nil {
@@ -167,17 +168,18 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 	})
 }
 
-// ResendOTP handles OTP resend requests
+// ResendOTP handles resending OTP to user's mobile number
 // @Summary Resend OTP
-// @Description Resend OTP for verification
+// @Description Resend OTP code to user's mobile number
 // @Tags Authentication
 // @Accept json
 // @Produce json
-// @Param customer_id path uint true "Customer ID"
+// @Param customer_id path string true "Customer ID"
 // @Success 200 {object} dto.APIResponse "OTP resent successfully"
 // @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 404 {object} dto.APIResponse "User not found"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /auth/resend-otp/{customer_id} [post]
+// @Router /api/v1/auth/resend-otp/{customer_id} [post]
 func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	customerIDStr := c.Params("customer_id")
 	customerID, err := strconv.ParseUint(customerIDStr, 10, 32)
@@ -202,15 +204,14 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "OTP resent successfully", nil)
 }
 
-// Health endpoint for monitoring
-// Health check endpoint
+// Health handles health check requests
 // @Summary Health Check
 // @Description Check the health status of the API
 // @Tags Health
 // @Accept json
 // @Produce json
-// @Success 200 {object} dto.APIResponse{data=map[string]interface{}} "Service is healthy"
-// @Router /health [get]
+// @Success 200 {object} dto.APIResponse "Service is healthy"
+// @Router /api/v1/health [get]
 func (h *AuthHandler) Health(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Auth service is healthy", fiber.Map{
 		"status":    "healthy",
@@ -321,18 +322,7 @@ func getValidationErrorMessage(err validator.FieldError) string {
 // @Failure 400 {object} dto.APIResponse "Invalid credentials"
 // @Failure 401 {object} dto.APIResponse "Authentication failed"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
-// Login handles user authentication
-// @Summary User Login
-// @Description Authenticate user with email/mobile and password
-// @Tags Authentication
-// @Accept json
-// @Produce json
-// @Param request body dto.LoginRequest true "Login credentials"
-// @Success 200 {object} dto.APIResponse{data=dto.LoginResponse} "Login successful"
-// @Failure 400 {object} dto.APIResponse "Invalid credentials"
-// @Failure 401 {object} dto.APIResponse "Authentication failed"
-// @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /auth/login [post]
+// @Router /api/v1/auth/login [post]
 func (h *AuthHandler) Login(c fiber.Ctx) error {
 	var req dto.LoginRequest
 	if err := c.Bind().JSON(&req); err != nil {
@@ -375,18 +365,18 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	})
 }
 
-// ForgotPassword initiates the password reset process
+// ForgotPassword handles password reset initiation
 // @Summary Forgot Password
 // @Description Initiate password reset by sending OTP to registered mobile
 // @Tags Authentication
 // @Accept json
 // @Produce json
-// @Param request body dto.ForgotPasswordRequest true "User identifier"
+// @Param request body dto.ForgotPasswordRequest true "Password reset request"
 // @Success 200 {object} dto.APIResponse{data=dto.ForgotPasswordResponse} "OTP sent successfully"
 // @Failure 400 {object} dto.APIResponse "Invalid request"
 // @Failure 404 {object} dto.APIResponse "User not found"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /auth/forgot-password [post]
+// @Router /api/v1/auth/forgot-password [post]
 func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 	var req dto.ForgotPasswordRequest
 	if err := c.Bind().JSON(&req); err != nil {
@@ -431,7 +421,7 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 	})
 }
 
-// ResetPassword completes the password reset process
+// ResetPassword handles password reset completion
 // @Summary Reset Password
 // @Description Complete password reset with OTP verification
 // @Tags Authentication
@@ -440,8 +430,9 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 // @Param request body dto.ResetPasswordRequest true "Password reset data"
 // @Success 200 {object} dto.APIResponse{data=dto.ResetPasswordResponse} "Password reset successful"
 // @Failure 400 {object} dto.APIResponse "Invalid request or OTP"
+// @Failure 404 {object} dto.APIResponse "User not found"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /auth/reset-password [post]
+// @Router /api/v1/auth/reset [post]
 func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 	var req dto.ResetPasswordRequest
 	if err := c.Bind().JSON(&req); err != nil {

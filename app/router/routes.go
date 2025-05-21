@@ -77,6 +77,13 @@ func (r *FiberRouter) SetupRoutes() {
 		api.Get("/swagger.json", r.serveSwaggerJSON)
 		// Serve Swagger UI
 		r.app.Get("/swagger", r.serveSwaggerUI)
+		// Serve standalone Swagger UI
+		r.app.Get("/swagger-standalone", r.serveStandaloneSwaggerUI)
+		// Serve Swagger UI static assets
+		r.app.Get("/swagger-ui-assets/*", func(c fiber.Ctx) error {
+			filePath := c.Params("*")
+			return c.SendFile("./docs/swagger-ui-assets/" + filePath)
+		})
 		log.Println("API documentation enabled for development")
 	}
 
@@ -423,6 +430,24 @@ func (r *FiberRouter) serveSwaggerJSON(c fiber.Ctx) error {
 
 	c.Set("Content-Type", "application/json")
 	return c.Send(swaggerData)
+}
+
+// Serve standalone Swagger UI HTML page
+func (r *FiberRouter) serveStandaloneSwaggerUI(c fiber.Ctx) error {
+	// Read the standalone HTML file
+	htmlData, err := os.ReadFile("docs/swagger-ui-standalone.html")
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Failed to load standalone Swagger UI",
+			Error: dto.ErrorDetail{
+				Code: "SWAGGER_UI_LOAD_ERROR",
+			},
+		})
+	}
+
+	c.Set("Content-Type", "text/html")
+	return c.Send(htmlData)
 }
 
 // Not found handler
