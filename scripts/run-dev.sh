@@ -332,6 +332,35 @@ show_help() {
     echo ""
 }
 
+# Function to start the application
+start_application() {
+	print_status "Starting Yamata no Orochi application..."
+	
+	# Generate Swagger documentation first
+	print_status "Generating Swagger documentation..."
+	if command -v swag >/dev/null 2>&1; then
+		if swag init -g main.go -o docs >/dev/null 2>&1; then
+			print_success "Swagger documentation generated successfully"
+		else
+			print_warning "Failed to generate Swagger documentation, continuing anyway..."
+		fi
+	else
+		print_warning "swag command not found, skipping Swagger generation"
+		print_warning "Install with: go install github.com/swaggo/swag/cmd/swag@latest"
+	fi
+	
+	# Start the application with air for hot reloading
+	print_status "Starting application with hot reloading..."
+	if command -v air >/dev/null 2>&1; then
+		print_success "Using air for hot reloading"
+		air
+	else
+		print_warning "air not found, using go run"
+		print_warning "Install air with: go install github.com/cosmtrek/air@latest"
+		go run main.go
+	fi
+}
+
 # Main function
 main() {
     local cleanup_on_exit=true
@@ -382,6 +411,9 @@ main() {
     # Build application
     build_application
     
+    # Start the application
+    start_application
+    
     echo ""
     print_success "🎉 Development environment ready!"
     echo ""
@@ -400,7 +432,7 @@ main() {
     echo ""
     
     # Run the application
-    "$TEMP_DIR/main"
+    # "$TEMP_DIR/main" # This line is now handled by start_application
 }
 
 # Run main function with all arguments
