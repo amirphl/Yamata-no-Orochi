@@ -13,6 +13,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
 	_ "github.com/amirphl/Yamata-no-Orochi/docs"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/cache"
 	"github.com/gofiber/fiber/v3/middleware/compress"
@@ -178,7 +179,7 @@ func (r *FiberRouter) setupMiddleware() {
 			"X-Response-Time",
 		},
 		AllowCredentials: true,
-		MaxAge:           86400, // 24 hours
+		MaxAge:           utils.CORSMaxAge,
 	}))
 
 	// Compression middleware for performance

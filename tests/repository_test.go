@@ -18,7 +18,7 @@ import (
 func TestAccountTypeRepository(t *testing.T) {
 	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
 		repo := repository.NewAccountTypeRepository(testDB.DB)
-		ctx := testingutil.CreateTestContext()
+		ctx := context.Background()
 
 		t.Run("ByID", func(t *testing.T) {
 			// Get existing account type (inserted by setup)
@@ -77,7 +77,7 @@ func TestCustomerRepository(t *testing.T) {
 	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
 		repo := repository.NewCustomerRepository(testDB.DB)
 		fixtures := testingutil.NewTestFixtures(testDB)
-		ctx := testingutil.CreateTestContext()
+		ctx := context.Background()
 
 		t.Run("Save", func(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
@@ -246,7 +246,7 @@ func TestOTPVerificationRepository(t *testing.T) {
 	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
 		repo := repository.NewOTPVerificationRepository(testDB.DB)
 		fixtures := testingutil.NewTestFixtures(testDB)
-		ctx := testingutil.CreateTestContext()
+		ctx := context.Background()
 
 		t.Run("Save", func(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
@@ -538,7 +538,7 @@ func TestCustomerSessionRepository(t *testing.T) {
 	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
 		repo := repository.NewCustomerSessionRepository(testDB.DB)
 		fixtures := testingutil.NewTestFixtures(testDB)
-		ctx := testingutil.CreateTestContext()
+		ctx := context.Background()
 
 		t.Run("Save", func(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
@@ -825,7 +825,7 @@ func TestAuditLogRepository(t *testing.T) {
 	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
 		repo := repository.NewAuditLogRepository(testDB.DB)
 		fixtures := testingutil.NewTestFixtures(testDB)
-		ctx := testingutil.CreateTestContext()
+		ctx := context.Background()
 
 		t.Run("Save", func(t *testing.T) {
 			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)

@@ -10,10 +10,10 @@ type SignupRequest struct {
 
 	// Company fields (required for independent_company and marketing_agency)
 	CompanyName    *string `json:"company_name,omitempty" validate:"omitempty,max=60"`
-	NationalID     *string `json:"national_id,omitempty" validate:"omitempty,len=11,numeric"`
+	NationalID     *string `json:"national_id,omitempty" validate:"omitempty,min=10,max=20,numeric"`
 	CompanyPhone   *string `json:"company_phone,omitempty" validate:"omitempty,min=10"`
 	CompanyAddress *string `json:"company_address,omitempty" validate:"omitempty,max=255"`
-	PostalCode     *string `json:"postal_code,omitempty" validate:"omitempty,len=10,numeric"`
+	PostalCode     *string `json:"postal_code,omitempty" validate:"omitempty,min=10,max=20,numeric"`
 
 	// Representative/Individual fields (required for all types)
 	RepresentativeFirstName string `json:"representative_first_name" validate:"required,max=255,alpha_space"`
@@ -56,7 +56,7 @@ type OTPVerificationResponse struct {
 type CustomerDTO struct {
 	ID                      uint      `json:"id"`
 	UUID                    string    `json:"uuid"`
-	AccountType             string    `json:"account_type"`
+	AccountTypeID           uint      `json:"account_type_id"`
 	CompanyName             *string   `json:"company_name,omitempty"`
 	NationalID              *string   `json:"national_id,omitempty"`
 	CompanyPhone            *string   `json:"company_phone,omitempty"`

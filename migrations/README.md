@@ -63,7 +63,7 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 
 ### Company Fields (Independent Company & Marketing Agency)
 - Company Name: Max 60 characters
-- National ID: Exactly 11 digits
+- National ID: Atleast 10 digits
 - Company Phone: Min 10 characters, various formats allowed
 - Company Address: Max 255 characters
 - Postal Code: Exactly 10 digits

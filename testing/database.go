@@ -2,7 +2,6 @@
 package testing
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -305,9 +304,4 @@ func TestWithDB(testFunc func(*TestDB) error) error {
 	// Account types are already inserted by migrations, no need to insert them again
 
 	return testFunc(testDB)
-}
-
-// CreateTestContext creates a context for testing
-func CreateTestContext() context.Context {
-	return context.Background()
 }

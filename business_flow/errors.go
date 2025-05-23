@@ -65,6 +65,10 @@ var (
 
 	// Token errors
 	ErrTokenGenerationFailed = errors.New("failed to generate tokens")
+
+	// Signup flow specific errors
+	ErrSignupValidationFailed = errors.New("signup validation failed")
+	ErrResendOTPFailed        = errors.New("resend OTP failed")
 )
 
 type BusinessError struct {
@@ -218,4 +222,44 @@ func IsEmailSearchFailed(err error) bool {
 
 func IsMobileSearchFailed(err error) bool {
 	return errors.Is(err, ErrMobileSearchFailed)
+}
+
+func IsSignupValidationFailed(err error) bool {
+	return errors.Is(err, ErrSignupValidationFailed)
+}
+
+func IsResendOTPFailed(err error) bool {
+	return errors.Is(err, ErrResendOTPFailed)
+}
+
+func IsCustomerSearchFailed(err error) bool {
+	var businessErr *BusinessError
+	if errors.As(err, &businessErr) {
+		return businessErr.Code == "CUSTOMER_SEARCH_FAILED"
+	}
+	return false
+}
+
+func IsAccountTypeFetchFailed(err error) bool {
+	var businessErr *BusinessError
+	if errors.As(err, &businessErr) {
+		return businessErr.Code == "ACCOUNT_TYPE_FETCH_FAILED"
+	}
+	return false
+}
+
+func IsOTPSearchFailed(err error) bool {
+	var businessErr *BusinessError
+	if errors.As(err, &businessErr) {
+		return businessErr.Code == "OTP_SEARCH_FAILED"
+	}
+	return false
+}
+
+func IsSignupFailed(err error) bool {
+	var businessErr *BusinessError
+	if errors.As(err, &businessErr) {
+		return businessErr.Code == "SIGNUP_FAILED"
+	}
+	return false
 }

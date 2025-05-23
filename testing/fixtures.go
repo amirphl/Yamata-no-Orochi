@@ -97,7 +97,7 @@ func (tf *TestFixtures) CreateTestOTP(customerID uint, otpType, otpCode string) 
 		Status:        models.OTPStatusPending,
 		AttemptsCount: 0,
 		MaxAttempts:   3,
-		ExpiresAt:     time.Now().Add(5 * time.Minute),
+		ExpiresAt:     time.Now().Add(utils.OTPExpiry),
 	}
 
 	err := tf.DB.DB.Create(otp).Error
@@ -137,7 +137,7 @@ func (tf *TestFixtures) CreateTestSession(customerID uint) (*models.CustomerSess
 		CustomerID:    customerID,
 		SessionToken:  sessionToken,
 		RefreshToken:  &refreshToken,
-		ExpiresAt:     time.Now().Add(24 * time.Hour),
+		ExpiresAt:     time.Now().Add(utils.SessionTimeout),
 		IsActive:      utils.ToPtr(true),
 		IPAddress:     &ipAddress,
 		UserAgent:     &userAgent,
