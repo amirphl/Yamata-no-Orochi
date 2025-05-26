@@ -33,5 +33,8 @@
 \echo 'Running 0010_add_customer_uuid_and_agency_id.sql...'
 \i migrations/0010_add_customer_uuid_and_agency_id.sql
 
+\echo 'Running 0011_add_new_audit_actions.sql...'
+\i migrations/0011_add_new_audit_actions.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi signup system.' 
