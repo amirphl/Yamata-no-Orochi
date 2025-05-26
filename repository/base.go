@@ -3,7 +3,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"gorm.io/gorm"
@@ -42,22 +41,6 @@ func (r *BaseRepository[T, F]) getDBForWrite(ctx context.Context) (*gorm.DB, boo
 	}
 
 	return tx, true, nil // New transaction, should commit
-}
-
-// ByID retrieves an entity by its ID
-func (r *BaseRepository[T, F]) ByID(ctx context.Context, id uint) (*T, error) {
-	db := r.getDB(ctx)
-
-	var entity T
-	err := db.Last(&entity, id).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("failed to find entity by ID %d: %w", id, err)
-	}
-
-	return &entity, nil
 }
 
 // ByFilter retrieves entities based on filter criteria

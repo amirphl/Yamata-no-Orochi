@@ -24,6 +24,23 @@ func NewOTPVerificationRepository(db *gorm.DB) OTPVerificationRepository {
 	}
 }
 
+// ByID retrieves an OTP verification by its ID with preloaded relationships
+func (r *OTPVerificationRepositoryImpl) ByID(ctx context.Context, id uint) (*models.OTPVerification, error) {
+	db := r.getDB(ctx)
+
+	var otp models.OTPVerification
+	err := db.Preload("Customer").
+		Last(&otp, id).Error
+	if err != nil {
+		if err.Error() == "record not found" { // GORM error check
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find OTP verification by ID %d: %w", id, err)
+	}
+
+	return &otp, nil
+}
+
 // ByCustomerAndType retrieves OTP verifications for a customer and specific type
 func (r *OTPVerificationRepositoryImpl) ByCustomerAndType(ctx context.Context, customerID uint, otpType string) ([]*models.OTPVerification, error) {
 	filter := models.OTPVerificationFilter{

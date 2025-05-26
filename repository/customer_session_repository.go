@@ -24,6 +24,23 @@ func NewCustomerSessionRepository(db *gorm.DB) CustomerSessionRepository {
 	}
 }
 
+// ByID retrieves a customer session by its ID with preloaded relationships
+func (r *CustomerSessionRepositoryImpl) ByID(ctx context.Context, id uint) (*models.CustomerSession, error) {
+	db := r.getDB(ctx)
+
+	var session models.CustomerSession
+	err := db.Preload("Customer").
+		Last(&session, id).Error
+	if err != nil {
+		if err.Error() == "record not found" { // GORM error check
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find customer session by ID %d: %w", id, err)
+	}
+
+	return &session, nil
+}
+
 // BySessionToken retrieves a session by session token
 func (r *CustomerSessionRepositoryImpl) BySessionToken(ctx context.Context, token string) (*models.CustomerSession, error) {
 	db := r.getDB(ctx)

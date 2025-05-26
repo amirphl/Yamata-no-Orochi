@@ -21,6 +21,22 @@ func NewAccountTypeRepository(db *gorm.DB) AccountTypeRepository {
 	}
 }
 
+// ByID retrieves an account type by its ID
+func (r *AccountTypeRepositoryImpl) ByID(ctx context.Context, id uint) (*models.AccountType, error) {
+	db := r.getDB(ctx)
+
+	var accountType models.AccountType
+	err := db.Last(&accountType, id).Error
+	if err != nil {
+		if err.Error() == "record not found" { // GORM error check
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find account type by ID %d: %w", id, err)
+	}
+
+	return &accountType, nil
+}
+
 // ByTypeName retrieves an account type by its type name
 func (r *AccountTypeRepositoryImpl) ByTypeName(ctx context.Context, typeName string) (*models.AccountType, error) {
 	db := r.getDB(ctx)

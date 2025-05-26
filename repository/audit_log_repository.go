@@ -21,6 +21,23 @@ func NewAuditLogRepository(db *gorm.DB) AuditLogRepository {
 	}
 }
 
+// ByID retrieves an audit log by its ID with preloaded relationships
+func (r *AuditLogRepositoryImpl) ByID(ctx context.Context, id uint) (*models.AuditLog, error) {
+	db := r.getDB(ctx)
+
+	var auditLog models.AuditLog
+	err := db.Preload("Customer").
+		Last(&auditLog, id).Error
+	if err != nil {
+		if err.Error() == "record not found" { // GORM error check
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find audit log by ID %d: %w", id, err)
+	}
+
+	return &auditLog, nil
+}
+
 // ListByCustomer retrieves audit logs for a specific customer with pagination
 func (r *AuditLogRepositoryImpl) ListByCustomer(ctx context.Context, customerID uint, limit, offset int) ([]*models.AuditLog, error) {
 	db := r.getDB(ctx)

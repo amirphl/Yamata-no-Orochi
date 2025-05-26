@@ -23,6 +23,24 @@ func NewCustomerRepository(db *gorm.DB) CustomerRepository {
 	}
 }
 
+// ByID retrieves a customer by its ID with preloaded relationships
+func (r *CustomerRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Customer, error) {
+	db := r.getDB(ctx)
+
+	var customer models.Customer
+	err := db.Preload("AccountType").
+		Preload("ReferrerAgency").
+		Last(&customer, id).Error
+	if err != nil {
+		if err.Error() == "record not found" { // GORM error check
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to find customer by ID %d: %w", id, err)
+	}
+
+	return &customer, nil
+}
+
 // ByEmail retrieves a customer by email address
 func (r *CustomerRepositoryImpl) ByEmail(ctx context.Context, email string) (*models.Customer, error) {
 	filter := models.CustomerFilter{Email: &email}

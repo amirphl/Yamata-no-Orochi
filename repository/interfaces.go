@@ -15,7 +15,6 @@ type contextKey string
 const TxContextKey contextKey = "tx"
 
 type Repository[T any, F any] interface {
-	ByID(ctx context.Context, id uint) (*T, error)
 	ByFilter(ctx context.Context, filter F, orderBy string, limit, offset int) ([]*T, error)
 	Save(ctx context.Context, entity *T) error
 	SaveBatch(ctx context.Context, entities []*T) error
@@ -26,12 +25,14 @@ type Repository[T any, F any] interface {
 // AccountTypeRepository defines operations for account types
 type AccountTypeRepository interface {
 	Repository[models.AccountType, models.AccountTypeFilter]
+	ByID(ctx context.Context, id uint) (*models.AccountType, error)
 	ByTypeName(ctx context.Context, typeName string) (*models.AccountType, error)
 }
 
 // CustomerRepository defines operations for customers
 type CustomerRepository interface {
 	Repository[models.Customer, models.CustomerFilter]
+	ByID(ctx context.Context, id uint) (*models.Customer, error)
 	ByEmail(ctx context.Context, email string) (*models.Customer, error)
 	ByMobile(ctx context.Context, mobile string) (*models.Customer, error)
 	ByUUID(ctx context.Context, uuid string) (*models.Customer, error)
@@ -46,6 +47,7 @@ type CustomerRepository interface {
 // OTPVerificationRepository defines operations for OTP verifications
 type OTPVerificationRepository interface {
 	Repository[models.OTPVerification, models.OTPVerificationFilter]
+	ByID(ctx context.Context, id uint) (*models.OTPVerification, error)
 	ByCustomerAndType(ctx context.Context, customerID uint, otpType string) ([]*models.OTPVerification, error)
 	ByTargetAndType(ctx context.Context, targetValue, otpType string) (*models.OTPVerification, error)
 	ListActiveOTPs(ctx context.Context, customerID uint) ([]*models.OTPVerification, error)
@@ -57,6 +59,7 @@ type OTPVerificationRepository interface {
 // CustomerSessionRepository defines operations for customer sessions
 type CustomerSessionRepository interface {
 	Repository[models.CustomerSession, models.CustomerSessionFilter]
+	ByID(ctx context.Context, id uint) (*models.CustomerSession, error)
 	BySessionToken(ctx context.Context, token string) (*models.CustomerSession, error)
 	ByRefreshToken(ctx context.Context, token string) (*models.CustomerSession, error)
 	ListActiveSessionsByCustomer(ctx context.Context, customerID uint) ([]*models.CustomerSession, error)
@@ -70,6 +73,7 @@ type CustomerSessionRepository interface {
 // AuditLogRepository defines operations for audit logs
 type AuditLogRepository interface {
 	Repository[models.AuditLog, models.AuditLogFilter]
+	ByID(ctx context.Context, id uint) (*models.AuditLog, error)
 	ListByCustomer(ctx context.Context, customerID uint, limit, offset int) ([]*models.AuditLog, error)
 	ListByAction(ctx context.Context, action string, limit, offset int) ([]*models.AuditLog, error)
 	ListFailedActions(ctx context.Context, limit, offset int) ([]*models.AuditLog, error)
