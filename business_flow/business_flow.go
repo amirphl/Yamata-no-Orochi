@@ -80,7 +80,7 @@ func ToAuthCustomerDTO(customer models.Customer) dto.AuthCustomerDTO {
 		RepresentativeFirstName: customer.RepresentativeFirstName,
 		RepresentativeLastName:  customer.RepresentativeLastName,
 		RepresentativeMobile:    customer.RepresentativeMobile,
-		AccountType:             customer.AccountType.DisplayName,
+		AccountType:             customer.AccountType.TypeName,
 		CompanyName:             customer.CompanyName,
 		IsActive:                customer.IsActive,
 		IsEmailVerified:         customer.IsEmailVerified,
@@ -96,7 +96,7 @@ func ToCustomerSessionDTO(session models.CustomerSession) dto.CustomerSessionDTO
 	return dto.CustomerSessionDTO{
 		SessionToken: session.SessionToken,
 		RefreshToken: session.RefreshToken,
-		ExpiresIn:    int(session.ExpiresAt.Sub(time.Now()).Seconds()), // TODO: UTC?
+		ExpiresIn:    int(time.Until(session.ExpiresAt).Seconds()), // TODO: UTC?
 		TokenType:    "Bearer",
 		CreatedAt:    session.CreatedAt.Format(time.RFC3339),
 	}

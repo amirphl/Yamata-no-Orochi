@@ -17,7 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestInitiateSignup(t *testing.T) {
+func TestSignup(t *testing.T) {
 	err := testingutil.TestWithDB(func(testDB *testingutil.TestDB) error {
 		fixtures := testingutil.NewTestFixtures(testDB)
 
@@ -60,7 +60,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -123,7 +123,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -161,7 +161,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -191,7 +191,7 @@ func TestInitiateSignup(t *testing.T) {
 				ReferrerAgencyCode:      &agency.AgencyRefererCode,
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.True(t, result.OTPSent)
@@ -218,7 +218,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "email already exists")
@@ -246,7 +246,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "mobile number already exists")
@@ -272,7 +272,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "national ID already exists")
@@ -290,7 +290,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "company fields are required")
@@ -310,7 +310,7 @@ func TestInitiateSignup(t *testing.T) {
 				ReferrerAgencyCode:      &invalidAgencyCode,
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "referrer agency not found")
@@ -332,7 +332,7 @@ func TestInitiateSignup(t *testing.T) {
 				ReferrerAgencyCode:      &company.AgencyRefererCode,
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 			assert.Contains(t, err.Error(), "referrer must be a marketing agency")
@@ -358,7 +358,7 @@ func TestInitiateSignup(t *testing.T) {
 		// 		ReferrerAgencyCode:      &agency.AgencyRefererCode,
 		// 	}
 
-		// 	result, err := signupFlow.InitiateSignup(context.Background(), req)
+		// 	result, err := signupFlow.Signup(context.Background(), req)
 		// 	require.Error(t, err)
 		// 	require.Nil(t, result)
 		// 	assert.Contains(t, err.Error(), "referrer agency is inactive")
@@ -382,7 +382,7 @@ func TestInitiateSignup(t *testing.T) {
 		// 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 		// 	defer cancel()
 
-		// 	result, err := signupFlow.InitiateSignup(ctx, req)
+		// 	result, err := signupFlow.Signup(ctx, req)
 		// 	require.Error(t, err)
 		// 	require.Nil(t, result)
 		// })
@@ -400,7 +400,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -427,7 +427,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -457,7 +457,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.Error(t, err)
 			require.Nil(t, result)
 
@@ -487,7 +487,7 @@ func TestInitiateSignup(t *testing.T) {
 				ConfirmPassword:         "SecurePass123!",
 			}
 
-			result, err := signupFlow.InitiateSignup(context.Background(), req, nil)
+			result, err := signupFlow.Signup(context.Background(), req, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 
@@ -840,7 +840,7 @@ func TestVerifyOTP(t *testing.T) {
 			// Verify audit log was created for failed verification
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
 				CustomerID: &customer.ID,
-				Action:     utils.ToPtr(models.AuditActionOTPFailed),
+				Action:     utils.ToPtr(models.AuditActionOTPVerificationFailed),
 			}, "", 0, 0)
 			require.NoError(t, err)
 			require.Len(t, auditLogs, 1)

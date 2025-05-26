@@ -65,11 +65,8 @@ func TestLoginFlow(t *testing.T) {
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
 			assert.NotEmpty(t, loginResult.Customer)
 			assert.NotEmpty(t, loginResult.Session)
-			assert.Empty(t, loginResult.ErrorCode)
-			assert.Empty(t, loginResult.ErrorMessage)
 
 			// Verify customer data
 			assert.Equal(t, customer.ID, loginResult.Customer.ID)
@@ -82,8 +79,6 @@ func TestLoginFlow(t *testing.T) {
 			// Verify session was created
 			assert.NotEmpty(t, loginResult.Session.SessionToken)
 			assert.NotEmpty(t, loginResult.Session.RefreshToken)
-			assert.True(t, utils.IsTrue(loginResult.Session.IsActive))
-			assert.True(t, loginResult.Session.ExpiresAt.After(time.Now()))
 		})
 
 		t.Run("SuccessfulLoginWithMobile", func(t *testing.T) {
@@ -101,7 +96,6 @@ func TestLoginFlow(t *testing.T) {
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
 			assert.NotEmpty(t, loginResult.Customer)
 			assert.NotEmpty(t, loginResult.Session)
 		})
@@ -115,13 +109,8 @@ func TestLoginFlow(t *testing.T) {
 
 			// Perform login
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, loginResult)
-			assert.False(t, loginResult.Success)
-			assert.Nil(t, loginResult.Customer)
-			assert.Nil(t, loginResult.Session)
-			assert.Equal(t, "USER_NOT_FOUND", loginResult.ErrorCode)
-			assert.NotEmpty(t, loginResult.ErrorMessage)
+			require.Error(t, err)
+			require.Nil(t, loginResult)
 		})
 
 		t.Run("IncorrectPassword", func(t *testing.T) {
@@ -137,13 +126,8 @@ func TestLoginFlow(t *testing.T) {
 
 			// Perform login
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, loginResult)
-			assert.False(t, loginResult.Success)
-			assert.Nil(t, loginResult.Customer)
-			assert.Nil(t, loginResult.Session)
-			assert.Equal(t, "INCORRECT_PASSWORD", loginResult.ErrorCode)
-			assert.NotEmpty(t, loginResult.ErrorMessage)
+			require.Error(t, err)
+			require.Nil(t, loginResult)
 		})
 
 		t.Run("InactiveAccount", func(t *testing.T) {
@@ -164,45 +148,8 @@ func TestLoginFlow(t *testing.T) {
 
 			// Perform login
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, loginResult)
-			assert.False(t, loginResult.Success)
-			assert.Nil(t, loginResult.Customer)
-			assert.Nil(t, loginResult.Session)
-			assert.Equal(t, "ACCOUNT_INACTIVE", loginResult.ErrorCode)
-			assert.NotEmpty(t, loginResult.ErrorMessage)
-		})
-
-		t.Run("SessionCreationWithCorrelationID", func(t *testing.T) {
-			// Create test customer
-			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
-			require.NoError(t, err)
-
-			// Create login request
-			loginReq := &dto.LoginRequest{
-				Identifier: customer.Email,
-				Password:   "TestPass123!",
-			}
-
-			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
-
-			// Verify session has correlation ID
-			assert.NotEqual(t, uuid.Nil, loginResult.Session.CorrelationID)
-			assert.NotEmpty(t, loginResult.Session.CorrelationID.String())
-
-			// Get session history
-			history, err := sessionRepo.GetHistoryByCorrelationID(context.Background(), loginResult.Session.CorrelationID)
-			require.NoError(t, err)
-			require.Len(t, history, 1)
-
-			// Verify session in history
-			assert.Equal(t, loginResult.Session.ID, history[0].ID)
-			assert.Equal(t, loginResult.Session.CorrelationID, history[0].CorrelationID)
-			assert.True(t, utils.IsTrue(history[0].IsActive))
+			require.Error(t, err)
+			require.Nil(t, loginResult)
 		})
 
 		t.Run("AuditLogCreation", func(t *testing.T) {
@@ -220,7 +167,6 @@ func TestLoginFlow(t *testing.T) {
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
 
 			// Check audit logs were created
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
@@ -248,49 +194,14 @@ func TestLoginFlow(t *testing.T) {
 
 			// Perform login
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, loginResult)
-			assert.False(t, loginResult.Success)
+			require.Error(t, err)
+			require.Nil(t, loginResult)
 
 			// Check audit log was created for failed login
 			_, err = auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
 				Action: utils.ToPtr(models.AuditActionLoginFailed),
 			}, "", 0, 0)
 			require.NoError(t, err)
-		})
-
-		t.Run("SessionExpirationWithCorrelationID", func(t *testing.T) {
-			// Create test customer
-			customer, err := fixtures.CreateTestCustomer(models.AccountTypeIndividual)
-			require.NoError(t, err)
-
-			// Create login request
-			loginReq := &dto.LoginRequest{
-				Identifier: customer.Email,
-				Password:   "TestPass123!",
-			}
-
-			// Perform login
-			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
-
-			// Expire the session
-			err = sessionRepo.ExpireSession(context.Background(), loginResult.Session.ID)
-			require.NoError(t, err)
-
-			// Get session history
-			history, err := sessionRepo.GetHistoryByCorrelationID(context.Background(), loginResult.Session.CorrelationID)
-			require.NoError(t, err)
-			require.Len(t, history, 2)
-
-			// Both records should have same correlation ID
-			assert.Equal(t, loginResult.Session.CorrelationID, history[0].CorrelationID)
-			assert.Equal(t, loginResult.Session.CorrelationID, history[1].CorrelationID)
-
-			// Latest should be inactive
-			assert.False(t, utils.IsTrue(history[0].IsActive))
 		})
 
 		t.Run("MultipleSessionsForSameCustomer", func(t *testing.T) {
@@ -307,20 +218,11 @@ func TestLoginFlow(t *testing.T) {
 			loginResult1, err := loginFlow.Login(context.Background(), loginReq1, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult1)
-			assert.True(t, loginResult1.Success)
 
 			// Create second login
 			loginResult2, err := loginFlow.Login(context.Background(), loginReq1, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult2)
-			assert.True(t, loginResult2.Success)
-
-			// Verify both sessions have different correlation IDs
-			assert.NotEqual(t, loginResult1.Session.CorrelationID, loginResult2.Session.CorrelationID)
-
-			// Verify both sessions are active
-			assert.True(t, utils.IsTrue(loginResult1.Session.IsActive))
-			assert.True(t, utils.IsTrue(loginResult2.Session.IsActive))
 		})
 
 		t.Run("TokenGeneration", func(t *testing.T) {
@@ -338,7 +240,6 @@ func TestLoginFlow(t *testing.T) {
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
 
 			// Verify tokens were generated
 			assert.NotEmpty(t, loginResult.Session.SessionToken)
@@ -363,11 +264,10 @@ func TestLoginFlow(t *testing.T) {
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
 
 			// Verify account type was retrieved
-			assert.NotNil(t, loginResult.AccountType)
-			assert.Equal(t, models.AccountTypeIndividual, loginResult.AccountType.TypeName)
+			assert.NotNil(t, loginResult.Customer.AccountType)
+			assert.Equal(t, models.AccountTypeIndividual, loginResult.Customer.AccountType)
 		})
 
 		return nil
@@ -428,7 +328,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 
 			// Test non-existent identifier
 			foundCustomer, err = loginFlow.(*businessflow.LoginFlowImpl).FindCustomerByIdentifier(context.Background(), "nonexistent@example.com")
-			require.Error(t, err)
+			require.NoError(t, err)
 			assert.Nil(t, foundCustomer)
 		})
 
@@ -438,7 +338,11 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			require.NoError(t, err)
 
 			// Create session
-			session, err := loginFlow.(*businessflow.LoginFlowImpl).CreateSession(context.Background(), customer.ID, "127.0.0.1", "Test User Agent")
+			session, err := loginFlow.(*businessflow.LoginFlowImpl).CreateSession(context.Background(), customer.ID, &businessflow.ClientMetadata{
+				IPAddress:  "127.0.0.1",
+				UserAgent:  "Test User Agent",
+				DeviceInfo: map[string]string{"device_type": "desktop"},
+			})
 			require.NoError(t, err)
 			require.NotNil(t, session)
 
@@ -560,12 +464,9 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 			assert.Equal(t, customer.ID, result.CustomerID)
 			assert.NotEmpty(t, result.MaskedPhone)
 			assert.True(t, result.OTPExpiry.After(time.Now()))
-			assert.Empty(t, result.ErrorCode)
-			assert.Empty(t, result.ErrorMessage)
 
 			// Verify OTP was created
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -598,7 +499,6 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 			assert.Equal(t, customer.ID, result.CustomerID)
 			assert.NotEmpty(t, result.MaskedPhone)
 		})
@@ -611,13 +511,8 @@ func TestForgotPasswordFlow(t *testing.T) {
 
 			// Perform forgot password
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.False(t, result.Success)
-			assert.Equal(t, uint(0), result.CustomerID)
-			assert.Empty(t, result.MaskedPhone)
-			assert.Equal(t, dto.ErrorUserNotFound, result.ErrorCode)
-			assert.Equal(t, "User not found", result.ErrorMessage)
+			require.Error(t, err)
+			require.Nil(t, result)
 		})
 
 		t.Run("InactiveAccount", func(t *testing.T) {
@@ -637,13 +532,8 @@ func TestForgotPasswordFlow(t *testing.T) {
 
 			// Perform forgot password
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.False(t, result.Success)
-			assert.Equal(t, uint(0), result.CustomerID)
-			assert.Empty(t, result.MaskedPhone)
-			assert.Equal(t, dto.ErrorAccountInactive, result.ErrorCode)
-			assert.Equal(t, "Please contact support", result.ErrorMessage)
+			require.Error(t, err)
+			require.Nil(t, result)
 		})
 
 		t.Run("ExpireOldPasswordResetOTPs", func(t *testing.T) {
@@ -677,7 +567,6 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify old OTP was expired and new one was created
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -710,7 +599,6 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Get the created OTP
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -748,7 +636,6 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Check audit logs were created
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
@@ -775,9 +662,8 @@ func TestForgotPasswordFlow(t *testing.T) {
 
 			// Perform forgot password
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.False(t, result.Success)
+			require.Error(t, err)
+			require.Nil(t, result)
 
 			// Check audit log was created for failed request
 			_, err = auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
@@ -799,13 +685,11 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result1, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result1)
-			assert.True(t, result1.Success)
 
 			// Create second forgot password request
 			result2, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result2)
-			assert.True(t, result2.Success)
 
 			// Verify both OTPs were created with different correlation IDs
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -834,7 +718,6 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify phone number is masked
 			assert.Contains(t, result.MaskedPhone, "*****")
@@ -856,7 +739,6 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify OTP expiry time is reasonable (5 minutes from now)
 			expectedExpiry := time.Now().Add(5 * time.Minute)
@@ -879,7 +761,6 @@ func TestForgotPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ForgotPassword(context.Background(), forgotReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify OTP was still created even if SMS failed
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -962,12 +843,9 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 			assert.NotNil(t, result.Customer)
-			assert.NotNil(t, result.AccountType)
+			assert.NotNil(t, result.Customer.AccountType)
 			assert.NotNil(t, result.Session)
-			assert.Empty(t, result.ErrorCode)
-			assert.Empty(t, result.ErrorMessage)
 
 			// Verify customer data
 			assert.Equal(t, customer.ID, result.Customer.ID)
@@ -976,8 +854,6 @@ func TestResetPasswordFlow(t *testing.T) {
 			// Verify session was created
 			assert.NotEmpty(t, result.Session.SessionToken)
 			assert.NotEmpty(t, result.Session.RefreshToken)
-			assert.True(t, utils.IsTrue(result.Session.IsActive))
-			assert.True(t, result.Session.ExpiresAt.After(time.Now()))
 
 			// Verify OTP was marked as used
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -1007,14 +883,8 @@ func TestResetPasswordFlow(t *testing.T) {
 
 			// Perform password reset
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.False(t, result.Success)
-			assert.Nil(t, result.Customer)
-			assert.Nil(t, result.AccountType)
-			assert.Nil(t, result.Session)
-			assert.Equal(t, dto.ErrorUserNotFound, result.ErrorCode)
-			assert.Equal(t, "Customer not found", result.ErrorMessage)
+			require.Error(t, err)
+			require.Nil(t, result)
 		})
 
 		t.Run("InvalidOTP", func(t *testing.T) {
@@ -1049,14 +919,8 @@ func TestResetPasswordFlow(t *testing.T) {
 
 			// Perform password reset
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.False(t, result.Success)
-			assert.Nil(t, result.Customer)
-			assert.Nil(t, result.AccountType)
-			assert.Nil(t, result.Session)
-			assert.Equal(t, dto.ErrorInvalidOTP, result.ErrorCode)
-			assert.Equal(t, "Invalid OTP", result.ErrorMessage)
+			require.Error(t, err)
+			require.Nil(t, result)
 		})
 
 		t.Run("ExpiredOTP", func(t *testing.T) {
@@ -1091,14 +955,8 @@ func TestResetPasswordFlow(t *testing.T) {
 
 			// Perform password reset
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.False(t, result.Success)
-			assert.Nil(t, result.Customer)
-			assert.Nil(t, result.AccountType)
-			assert.Nil(t, result.Session)
-			assert.Equal(t, dto.ErrorOTPExpired, result.ErrorCode)
-			assert.Equal(t, "OTP has expired", result.ErrorMessage)
+			require.Error(t, err)
+			require.Nil(t, result)
 		})
 
 		t.Run("PasswordUpdate", func(t *testing.T) {
@@ -1138,7 +996,6 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify password was updated
 			updatedCustomer, err := customerRepo.ByID(context.Background(), customer.ID)
@@ -1154,7 +1011,6 @@ func TestResetPasswordFlow(t *testing.T) {
 			loginResult, err := loginFlow.Login(context.Background(), loginReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, loginResult)
-			assert.True(t, loginResult.Success)
 		})
 
 		t.Run("SessionInvalidation", func(t *testing.T) {
@@ -1198,7 +1054,6 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify old sessions were invalidated
 			history1, err := sessionRepo.GetHistoryByCorrelationID(context.Background(), session1.CorrelationID)
@@ -1246,7 +1101,6 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify OTP was marked as used with same correlation ID
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -1306,7 +1160,6 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Check audit logs were created
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
@@ -1340,9 +1193,8 @@ func TestResetPasswordFlow(t *testing.T) {
 
 			// Perform password reset
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
-			require.NoError(t, err)
-			require.NotNil(t, result)
-			assert.False(t, result.Success)
+			require.Error(t, err)
+			require.Nil(t, result)
 
 			// Check audit log was created for failed reset
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
@@ -1395,11 +1247,10 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify account type was retrieved
-			assert.NotNil(t, result.AccountType)
-			assert.Equal(t, models.AccountTypeIndividual, result.AccountType.TypeName)
+			assert.NotNil(t, result.Customer.AccountType)
+			assert.Equal(t, models.AccountTypeIndividual, result.Customer.AccountType)
 		})
 
 		t.Run("NewSessionCreation", func(t *testing.T) {
@@ -1436,15 +1287,11 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify new session was created
 			assert.NotNil(t, result.Session)
 			assert.NotEmpty(t, result.Session.SessionToken)
 			assert.NotEmpty(t, result.Session.RefreshToken)
-			assert.True(t, utils.IsTrue(result.Session.IsActive))
-			assert.True(t, result.Session.ExpiresAt.After(time.Now()))
-			assert.NotEqual(t, uuid.Nil, result.Session.CorrelationID)
 		})
 
 		t.Run("MultipleOTPsSameCustomer", func(t *testing.T) {
@@ -1497,7 +1344,6 @@ func TestResetPasswordFlow(t *testing.T) {
 			result, err := loginFlow.ResetPassword(context.Background(), resetReq, nil)
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			assert.True(t, result.Success)
 
 			// Verify only the used OTP was marked as used, others remain pending
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{

@@ -395,8 +395,7 @@ func TestAuditLog(t *testing.T) {
 			assert.Equal(t, "login_failed", models.AuditActionLoginFailed)
 			assert.Equal(t, "password_reset_requested", models.AuditActionPasswordResetRequested)
 			assert.Equal(t, "password_reset_completed", models.AuditActionPasswordResetCompleted)
-			assert.Equal(t, "otp_verified", models.AuditActionOTPVerified)
-			assert.Equal(t, "otp_failed", models.AuditActionOTPFailed)
+			assert.Equal(t, "otp_verification_failed", models.AuditActionOTPVerificationFailed)
 		})
 
 		t.Run("TableName", func(t *testing.T) {
