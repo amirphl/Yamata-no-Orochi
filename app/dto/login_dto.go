@@ -11,32 +11,10 @@ type LoginRequest struct {
 	Password   string `json:"password" validate:"required,min=8,max=100" example:"SecurePass123!"`
 }
 
-// LoginResponse represents the successful login response
+// LoginResponse represents the result of a login attempt
 type LoginResponse struct {
-	Success bool   `json:"success" example:"true"`
-	Message string `json:"message" example:"Login successful"`
-	Data    struct {
-		AccessToken  string    `json:"access_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
-		RefreshToken string    `json:"refresh_token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."`
-		TokenType    string    `json:"token_type" example:"Bearer"`
-		ExpiresIn    int       `json:"expires_in" example:"3600"`
-		User         UserInfo  `json:"user"`
-		ExpiresAt    time.Time `json:"expires_at" example:"2024-01-15T16:30:00Z"`
-	} `json:"data"`
-}
-
-// UserInfo represents user information returned in login response
-type UserInfo struct {
-	ID                      uint   `json:"id" example:"123"`
-	UUID                    string `json:"uuid" example:"550e8400-e29b-41d4-a716-446655440000"`
-	Email                   string `json:"email" example:"user@example.com"`
-	RepresentativeFirstName string `json:"representative_first_name" example:"John"`
-	RepresentativeLastName  string `json:"representative_last_name" example:"Doe"`
-	RepresentativeMobile    string `json:"representative_mobile" example:"+989123456789"`
-	AccountType             string `json:"account_type" example:"individual"`
-	CompanyName             string `json:"company_name,omitempty" example:"Tech Company Ltd"`
-	IsActive                *bool  `json:"is_active" example:"true"`
-	CreatedAt               string `json:"created_at" example:"2024-01-15T10:30:00Z"`
+	Customer AuthCustomerDTO
+	Session  CustomerSessionDTO
 }
 
 // ForgotPasswordRequest represents the request to initiate password reset
@@ -44,15 +22,11 @@ type ForgotPasswordRequest struct {
 	Identifier string `json:"identifier" validate:"required,min=3,max=255" example:"user@example.com or +989123456789"`
 }
 
-// ForgotPasswordResponse represents the response after requesting password reset
-type ForgotPasswordResponse struct {
-	Success bool   `json:"success" example:"true"`
-	Message string `json:"message" example:"Password reset OTP sent to your mobile number"`
-	Data    struct {
-		CustomerID  uint   `json:"customer_id" example:"123"`
-		MaskedPhone string `json:"masked_phone" example:"+9891234*****"`
-		ExpiresIn   int    `json:"expires_in" example:"300"`
-	} `json:"data"`
+// ForgetPasswordResponse represents the result of a password reset request
+type ForgetPasswordResponse struct {
+	CustomerID  uint
+	MaskedPhone string
+	OTPExpiry   time.Time
 }
 
 // ResetPasswordRequest represents the request to reset password with OTP
@@ -63,65 +37,10 @@ type ResetPasswordRequest struct {
 	ConfirmPassword string `json:"confirm_password" validate:"required,eqfield=NewPassword" example:"NewSecurePass123!"`
 }
 
-// ResetPasswordResponse represents the response after successful password reset
+// ResetPasswordResponse represents the result of a password reset request
 type ResetPasswordResponse struct {
-	Success bool   `json:"success" example:"true"`
-	Message string `json:"message" example:"New password saved"`
-	Data    struct {
-		PasswordChangedAt time.Time `json:"password_changed_at" example:"2024-01-15T16:30:00Z"`
-	} `json:"data"`
-}
-
-// LoginErrorResponse represents error responses for login operations
-type LoginErrorResponse struct {
-	Success bool   `json:"success" example:"false"`
-	Message string `json:"message" example:"User not found"`
-	Error   struct {
-		Code    string `json:"code" example:"USER_NOT_FOUND"`
-		Details string `json:"details,omitempty" example:"No user found with the provided email or mobile number"`
-	} `json:"error"`
-}
-
-// Common error codes for login operations
-const (
-	ErrorUserNotFound      = "USER_NOT_FOUND"
-	ErrorIncorrectPassword = "INCORRECT_PASSWORD"
-	ErrorAccountInactive   = "ACCOUNT_INACTIVE"
-	ErrorInvalidOTP        = "INVALID_OTP"
-	ErrorOTPExpired        = "OTP_EXPIRED"
-	ErrorTooManyAttempts   = "TOO_MANY_ATTEMPTS"
-)
-
-// APIResponse represents the standard API response structure
-type APIResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
-	Error   any    `json:"error,omitempty"`
-}
-
-// ErrorDetail represents error details in API responses
-type ErrorDetail struct {
-	Code    string `json:"code"`
-	Details any    `json:"details,omitempty"`
-}
-
-func (dto *LoginResponse) SetUserInfo(customerID uint, uuid, email, firstName, lastName, mobile, accountType string, companyName *string, isActive *bool, createdAt time.Time) {
-	dto.Data.User = UserInfo{
-		ID:                      customerID,
-		UUID:                    uuid,
-		Email:                   email,
-		RepresentativeFirstName: firstName,
-		RepresentativeLastName:  lastName,
-		RepresentativeMobile:    mobile,
-		AccountType:             accountType,
-		IsActive:                isActive,
-		CreatedAt:               createdAt.Format(time.RFC3339),
-	}
-
-	if companyName != nil {
-		dto.Data.User.CompanyName = *companyName
-	}
+	Customer AuthCustomerDTO
+	Session  CustomerSessionDTO
 }
 
 // MaskPhoneNumber masks the middle digits of a phone number for security
@@ -140,4 +59,29 @@ func MaskPhoneNumber(phone string) string {
 	end := len(phone) - start
 	masked := phone[:start] + "*****" + phone[end:]
 	return masked
+}
+
+// AuthCustomerDTO represents minimal customer data for authentication responses
+type AuthCustomerDTO struct {
+	ID                      uint    `json:"id" example:"123"`
+	UUID                    string  `json:"uuid" example:"550e8400-e29b-41d4-a716-446655440000"`
+	Email                   string  `json:"email" example:"user@example.com"`
+	RepresentativeFirstName string  `json:"representative_first_name" example:"John"`
+	RepresentativeLastName  string  `json:"representative_last_name" example:"Doe"`
+	RepresentativeMobile    string  `json:"representative_mobile" example:"+989123456789"`
+	AccountType             string  `json:"account_type" example:"individual"`
+	CompanyName             *string `json:"company_name,omitempty" example:"Tech Company Ltd"`
+	IsActive                *bool   `json:"is_active" example:"true"`
+	IsEmailVerified         *bool   `json:"is_email_verified" example:"true"`
+	IsMobileVerified        *bool   `json:"is_mobile_verified" example:"true"`
+	CreatedAt               string  `json:"created_at" example:"2024-01-15T10:30:00Z"`
+	ReferrerAgencyID        *uint   `json:"referrer_agency_id,omitempty" example:"123"`
+}
+
+type CustomerSessionDTO struct {
+	SessionToken string  `json:"session_token" example:"1234567890"`
+	RefreshToken *string `json:"refresh_token,omitempty" example:"1234567890"`
+	ExpiresIn    int     `json:"expires_in" example:"3600"`
+	TokenType    string  `json:"token_type" example:"Bearer"`
+	CreatedAt    string  `json:"created_at" example:"2024-01-15T10:30:00Z"`
 }

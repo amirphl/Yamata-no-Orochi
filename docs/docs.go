@@ -51,7 +51,18 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.ForgotPasswordResponse"
+                                            "type": "object",
+                                            "properties": {
+                                                "customer_id": {
+                                                    "type": "integer"
+                                                },
+                                                "expires_in": {
+                                                    "type": "integer"
+                                                },
+                                                "masked_phone": {
+                                                    "type": "string"
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -105,7 +116,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Login successful",
+                        "description": "Login successful with tokens",
                         "schema": {
                             "allOf": [
                                 {
@@ -115,7 +126,24 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.LoginResponse"
+                                            "type": "object",
+                                            "properties": {
+                                                "access_token": {
+                                                    "type": "string"
+                                                },
+                                                "customer": {
+                                                    "$ref": "#/definitions/dto.AuthCustomerDTO"
+                                                },
+                                                "expires_in": {
+                                                    "type": "integer"
+                                                },
+                                                "refresh_token": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string"
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -143,7 +171,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/auth/resend-otp/{customer_id}": {
+        "/api/v1/auth/resend-otp": {
             "post": {
                 "description": "Resend OTP code to user's mobile number",
                 "consumes": [
@@ -158,18 +186,40 @@ const docTemplate = `{
                 "summary": "Resend OTP",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "Customer ID",
-                        "name": "customer_id",
-                        "in": "path",
-                        "required": true
+                        "description": "OTP resend request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.OTPResendRequest"
+                        }
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OTP resent successfully",
                         "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "masked_otp_target": {
+                                                    "type": "string"
+                                                },
+                                                "otp_sent": {
+                                                    "type": "boolean"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -219,7 +269,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "Password reset successful",
+                        "description": "Password reset successful with tokens",
                         "schema": {
                             "allOf": [
                                 {
@@ -229,7 +279,27 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.ResetPasswordResponse"
+                                            "type": "object",
+                                            "properties": {
+                                                "access_token": {
+                                                    "type": "string"
+                                                },
+                                                "customer": {
+                                                    "$ref": "#/definitions/dto.AuthCustomerDTO"
+                                                },
+                                                "expires_in": {
+                                                    "type": "integer"
+                                                },
+                                                "password_changed_at": {
+                                                    "type": "string"
+                                                },
+                                                "refresh_token": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string"
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -357,7 +427,24 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.OTPVerificationResponse"
+                                            "type": "object",
+                                            "properties": {
+                                                "access_token": {
+                                                    "type": "string"
+                                                },
+                                                "customer": {
+                                                    "$ref": "#/definitions/dto.AuthCustomerDTO"
+                                                },
+                                                "expires_in": {
+                                                    "type": "integer"
+                                                },
+                                                "refresh_token": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string"
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -423,59 +510,60 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.CustomerDTO": {
+        "dto.AuthCustomerDTO": {
             "type": "object",
             "properties": {
                 "account_type": {
-                    "type": "string"
-                },
-                "company_address": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "individual"
                 },
                 "company_name": {
-                    "type": "string"
-                },
-                "company_phone": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "Tech Company Ltd"
                 },
                 "created_at": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "2024-01-15T10:30:00Z"
                 },
                 "email": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "user@example.com"
                 },
                 "id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 123
                 },
                 "is_active": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "is_email_verified": {
-                    "type": "boolean"
+                    "type": "boolean",
+                    "example": true
                 },
                 "is_mobile_verified": {
-                    "type": "boolean"
-                },
-                "national_id": {
-                    "type": "string"
-                },
-                "postal_code": {
-                    "type": "string"
+                    "type": "boolean",
+                    "example": true
                 },
                 "referrer_agency_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "example": 123
                 },
                 "representative_first_name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "John"
                 },
                 "representative_last_name": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "Doe"
                 },
                 "representative_mobile": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "+989123456789"
                 },
                 "uuid": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
                 }
             }
         },
@@ -490,36 +578,6 @@ const docTemplate = `{
                     "maxLength": 255,
                     "minLength": 3,
                     "example": "user@example.com or +989123456789"
-                }
-            }
-        },
-        "dto.ForgotPasswordResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "properties": {
-                        "customer_id": {
-                            "type": "integer",
-                            "example": 123
-                        },
-                        "expires_in": {
-                            "type": "integer",
-                            "example": 300
-                        },
-                        "masked_phone": {
-                            "type": "string",
-                            "example": "+9891234*****"
-                        }
-                    }
-                },
-                "message": {
-                    "type": "string",
-                    "example": "Password reset OTP sent to your mobile number"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": true
                 }
             }
         },
@@ -544,44 +602,22 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.LoginResponse": {
+        "dto.OTPResendRequest": {
             "type": "object",
+            "required": [
+                "customer_id",
+                "otp_type"
+            ],
             "properties": {
-                "data": {
-                    "type": "object",
-                    "properties": {
-                        "access_token": {
-                            "type": "string",
-                            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                        },
-                        "expires_at": {
-                            "type": "string",
-                            "example": "2024-01-15T16:30:00Z"
-                        },
-                        "expires_in": {
-                            "type": "integer",
-                            "example": 3600
-                        },
-                        "refresh_token": {
-                            "type": "string",
-                            "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-                        },
-                        "token_type": {
-                            "type": "string",
-                            "example": "Bearer"
-                        },
-                        "user": {
-                            "$ref": "#/definitions/dto.UserInfo"
-                        }
-                    }
+                "customer_id": {
+                    "type": "integer"
                 },
-                "message": {
+                "otp_type": {
                     "type": "string",
-                    "example": "Login successful"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": true
+                    "enum": [
+                        "mobile",
+                        "email"
+                    ]
                 }
             }
         },
@@ -605,23 +641,6 @@ const docTemplate = `{
                         "mobile",
                         "email"
                     ]
-                }
-            }
-        },
-        "dto.OTPVerificationResponse": {
-            "type": "object",
-            "properties": {
-                "customer": {
-                    "$ref": "#/definitions/dto.CustomerDTO"
-                },
-                "message": {
-                    "type": "string"
-                },
-                "refresh_token": {
-                    "type": "string"
-                },
-                "token": {
-                    "type": "string"
                 }
             }
         },
@@ -651,28 +670,6 @@ const docTemplate = `{
                 "otp_code": {
                     "type": "string",
                     "example": "123456"
-                }
-            }
-        },
-        "dto.ResetPasswordResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "properties": {
-                        "password_changed_at": {
-                            "type": "string",
-                            "example": "2024-01-15T16:30:00Z"
-                        }
-                    }
-                },
-                "message": {
-                    "type": "string",
-                    "example": "New password saved"
-                },
-                "success": {
-                    "type": "boolean",
-                    "example": true
                 }
             }
         },
@@ -719,14 +716,18 @@ const docTemplate = `{
                     "maxLength": 255
                 },
                 "national_id": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 20,
+                    "minLength": 10
                 },
                 "password": {
                     "type": "string",
                     "minLength": 8
                 },
                 "postal_code": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 20,
+                    "minLength": 10
                 },
                 "referrer_agency_code": {
                     "description": "Optional agency referral",
@@ -761,51 +762,6 @@ const docTemplate = `{
                 "otp_target": {
                     "description": "Mobile number (masked for security)",
                     "type": "string"
-                }
-            }
-        },
-        "dto.UserInfo": {
-            "type": "object",
-            "properties": {
-                "account_type": {
-                    "type": "string",
-                    "example": "individual"
-                },
-                "company_name": {
-                    "type": "string",
-                    "example": "Tech Company Ltd"
-                },
-                "created_at": {
-                    "type": "string",
-                    "example": "2024-01-15T10:30:00Z"
-                },
-                "email": {
-                    "type": "string",
-                    "example": "user@example.com"
-                },
-                "id": {
-                    "type": "integer",
-                    "example": 123
-                },
-                "is_active": {
-                    "type": "boolean",
-                    "example": true
-                },
-                "representative_first_name": {
-                    "type": "string",
-                    "example": "John"
-                },
-                "representative_last_name": {
-                    "type": "string",
-                    "example": "Doe"
-                },
-                "representative_mobile": {
-                    "type": "string",
-                    "example": "+989123456789"
-                },
-                "uuid": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
                 }
             }
         }

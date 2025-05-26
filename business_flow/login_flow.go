@@ -21,9 +21,9 @@ import (
 
 // LoginFlow handles user authentication and password reset operations
 type LoginFlow interface {
-	Login(ctx context.Context, request *dto.LoginRequest, metadata *ClientMetadata) (*LoginResult, error)
-	ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, metadata *ClientMetadata) (*PasswordResetResult, error)
-	ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, metadata *ClientMetadata) (*LoginResult, error)
+	Login(ctx context.Context, request *dto.LoginRequest, metadata *ClientMetadata) (*dto.LoginResponse, error)
+	ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, metadata *ClientMetadata) (*dto.ForgetPasswordResponse, error)
+	ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, metadata *ClientMetadata) (*dto.ResetPasswordResponse, error)
 }
 
 // LoginFlowImpl implements the login business flow
@@ -61,160 +61,96 @@ func NewLoginFlow(
 	}
 }
 
-// LoginResult represents the result of a login attempt
-type LoginResult struct {
-	Success      bool
-	Customer     *models.Customer
-	AccountType  *models.AccountType
-	Session      *models.CustomerSession
-	ErrorCode    string
-	ErrorMessage string
-}
-
-// PasswordResetResult represents the result of a password reset request
-type PasswordResetResult struct {
-	Success      bool
-	CustomerID   uint
-	MaskedPhone  string
-	OTPExpiry    time.Time
-	ErrorCode    string
-	ErrorMessage string
-}
-
 // Login authenticates a user with email/mobile and password
-func (lf *LoginFlowImpl) Login(ctx context.Context, request *dto.LoginRequest, metadata *ClientMetadata) (*LoginResult, error) {
-	// Start transaction for login process
-	return lf.WithLoginTransaction(ctx, func(ctx context.Context) (*LoginResult, error) {
-		// Find customer by email or mobile
-		customer, err := lf.FindCustomerByIdentifier(ctx, request.Identifier)
-		if err != nil {
-			errMsg := fmt.Sprintf("Failed to search customer: %s", request.Identifier)
-			_ = lf.LogLoginAttempt(ctx, nil, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
+func (lf *LoginFlowImpl) Login(ctx context.Context, request *dto.LoginRequest, metadata *ClientMetadata) (*dto.LoginResponse, error) {
+	var customer *models.Customer
 
-			return nil, NewBusinessError("CUSTOMER_SEARCH_FAILED", "Failed to search customer", err)
+	// Start transaction for login process
+	resp, err := lf.WithLoginTransaction(ctx, func(ctx context.Context) (*dto.LoginResponse, error) {
+		// Find customer by email or mobile
+		var err error
+		customer, err = lf.FindCustomerByIdentifier(ctx, request.Identifier)
+		if err != nil {
+			return nil, err
 		}
 		if customer == nil {
-			errMsg := fmt.Sprintf("User not found: %s", request.Identifier)
-			_ = lf.LogLoginAttempt(ctx, nil, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
-
-			return &LoginResult{
-				Success:      false,
-				ErrorCode:    dto.ErrorUserNotFound,
-				ErrorMessage: "User not found",
-			}, nil
+			return nil, ErrCustomerNotFound
 		}
 
 		// Check if account is active
 		if !utils.IsTrue(customer.IsActive) {
-			errMsg := fmt.Sprintf("Login attempt on inactive account: %d", customer.ID)
-			_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
-
-			return &LoginResult{
-				Success:      false,
-				ErrorCode:    dto.ErrorAccountInactive,
-				ErrorMessage: "Please contact support",
-			}, nil
+			return nil, ErrAccountInactive
 		}
 
 		// Verify password
 		if err := bcrypt.CompareHashAndPassword([]byte(customer.PasswordHash), []byte(request.Password)); err != nil {
-			errMsg := fmt.Sprintf("Incorrect password for customer: %d", customer.ID)
-			_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
-
-			return &LoginResult{
-				Success:      false,
-				ErrorCode:    dto.ErrorIncorrectPassword,
-				ErrorMessage: "Incorrect password",
-			}, nil
+			return nil, ErrIncorrectPassword
 		}
 
 		// Get account type information
 		accountType, err := lf.accountTypeRepo.ByID(ctx, customer.AccountTypeID)
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to get account type: %d", customer.AccountTypeID)
-			_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("ACCOUNT_TYPE_FETCH_FAILED", "Failed to get account type", err)
+			return nil, err
 		}
 		if accountType == nil {
-			errMsg := fmt.Sprintf("Account type not found: %d", customer.AccountTypeID)
-			_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("ACCOUNT_TYPE_FETCH_FAILED", "Failed to get account type", ErrAccountTypeNotFound)
+			return nil, ErrAccountTypeNotFound
 		}
 
 		// Create new session
 		session, err := lf.CreateSession(ctx, customer.ID, metadata)
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to create session: %d", customer.ID)
-			_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("SESSION_CREATION_FAILED", "Failed to create session", err)
+			return nil, err
 		}
 
-		// Log successful login
-		msg := fmt.Sprintf("User logged in successfully: %d", customer.ID)
-		_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginSuccess, msg, true, nil, metadata)
-
-		return &LoginResult{
-			Success:     true,
-			Customer:    customer,
-			AccountType: accountType,
-			Session:     session,
+		return &dto.LoginResponse{
+			Customer: ToAuthCustomerDTO(*customer),
+			Session:  ToCustomerSessionDTO(*session),
 		}, nil
 	})
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Login failed: %s", err.Error())
+		_ = lf.LogLoginAttempt(ctx, nil, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
+
+		return nil, NewBusinessError("LOGIN_FAILED", "Login failed", err)
+	} else {
+		msg := fmt.Sprintf("User logged in successfully: %d", resp.Customer.ID)
+		_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginSuccess, msg, true, nil, metadata)
+	}
+
+	return resp, nil
 }
 
 // ForgotPassword initiates the password reset process
-func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, metadata *ClientMetadata) (*PasswordResetResult, error) {
-	// Start transaction for password reset process
-	return lf.WithPasswordResetTransaction(ctx, func(ctx context.Context) (*PasswordResetResult, error) {
-		// Find customer by email or mobile
-		customer, err := lf.FindCustomerByIdentifier(ctx, request.Identifier)
-		if err != nil {
-			errMsg := fmt.Sprintf("Failed to search customer: %s", request.Identifier)
-			_ = lf.LogLoginAttempt(ctx, nil, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
+func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, metadata *ClientMetadata) (*dto.ForgetPasswordResponse, error) {
+	var customer *models.Customer
 
-			return nil, NewBusinessError("CUSTOMER_SEARCH_FAILED", "Failed to search customer", err)
+	// Start transaction for password reset process
+	resp, err := lf.WithForgotPasswordTransaction(ctx, func(ctx context.Context) (*dto.ForgetPasswordResponse, error) {
+		// Find customer by email or mobile
+		var err error
+		customer, err = lf.FindCustomerByIdentifier(ctx, request.Identifier)
+		if err != nil {
+			return nil, err
 		}
 		if customer == nil {
-			errMsg := fmt.Sprintf("Password reset requested for non-existent user: %s", request.Identifier)
-			_ = lf.LogPasswordResetAttempt(ctx, nil, models.AuditActionPasswordResetRequested, errMsg, false, &errMsg, metadata)
-
-			return &PasswordResetResult{
-				Success:      false,
-				ErrorCode:    dto.ErrorUserNotFound,
-				ErrorMessage: "User not found",
-			}, nil
+			return nil, ErrCustomerNotFound
 		}
 
 		// Check if account is active
 		if !utils.IsTrue(customer.IsActive) {
-			errMsg := fmt.Sprintf("Password reset attempted on inactive account: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetRequested, errMsg, false, &errMsg, metadata)
-
-			return &PasswordResetResult{
-				Success:      false,
-				ErrorCode:    dto.ErrorAccountInactive,
-				ErrorMessage: "Please contact support",
-			}, nil
+			return nil, ErrAccountInactive
 		}
 
 		// Expire any existing password reset OTPs
 		if err := lf.ExpireOldPasswordResetOTPs(ctx, customer.ID); err != nil {
-			errMsg := fmt.Sprintf("Failed to expire old OTPs: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetRequested, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("OTP_EXPIRATION_FAILED", "Failed to expire old OTPs", err)
+			return nil, err
 		}
 
 		// Generate new OTP
 		otpCode, err := GenerateOTP()
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to generate OTP: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetRequested, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("OTP_GENERATION_FAILED", "Failed to generate OTP", err)
+			return nil, err
 		}
 
 		ipAddress := "127.0.0.1"
@@ -239,10 +175,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.Forgot
 		}
 
 		if err := lf.otpRepo.Save(ctx, otp); err != nil {
-			errMsg := fmt.Sprintf("Failed to save OTP: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetRequested, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("OTP_SAVE_FAILED", "Failed to save OTP", err)
+			return nil, err
 		}
 
 		// Send OTP via SMS
@@ -250,44 +183,44 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.Forgot
 		if err := lf.notificationSvc.SendSMS(customer.RepresentativeMobile, smsMessage); err != nil {
 			// Log SMS failure but don't fail the entire process
 			errMsg := fmt.Sprintf("OTP generated but SMS failed: %v", err)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetRequested, errMsg, false, &errMsg, metadata)
+			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
 			// TODO: Retry sending OTP
 		}
 
-		// Log successful password reset request
-		msg := fmt.Sprintf("Password reset OTP sent successfully: %d", customer.ID)
-		_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetRequested, msg, true, nil, metadata)
-
-		return &PasswordResetResult{
-			Success:     true,
+		return &dto.ForgetPasswordResponse{
 			CustomerID:  customer.ID,
 			MaskedPhone: dto.MaskPhoneNumber(customer.RepresentativeMobile),
 			OTPExpiry:   otp.ExpiresAt,
 		}, nil
 	})
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Forgot password failed: %s", err.Error())
+		_ = lf.LogPasswordResetAttempt(ctx, nil, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
+
+		return nil, NewBusinessError("FORGOT_PASSWORD_FAILED", "Forgot password failed", err)
+	} else {
+		msg := fmt.Sprintf("Password reset OTP sent successfully: %d", resp.CustomerID)
+		_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetRequested, msg, true, nil, metadata)
+	}
+
+	return resp, nil
 }
 
 // ResetPassword completes the password reset process with OTP verification
-func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, metadata *ClientMetadata) (*LoginResult, error) {
-	// Start transaction for password reset completion
-	return lf.WithLoginTransaction(ctx, func(ctx context.Context) (*LoginResult, error) {
-		// Find the customer
-		customer, err := lf.customerRepo.ByID(ctx, request.CustomerID)
-		if err != nil {
-			errMsg := fmt.Sprintf("Failed to find customer: %d", request.CustomerID)
-			_ = lf.LogPasswordResetAttempt(ctx, nil, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
+func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, metadata *ClientMetadata) (*dto.ResetPasswordResponse, error) {
+	var customer *models.Customer
 
-			return nil, NewBusinessError("CUSTOMER_SEARCH_FAILED", "Failed to find customer", err)
+	// Start transaction for password reset completion
+	resp, err := lf.WithResetPasswordTransaction(ctx, func(ctx context.Context) (*dto.ResetPasswordResponse, error) {
+		// Find the customer
+		var err error
+		customer, err = lf.customerRepo.ByID(ctx, request.CustomerID)
+		if err != nil {
+			return nil, err
 		}
 		if customer == nil {
-			errMsg := fmt.Sprintf("Customer not found: %d", request.CustomerID)
-			_ = lf.LogPasswordResetAttempt(ctx, nil, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return &LoginResult{
-				Success:      false,
-				ErrorCode:    dto.ErrorUserNotFound,
-				ErrorMessage: "Customer not found",
-			}, nil
+			return nil, ErrCustomerNotFound
 		}
 
 		// Find and verify OTP
@@ -301,10 +234,7 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 
 		otps, err := lf.otpRepo.ByFilter(ctx, otpFilter, "", 0, 0)
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to find OTP: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("OTP_SEARCH_FAILED", "Failed to find OTP", err)
+			return nil, err
 		}
 
 		var validOTP *models.OTPVerification
@@ -319,44 +249,24 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 			// Check if there was an OTP but it's expired or wrong
 			for _, otp := range otps {
 				if time.Now().After(otp.ExpiresAt) {
-					errMsg := fmt.Sprintf("Expired OTP used for password reset: %d", customer.ID)
-					_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-					return &LoginResult{
-						Success:      false,
-						ErrorCode:    dto.ErrorOTPExpired,
-						ErrorMessage: "OTP has expired",
-					}, nil
+					return nil, ErrOTPExpired
 				}
 			}
 
 			// Invalid OTP
-			errMsg := fmt.Sprintf("Invalid OTP used for password reset: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return &LoginResult{
-				Success:      false,
-				ErrorCode:    dto.ErrorInvalidOTP,
-				ErrorMessage: "Invalid OTP",
-			}, nil
+			return nil, ErrInvalidOTPCode
 		}
 
 		// Hash the new password
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(request.NewPassword), bcrypt.DefaultCost)
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to hash password: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("PASSWORD_HASH_FAILED", "Failed to hash password", err)
+			return nil, err
 		}
 
 		// Update customer password (maintain referential integrity)
 		err = lf.customerRepo.UpdatePassword(ctx, customer.ID, string(hashedPassword))
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to update customer password: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("PASSWORD_UPDATE_FAILED", "Failed to update customer password", err)
+			return nil, err
 		}
 
 		// Mark OTP as used
@@ -367,55 +277,46 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 		usedOTP.CreatedAt = time.Now()
 
 		if err := lf.otpRepo.Save(ctx, &usedOTP); err != nil {
-			errMsg := fmt.Sprintf("Failed to mark OTP as used: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("OTP_MARK_USED_FAILED", "Failed to mark OTP as used", err)
+			return nil, err
 		}
 
 		// Invalidate all existing sessions for this customer
 		if err := lf.InvalidateAllSessions(ctx, customer.ID); err != nil {
-			errMsg := fmt.Sprintf("Failed to invalidate sessions: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("SESSION_INVALIDATION_FAILED", "Failed to invalidate sessions", err)
+			return nil, err
 		}
 
 		// Get account type information
 		accountType, err := lf.accountTypeRepo.ByID(ctx, customer.AccountTypeID)
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to get account type: %d", customer.AccountTypeID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("ACCOUNT_TYPE_FETCH_FAILED", "Failed to get account type", err)
+			return nil, err
 		}
 		if accountType == nil {
-			errMsg := fmt.Sprintf("Account type not found: %d", customer.AccountTypeID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("ACCOUNT_TYPE_FETCH_FAILED", "Failed to get account type", ErrAccountTypeNotFound)
+			return nil, ErrAccountTypeNotFound
 		}
 
 		// Create new session for the user
 		session, err := lf.CreateSession(ctx, customer.ID, metadata)
 		if err != nil {
-			errMsg := fmt.Sprintf("Failed to create session: %d", customer.ID)
-			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-
-			return nil, NewBusinessError("SESSION_CREATION_FAILED", "Failed to create session", err)
+			return nil, err
 		}
 
-		// Log successful password reset
-		msg := fmt.Sprintf("Password reset completed successfully: %d", customer.ID)
-		_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetCompleted, msg, true, nil, metadata)
-
-		return &LoginResult{
-			Success:     true,
-			Customer:    customer, // Use the existing customer (password updated in place)
-			AccountType: accountType,
-			Session:     session,
+		return &dto.ResetPasswordResponse{
+			Customer: ToAuthCustomerDTO(*customer),
+			Session:  ToCustomerSessionDTO(*session),
 		}, nil
 	})
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Password reset failed: %s", err.Error())
+		_ = lf.LogPasswordResetAttempt(ctx, nil, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
+
+		return nil, NewBusinessError("PASSWORD_RESET_FAILED", "Password reset failed", err)
+	} else {
+		msg := fmt.Sprintf("Password reset completed successfully: %d", resp.Customer.ID)
+		_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetCompleted, msg, true, nil, metadata)
+	}
+
+	return resp, nil
 }
 
 // Private helper methods
@@ -629,8 +530,8 @@ func (lf *LoginFlowImpl) LogPasswordResetAttempt(ctx context.Context, customer *
 	return lf.auditRepo.Save(ctx, audit)
 }
 
-func (lf *LoginFlowImpl) WithLoginTransaction(ctx context.Context, fn func(context.Context) (*LoginResult, error)) (*LoginResult, error) {
-	var result *LoginResult
+func (lf *LoginFlowImpl) WithLoginTransaction(ctx context.Context, fn func(context.Context) (*dto.LoginResponse, error)) (*dto.LoginResponse, error) {
+	var result *dto.LoginResponse
 	var fnErr error
 
 	err := repository.WithTransaction(ctx, lf.db, func(ctx context.Context) error {
@@ -644,8 +545,23 @@ func (lf *LoginFlowImpl) WithLoginTransaction(ctx context.Context, fn func(conte
 	return result, fnErr
 }
 
-func (lf *LoginFlowImpl) WithPasswordResetTransaction(ctx context.Context, fn func(context.Context) (*PasswordResetResult, error)) (*PasswordResetResult, error) {
-	var result *PasswordResetResult
+func (lf *LoginFlowImpl) WithForgotPasswordTransaction(ctx context.Context, fn func(context.Context) (*dto.ForgetPasswordResponse, error)) (*dto.ForgetPasswordResponse, error) {
+	var result *dto.ForgetPasswordResponse
+	var fnErr error
+
+	err := repository.WithTransaction(ctx, lf.db, func(ctx context.Context) error {
+		result, fnErr = fn(ctx)
+		return fnErr
+	})
+
+	if err != nil {
+		return nil, err
+	}
+	return result, fnErr
+}
+
+func (lf *LoginFlowImpl) WithResetPasswordTransaction(ctx context.Context, fn func(context.Context) (*dto.ResetPasswordResponse, error)) (*dto.ResetPasswordResponse, error) {
+	var result *dto.ResetPasswordResponse
 	var fnErr error
 
 	err := repository.WithTransaction(ctx, lf.db, func(ctx context.Context) error {

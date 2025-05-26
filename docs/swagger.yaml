@@ -8,41 +8,46 @@ definitions:
       success:
         type: boolean
     type: object
-  dto.CustomerDTO:
+  dto.AuthCustomerDTO:
     properties:
       account_type:
-        type: string
-      company_address:
+        example: individual
         type: string
       company_name:
-        type: string
-      company_phone:
+        example: Tech Company Ltd
         type: string
       created_at:
+        example: "2024-01-15T10:30:00Z"
         type: string
       email:
+        example: user@example.com
         type: string
       id:
+        example: 123
         type: integer
       is_active:
+        example: true
         type: boolean
       is_email_verified:
+        example: true
         type: boolean
       is_mobile_verified:
+        example: true
         type: boolean
-      national_id:
-        type: string
-      postal_code:
-        type: string
       referrer_agency_id:
+        example: 123
         type: integer
       representative_first_name:
+        example: John
         type: string
       representative_last_name:
+        example: Doe
         type: string
       representative_mobile:
+        example: "+989123456789"
         type: string
       uuid:
+        example: 550e8400-e29b-41d4-a716-446655440000
         type: string
     type: object
   dto.ForgotPasswordRequest:
@@ -54,27 +59,6 @@ definitions:
         type: string
     required:
     - identifier
-    type: object
-  dto.ForgotPasswordResponse:
-    properties:
-      data:
-        properties:
-          customer_id:
-            example: 123
-            type: integer
-          expires_in:
-            example: 300
-            type: integer
-          masked_phone:
-            example: +9891234*****
-            type: string
-        type: object
-      message:
-        example: Password reset OTP sent to your mobile number
-        type: string
-      success:
-        example: true
-        type: boolean
     type: object
   dto.LoginRequest:
     properties:
@@ -92,34 +76,18 @@ definitions:
     - identifier
     - password
     type: object
-  dto.LoginResponse:
+  dto.OTPResendRequest:
     properties:
-      data:
-        properties:
-          access_token:
-            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-            type: string
-          expires_at:
-            example: "2024-01-15T16:30:00Z"
-            type: string
-          expires_in:
-            example: 3600
-            type: integer
-          refresh_token:
-            example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-            type: string
-          token_type:
-            example: Bearer
-            type: string
-          user:
-            $ref: '#/definitions/dto.UserInfo'
-        type: object
-      message:
-        example: Login successful
+      customer_id:
+        type: integer
+      otp_type:
+        enum:
+        - mobile
+        - email
         type: string
-      success:
-        example: true
-        type: boolean
+    required:
+    - customer_id
+    - otp_type
     type: object
   dto.OTPVerificationRequest:
     properties:
@@ -136,17 +104,6 @@ definitions:
     - customer_id
     - otp_code
     - otp_type
-    type: object
-  dto.OTPVerificationResponse:
-    properties:
-      customer:
-        $ref: '#/definitions/dto.CustomerDTO'
-      message:
-        type: string
-      refresh_token:
-        type: string
-      token:
-        type: string
     type: object
   dto.ResetPasswordRequest:
     properties:
@@ -169,21 +126,6 @@ definitions:
     - customer_id
     - new_password
     - otp_code
-    type: object
-  dto.ResetPasswordResponse:
-    properties:
-      data:
-        properties:
-          password_changed_at:
-            example: "2024-01-15T16:30:00Z"
-            type: string
-        type: object
-      message:
-        example: New password saved
-        type: string
-      success:
-        example: true
-        type: boolean
     type: object
   dto.SignupRequest:
     properties:
@@ -211,11 +153,15 @@ definitions:
         maxLength: 255
         type: string
       national_id:
+        maxLength: 20
+        minLength: 10
         type: string
       password:
         minLength: 8
         type: string
       postal_code:
+        maxLength: 20
+        minLength: 10
         type: string
       referrer_agency_code:
         description: Optional agency referral
@@ -250,39 +196,6 @@ definitions:
         description: Mobile number (masked for security)
         type: string
     type: object
-  dto.UserInfo:
-    properties:
-      account_type:
-        example: individual
-        type: string
-      company_name:
-        example: Tech Company Ltd
-        type: string
-      created_at:
-        example: "2024-01-15T10:30:00Z"
-        type: string
-      email:
-        example: user@example.com
-        type: string
-      id:
-        example: 123
-        type: integer
-      is_active:
-        example: true
-        type: boolean
-      representative_first_name:
-        example: John
-        type: string
-      representative_last_name:
-        example: Doe
-        type: string
-      representative_mobile:
-        example: "+989123456789"
-        type: string
-      uuid:
-        example: 550e8400-e29b-41d4-a716-446655440000
-        type: string
-    type: object
 info:
   contact: {}
 paths:
@@ -308,7 +221,14 @@ paths:
             - $ref: '#/definitions/dto.APIResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/dto.ForgotPasswordResponse'
+                  properties:
+                    customer_id:
+                      type: integer
+                    expires_in:
+                      type: integer
+                    masked_phone:
+                      type: string
+                  type: object
               type: object
         "400":
           description: Invalid request
@@ -341,13 +261,24 @@ paths:
       - application/json
       responses:
         "200":
-          description: Login successful
+          description: Login successful with tokens
           schema:
             allOf:
             - $ref: '#/definitions/dto.APIResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/dto.LoginResponse'
+                  properties:
+                    access_token:
+                      type: string
+                    customer:
+                      $ref: '#/definitions/dto.AuthCustomerDTO'
+                    expires_in:
+                      type: integer
+                    refresh_token:
+                      type: string
+                    token_type:
+                      type: string
+                  type: object
               type: object
         "400":
           description: Invalid credentials
@@ -364,24 +295,35 @@ paths:
       summary: User Login
       tags:
       - Authentication
-  /api/v1/auth/resend-otp/{customer_id}:
+  /api/v1/auth/resend-otp:
     post:
       consumes:
       - application/json
       description: Resend OTP code to user's mobile number
       parameters:
-      - description: Customer ID
-        in: path
-        name: customer_id
+      - description: OTP resend request
+        in: body
+        name: request
         required: true
-        type: string
+        schema:
+          $ref: '#/definitions/dto.OTPResendRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OTP resent successfully
           schema:
-            $ref: '#/definitions/dto.APIResponse'
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    masked_otp_target:
+                      type: string
+                    otp_sent:
+                      type: boolean
+                  type: object
+              type: object
         "400":
           description: Invalid request
           schema:
@@ -413,13 +355,26 @@ paths:
       - application/json
       responses:
         "200":
-          description: Password reset successful
+          description: Password reset successful with tokens
           schema:
             allOf:
             - $ref: '#/definitions/dto.APIResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/dto.ResetPasswordResponse'
+                  properties:
+                    access_token:
+                      type: string
+                    customer:
+                      $ref: '#/definitions/dto.AuthCustomerDTO'
+                    expires_in:
+                      type: integer
+                    password_changed_at:
+                      type: string
+                    refresh_token:
+                      type: string
+                    token_type:
+                      type: string
+                  type: object
               type: object
         "400":
           description: Invalid request or OTP
@@ -497,7 +452,18 @@ paths:
             - $ref: '#/definitions/dto.APIResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/dto.OTPVerificationResponse'
+                  properties:
+                    access_token:
+                      type: string
+                    customer:
+                      $ref: '#/definitions/dto.AuthCustomerDTO'
+                    expires_in:
+                      type: integer
+                    refresh_token:
+                      type: string
+                    token_type:
+                      type: string
+                  type: object
               type: object
         "400":
           description: Invalid OTP or request

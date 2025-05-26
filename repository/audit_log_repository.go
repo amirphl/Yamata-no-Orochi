@@ -82,17 +82,8 @@ func (r *AuditLogRepositoryImpl) ListFailedActions(ctx context.Context, limit, o
 func (r *AuditLogRepositoryImpl) ListSecurityEvents(ctx context.Context, limit, offset int) ([]*models.AuditLog, error) {
 	db := r.getDB(ctx)
 
-	securityActions := []string{
-		models.AuditActionLoginSuccess,
-		models.AuditActionLoginFailed,
-		models.AuditActionPasswordChanged,
-		models.AuditActionAccountActivated,
-		models.AuditActionAccountDeactivated,
-		models.AuditActionOTPFailed,
-	}
-
 	var logs []*models.AuditLog
-	err := db.Where("action IN ?", securityActions).
+	err := db.Where("action IN ?", models.SecurityActions).
 		Order("created_at DESC").
 		Limit(limit).
 		Offset(offset).

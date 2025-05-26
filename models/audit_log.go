@@ -28,6 +28,7 @@ func (AuditLog) TableName() string {
 // Audit action constants
 const (
 	AuditActionSignupInitiated        = "signup_initiated"
+	AuditActionSignupFailed           = "signup_failed"
 	AuditActionSignupCompleted        = "signup_completed"
 	AuditActionEmailVerified          = "email_verified"
 	AuditActionMobileVerified         = "mobile_verified"
@@ -45,7 +46,11 @@ const (
 	AuditActionSessionExpired         = "session_expired"
 	AuditActionOTPGenerated           = "otp_generated"
 	AuditActionOTPVerified            = "otp_verified"
-	AuditActionOTPFailed              = "otp_failed"
+	AuditActionOTPVerificationFailed  = "otp_verification_failed"
+	AuditActionOTPSMSFailed           = "otp_sms_failed"
+	AuditActionOTPResendFailed        = "otp_resend_failed"
+	AuditActionOTPExpired             = "otp_expired"
+	AuditActionOTPResent              = "otp_resent"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries
@@ -64,14 +69,15 @@ func (a *AuditLog) IsFailed() bool {
 	return a.Success != nil && !*a.Success
 }
 
+var SecurityActions = map[string]bool{
+	AuditActionLoginSuccess:          true,
+	AuditActionLoginFailed:           true,
+	AuditActionPasswordChanged:       true,
+	AuditActionAccountActivated:      true,
+	AuditActionAccountDeactivated:    true,
+	AuditActionOTPVerificationFailed: true,
+}
+
 func (a *AuditLog) IsSecurityEvent() bool {
-	securityActions := map[string]bool{
-		AuditActionLoginSuccess:       true,
-		AuditActionLoginFailed:        true,
-		AuditActionPasswordChanged:    true,
-		AuditActionAccountActivated:   true,
-		AuditActionAccountDeactivated: true,
-		AuditActionOTPFailed:          true,
-	}
-	return securityActions[a.Action]
+	return SecurityActions[a.Action]
 }

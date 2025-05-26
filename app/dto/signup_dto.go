@@ -1,8 +1,6 @@
 // Package dto contains Data Transfer Objects for API request and response structures
 package dto
 
-import "time"
-
 // SignupRequest represents the signup form data
 type SignupRequest struct {
 	// Account type selection
@@ -46,43 +44,19 @@ type OTPVerificationRequest struct {
 
 // OTPVerificationResponse represents the response after successful OTP verification
 type OTPVerificationResponse struct {
-	Message      string      `json:"message"`
-	Token        string      `json:"token"`
-	RefreshToken string      `json:"refresh_token"`
-	Customer     CustomerDTO `json:"customer"`
+	Message      string          `json:"message"`
+	Token        string          `json:"token"`
+	RefreshToken string          `json:"refresh_token"`
+	Customer     AuthCustomerDTO `json:"customer"`
 }
 
-// CustomerDTO represents customer data for API responses
-type CustomerDTO struct {
-	ID                      uint      `json:"id"`
-	UUID                    string    `json:"uuid"`
-	AccountTypeID           uint      `json:"account_type_id"`
-	CompanyName             *string   `json:"company_name,omitempty"`
-	NationalID              *string   `json:"national_id,omitempty"`
-	CompanyPhone            *string   `json:"company_phone,omitempty"`
-	CompanyAddress          *string   `json:"company_address,omitempty"`
-	PostalCode              *string   `json:"postal_code,omitempty"`
-	RepresentativeFirstName string    `json:"representative_first_name"`
-	RepresentativeLastName  string    `json:"representative_last_name"`
-	RepresentativeMobile    string    `json:"representative_mobile"`
-	Email                   string    `json:"email"`
-	IsEmailVerified         *bool     `json:"is_email_verified"`
-	IsMobileVerified        *bool     `json:"is_mobile_verified"`
-	IsActive                *bool     `json:"is_active"`
-	CreatedAt               time.Time `json:"created_at"`
-	ReferrerAgencyID        *uint     `json:"referrer_agency_id,omitempty"`
+type OTPResendRequest struct {
+	CustomerID uint   `json:"customer_id" validate:"required"`
+	OTPType    string `json:"otp_type" validate:"required,oneof=mobile email"`
 }
 
-// ErrorResponse represents API error responses
-type ErrorResponse struct {
-	Error   string            `json:"error"`
-	Message string            `json:"message"`
-	Details map[string]string `json:"details,omitempty"` // Field-specific validation errors
-}
-
-// SuccessResponse represents generic success responses
-type SuccessResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    any    `json:"data,omitempty"`
+type OTPResendResponse struct {
+	Message         string `json:"message"`
+	OTPSent         bool   `json:"otp_sent"`
+	MaskedOTPTarget string `json:"masked_otp_target"`
 }

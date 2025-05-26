@@ -9,66 +9,27 @@ import (
 // Business flow error constants
 var (
 	// Customer-related errors
-	ErrCustomerNotFound = errors.New("customer not found")
-	ErrUserNotFound     = errors.New("user not found")
-
-	// Signup-related errors
+	ErrCustomerNotFound        = errors.New("customer not found")
+	ErrAccountInactive         = errors.New("account is inactive")
+	ErrAccountTypeNotFound     = errors.New("account type not found")
+	ErrIncorrectPassword       = errors.New("incorrect password")
 	ErrEmailAlreadyExists      = errors.New("email already exists")
 	ErrMobileAlreadyExists     = errors.New("mobile number already exists")
 	ErrNationalIDAlreadyExists = errors.New("national ID already exists")
-	ErrInvalidAccountType      = errors.New("invalid account type")
-	ErrSignupFailed            = errors.New("signup failed")
 
 	// Company/Business account errors
 	ErrCompanyFieldsRequired = errors.New("company fields are required for business accounts")
 
 	// Referrer agency errors
-	ErrReferrerAgencyNotFound   = errors.New("referrer agency not found")
-	ErrReferrerMustBeAgency     = errors.New("referrer must be a marketing agency")
-	ErrReferrerAgencyInactive   = errors.New("referrer agency is inactive")
-	ErrReferrerAgencyValidation = errors.New("failed to validate referrer agency")
+	ErrReferrerAgencyNotFound = errors.New("referrer agency not found")
+	ErrReferrerMustBeAgency   = errors.New("referrer must be a marketing agency")
+	ErrReferrerAgencyInactive = errors.New("referrer agency is inactive")
 
 	// OTP-related errors
-	ErrNoValidOTPFound       = errors.New("no valid OTP found")
-	ErrInvalidOTPCode        = errors.New("invalid OTP code")
-	ErrInvalidOTPType        = errors.New("invalid OTP type")
-	ErrOTPVerificationFailed = errors.New("OTP verification failed")
-
-	// Account type errors
-	ErrAccountTypeNotFound = errors.New("account type not found")
-
-	// Session errors
-	ErrSessionCreationFailed     = errors.New("failed to create session")
-	ErrSessionInvalidationFailed = errors.New("failed to invalidate session")
-
-	// Password reset errors
-	ErrPasswordResetFailed  = errors.New("password reset failed")
-	ErrPasswordHashFailed   = errors.New("failed to hash password")
-	ErrPasswordUpdateFailed = errors.New("failed to update customer password")
-
-	// OTP management errors
-	ErrOTPExpirationFailed = errors.New("failed to expire OTP")
-	ErrOTPGenerationFailed = errors.New("failed to generate OTP")
-	ErrOTPSaveFailed       = errors.New("failed to save OTP")
-	ErrOTPMarkUsedFailed   = errors.New("failed to mark OTP as used")
-
-	// Login errors
-	ErrLoginFailed        = errors.New("login failed")
-	ErrLoginLoggingFailed = errors.New("failed to log login attempt")
-
-	// Password reset logging errors
-	ErrPasswordResetLoggingFailed = errors.New("failed to log password reset attempt")
-
-	// Search errors
-	ErrEmailSearchFailed  = errors.New("failed to search by email")
-	ErrMobileSearchFailed = errors.New("failed to search by mobile")
-
-	// Token errors
-	ErrTokenGenerationFailed = errors.New("failed to generate tokens")
-
-	// Signup flow specific errors
-	ErrSignupValidationFailed = errors.New("signup validation failed")
-	ErrResendOTPFailed        = errors.New("resend OTP failed")
+	ErrNoValidOTPFound = errors.New("no valid OTP found")
+	ErrInvalidOTPCode  = errors.New("invalid OTP code")
+	ErrInvalidOTPType  = errors.New("invalid OTP type")
+	ErrOTPExpired      = errors.New("OTP has expired")
 )
 
 type BusinessError struct {
@@ -108,8 +69,16 @@ func IsCustomerNotFound(err error) bool {
 	return errors.Is(err, ErrCustomerNotFound)
 }
 
-func IsUserNotFound(err error) bool {
-	return errors.Is(err, ErrUserNotFound)
+func IsAccountInactive(err error) bool {
+	return errors.Is(err, ErrAccountInactive)
+}
+
+func IsAccountTypeNotFound(err error) bool {
+	return errors.Is(err, ErrAccountTypeNotFound)
+}
+
+func IsIncorrectPassword(err error) bool {
+	return errors.Is(err, ErrIncorrectPassword)
 }
 
 func IsEmailAlreadyExists(err error) bool {
@@ -122,10 +91,6 @@ func IsMobileAlreadyExists(err error) bool {
 
 func IsNationalIDAlreadyExists(err error) bool {
 	return errors.Is(err, ErrNationalIDAlreadyExists)
-}
-
-func IsInvalidAccountType(err error) bool {
-	return errors.Is(err, ErrInvalidAccountType)
 }
 
 func IsCompanyFieldsRequired(err error) bool {
@@ -156,110 +121,6 @@ func IsInvalidOTPType(err error) bool {
 	return errors.Is(err, ErrInvalidOTPType)
 }
 
-func IsOTPVerificationFailed(err error) bool {
-	return errors.Is(err, ErrOTPVerificationFailed)
-}
-
-func IsAccountTypeNotFound(err error) bool {
-	return errors.Is(err, ErrAccountTypeNotFound)
-}
-
-func IsSessionCreationFailed(err error) bool {
-	return errors.Is(err, ErrSessionCreationFailed)
-}
-
-func IsPasswordResetFailed(err error) bool {
-	return errors.Is(err, ErrPasswordResetFailed)
-}
-
-func IsLoginFailed(err error) bool {
-	return errors.Is(err, ErrLoginFailed)
-}
-
-func IsTokenGenerationFailed(err error) bool {
-	return errors.Is(err, ErrTokenGenerationFailed)
-}
-
-func IsLoginLoggingFailed(err error) bool {
-	return errors.Is(err, ErrLoginLoggingFailed)
-}
-
-func IsPasswordResetLoggingFailed(err error) bool {
-	return errors.Is(err, ErrPasswordResetLoggingFailed)
-}
-
-func IsPasswordHashFailed(err error) bool {
-	return errors.Is(err, ErrPasswordHashFailed)
-}
-
-func IsPasswordUpdateFailed(err error) bool {
-	return errors.Is(err, ErrPasswordUpdateFailed)
-}
-
-func IsOTPExpirationFailed(err error) bool {
-	return errors.Is(err, ErrOTPExpirationFailed)
-}
-
-func IsOTPGenerationFailed(err error) bool {
-	return errors.Is(err, ErrOTPGenerationFailed)
-}
-
-func IsOTPSaveFailed(err error) bool {
-	return errors.Is(err, ErrOTPSaveFailed)
-}
-
-func IsOTPMarkUsedFailed(err error) bool {
-	return errors.Is(err, ErrOTPMarkUsedFailed)
-}
-
-func IsSessionInvalidationFailed(err error) bool {
-	return errors.Is(err, ErrSessionInvalidationFailed)
-}
-
-func IsEmailSearchFailed(err error) bool {
-	return errors.Is(err, ErrEmailSearchFailed)
-}
-
-func IsMobileSearchFailed(err error) bool {
-	return errors.Is(err, ErrMobileSearchFailed)
-}
-
-func IsSignupValidationFailed(err error) bool {
-	return errors.Is(err, ErrSignupValidationFailed)
-}
-
-func IsResendOTPFailed(err error) bool {
-	return errors.Is(err, ErrResendOTPFailed)
-}
-
-func IsCustomerSearchFailed(err error) bool {
-	var businessErr *BusinessError
-	if errors.As(err, &businessErr) {
-		return businessErr.Code == "CUSTOMER_SEARCH_FAILED"
-	}
-	return false
-}
-
-func IsAccountTypeFetchFailed(err error) bool {
-	var businessErr *BusinessError
-	if errors.As(err, &businessErr) {
-		return businessErr.Code == "ACCOUNT_TYPE_FETCH_FAILED"
-	}
-	return false
-}
-
-func IsOTPSearchFailed(err error) bool {
-	var businessErr *BusinessError
-	if errors.As(err, &businessErr) {
-		return businessErr.Code == "OTP_SEARCH_FAILED"
-	}
-	return false
-}
-
-func IsSignupFailed(err error) bool {
-	var businessErr *BusinessError
-	if errors.As(err, &businessErr) {
-		return businessErr.Code == "SIGNUP_FAILED"
-	}
-	return false
+func IsOTPExpired(err error) bool {
+	return errors.Is(err, ErrOTPExpired)
 }
