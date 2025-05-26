@@ -463,7 +463,7 @@ func TestSignup(t *testing.T) {
 
 			// Verify audit log was created for failed signup
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
-				Action: utils.ToPtr(models.AuditActionSignupInitiated),
+				Action: utils.ToPtr(string(models.AuditActionSignupFailed)),
 			}, "", 0, 0)
 			require.NoError(t, err)
 			// Should have at least one failed audit log

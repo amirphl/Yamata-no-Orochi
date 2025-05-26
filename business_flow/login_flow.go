@@ -110,7 +110,7 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, request *dto.LoginRequest, m
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Login failed: %s", err.Error())
-		_ = lf.LogLoginAttempt(ctx, nil, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
+		_ = lf.LogLoginAttempt(ctx, customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
 
 		return nil, NewBusinessError("LOGIN_FAILED", "Login failed", err)
 	} else {
@@ -196,7 +196,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.Forgot
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Forgot password failed: %s", err.Error())
-		_ = lf.LogPasswordResetAttempt(ctx, nil, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
+		_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
 
 		return nil, NewBusinessError("FORGOT_PASSWORD_FAILED", "Forgot password failed", err)
 	} else {
@@ -308,7 +308,7 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Password reset failed: %s", err.Error())
-		_ = lf.LogPasswordResetAttempt(ctx, nil, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
+		_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
 
 		return nil, NewBusinessError("PASSWORD_RESET_FAILED", "Password reset failed", err)
 	} else {
