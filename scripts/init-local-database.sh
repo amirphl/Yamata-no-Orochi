@@ -32,19 +32,19 @@ print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# Load environment variables from .env file if it exists
-if [ -f "$PROJECT_ROOT/.env" ]; then
-    print_status "Loading environment variables from .env file..."
+# Load environment variables from .env.local file if it exists
+if [ -f "$PROJECT_ROOT/.env.local" ]; then
+    print_status "Loading environment variables from .env.local file..."
     # Use set -a to automatically export variables, then source the file
     set -a
-    source "$PROJECT_ROOT/.env"
+    source "$PROJECT_ROOT/.env.local"
     set +a
 fi
 
 # Function to get database configuration from environment variables
 get_db_config() {
     # Database configuration with defaults
-    DB_HOST=${DB_HOST:-localhost}
+    DB_HOST="172.20.0.10"
     DB_PORT=${DB_PORT:-5432}
     DB_NAME=${DB_NAME:-yamata_no_orochi}
     DB_USER=${DB_USER:-yamata_user}
@@ -63,9 +63,9 @@ get_db_config() {
 
 # Function to check if PostgreSQL container is running
 check_postgres_container() {
-    if ! docker ps --format "table {{.Names}}" | grep -q "yamata-postgres"; then
+    if ! docker ps --format "table {{.Names}}" | grep -q "yamata-postgres-local"; then
         print_error "PostgreSQL container is not running. Please start the services first:"
-        echo "  docker-compose -f docker-compose.production.yml up -d postgres"
+        echo "  docker-compose -f docker-compose.local.yml up -d postgres-local"
         exit 1
     fi
     
@@ -75,7 +75,7 @@ check_postgres_container() {
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if docker exec yamata-postgres pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+        if docker exec yamata-postgres-local pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
             print_success "PostgreSQL is ready!"
             return 0
         fi
@@ -91,7 +91,7 @@ check_postgres_container() {
 
 # Function to check if database exists
 check_database_exists() {
-    if docker exec yamata-postgres psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
+    if docker exec yamata-postgres-local psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
         print_status "Database '$DB_NAME' already exists"
         return 0
     else
@@ -104,7 +104,7 @@ check_database_exists() {
 create_database() {
     print_status "Creating database '$DB_NAME'..."
     
-    if docker exec yamata-postgres createdb -U "$DB_USER" "$DB_NAME" 2>/dev/null; then
+    if docker exec yamata-postgres-local createdb -U "$DB_USER" "$DB_NAME" 2>/dev/null; then
         print_success "Database '$DB_NAME' created successfully"
     else
         print_warning "Database '$DB_NAME' might already exist or creation failed"
@@ -116,11 +116,11 @@ apply_migrations() {
     print_status "Applying database migrations..."
     
     # Copy migrations to container
-    docker exec yamata-postgres mkdir -p /tmp/migrations
-    docker cp "$PROJECT_ROOT/migrations" yamata-postgres:/tmp/
+    docker exec yamata-postgres-local mkdir -p /tmp/migrations
+    docker cp "$PROJECT_ROOT/migrations" yamata-postgres-local:/tmp/
     
     # Apply migrations
-    if docker exec yamata-postgres psql -U "$DB_USER" -d "$DB_NAME" -f /tmp/migrations/run_all_up.sql; then
+    if docker exec yamata-postgres-local psql -U "$DB_USER" -d "$DB_NAME" -f /tmp/migrations/run_all_up.sql; then
         print_success "All migrations applied successfully"
     else
         print_error "Failed to apply migrations"
@@ -128,7 +128,7 @@ apply_migrations() {
     fi
     
     # Clean up
-    docker exec yamata-postgres rm -rf /tmp/migrations
+    docker exec yamata-postgres-local rm -rf /tmp/migrations
 }
 
 # Function to verify database schema
@@ -136,17 +136,17 @@ verify_schema() {
     print_status "Verifying database schema..."
     
     # Check if key tables exist
-    local tables=("account_types" "customers" "otp_verifications" "customer_sessions" "audit_log")
+    local tables=("account_types" "customers")
     local missing_tables=()
     
     for table in "${tables[@]}"; do
-        if ! docker exec yamata-postgres psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='$table'" | grep -q 1; then
+        if ! docker exec yamata-postgres-local psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='$table'" | grep -q 1; then
             missing_tables+=("$table")
         fi
     done
     
     if [ ${#missing_tables[@]} -eq 0 ]; then
-        print_success "All required tables exist"
+        print_success "AccountType and Customer tables exist"
     else
         print_error "Missing tables: ${missing_tables[*]}"
         exit 1
@@ -193,7 +193,7 @@ main() {
     echo "  Port: $DB_PORT"
     echo ""
     echo "🔍 You can connect to the database using:"
-    echo "  docker exec -it yamata-postgres psql -U $DB_USER -d $DB_NAME"
+    echo "  docker exec -it yamata-postgres-local psql -U $DB_USER -d $DB_NAME"
     echo ""
 }
 

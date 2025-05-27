@@ -93,6 +93,14 @@ check_prerequisites() {
         print_warning "Redis client not found. Some features may not work properly."
     fi
     
+    # Check swag for Swagger documentation
+    if ! command_exists swag; then
+        print_warning "swag command not found. Swagger documentation generation will be skipped."
+        print_warning "Install with: go install github.com/swaggo/swag/cmd/swag@latest"
+    else
+        print_success "swag found - Swagger documentation will be generated"
+    fi
+
     print_success "Prerequisites check completed"
 }
 
@@ -146,12 +154,6 @@ set_environment() {
     export DB_MAX_IDLE_CONNS=5
     export DB_CONN_MAX_LIFETIME=30m
     export DB_CONN_MAX_IDLE_TIME=15m
-    export SERVER_HOST=0.0.0.0
-    export SERVER_PORT=8080
-    export SERVER_READ_TIMEOUT=30s
-    export SERVER_WRITE_TIMEOUT=30s
-    export SERVER_IDLE_TIMEOUT=120s
-    export SERVER_SHUTDOWN_TIMEOUT=30s
     export JWT_SECRET_KEY="$jwt_secret"
     export JWT_ACCESS_TOKEN_TTL=15m
     export JWT_REFRESH_TOKEN_TTL=7d
@@ -159,25 +161,15 @@ set_environment() {
     export JWT_AUDIENCE=yamata-users
     export JWT_USE_RSA_KEYS=false
     export JWT_ALGORITHM=HS256
-    export LOG_LEVEL=debug
-    export LOG_FORMAT=json
-    export LOG_OUTPUT=stdout
-    export METRICS_ENABLED=true
-    export METRICS_PORT=9090
-    export CACHE_ENABLED=false
-    export SMS_PROVIDER=mock
-    export EMAIL_HOST=smtp.gmail.com
-    export EMAIL_PORT=587
-    export EMAIL_USERNAME=mock_email@gmail.com
-    export EMAIL_PASSWORD=mock_password
-    export EMAIL_FROM_EMAIL=noreply@localhost
-    export EMAIL_FROM_NAME="Yamata no Orochi (Dev)"
-    export EMAIL_USE_TLS=true
-    export EMAIL_USE_STARTTLS=true
+    export SMS_PROVIDER_DOMAIN="mock"
+    export SMS_API_KEY="mock_api_key"
+    export SMS_SOURCE_NUMBER="989121111111"
+    export SMS_RETRY_COUNT="3"
+    export SMS_VALIDITY_PERIOD="300"
+    export SMS_TIMEOUT="30s"
     
     print_success "Environment variables set for development"
     print_status "APP_ENV: $APP_ENV"
-    print_status "Server will start on: $SERVER_HOST:$SERVER_PORT"
     print_status "Database: $DB_HOST:$DB_PORT/$DB_NAME"
 }
 
@@ -271,26 +263,26 @@ run_migrations() {
 }
 
 # Function to verify database schema
-# verify_schema() {
-#     print_status "Verifying database schema..."
-    
-#     # Check if key tables exist
-#     local tables=("account_types" "customers" "otp_verifications" "customer_sessions" "audit_log")
-#     local missing_tables=()
-    
-#     for table in "${tables[@]}"; do
-#         if ! psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='$table'" | grep -q 1; then
-#             missing_tables+=("$table")
-#         fi
-#     done
-    
-#     if [ ${#missing_tables[@]} -eq 0 ]; then
-#         print_success "All required tables exist"
-#     else
-#         print_warning "Missing tables: ${missing_tables[*]}"
-#         print_warning "This might indicate incomplete migrations"
-#     fi
-# }
+verify_schema() {
+    print_status "Verifying database schema..."
+
+    # Check if key tables exist
+    local tables=("account_types" "customers")
+    local missing_tables=()
+
+    for table in "${tables[@]}"; do
+        if ! psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='$table'" | grep -q 1; then
+            missing_tables+=("$table")
+        fi
+    done
+
+    if [ ${#missing_tables[@]} -eq 0 ]; then
+        print_success "AccountType and Customer tables exist"
+    else
+        print_warning "Missing tables: ${missing_tables[*]}"
+        print_warning "This might indicate incomplete migrations"
+    fi
+}
 
 # Function to cleanup temporary files
 cleanup() {
@@ -319,6 +311,7 @@ show_help() {
     echo "  - PostgreSQL running (optional, will show warnings if not)"
     echo "  - Redis running (optional, will show warnings if not)"
     echo "  - PostgreSQL client tools (psql, createdb)"
+    echo "  - swag tool (optional, for Swagger docs): go install github.com/swaggo/swag/cmd/swag@latest"
     echo ""
     echo "Database Features:"
     echo "  - Automatic database connection checking"
@@ -326,28 +319,43 @@ show_help() {
     echo "  - Automatic migration running"
     echo "  - Schema verification"
     echo ""
+    echo "Swagger Features:"
+    echo "  - Automatic Swagger documentation generation"
+    echo "  - Swagger UI available at http://localhost:8080/swagger"
+    echo "  - API documentation with interactive testing"
+    echo ""
     echo "Examples:"
     echo "  $0                    # Run with cleanup"
     echo "  $0 --no-cleanup      # Run without cleanup"
     echo ""
 }
 
-# Function to start the application
-start_application() {
-	print_status "Starting Yamata no Orochi application..."
-	
-	# Generate Swagger documentation first
+# Function to generate Swagger documentation
+generate_swagger_docs() {
 	print_status "Generating Swagger documentation..."
 	if command -v swag >/dev/null 2>&1; then
-		if swag init -g main.go -o docs >/dev/null 2>&1; then
+		# Change to project root directory
+		cd "$PROJECT_ROOT"
+
+		# Generate Swagger docs with verbose output for better debugging
+		if swag init -g main.go -o docs --parseDependency --parseInternal; then
 			print_success "Swagger documentation generated successfully"
+			print_status "Swagger files created:"
+			ls -la docs/ | grep -E "(swagger\.(json|yaml)|docs\.go)" || true
 		else
-			print_warning "Failed to generate Swagger documentation, continuing anyway..."
+			print_warning "Failed to generate Swagger documentation"
+			print_warning "This might be due to missing Swagger annotations in the code"
+			print_warning "Continuing without Swagger documentation..."
 		fi
 	else
 		print_warning "swag command not found, skipping Swagger generation"
 		print_warning "Install with: go install github.com/swaggo/swag/cmd/swag@latest"
 	fi
+}
+
+# Function to start the application
+start_application() {
+	print_status "Starting Yamata no Orochi application..."
 	
 	# Start the application with air for hot reloading
 	print_status "Starting application with hot reloading..."
@@ -356,7 +364,7 @@ start_application() {
 		air
 	else
 		print_warning "air not found, using go run"
-		print_warning "Install air with: go install github.com/cosmtrek/air@latest"
+		print_warning "Install air with: go install github.com/air-verse/air@latest"
 		go run main.go
 	fi
 }
@@ -411,17 +419,17 @@ main() {
     # Build application
     build_application
     
-    # Start the application
-    start_application
+    # Generate Swagger documentation
+    generate_swagger_docs
     
     echo ""
     print_success "🎉 Development environment ready!"
     echo ""
     echo "📋 Development Information:"
-    echo "  Application: http://localhost:$SERVER_PORT"
-    echo "  Swagger UI: http://localhost:$SERVER_PORT/swagger"
-    echo "  Health Check: http://localhost:$SERVER_PORT/api/v1/health"
-    echo "  Metrics: http://localhost:$METRICS_PORT/metrics"
+    echo "  Application: http://localhost:8080"
+    echo "  Swagger UI: http://localhost:8080/swagger"
+    echo "  Health Check: http://localhost:8080/api/v1/health"
+    echo "  Metrics: http://localhost:9090/metrics"
     echo ""
     echo "🔧 Environment:"
     echo "  APP_ENV: $APP_ENV"
@@ -431,8 +439,8 @@ main() {
     echo "🚀 Starting application..."
     echo ""
     
-    # Run the application
-    # "$TEMP_DIR/main" # This line is now handled by start_application
+    # Start the application
+    start_application
 }
 
 # Run main function with all arguments

@@ -7,7 +7,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-ENV_FILE="$PROJECT_ROOT/.env"
+ENV_FILE="$PROJECT_ROOT/.env.local"
 SSL_DIR="$PROJECT_ROOT/docker/nginx/ssl"
 NGINX_CONF_DIR="$PROJECT_ROOT/docker/nginx/sites-available"
 NGINX_TEMPLATE="$NGINX_CONF_DIR/yamata.conf"
@@ -113,7 +113,7 @@ generate_nginx_config() {
     print_status "Generating nginx configuration for domain: $domain"
     
     # Create generated directory if it doesn't exist
-    mkdir -p "$NGINX_CONF_DIR/generated"
+    mkdir -p "$NGINX_CONF_DIR/generated/local"
     
     # Set environment variables for template processing
     export DOMAIN="$domain"
@@ -127,24 +127,28 @@ generate_nginx_config() {
     if [ -f "$NGINX_TEMPLATE" ]; then
         # Process the template with only specific environment variable substitution
         # Use envsubst with specific variables to avoid interfering with Nginx variables
-        envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$NGINX_CONF_DIR/generated/yamata.conf"
+        envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$NGINX_CONF_DIR/generated/local/yamata.conf"
         
         # Replace SSL certificate paths for local development
         # Replace main domain SSL paths
-        sed -i "s|/etc/letsencrypt/live/$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
         
         # Replace API domain SSL paths
-        sed -i "s|/etc/letsencrypt/live/api.$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/api.$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/api.$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/api.$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/api.$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/api.$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
         
         # Replace monitoring domain SSL paths
-        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/yamata.conf"
-        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/fullchain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+        sed -i "s|/etc/letsencrypt/live/monitoring.$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
         
+        # Replace upstream server addresses for local development
+        sed -i "s|server app:8080 max_fails=3 fail_timeout=30s;|server app-local:8080 max_fails=3 fail_timeout=30s;|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+        sed -i "s|server app:9090 max_fails=3 fail_timeout=30s;|server app-local:9090 max_fails=3 fail_timeout=30s;|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
+
         print_success "Nginx configuration generated from template"
     else
         print_error "Nginx template not found: $NGINX_TEMPLATE"
@@ -156,10 +160,10 @@ generate_nginx_config() {
 create_local_env() {
     local domain=$1
     
-    # Check if .env file already exists
+    # Check if .env.local file already exists
     if [ -f "$ENV_FILE" ]; then
-        print_status "Using existing .env file: $ENV_FILE"
-        print_warning "If you want to regenerate the .env file, please remove it first: rm $ENV_FILE"
+        print_status "Using existing .env.local file: $ENV_FILE"
+        print_warning "If you want to regenerate the .env.local file, please remove it first: rm $ENV_FILE"
         return 0
     fi
     
@@ -173,7 +177,10 @@ create_local_env() {
     # Create environment file with all configuration embedded (no comments, properly quoted)
     cat > "$ENV_FILE" << EOF
 APP_ENV="development"
-DB_HOST="localhost"
+VERSION="0.0.1"
+COMMIT_HASH="local"
+BUILD_TIME="local"
+DB_HOST="postgres-local"
 DB_PORT="5432"
 DB_NAME="yamata_no_orochi"
 DB_USER="yamata_user"
@@ -202,7 +209,7 @@ JWT_SECRET_KEY="$jwt_secret"
 JWT_PRIVATE_KEY=""
 JWT_PUBLIC_KEY=""
 JWT_USE_RSA_KEYS="false"
-JWT_ACCESS_TOKEN_TTL="15m"
+JWT_ACCESS_TOKEN_TTL="24h"
 JWT_REFRESH_TOKEN_TTL="168h"
 JWT_ISSUER="yamata-no-orochi"
 JWT_AUDIENCE="yamata-no-orochi-api"
@@ -220,8 +227,8 @@ CORS_ALLOWED_METHODS="GET,POST,PUT,DELETE,OPTIONS"
 CORS_ALLOWED_HEADERS="Origin,Content-Type,Accept,Authorization,X-Requested-With,X-API-Key"
 CORS_ALLOW_CREDENTIALS="true"
 CORS_MAX_AGE="86400"
-AUTH_RATE_LIMIT="5"
-GLOBAL_RATE_LIMIT="1000"
+AUTH_RATE_LIMIT="20"
+GLOBAL_RATE_LIMIT="2000"
 RATE_LIMIT_WINDOW="1m"
 RATE_LIMIT_MEMORY="64"
 CSP_POLICY="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
@@ -238,22 +245,18 @@ PASSWORD_MIN_LENGTH="8"
 PASSWORD_REQUIRE_UPPER="true"
 PASSWORD_REQUIRE_LOWER="true"
 PASSWORD_REQUIRE_NUMBER="true"
-PASSWORD_REQUIRE_SYMBOL="false"
+PASSWORD_REQUIRE_SYMBOL="true"
 BCRYPT_COST="12"
 SESSION_COOKIE_SECURE="true"
 SESSION_COOKIE_HTTPONLY="true"
 SESSION_COOKIE_SAMESITE="Strict"
 SESSION_TIMEOUT="24h"
 SESSION_CLEANUP_INTERVAL="1h"
-SMS_PROVIDER="mock"
-SMS_USERNAME="mock_user"
-SMS_PASSWORD="mock_password"
-SMS_FROM_NUMBER="+985000120304"
+SMS_PROVIDER_DOMAIN="mock"
 SMS_API_KEY="mock_api_key"
-SMS_API_SECRET="mock_api_secret"
-SMS_BASE_URL="https://api.kavenegar.com"
-SMS_RATE_LIMIT="60"
-SMS_RETRY_ATTEMPTS="3"
+SMS_SOURCE_NUMBER="98**********"
+SMS_RETRY_COUNT="3"
+SMS_VALIDITY_PERIOD="300"
 SMS_TIMEOUT="30s"
 EMAIL_HOST="smtp.gmail.com"
 EMAIL_PORT="587"
@@ -295,7 +298,7 @@ METRICS_COLLECT_CACHE="true"
 METRICS_COLLECT_APP="true"
 CACHE_ENABLED="true"
 CACHE_PROVIDER="redis"
-CACHE_REDIS_URL="redis://redis:6379"
+CACHE_REDIS_URL="redis://redis-local:6379"
 CACHE_REDIS_DB="0"
 CACHE_REDIS_PREFIX="yamata:"
 CACHE_DEFAULT_TTL="1h"
@@ -462,7 +465,7 @@ start_services() {
     fi
     
     # Start services
-    docker compose -f docker-compose.production.yml up -d
+    docker compose -f docker-compose.local.yml up -d
     
     print_success "Services started successfully"
 }
@@ -475,7 +478,7 @@ wait_for_services() {
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if docker-compose -f docker-compose.production.yml ps | grep -q "Up"; then
+        if docker-compose -f docker-compose.local.yml ps | grep -q "Up"; then
             print_success "Services are ready!"
             return 0
         fi
@@ -500,20 +503,6 @@ show_deployment_info() {
     echo "  API: https://api.$domain"
     echo "  Monitoring: https://monitoring.$domain"
     echo ""
-    echo "🔧 Services:"
-    echo "  Application: http://localhost:8080"
-    echo "  Metrics: http://localhost:9090"
-    echo "  Prometheus: http://localhost:9091"
-    echo "  Grafana: http://localhost:3000"
-    echo ""
-    echo "📊 Monitoring Credentials:"
-    echo "  Grafana Admin: admin / $(grep GRAFANA_ADMIN_PASSWORD "$ENV_FILE" | cut -d'=' -f2)"
-    echo ""
-    echo "🔍 Useful Commands:"
-    echo "  View logs: docker-compose -f docker-compose.production.yml logs -f"
-    echo "  Stop services: docker-compose -f docker-compose.production.yml down"
-    echo "  Restart services: docker-compose -f docker-compose.production.yml restart"
-    echo ""
     echo "⚠️  Important Notes:"
     echo "  - Self-signed certificates are used (browser will show security warning)"
     echo "  - Accept the certificate warning in your browser"
@@ -535,12 +524,12 @@ show_help() {
     echo "  --help, -h          Show this help message"
     echo ""
     echo "Environment Configuration:"
-    echo "  - If .env file exists, it will be used (preserves your custom settings)"
-    echo "  - If .env doesn't exist, a new one will be created with generated passwords"
-    echo "  - To regenerate .env: rm .env && $0 <domain>"
+    echo "  - If .env.local file exists, it will be used (preserves your custom settings)"
+    echo "  - If .env.local doesn't exist, a new one will be created with generated passwords"
+    echo "  - To regenerate .env.local: rm .env.local && $0 <domain>"
     echo ""
     echo "Examples:"
-    echo "  $0 yourdomain.com                    # Use existing .env or create new one"
+    echo "  $0 yourdomain.com                    # Use existing .env.local or create new one"
     echo "  $0 yourdomain.com --domain=yourdomain.com --email=admin@yourdomain.com"
     echo ""
 }
@@ -585,11 +574,11 @@ main() {
     
     # Set default domain if not provided
     if [ -z "$domain" ]; then
-        domain="canyouseethewriters.maiden"
+        domain="thewritingonthewall.com"
     fi
     # Set default email if not provided
     if [ -z "$email" ]; then
-        email="admin@canyouseethewriters.maiden"
+        email="admin@thewritingonthewall.com"
     fi
     
     # Validate domain
@@ -643,7 +632,7 @@ main() {
         set +a
     fi
     
-    if ./scripts/init-database.sh; then
+    if ./scripts/init-local-database.sh; then
         print_success "Database initialization completed"
     else
         print_warning "Database initialization failed or was skipped"

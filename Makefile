@@ -206,8 +206,6 @@ deploy-local:
 
 run-dev-simple:
 	@echo "Running in simplest development mode (no Docker)..."
-	@echo "Generating Swagger documentation first..."
-	@$(MAKE) swag
 	@echo "Starting development server..."
 	@chmod +x scripts/run-dev.sh
 	@./scripts/run-dev.sh

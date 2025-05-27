@@ -72,7 +72,6 @@ access.log
 # Docker
 .dockerignore.bak
 docker-compose.override.yml
-docker-compose.local.yml
 
 # SSL Certificates
 ssl/

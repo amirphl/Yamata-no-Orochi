@@ -1,25 +1,25 @@
 networks:
-  yamata-network:
+  yamata-network-local:
     driver: bridge
     ipam:
       config:
         - subnet: 172.20.0.0/24
 
 volumes:
-  postgres_data:
+  postgres_data_local:
     driver: local
-  redis_data:
+  redi_data_local:
     driver: local
-  nginx_logs:
+  nginx_logs_local:
     driver: local
-  app_logs:
+  app_logs_local:
     driver: local
 
 services:
   # PostgreSQL Database
-  postgres:
+  postgres-local:
     image: postgres:15-alpine
-    container_name: yamata-postgres
+    container_name: yamata-postgres-local
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME}
@@ -27,14 +27,12 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_local:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./migrations:/migrations:ro
-    # ports:
-    #   - "127.0.0.1:5432:5432"  # Only accessible from localhost
     networks:
-      yamata-network:
+      yamata-network-local:
         ipv4_address: 172.20.0.10
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     healthcheck:
@@ -51,19 +49,17 @@ services:
       - /var/run/postgresql
 
   # Redis Cache
-  redis:
+  redis-local:
     image: redis:8.0.3-alpine
-    container_name: yamata-redis
+    container_name: yamata-redis-local
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
-      - redis_data:/data
+      - redi_data_local:/data
       # - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
-    # ports:
-    #   - "127.0.0.1:6379:6379"  # Only accessible from localhost
     networks:
-      yamata-network:
+      yamata-network-local:
         ipv4_address: 172.20.0.11
     # command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
@@ -80,18 +76,18 @@ services:
       - /tmp
 
   # Application
-  app:
+  app-local:
     image: yamata-no-orochi
-    container_name: yamata-app
+    container_name: yamata-app-local
     restart: unless-stopped
     depends_on:
-      postgres:
+      postgres-local:
         condition: service_healthy
-      redis:
+      redis-local:
         condition: service_healthy
     environment:
       # Database Configuration
-      DB_HOST: postgres
+      DB_HOST: postgres-local
       DB_PORT: ${DB_PORT}
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
@@ -165,6 +161,9 @@ services:
 
       # JWT Configuration
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+      JWT_USE_RSA_KEYS: ${JWT_USE_RSA_KEYS}
       JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL}
       JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL}
       JWT_ISSUER: ${JWT_ISSUER}
@@ -179,15 +178,11 @@ services:
       SESSION_CLEANUP_INTERVAL: ${SESSION_CLEANUP_INTERVAL}
 
       # SMS Configuration
-      SMS_PROVIDER: ${SMS_PROVIDER}
-      SMS_USERNAME: ${SMS_USERNAME}
-      SMS_PASSWORD: ${SMS_PASSWORD}
-      SMS_FROM_NUMBER: ${SMS_FROM_NUMBER}
+      SMS_PROVIDER_DOMAIN: ${SMS_PROVIDER_DOMAIN}
       SMS_API_KEY: ${SMS_API_KEY}
-      SMS_API_SECRET: ${SMS_API_SECRET}
-      SMS_BASE_URL: ${SMS_BASE_URL}
-      SMS_RATE_LIMIT: ${SMS_RATE_LIMIT}
-      SMS_RETRY_ATTEMPTS: ${SMS_RETRY_ATTEMPTS}
+      SMS_SOURCE_NUMBER: ${SMS_SOURCE_NUMBER}
+      SMS_RETRY_COUNT: ${SMS_RETRY_COUNT}
+      SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD}
       SMS_TIMEOUT: ${SMS_TIMEOUT}
 
       # Email Configuration
@@ -260,12 +255,12 @@ services:
       BUILD_TIME: ${BUILD_TIME:-unknown}
 
     volumes:
-      - app_logs:/var/log/yamata
+      - app_logs_local:/var/log/yamata
     # ports:
     #   - "127.0.0.1:8080:8080"  # Only accessible from localhost
     #   - "127.0.0.1:9090:9090"  # Metrics port
     networks:
-      yamata-network:
+      yamata-network-local:
         ipv4_address: 172.20.0.20
     healthcheck:
       test: ["CMD", "curl", "-f", "--noproxy", "localhost", "http://localhost:8080/api/v1/health"]
@@ -282,7 +277,7 @@ services:
     user: "appuser"
 
   # Nginx Reverse Proxy
-  nginx:
+  nginx-local:
     image: nginx:1.25-alpine
     container_name: yamata-nginx
     restart: unless-stopped
@@ -291,18 +286,18 @@ services:
         condition: service_healthy
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/nginx/sites-available/generated:/etc/nginx/sites-available:ro
+      - ./docker/nginx/sites-available/generated/local:/etc/nginx/sites-available:ro
       - ./docker/nginx/ssl:/etc/nginx/ssl:ro
       - ./docker/nginx/security.conf:/etc/nginx/security.conf:ro
       - ./docker/nginx/gzip.conf:/etc/nginx/gzip.conf:ro
       - ./docker/nginx/proxy.conf:/etc/nginx/proxy.conf:ro
-      - nginx_logs:/var/log/nginx
+      - nginx_logs_local:/var/log/nginx
       - /etc/letsencrypt:/etc/letsencrypt:ro  # Let's Encrypt certificates
-    ports:
-      - "80:80"
-      - "443:443"
+    # ports:
+    #   - "80:80"
+    #   - "443:443"
     networks:
-      yamata-network:
+      yamata-network-local:
         ipv4_address: 172.20.0.30
     healthcheck:
       test: ["CMD", "curl", "-f", "--noproxy", "app", "http://app:8080/api/v1/health"]
@@ -329,7 +324,7 @@ services:
     # ports:
     #   - "127.0.0.1:9091:9090"  # Only accessible from localhost
     networks:
-      yamata-network:
+      yamata-network-local:
         ipv4_address: 172.20.0.40
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
@@ -359,7 +354,7 @@ services:
     # ports:
     #   - "127.0.0.1:3000:3000"  # Only accessible from localhost
     networks:
-      yamata-network:
+      yamata-network-local:
         ipv4_address: 172.20.0.50
     depends_on:
       - prometheus

@@ -112,7 +112,7 @@ EXPOSE 8080
 
 # Health check - HTTP request to health endpoint
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8080/api/v1/health || exit 1
+    CMD curl -f --noproxy localhost,127.0.0.1 http://localhost:8080/api/v1/health || exit 1
 
 # Security labels
 LABEL \
@@ -128,12 +128,6 @@ USER appuser
 
 # Set environment variables for production
 ENV \
-    GIN_MODE=release \
-    LOG_LEVEL=info \
-    LOG_FORMAT=json \
-    TLS_ENABLED=false \
-    DB_SSL_MODE=require \
-    BCRYPT_COST=12 \
     TZ=UTC
 
 # Start the application
