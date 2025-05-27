@@ -30,6 +30,8 @@ var (
 	ErrInvalidOTPCode  = errors.New("invalid OTP code")
 	ErrInvalidOTPType  = errors.New("invalid OTP type")
 	ErrOTPExpired      = errors.New("OTP has expired")
+
+	ErrAlreadyVerified = errors.New("already verified")
 )
 
 type BusinessError struct {
@@ -123,4 +125,8 @@ func IsInvalidOTPType(err error) bool {
 
 func IsOTPExpired(err error) bool {
 	return errors.Is(err, ErrOTPExpired)
+}
+
+func IsAlreadyVerified(err error) bool {
+	return errors.Is(err, ErrAlreadyVerified)
 }

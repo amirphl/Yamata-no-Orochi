@@ -63,6 +63,11 @@ func NewLoginFlow(
 
 // Login authenticates a user with email/mobile and password
 func (lf *LoginFlowImpl) Login(ctx context.Context, request *dto.LoginRequest, metadata *ClientMetadata) (*dto.LoginResponse, error) {
+	// Validate business rules
+	if err := lf.validateLoginRequest(ctx, request); err != nil {
+		return nil, NewBusinessError("LOGIN_VALIDATION_FAILED", "Login validation failed", err)
+	}
+
 	var customer *models.Customer
 
 	// Start transaction for login process
@@ -123,6 +128,11 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, request *dto.LoginRequest, m
 
 // ForgotPassword initiates the password reset process
 func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, metadata *ClientMetadata) (*dto.ForgetPasswordResponse, error) {
+	// Validate business rules
+	if err := lf.validateForgotPasswordRequest(ctx, request); err != nil {
+		return nil, NewBusinessError("FORGOT_PASSWORD_VALIDATION_FAILED", "Forgot password validation failed", err)
+	}
+
 	var customer *models.Customer
 
 	// Start transaction for password reset process
@@ -209,6 +219,11 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.Forgot
 
 // ResetPassword completes the password reset process with OTP verification
 func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, metadata *ClientMetadata) (*dto.ResetPasswordResponse, error) {
+	// Validate business rules
+	if err := lf.validateResetPasswordRequest(ctx, request); err != nil {
+		return nil, NewBusinessError("RESET_PASSWORD_VALIDATION_FAILED", "Reset password validation failed", err)
+	}
+
 	var customer *models.Customer
 
 	// Start transaction for password reset completion
@@ -573,4 +588,55 @@ func (lf *LoginFlowImpl) WithResetPasswordTransaction(ctx context.Context, fn fu
 		return nil, err
 	}
 	return result, fnErr
+}
+
+func (lf *LoginFlowImpl) validateLoginRequest(ctx context.Context, request *dto.LoginRequest) error {
+	// Validate identifier is not empty
+	if request.Identifier == "" {
+		return ErrCustomerNotFound
+	}
+
+	// Validate password is not empty
+	if request.Password == "" {
+		return ErrIncorrectPassword
+	}
+
+	return nil
+}
+
+func (lf *LoginFlowImpl) validateForgotPasswordRequest(ctx context.Context, request *dto.ForgotPasswordRequest) error {
+	// Validate identifier is not empty
+	if request.Identifier == "" {
+		return ErrCustomerNotFound
+	}
+
+	return nil
+}
+
+func (lf *LoginFlowImpl) validateResetPasswordRequest(ctx context.Context, request *dto.ResetPasswordRequest) error {
+	// Validate customer exists
+	customer, err := lf.customerRepo.ByID(ctx, request.CustomerID)
+	if err != nil {
+		return err
+	}
+	if customer == nil {
+		return ErrCustomerNotFound
+	}
+
+	// Validate OTP code format (6 digits)
+	if len(request.OTPCode) != 6 {
+		return ErrInvalidOTPCode
+	}
+
+	// Validate password is not empty
+	if request.NewPassword == "" {
+		return ErrIncorrectPassword
+	}
+
+	// Validate password confirmation matches
+	if request.NewPassword != request.ConfirmPassword {
+		return ErrIncorrectPassword
+	}
+
+	return nil
 }

@@ -242,6 +242,9 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 		if businessflow.IsAccountTypeNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
 		}
+		if businessflow.IsAlreadyVerified(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account is already verified", "ACCOUNT_ALREADY_VERIFIED", nil)
+		}
 
 		log.Println("Resend OTP failed", err)
 		// Handle generic business errors

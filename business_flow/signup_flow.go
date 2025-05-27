@@ -116,6 +116,11 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 
 // VerifyOTP handles OTP verification and completes signup
 func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerificationRequest, metadata *ClientMetadata) (*dto.OTPVerificationResponse, error) {
+	// Validate business rules
+	if err := s.validateOTPVerificationRequest(ctx, req); err != nil {
+		return nil, NewBusinessError("OTP_VERIFICATION_VALIDATION_FAILED", "OTP verification validation failed", err)
+	}
+
 	var customer *models.Customer
 	var tokens struct {
 		access  string
@@ -183,6 +188,11 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 
 // ResendOTP generates and sends a new OTP
 func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendRequest, metadata *ClientMetadata) (*dto.OTPResendResponse, error) {
+	// Validate business rules
+	if err := s.validateOTPResendRequest(ctx, req); err != nil {
+		return nil, NewBusinessError("OTP_RESEND_VALIDATION_FAILED", "OTP resend validation failed", err)
+	}
+
 	var customer *models.Customer
 
 	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
@@ -509,4 +519,61 @@ func (s *SignupFlowImpl) maskMobileNumber(mobile string) string {
 	}
 	// Show +989****1234 format
 	return mobile[:4] + "****" + mobile[len(mobile)-4:]
+}
+
+func (s *SignupFlowImpl) validateOTPVerificationRequest(ctx context.Context, req *dto.OTPVerificationRequest) error {
+	// Validate customer exists
+	customer, err := s.customerRepo.ByID(ctx, req.CustomerID)
+	if err != nil {
+		return err
+	}
+	if customer == nil {
+		return ErrCustomerNotFound
+	}
+
+	// Validate OTP type
+	if req.OTPType != models.OTPTypeMobile && req.OTPType != models.OTPTypeEmail {
+		return ErrInvalidOTPType
+	}
+
+	// Validate OTP code format (6 digits)
+	if len(req.OTPCode) != 6 {
+		return ErrInvalidOTPCode
+	}
+
+	// Check if customer is already verified for this OTP type
+	if req.OTPType == models.OTPTypeMobile && utils.IsTrue(customer.IsMobileVerified) {
+		return ErrAlreadyVerified
+	}
+	if req.OTPType == models.OTPTypeEmail && utils.IsTrue(customer.IsEmailVerified) {
+		return ErrAlreadyVerified
+	}
+
+	return nil
+}
+
+func (s *SignupFlowImpl) validateOTPResendRequest(ctx context.Context, req *dto.OTPResendRequest) error {
+	// Validate customer exists
+	customer, err := s.customerRepo.ByID(ctx, req.CustomerID)
+	if err != nil {
+		return err
+	}
+	if customer == nil {
+		return ErrCustomerNotFound
+	}
+
+	// Validate OTP type
+	if req.OTPType != models.OTPTypeMobile && req.OTPType != models.OTPTypeEmail {
+		return ErrInvalidOTPType
+	}
+
+	// Check if customer is already verified for this OTP type
+	if req.OTPType == models.OTPTypeMobile && utils.IsTrue(customer.IsMobileVerified) {
+		return ErrAlreadyVerified
+	}
+	if req.OTPType == models.OTPTypeEmail && utils.IsTrue(customer.IsEmailVerified) {
+		return ErrAlreadyVerified
+	}
+
+	return nil
 }
