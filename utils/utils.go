@@ -4,7 +4,6 @@ package utils
 import (
 	"crypto/rand"
 	"math/big"
-	"time"
 
 	"github.com/google/uuid"
 )
@@ -31,7 +30,7 @@ func GenerateRandomAgencyRefererCode() int64 {
 	n, err := rand.Int(rand.Reader, new(big.Int).Sub(max, min))
 	if err != nil {
 		// Fallback to a simple random number if crypto/rand fails
-		return 1000000000 + time.Now().UnixNano()%9000000000
+		return 1000000000 + UTCNow().UnixNano()%9000000000
 	}
 
 	return new(big.Int).Add(n, min).Int64()

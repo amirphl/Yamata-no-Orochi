@@ -4,7 +4,6 @@ package tests
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
@@ -487,7 +486,7 @@ func TestOTPVerificationRepositoryCorrelationID(t *testing.T) {
 				AttemptsCount: otp.AttemptsCount,
 				MaxAttempts:   otp.MaxAttempts,
 				CreatedAt:     otp.CreatedAt,
-				ExpiresAt:     time.Now(),
+				ExpiresAt:     utils.UTCNow(),
 			}
 			err = testDB.DB.Create(expiredOTP).Error
 			require.NoError(t, err)
@@ -744,8 +743,8 @@ func TestCustomerSessionRepositoryCorrelationID(t *testing.T) {
 				UserAgent:      session.UserAgent,
 				IsActive:       utils.ToPtr(false),
 				CreatedAt:      session.CreatedAt,
-				LastAccessedAt: time.Now(),
-				ExpiresAt:      time.Now(),
+				LastAccessedAt: utils.UTCNow(),
+				ExpiresAt:      utils.UTCNow(),
 			}
 			err = testDB.DB.Create(expiredSession).Error
 			require.NoError(t, err)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
-	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
@@ -179,7 +178,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.Forgot
 			Status:        models.OTPStatusPending,
 			AttemptsCount: 0,
 			MaxAttempts:   3,
-			ExpiresAt:     time.Now().Add(utils.OTPExpiry),
+			ExpiresAt:     utils.UTCNowAdd(utils.OTPExpiry),
 			IPAddress:     &ipAddress,
 			UserAgent:     &userAgent,
 		}
@@ -254,7 +253,7 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 
 		var validOTP *models.OTPVerification
 		for _, otp := range otps {
-			if time.Now().Before(otp.ExpiresAt) {
+			if utils.UTCNow().Before(otp.ExpiresAt) {
 				validOTP = otp
 				break
 			}
@@ -263,7 +262,7 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 		if validOTP == nil {
 			// Check if there was an OTP but it's expired or wrong
 			for _, otp := range otps {
-				if time.Now().After(otp.ExpiresAt) {
+				if utils.UTCNow().After(otp.ExpiresAt) {
 					return nil, ErrOTPExpired
 				}
 			}
@@ -289,7 +288,7 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, request *dto.ResetPa
 		usedOTP.ID = 0                                 // Reset ID to create new record (immutable design for OTP)
 		usedOTP.CorrelationID = validOTP.CorrelationID // Use same correlation ID
 		usedOTP.Status = models.OTPStatusUsed
-		usedOTP.CreatedAt = time.Now()
+		usedOTP.CreatedAt = utils.UTCNow()
 
 		if err := lf.otpRepo.Save(ctx, &usedOTP); err != nil {
 			return nil, err
@@ -378,7 +377,7 @@ func (lf *LoginFlowImpl) CreateSession(ctx context.Context, customerID uint, met
 	}
 
 	// Calculate expiry time using constant
-	expiresAt := time.Now().Add(utils.SessionTimeout)
+	expiresAt := utils.UTCNowAdd(utils.SessionTimeout)
 
 	ipAddress := "127.0.0.1"
 	userAgent := ""
@@ -439,7 +438,7 @@ func (lf *LoginFlowImpl) ExpireOldPasswordResetOTPs(ctx context.Context, custome
 		expiredOTP.ID = 0
 		expiredOTP.CorrelationID = otp.CorrelationID // Use same correlation ID
 		expiredOTP.Status = models.OTPStatusExpired
-		expiredOTP.CreatedAt = time.Now()
+		expiredOTP.CreatedAt = utils.UTCNow()
 
 		if err := lf.otpRepo.Save(ctx, &expiredOTP); err != nil {
 			return err
@@ -467,7 +466,7 @@ func (lf *LoginFlowImpl) InvalidateAllSessions(ctx context.Context, customerID u
 		inactiveSession.ID = 0
 		inactiveSession.CorrelationID = session.CorrelationID // Use same correlation ID
 		inactiveSession.IsActive = utils.ToPtr(false)
-		inactiveSession.CreatedAt = time.Now()
+		inactiveSession.CreatedAt = utils.UTCNow()
 
 		if err := lf.sessionRepo.Save(ctx, &inactiveSession); err != nil {
 			return err

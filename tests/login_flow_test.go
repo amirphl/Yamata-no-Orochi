@@ -351,7 +351,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 			assert.NotEmpty(t, session.SessionToken)
 			assert.NotEmpty(t, session.RefreshToken)
 			assert.True(t, utils.IsTrue(session.IsActive))
-			assert.True(t, session.ExpiresAt.After(time.Now()))
+			assert.True(t, session.ExpiresAt.After(utils.UTCNow()))
 			assert.NotNil(t, session.IPAddress)
 			assert.NotNil(t, session.UserAgent)
 			assert.NotEqual(t, uuid.Nil, session.CorrelationID)
@@ -466,7 +466,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			require.NotNil(t, result)
 			assert.Equal(t, customer.ID, result.CustomerID)
 			assert.NotEmpty(t, result.MaskedPhone)
-			assert.True(t, result.OTPExpiry.After(time.Now()))
+			assert.True(t, result.OTPExpiry.After(utils.UTCNow()))
 
 			// Verify OTP was created
 			otps, err := otpRepo.ByFilter(context.Background(), models.OTPVerificationFilter{
@@ -481,7 +481,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 			assert.Equal(t, customer.RepresentativeMobile, otp.TargetValue)
 			assert.Equal(t, 0, otp.AttemptsCount)
 			assert.Equal(t, 3, otp.MaxAttempts)
-			assert.True(t, otp.ExpiresAt.After(time.Now()))
+			assert.True(t, otp.ExpiresAt.After(utils.UTCNow()))
 			assert.NotEqual(t, uuid.Nil, otp.CorrelationID)
 		})
 
@@ -551,7 +551,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(-1 * time.Hour), // Expired
+				ExpiresAt:     utils.UTCNow().Add(-1 * time.Hour), // Expired
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -741,8 +741,8 @@ func TestForgotPasswordFlow(t *testing.T) {
 			require.NotNil(t, result)
 
 			// Verify OTP expiry time is reasonable (5 minutes from now)
-			expectedExpiry := time.Now().Add(5 * time.Minute)
-			assert.True(t, result.OTPExpiry.After(time.Now()))
+			expectedExpiry := utils.UTCNow().Add(5 * time.Minute)
+			assert.True(t, result.OTPExpiry.After(utils.UTCNow()))
 			assert.True(t, result.OTPExpiry.Before(expectedExpiry.Add(1*time.Minute)))
 			assert.True(t, result.OTPExpiry.After(expectedExpiry.Add(-1*time.Minute)))
 		})
@@ -824,7 +824,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -902,7 +902,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -938,7 +938,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(-1 * time.Hour), // Expired
+				ExpiresAt:     utils.UTCNow().Add(-1 * time.Hour), // Expired
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -977,7 +977,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -1035,7 +1035,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -1082,7 +1082,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -1141,7 +1141,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -1228,7 +1228,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -1268,7 +1268,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -1309,7 +1309,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}
@@ -1325,7 +1325,7 @@ func TestResetPasswordFlow(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 				IPAddress:     utils.ToPtr("127.0.0.1"),
 				UserAgent:     utils.ToPtr("Test User Agent"),
 			}

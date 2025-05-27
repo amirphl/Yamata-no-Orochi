@@ -4,7 +4,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -130,7 +129,7 @@ func (r *OTPVerificationRepositoryImpl) ExpireOldOTPs(ctx context.Context, custo
 			AttemptsCount: oldOTP.AttemptsCount,
 			MaxAttempts:   oldOTP.MaxAttempts,
 			CreatedAt:     oldOTP.CreatedAt,
-			ExpiresAt:     time.Now(), // Mark as expired now
+			ExpiresAt:     utils.UTCNow(), // Mark as expired now
 			IPAddress:     oldOTP.IPAddress,
 			UserAgent:     oldOTP.UserAgent,
 		}
@@ -200,7 +199,7 @@ func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter mod
 
 	// Special handling for IsActive - filter non-expired pending OTPs
 	if filter.IsActive != nil && *filter.IsActive {
-		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, time.Now())
+		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, utils.UTCNow())
 	}
 
 	// Apply ordering (default to id DESC)
@@ -282,7 +281,7 @@ func (r *OTPVerificationRepositoryImpl) Count(ctx context.Context, filter models
 
 	// Special handling for IsActive - filter non-expired pending OTPs
 	if filter.IsActive != nil && *filter.IsActive {
-		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, time.Now())
+		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, utils.UTCNow())
 	}
 
 	var count int64

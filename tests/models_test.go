@@ -145,7 +145,7 @@ func TestOTPVerification(t *testing.T) {
 			assert.Equal(t, models.OTPStatusPending, otp.Status)
 			assert.Equal(t, 0, otp.AttemptsCount)
 			assert.Equal(t, 3, otp.MaxAttempts)
-			assert.True(t, otp.ExpiresAt.After(time.Now()))
+			assert.True(t, otp.ExpiresAt.After(utils.UTCNow()))
 		})
 
 		t.Run("OTPConstants", func(t *testing.T) {
@@ -167,7 +167,7 @@ func TestOTPVerification(t *testing.T) {
 			expiredOTP, err := fixtures.CreateExpiredOTP(customer.ID)
 			require.NoError(t, err)
 
-			assert.True(t, time.Now().After(expiredOTP.ExpiresAt))
+			assert.True(t, utils.UTCNow().After(expiredOTP.ExpiresAt))
 		})
 
 		t.Run("CanAttemptMethod", func(t *testing.T) {
@@ -269,7 +269,7 @@ func TestCustomerSession(t *testing.T) {
 			assert.Equal(t, customer.ID, session.CustomerID)
 			assert.NotNil(t, session.RefreshToken)
 			assert.True(t, utils.IsTrue(session.IsActive))
-			assert.True(t, session.ExpiresAt.After(time.Now()))
+			assert.True(t, session.ExpiresAt.After(utils.UTCNow()))
 			assert.NotNil(t, session.IPAddress)
 			assert.NotNil(t, session.UserAgent)
 		})
@@ -293,7 +293,7 @@ func TestCustomerSession(t *testing.T) {
 			assert.True(t, session.IsValid())
 
 			// Expired session should be invalid
-			session.ExpiresAt = time.Now().Add(-1 * time.Hour)
+			session.ExpiresAt = utils.UTCNow().Add(-1 * time.Hour)
 			assert.False(t, session.IsValid())
 		})
 

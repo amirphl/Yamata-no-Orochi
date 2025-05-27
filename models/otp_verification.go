@@ -4,6 +4,7 @@ package models
 import (
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 )
 
@@ -18,7 +19,7 @@ type OTPVerification struct {
 	Status        string     `gorm:"type:otp_status_enum;default:pending;index:idx_otp_type_status" json:"status"`
 	AttemptsCount int        `gorm:"default:0" json:"attempts_count"`
 	MaxAttempts   int        `gorm:"default:3" json:"max_attempts"`
-	CreatedAt     time.Time  `gorm:"default:CURRENT_TIMESTAMP;index:idx_otp_created_at" json:"created_at"`
+	CreatedAt     time.Time  `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_otp_created_at" json:"created_at"`
 	ExpiresAt     time.Time  `gorm:"not null;index:idx_otp_expires_at" json:"expires_at"`
 	VerifiedAt    *time.Time `json:"verified_at,omitempty"`
 	IPAddress     *string    `gorm:"type:inet;index:idx_otp_ip_address" json:"ip_address,omitempty"`
@@ -63,7 +64,7 @@ type OTPVerificationFilter struct {
 }
 
 func (o *OTPVerification) IsExpired() bool {
-	return time.Now().After(o.ExpiresAt)
+	return utils.UTCNow().After(o.ExpiresAt)
 }
 
 func (o *OTPVerification) IsVerified() bool {

@@ -229,7 +229,7 @@ func (r *FiberRouter) setupMiddleware() {
 		StackTraceHandler: func(c fiber.Ctx, e interface{}) {
 			// Log panic with request context
 			log.Printf(`{"time":"%s","level":"error","request_id":"%s","event":"panic","error":"%v","path":"%s","method":"%s","ip":"%s"}`,
-				time.Now().Format(time.RFC3339),
+				utils.UTCNow().Format(time.RFC3339),
 				c.Locals("requestid"),
 				e,
 				c.Path(),
@@ -243,7 +243,7 @@ func (r *FiberRouter) setupMiddleware() {
 // Custom security middleware
 func (r *FiberRouter) securityMiddleware(c fiber.Ctx) error {
 	// Add security headers
-	c.Set("X-Response-Time", time.Now().Format(time.RFC3339))
+	c.Set("X-Response-Time", utils.UTCNow().Format(time.RFC3339))
 	c.Set("Server", "Yamata-no-Orochi")
 
 	// IP validation (if configured)
@@ -337,7 +337,7 @@ func (r *FiberRouter) healthCheck(c fiber.Ctx) error {
 		Message: "Service is healthy",
 		Data: fiber.Map{
 			"status":    "ok",
-			"timestamp": time.Now().Unix(),
+			"timestamp": utils.UTCNow().Unix(),
 			"version":   "1.0.0",
 			"service":   "yamata-no-orochi-api",
 		},
@@ -492,7 +492,7 @@ func errorHandler(c fiber.Ctx, err error) error {
 		Error: dto.ErrorDetail{
 			Code: "INTERNAL_ERROR",
 			Details: fiber.Map{
-				"timestamp":  time.Now().Unix(),
+				"timestamp":  utils.UTCNow().Unix(),
 				"request_id": requestID,
 			},
 		},

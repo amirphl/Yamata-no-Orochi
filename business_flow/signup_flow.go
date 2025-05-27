@@ -385,7 +385,7 @@ func (s *SignupFlowImpl) generateAndSaveOTP(ctx context.Context, customerID uint
 		Status:        models.OTPStatusPending,
 		AttemptsCount: 0,
 		MaxAttempts:   3,
-		ExpiresAt:     time.Now().Add(utils.OTPExpiry),
+		ExpiresAt:     utils.UTCNowAdd(utils.OTPExpiry),
 	}
 
 	err = s.otpRepo.Save(ctx, otp)
@@ -432,7 +432,7 @@ func (s *SignupFlowImpl) verifyOTPCode(ctx context.Context, customerID uint, cod
 	verifiedOTP.ID = 0
 	verifiedOTP.CorrelationID = validOTP.CorrelationID // Use same correlation ID
 	verifiedOTP.Status = models.OTPStatusVerified
-	verifiedOTP.VerifiedAt = utils.ToPtr(time.Now())
+	verifiedOTP.VerifiedAt = utils.UTCNowPtr()
 
 	return s.otpRepo.Save(ctx, &verifiedOTP)
 }
@@ -445,10 +445,10 @@ func (s *SignupFlowImpl) completeSignup(ctx context.Context, customer *models.Cu
 	switch otpType {
 	case models.OTPTypeMobile:
 		isMobileVerified = utils.ToPtr(true)
-		mobileVerifiedAt = utils.ToPtr(time.Now())
+		mobileVerifiedAt = utils.UTCNowPtr()
 	case models.OTPTypeEmail:
 		isEmailVerified = utils.ToPtr(true)
-		emailVerifiedAt = utils.ToPtr(time.Now())
+		emailVerifiedAt = utils.UTCNowPtr()
 	default:
 		return ErrInvalidOTPType
 	}
@@ -472,7 +472,7 @@ func (s *SignupFlowImpl) createSession(ctx context.Context, customerID uint, acc
 		IPAddress:     &ipAddress,
 		UserAgent:     &userAgent,
 		IsActive:      utils.ToPtr(true),
-		ExpiresAt:     time.Now().Add(utils.SessionTimeout),
+		ExpiresAt:     utils.UTCNowAdd(utils.SessionTimeout),
 	}
 
 	return s.sessionRepo.Save(ctx, session)

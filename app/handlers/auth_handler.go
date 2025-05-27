@@ -268,7 +268,7 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 func (h *AuthHandler) Health(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Auth service is healthy", fiber.Map{
 		"status":    "healthy",
-		"timestamp": time.Now().Format(time.RFC3339),
+		"timestamp": utils.UTCNow().Format(time.RFC3339),
 		"service":   "auth-handler",
 	})
 }
@@ -579,6 +579,6 @@ func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 		"token_type":          "Bearer",
 		"expires_in":          utils.AccessTokenTTLSeconds,
 		"customer":            result.Customer,
-		"password_changed_at": time.Now().Format(time.RFC3339),
+		"password_changed_at": utils.UTCNow().Format(time.RFC3339),
 	})
 }

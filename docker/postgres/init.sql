@@ -76,6 +76,9 @@ $$ LANGUAGE plpgsql;
 \echo 'Running 0011_add_new_audit_actions.sql...'
 \i /migrations/0011_add_new_audit_actions.sql
 
+\echo 'Running 0012_update_timestamp_defaults_to_utc.sql...'
+\i /migrations/0012_update_timestamp_defaults_to_utc.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi signup system.'
 

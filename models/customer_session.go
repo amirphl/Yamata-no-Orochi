@@ -20,8 +20,8 @@ type CustomerSession struct {
 	IPAddress      *string         `gorm:"type:inet;index:idx_sessions_ip_address" json:"ip_address,omitempty"`
 	UserAgent      *string         `gorm:"type:text" json:"user_agent,omitempty"`
 	IsActive       *bool           `gorm:"default:true;index:idx_sessions_is_active" json:"is_active"`
-	CreatedAt      time.Time       `gorm:"default:CURRENT_TIMESTAMP" json:"created_at"`
-	LastAccessedAt time.Time       `gorm:"default:CURRENT_TIMESTAMP;index:idx_sessions_last_accessed" json:"last_accessed_at"`
+	CreatedAt      time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"created_at"`
+	LastAccessedAt time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sessions_last_accessed" json:"last_accessed_at"`
 	ExpiresAt      time.Time       `gorm:"not null;index:idx_sessions_expires_at" json:"expires_at"`
 }
 
@@ -46,7 +46,7 @@ type CustomerSessionFilter struct {
 }
 
 func (s *CustomerSession) IsExpired() bool {
-	return time.Now().After(s.ExpiresAt)
+	return utils.UTCNow().After(s.ExpiresAt)
 }
 
 func (s *CustomerSession) IsValid() bool {

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -132,7 +133,7 @@ func parseRSAKeys(privateKeyPEM, publicKeyPEM string) (*rsa.PrivateKey, *rsa.Pub
 
 // GenerateTokens generates access and refresh tokens for a customer
 func (s *TokenServiceImpl) GenerateTokens(customerID uint) (accessToken, refreshToken string, err error) {
-	now := time.Now()
+	now := utils.UTCNow()
 
 	// Generate unique token IDs
 	accessTokenID, err := generateTokenID()
@@ -249,7 +250,7 @@ func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
 	}
 
 	// Check if token has expired
-	if time.Now().After(time.Unix(int64(expiresAt), 0)) {
+	if utils.UTCNow().After(time.Unix(int64(expiresAt), 0)) {
 		return nil, ErrTokenExpired
 	}
 
@@ -279,7 +280,7 @@ func (s *TokenServiceImpl) RefreshToken(refreshToken string) (newAccessToken, ne
 		return "", "", fmt.Errorf("token is not a refresh token")
 	}
 
-	if time.Now().After(claims.ExpiresAt) {
+	if utils.UTCNow().After(claims.ExpiresAt) {
 		return "", "", fmt.Errorf("refresh token has expired")
 	}
 

@@ -18,7 +18,7 @@ type AuditLog struct {
 	Metadata     json.RawMessage `gorm:"type:jsonb;index:idx_audit_metadata,type:gin" json:"metadata,omitempty"`
 	Success      *bool           `gorm:"default:true;index:idx_audit_success" json:"success"`
 	ErrorMessage *string         `gorm:"type:text" json:"error_message,omitempty"`
-	CreatedAt    time.Time       `gorm:"default:CURRENT_TIMESTAMP;index:idx_audit_created_at" json:"created_at"`
+	CreatedAt    time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_audit_created_at" json:"created_at"`
 }
 
 func (AuditLog) TableName() string {

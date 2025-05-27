@@ -40,8 +40,8 @@ type Customer struct {
 	IsActive         *bool `gorm:"default:true;index:idx_customers_is_active" json:"is_active"`
 
 	// Timestamps
-	CreatedAt        time.Time  `gorm:"default:CURRENT_TIMESTAMP;index:idx_customers_created_at" json:"created_at"`
-	UpdatedAt        time.Time  `gorm:"default:CURRENT_TIMESTAMP" json:"updated_at"`
+	CreatedAt        time.Time  `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_customers_created_at" json:"created_at"`
+	UpdatedAt        time.Time  `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"updated_at"`
 	EmailVerifiedAt  *time.Time `json:"email_verified_at,omitempty"`
 	MobileVerifiedAt *time.Time `json:"mobile_verified_at,omitempty"`
 	LastLoginAt      *time.Time `gorm:"index:idx_customers_last_login_at" json:"last_login_at,omitempty"`

@@ -89,7 +89,7 @@ func TestSignup(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, otps, 1)
 			assert.Equal(t, models.OTPStatusPending, otps[0].Status)
-			assert.True(t, otps[0].ExpiresAt.After(time.Now()))
+			assert.True(t, otps[0].ExpiresAt.After(utils.UTCNow()))
 
 			// Verify audit log was created
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
@@ -588,7 +588,7 @@ func TestVerifyOTP(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, sessions, 1)
 			assert.True(t, utils.IsTrue(sessions[0].IsActive))
-			assert.True(t, sessions[0].ExpiresAt.After(time.Now()))
+			assert.True(t, sessions[0].ExpiresAt.After(utils.UTCNow()))
 
 			// Verify audit logs were created
 			auditLogs, err := auditRepo.ByFilter(context.Background(), models.AuditLogFilter{
@@ -714,7 +714,7 @@ func TestVerifyOTP(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 0,
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(-1 * time.Hour), // Expired
+				ExpiresAt:     utils.UTCNow().Add(-1 * time.Hour), // Expired
 			}
 			err = testDB.DB.Create(expiredOTP).Error
 			require.NoError(t, err)
@@ -746,7 +746,7 @@ func TestVerifyOTP(t *testing.T) {
 				Status:        models.OTPStatusPending,
 				AttemptsCount: 3, // Max attempts reached
 				MaxAttempts:   3,
-				ExpiresAt:     time.Now().Add(5 * time.Minute),
+				ExpiresAt:     utils.UTCNow().Add(5 * time.Minute),
 			}
 			err = testDB.DB.Create(exceededOTP).Error
 			require.NoError(t, err)

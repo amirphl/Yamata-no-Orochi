@@ -217,7 +217,7 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 // 						entityType = entityType.Elem()
 // 					}
 // 					if entityType.Name() == "OTPVerification" {
-// 						db = db.Where("status = ? AND expires_at > ?", "pending", time.Now())
+// 						db = db.Where("status = ? AND expires_at > ?", "pending", utils.UTCNow())
 // 					} else {
 // 						db = db.Where(fmt.Sprintf("%s = ?", dbColumnName), field.Interface())
 // 					}
@@ -229,7 +229,7 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 // 			}
 // 		case "IsExpired":
 // 			if field.Kind() == reflect.Bool && field.Bool() {
-// 				db = db.Where("expires_at <= ?", time.Now())
+// 				db = db.Where("expires_at <= ?", utils.UTCNow())
 // 			}
 // 		case "AccountTypeName":
 // 			// Join with account_types table for type name filtering

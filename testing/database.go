@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	_ "github.com/lib/pq" // PostgreSQL driver for database/sql
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -50,7 +50,7 @@ func SetupTestDB() (*TestDB, error) {
 	config := GetTestDBConfig()
 
 	// Generate unique database name
-	timestamp := time.Now().UnixNano()
+	timestamp := utils.UTCNow().UnixNano()
 	randomSuffix := rand.Intn(10000)
 	dbName := fmt.Sprintf("yamata_test_%d_%d", timestamp, randomSuffix)
 
@@ -244,6 +244,7 @@ func runTestMigrations(databaseURL, dbName string) error {
 		"0009_add_correlation_ids.sql",
 		"0010_add_customer_uuid_and_agency_id.sql",
 		"0011_add_new_audit_actions.sql",
+		"0012_update_timestamp_defaults_to_utc.sql",
 	}
 
 	// Execute each migration file

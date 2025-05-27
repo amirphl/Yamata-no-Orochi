@@ -4,7 +4,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -47,7 +46,7 @@ func (r *CustomerSessionRepositoryImpl) BySessionToken(ctx context.Context, toke
 
 	var session models.CustomerSession
 	err := db.Where("session_token = ? AND is_active = ? AND expires_at > ?",
-		token, true, time.Now()).
+		token, true, utils.UTCNow()).
 		Preload("Customer").
 		Last(&session).Error
 
@@ -67,7 +66,7 @@ func (r *CustomerSessionRepositoryImpl) ByRefreshToken(ctx context.Context, toke
 
 	var session models.CustomerSession
 	err := db.Where("refresh_token = ? AND is_active = ? AND expires_at > ?",
-		token, true, time.Now()).
+		token, true, utils.UTCNow()).
 		Preload("Customer").
 		Last(&session).Error
 
@@ -95,7 +94,7 @@ func (r *CustomerSessionRepositoryImpl) ListActiveSessionsByCustomer(ctx context
 
 	// Filter out expired sessions
 	var activeSessions []*models.CustomerSession
-	now := time.Now()
+	now := utils.UTCNow()
 	for _, session := range sessions {
 		if session.ExpiresAt.After(now) {
 			activeSessions = append(activeSessions, session)
@@ -140,8 +139,8 @@ func (r *CustomerSessionRepositoryImpl) ExpireSession(ctx context.Context, sessi
 		UserAgent:      session.UserAgent,
 		IsActive:       utils.ToPtr(false),
 		CreatedAt:      session.CreatedAt,
-		LastAccessedAt: time.Now(),
-		ExpiresAt:      time.Now(), // Mark as expired now
+		LastAccessedAt: utils.UTCNow(),
+		ExpiresAt:      utils.UTCNow(), // Mark as expired now
 	}
 
 	err = db.Create(&expiredSession).Error
@@ -179,7 +178,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireAllCustomerSessions(ctx context.Co
 	}
 
 	// Create expired records for each session
-	now := time.Now()
+	now := utils.UTCNow()
 	for _, session := range sessions {
 		expiredSession := models.CustomerSession{
 			CorrelationID:  session.CorrelationID, // Use same correlation ID
@@ -223,7 +222,7 @@ func (r *CustomerSessionRepositoryImpl) CleanupExpiredSessions(ctx context.Conte
 
 	// Find all sessions that are naturally expired but still marked as active
 	var expiredSessions []models.CustomerSession
-	now := time.Now()
+	now := utils.UTCNow()
 	err = db.Where("is_active = ? AND expires_at <= ?", true, now).
 		Find(&expiredSessions).Error
 
@@ -307,7 +306,7 @@ func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter mod
 
 	// Special handling for IsExpired - filter expired sessions
 	if filter.IsExpired != nil && *filter.IsExpired {
-		query = query.Where("expires_at <= ?", time.Now())
+		query = query.Where("expires_at <= ?", utils.UTCNow())
 	}
 
 	// Apply ordering (default to id DESC)
@@ -385,7 +384,7 @@ func (r *CustomerSessionRepositoryImpl) Count(ctx context.Context, filter models
 
 	// Special handling for IsExpired - filter expired sessions
 	if filter.IsExpired != nil && *filter.IsExpired {
-		query = query.Where("expires_at <= ?", time.Now())
+		query = query.Where("expires_at <= ?", utils.UTCNow())
 	}
 
 	var count int64
