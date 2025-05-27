@@ -99,7 +99,8 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 
 	// Send OTP via SMS (outside transaction to avoid rollback on SMS failure)
 	go func() {
-		err := s.notificationSvc.SendSMS(customer.RepresentativeMobile, fmt.Sprintf("Your verification code is: %s", otpCode))
+		customerID := int64(customer.ID)
+		err := s.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, fmt.Sprintf("Your verification code is: %s", otpCode), &customerID)
 		if err != nil {
 			errMsg := fmt.Sprintf("Failed to send SMS: %v", err)
 			_ = s.createAuditLog(context.Background(), customer, models.AuditActionOTPSMSFailed, errMsg, false, &errMsg, metadata)
@@ -226,7 +227,8 @@ func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendReques
 		// Send notification
 		message := fmt.Sprintf("Your new verification code is: %s. Valid for 5 minutes.", otpCode)
 		if req.OTPType == models.OTPTypeMobile {
-			return s.notificationSvc.SendSMS(target, message)
+			customerID := int64(req.CustomerID)
+			return s.notificationSvc.SendSMS(ctx, target, message, &customerID)
 		} else {
 			return s.notificationSvc.SendEmail(target, "Verification Code", message)
 		}

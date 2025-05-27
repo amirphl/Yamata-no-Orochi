@@ -34,7 +34,7 @@ func TestLoginFlow(t *testing.T) {
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
-			services.NewMockSMSProvider(),
+			services.NewMockSMSService(),
 			services.NewMockEmailProvider(),
 		)
 
@@ -291,7 +291,7 @@ func TestLoginFlowHelperFunctions(t *testing.T) {
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
-			services.NewMockSMSProvider(),
+			services.NewMockSMSService(),
 			services.NewMockEmailProvider(),
 		)
 
@@ -434,7 +434,7 @@ func TestForgotPasswordFlow(t *testing.T) {
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
-			services.NewMockSMSProvider(),
+			services.NewMockSMSService(),
 			services.NewMockEmailProvider(),
 		)
 
@@ -793,7 +793,7 @@ func TestResetPasswordFlow(t *testing.T) {
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
-			services.NewMockSMSProvider(),
+			services.NewMockSMSService(),
 			services.NewMockEmailProvider(),
 		)
 

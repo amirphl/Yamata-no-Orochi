@@ -114,22 +114,21 @@ func initializeDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 
 // initializeNotificationService initializes the notification service
 func initializeNotificationService(cfg *config.ProductionConfig) services.NotificationService {
-	// Create providers based on configuration
-	var smsProvider services.SMSProvider
+	// Create SMS service based on configuration
+	var smsService services.SMSService
 	var emailProvider services.EmailProvider
 
-	switch cfg.SMS.Provider {
+	switch cfg.SMS.ProviderDomain {
 	case "mock":
-		smsProvider = services.NewMockSMSProvider()
+		smsService = services.NewMockSMSService()
 	default:
-		log.Printf("Unknown SMS provider: %s, using mock", cfg.SMS.Provider)
-		smsProvider = services.NewMockSMSProvider()
+		smsService = services.NewSMSService(&cfg.SMS)
 	}
 
 	// Initialize email provider with mock for now
 	emailProvider = services.NewMockEmailProvider()
 
-	return services.NewNotificationService(smsProvider, emailProvider)
+	return services.NewNotificationService(smsService, emailProvider)
 }
 
 // initializeApplication initializes the application components
@@ -195,7 +194,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Log that services are initialized
 	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
-	log.Printf("Notification service initialized with provider: %s", cfg.SMS.Provider)
+	log.Printf("Notification service initialized with SMS domain: %s", cfg.SMS.ProviderDomain)
 	log.Printf("Database initialized: %s:%d/%s", cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 
 	log.Println("Application components initialized successfully")

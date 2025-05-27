@@ -189,7 +189,8 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, request *dto.Forgot
 
 		// Send OTP via SMS
 		smsMessage := fmt.Sprintf("Your password reset code is: %s. This code will expire in 5 minutes.", otpCode)
-		if err := lf.notificationSvc.SendSMS(customer.RepresentativeMobile, smsMessage); err != nil {
+		customerID := int64(customer.ID)
+		if err := lf.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, smsMessage, &customerID); err != nil {
 			// Log SMS failure but don't fail the entire process
 			errMsg := fmt.Sprintf("OTP generated but SMS failed: %v", err)
 			_ = lf.LogPasswordResetAttempt(ctx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)

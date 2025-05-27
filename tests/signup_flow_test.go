@@ -33,7 +33,7 @@ func TestSignup(t *testing.T) {
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
-			services.NewMockSMSProvider(),
+			services.NewMockSMSService(),
 			services.NewMockEmailProvider(),
 		)
 
@@ -518,7 +518,7 @@ func TestVerifyOTP(t *testing.T) {
 		require.NoError(t, err)
 
 		notificationService := services.NewNotificationService(
-			services.NewMockSMSProvider(),
+			services.NewMockSMSService(),
 			services.NewMockEmailProvider(),
 		)
 

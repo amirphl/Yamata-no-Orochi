@@ -88,12 +88,34 @@ func (r *FiberRouter) SetupRoutes() {
 		log.Println("API documentation enabled for development")
 	}
 
-	// Auth routes with rate limiting
+	// Apply general rate limiting to all API routes (aligned with nginx)
+	api.Use(limiter.New(limiter.Config{
+		Max:        2000,            // Maximum 2000 requests (matches nginx api zone)
+		Expiration: 1 * time.Minute, // Per minute
+		KeyGenerator: func(c fiber.Ctx) string {
+			return c.IP() // Rate limit by IP
+		},
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Too many requests. Please try again later.",
+				Error: dto.ErrorDetail{
+					Code: "RATE_LIMIT_EXCEEDED",
+				},
+			})
+		},
+		Next: func(c fiber.Ctx) bool {
+			// Skip rate limiting for health checks
+			return c.Path() == "/api/v1/health"
+		},
+	}))
+
+	// Auth routes with stricter rate limiting
 	auth := api.Group("/auth")
 
-	// Apply rate limiting to auth endpoints
+	// Apply stricter rate limiting to auth endpoints (aligned with nginx)
 	auth.Use(limiter.New(limiter.Config{
-		Max:        30,              // Maximum 30 requests
+		Max:        20,              // Maximum 20 requests (matches nginx auth zone)
 		Expiration: 1 * time.Minute, // Per minute
 		KeyGenerator: func(c fiber.Ctx) string {
 			return c.IP() // Rate limit by IP

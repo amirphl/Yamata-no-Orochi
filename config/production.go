@@ -121,16 +121,12 @@ type JWTConfig struct {
 }
 
 type SMSConfig struct {
-	Provider      string        `json:"provider"`
-	Username      string        `json:"username"`
-	Password      string        `json:"password"`
-	FromNumber    string        `json:"from_number"`
-	APIKey        string        `json:"api_key"`
-	APISecret     string        `json:"api_secret"`
-	BaseURL       string        `json:"base_url"`
-	RateLimit     int           `json:"rate_limit"` // SMS per minute
-	RetryAttempts int           `json:"retry_attempts"`
-	Timeout       time.Duration `json:"timeout"`
+	ProviderDomain string        `json:"provider_domain"`
+	APIKey         string        `json:"api_key"`
+	SourceNumber   string        `json:"source_number"`
+	RetryCount     int           `json:"retry_count"`
+	ValidityPeriod int           `json:"validity_period"`
+	Timeout        time.Duration `json:"timeout"`
 }
 
 type EmailConfig struct {
@@ -239,7 +235,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Database: DatabaseConfig{
 			Host:            getEnvString("DB_HOST", "localhost"),
 			Port:            getEnvInt("DB_PORT", 5432),
-			Name:            getEnvString("DB_NAME", "yamata_no_orochi"),
+			Name:            getEnvString("DB_NAME", "postgres"),
 			User:            getEnvString("DB_USER", "postgres"),
 			Password:        getEnvString("DB_PASSWORD", ""),
 			SSLMode:         getEnvString("DB_SSL_MODE", "require"),
@@ -277,6 +273,8 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			AllowedOrigins: getEnvStringSlice("CORS_ALLOWED_ORIGINS", []string{
 				"https://yamata-no-orochi.com",
 				"https://api.yamata-no-orochi.com",
+				"https://wwww.yamata-no-orochi.com",
+				"https://monitoring.yamata-no-orochi.com",
 				"https://admin.yamata-no-orochi.com",
 			}),
 			AllowedMethods:   getEnvStringSlice("CORS_ALLOWED_METHODS", []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
@@ -284,8 +282,8 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			AllowCredentials: getEnvBool("CORS_ALLOW_CREDENTIALS", true),
 			CORSMaxAge:       getEnvInt("CORS_MAX_AGE", 86400),
 
-			AuthRateLimit:   getEnvInt("AUTH_RATE_LIMIT", 5),      // 5 auth requests per minute
-			GlobalRateLimit: getEnvInt("GLOBAL_RATE_LIMIT", 1000), // 1000 requests per minute
+			AuthRateLimit:   getEnvInt("AUTH_RATE_LIMIT", 20),     // 20 auth requests per minute
+			GlobalRateLimit: getEnvInt("GLOBAL_RATE_LIMIT", 2000), // 2000 requests per minute
 			RateLimitWindow: getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
 			RateLimitMemory: getEnvInt("RATE_LIMIT_MEMORY", 64), // 64MB
 
@@ -305,7 +303,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			PasswordRequireUpper:  getEnvBool("PASSWORD_REQUIRE_UPPER", true),
 			PasswordRequireLower:  getEnvBool("PASSWORD_REQUIRE_LOWER", true),
 			PasswordRequireNum:    getEnvBool("PASSWORD_REQUIRE_NUMBER", true),
-			PasswordRequireSymbol: getEnvBool("PASSWORD_REQUIRE_SYMBOL", false),
+			PasswordRequireSymbol: getEnvBool("PASSWORD_REQUIRE_SYMBOL", true),
 			BcryptCost:            getEnvInt("BCRYPT_COST", 12),
 
 			SessionCookieSecure:    getEnvBool("SESSION_COOKIE_SECURE", true),
@@ -319,23 +317,19 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			PrivateKey:      getEnvString("JWT_PRIVATE_KEY", ""),
 			PublicKey:       getEnvString("JWT_PUBLIC_KEY", ""),
 			UseRSAKeys:      getEnvBool("JWT_USE_RSA_KEYS", false),
-			AccessTokenTTL:  getEnvDuration("JWT_ACCESS_TOKEN_TTL", 15*time.Minute),
+			AccessTokenTTL:  getEnvDuration("JWT_ACCESS_TOKEN_TTL", 24*time.Hour),
 			RefreshTokenTTL: getEnvDuration("JWT_REFRESH_TOKEN_TTL", 7*24*time.Hour),
 			Issuer:          getEnvString("JWT_ISSUER", "yamata-no-orochi"),
 			Audience:        getEnvString("JWT_AUDIENCE", "yamata-no-orochi-api"),
 			Algorithm:       getEnvString("JWT_ALGORITHM", "HS256"),
 		},
 		SMS: SMSConfig{
-			Provider:      getEnvString("SMS_PROVIDER", "kavenegar"),
-			Username:      getEnvString("SMS_USERNAME", ""),
-			Password:      getEnvString("SMS_PASSWORD", ""),
-			FromNumber:    getEnvString("SMS_FROM_NUMBER", "+985000120304"),
-			APIKey:        getEnvString("SMS_API_KEY", ""),
-			APISecret:     getEnvString("SMS_API_SECRET", ""),
-			BaseURL:       getEnvString("SMS_BASE_URL", "https://api.kavenegar.com"),
-			RateLimit:     getEnvInt("SMS_RATE_LIMIT", 60),
-			RetryAttempts: getEnvInt("SMS_RETRY_ATTEMPTS", 3),
-			Timeout:       getEnvDuration("SMS_TIMEOUT", 30*time.Second),
+			ProviderDomain: getEnvString("SMS_PROVIDER_DOMAIN", "mock"),
+			APIKey:         getEnvString("SMS_API_KEY", ""),
+			SourceNumber:   getEnvString("SMS_SOURCE_NUMBER", ""),
+			RetryCount:     getEnvInt("SMS_RETRY_COUNT", 3),
+			ValidityPeriod: getEnvInt("SMS_VALIDITY_PERIOD", 300),
+			Timeout:        getEnvDuration("SMS_TIMEOUT", 30*time.Second),
 		},
 		Email: EmailConfig{
 			Host:          getEnvString("EMAIL_HOST", "smtp.gmail.com"),
@@ -384,7 +378,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Cache: CacheConfig{
 			Enabled:         getEnvBool("CACHE_ENABLED", true),
 			Provider:        getEnvString("CACHE_PROVIDER", "redis"),
-			RedisURL:        getEnvString("CACHE_REDIS_URL", "redis://redis:6379"),
+			RedisURL:        getEnvString("CACHE_REDIS_URL", "redis://localhost:6379"),
 			RedisDB:         getEnvInt("CACHE_REDIS_DB", 0),
 			RedisPrefix:     getEnvString("CACHE_REDIS_PREFIX", "yamata:"),
 			DefaultTTL:      getEnvDuration("CACHE_DEFAULT_TTL", 1*time.Hour),
@@ -401,15 +395,15 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			CertbotEmail: getEnvString("CERTBOT_EMAIL", "admin@your-domain.com"),
 
 			// Monitoring Configuration
-			GrafanaAdminPassword: getEnvString("GRAFANA_ADMIN_PASSWORD", "your_secure_grafana_password"),
+			GrafanaAdminPassword: getEnvString("GRAFANA_ADMIN_PASSWORD", ""),
 
 			// Additional Security
-			RedisPassword: getEnvString("REDIS_PASSWORD", "your_redis_password_if_enabled"),
+			RedisPassword: getEnvString("REDIS_PASSWORD", ""),
 
 			// Backup Configuration
-			BackupS3Bucket:    getEnvString("BACKUP_S3_BUCKET", "yamata-backups"),
-			BackupS3AccessKey: getEnvString("BACKUP_S3_ACCESS_KEY", "your_s3_access_key"),
-			BackupS3SecretKey: getEnvString("BACKUP_S3_SECRET_KEY", "your_s3_secret_key"),
+			BackupS3Bucket:    getEnvString("BACKUP_S3_BUCKET", ""),
+			BackupS3AccessKey: getEnvString("BACKUP_S3_ACCESS_KEY", ""),
+			BackupS3SecretKey: getEnvString("BACKUP_S3_SECRET_KEY", ""),
 
 			// Build Information
 			Environment: getEnvString("APP_ENV", "production"),
@@ -597,12 +591,12 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 	}
 
 	// Validate SMS configuration if enabled
-	if cfg.SMS.Provider != "mock" {
+	if cfg.SMS.ProviderDomain != "mock" {
 		if cfg.SMS.APIKey == "" {
-			errors = append(errors, "SMS_API_KEY is required for non-mock SMS provider")
+			errors = append(errors, "SMS_API_KEY is required for SMS provider")
 		}
-		if cfg.SMS.BaseURL == "" {
-			errors = append(errors, "SMS_BASE_URL is required for non-mock SMS provider")
+		if cfg.SMS.SourceNumber == "" {
+			errors = append(errors, "SMS_SOURCE_NUMBER is required for SMS provider")
 		}
 	}
 

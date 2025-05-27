@@ -2,6 +2,7 @@
 package services
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"strings"
@@ -9,19 +10,14 @@ import (
 
 // NotificationService handles sending notifications via SMS and email
 type NotificationService interface {
-	SendSMS(mobile, message string) error
+	SendSMS(ctx context.Context, mobile, message string, customerID *int64) error
 	SendEmail(email, subject, message string) error
 }
 
 // NotificationServiceImpl implements NotificationService
 type NotificationServiceImpl struct {
-	smsProvider   SMSProvider
+	smsService    SMSService
 	emailProvider EmailProvider
-}
-
-// SMSProvider interface for SMS sending
-type SMSProvider interface {
-	SendSMS(mobile, message string) error
 }
 
 // EmailProvider interface for email sending
@@ -30,25 +26,31 @@ type EmailProvider interface {
 }
 
 // NewNotificationService creates a new notification service
-func NewNotificationService(smsProvider SMSProvider, emailProvider EmailProvider) NotificationService {
+func NewNotificationService(smsService SMSService, emailProvider EmailProvider) NotificationService {
 	return &NotificationServiceImpl{
-		smsProvider:   smsProvider,
+		smsService:    smsService,
 		emailProvider: emailProvider,
 	}
 }
 
 // SendSMS sends an SMS message to the specified mobile number
-func (s *NotificationServiceImpl) SendSMS(mobile, message string) error {
-	if s.smsProvider == nil {
-		return fmt.Errorf("SMS provider not configured")
+func (s *NotificationServiceImpl) SendSMS(ctx context.Context, mobile, message string, customerID *int64) error {
+	if s.smsService == nil {
+		return fmt.Errorf("SMS service not configured")
+	}
+
+	// Validate mobile format (convert from +989 format to 989 format)
+	recipient := mobile
+	if strings.HasPrefix(mobile, "+") {
+		recipient = mobile[1:] // Remove the + prefix
 	}
 
 	// Validate mobile format
-	if len(mobile) != 13 || mobile[:4] != "+989" {
+	if len(recipient) != 12 || !strings.HasPrefix(recipient, "989") {
 		return fmt.Errorf("invalid mobile number format: %s", mobile)
 	}
 
-	return s.smsProvider.SendSMS(mobile, message)
+	return s.smsService.SendSMS(ctx, recipient, message, customerID)
 }
 
 // SendEmail sends an email to the specified email address
@@ -65,17 +67,6 @@ func (s *NotificationServiceImpl) SendEmail(email, subject, message string) erro
 	return s.emailProvider.SendEmail(email, subject, message)
 }
 
-type MockSMSProvider struct{}
-
-func NewMockSMSProvider() SMSProvider {
-	return &MockSMSProvider{}
-}
-
-func (p *MockSMSProvider) SendSMS(mobile, message string) error {
-	log.Printf("SMS sent to %s: %s", mobile, message)
-	return nil
-}
-
 type MockEmailProvider struct{}
 
 func NewMockEmailProvider() EmailProvider {
@@ -84,35 +75,6 @@ func NewMockEmailProvider() EmailProvider {
 
 func (p *MockEmailProvider) SendEmail(email, subject, message string) error {
 	log.Printf("Email sent to %s [%s]: %s", email, subject, message)
-	return nil
-}
-
-type IranianSMSProvider struct {
-	username   string
-	password   string
-	fromNumber string
-}
-
-func NewIranianSMSProvider(username, password, fromNumber string) SMSProvider {
-	return &IranianSMSProvider{
-		username:   username,
-		password:   password,
-		fromNumber: fromNumber,
-	}
-}
-
-func (p *IranianSMSProvider) SendSMS(mobile, message string) error {
-	// Implementation would integrate with Iranian SMS providers like:
-	// - Kavenegar
-	// - SMS.ir
-	// - Payamak
-	// - etc.
-
-	log.Printf("Sending SMS via Iranian provider to %s: %s", mobile, message)
-
-	// Placeholder implementation
-	// In real implementation, make HTTP request to SMS provider API
-
 	return nil
 }
 
