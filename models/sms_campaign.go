@@ -114,16 +114,16 @@ func (s *SMSCampaignSpec) Scan(value any) error {
 
 // SMSCampaign represents an SMS campaign in the database
 type SMSCampaign struct {
-	ID         int               `json:"id" db:"id"`
-	UUID       uuid.UUID         `json:"uuid" db:"uuid"`
-	CustomerID int               `json:"customer_id" db:"customer_id"`
-	Status     SMSCampaignStatus `json:"status" db:"status"`
-	CreatedAt  time.Time         `json:"created_at" db:"created_at"`
-	UpdatedAt  *time.Time        `json:"updated_at,omitempty" db:"updated_at"`
-	Spec       SMSCampaignSpec   `json:"spec" db:"spec"`
+	ID         uint              `gorm:"primaryKey" json:"id"`
+	UUID       uuid.UUID         `gorm:"type:uuid;not null;uniqueIndex:uk_sms_campaigns_uuid;index:idx_sms_campaigns_uuid" json:"uuid"`
+	CustomerID uint              `gorm:"not null;index:idx_sms_campaigns_customer_id" json:"customer_id"`
+	Status     SMSCampaignStatus `gorm:"type:sms_campaign_status;not null;default:'initiated';index:idx_sms_campaigns_status" json:"status"`
+	CreatedAt  time.Time         `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sms_campaigns_created_at" json:"created_at"`
+	UpdatedAt  *time.Time        `gorm:"index:idx_sms_campaigns_updated_at" json:"updated_at,omitempty"`
+	Spec       SMSCampaignSpec   `gorm:"type:jsonb;not null" json:"spec"`
 
-	// Optional joined fields
-	Customer *Customer `json:"customer,omitempty" db:"-"`
+	// Relations
+	Customer *Customer `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
 }
 
 // TableName returns the table name for the model
@@ -179,6 +179,27 @@ func (c *SMSCampaign) CanTransitionTo(newStatus SMSCampaignStatus) bool {
 	default:
 		return false
 	}
+}
+
+// SMSCampaignFilter represents filter criteria for SMS campaigns
+type SMSCampaignFilter struct {
+	ID             *uint              `json:"id,omitempty"`
+	UUID           *uuid.UUID         `json:"uuid,omitempty"`
+	CustomerID     *uint              `json:"customer_id,omitempty"`
+	Status         *SMSCampaignStatus `json:"status,omitempty"`
+	Title          *string            `json:"title,omitempty"`
+	Segment        *string            `json:"segment,omitempty"`
+	Sex            *string            `json:"sex,omitempty"`
+	City           *string            `json:"city,omitempty"`
+	LineNumber     *string            `json:"line_number,omitempty"`
+	CreatedAfter   *time.Time         `json:"created_after,omitempty"`
+	CreatedBefore  *time.Time         `json:"created_before,omitempty"`
+	UpdatedAfter   *time.Time         `json:"updated_after,omitempty"`
+	UpdatedBefore  *time.Time         `json:"updated_before,omitempty"`
+	ScheduleAfter  *time.Time         `json:"schedule_after,omitempty"`
+	ScheduleBefore *time.Time         `json:"schedule_before,omitempty"`
+	MinBudget      *uint64            `json:"min_budget,omitempty"`
+	MaxBudget      *uint64            `json:"max_budget,omitempty"`
 }
 
 // GetStatusDisplayName returns a human-readable status name
