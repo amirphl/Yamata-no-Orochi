@@ -82,6 +82,9 @@ $$ LANGUAGE plpgsql;
 \echo 'Running 0013_relax_name_validation.sql...'
 \i /migrations/0013_relax_name_validation.sql
 
+\echo 'Running 0014_create_sms_campaigns.sql...'
+\i /migrations/0014_create_sms_campaigns.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi signup system.'
 
