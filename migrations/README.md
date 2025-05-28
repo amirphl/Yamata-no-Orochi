@@ -24,6 +24,7 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 11. **0011_add_new_audit_actions** - Adds new audit action enum values
 12. **0012_update_timestamp_defaults_to_utc** - Updates timestamp defaults to UTC
 13. **0013_relax_name_validation** - Removes name format constraints to allow any characters
+14. 
 
 ## Database Schema Overview
 

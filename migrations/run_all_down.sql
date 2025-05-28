@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0014_create_sms_campaigns_down.sql...'
+\i migrations/0014_create_sms_campaigns_down.sql
+
 \echo 'Running 0013_relax_name_validation_down.sql...'
 \i migrations/0013_relax_name_validation_down.sql
 
