@@ -1,0 +1,218 @@
+package models
+
+import (
+	"database/sql/driver"
+	"encoding/json"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// SMSCampaignStatus represents the status of an SMS campaign
+type SMSCampaignStatus string
+
+const (
+	SMSCampaignStatusInitiated          SMSCampaignStatus = "initiated"
+	SMSCampaignStatusInProgress         SMSCampaignStatus = "in-progress"
+	SMSCampaignStatusWaitingForApproval SMSCampaignStatus = "waiting-for-approval"
+	SMSCampaignStatusApproved           SMSCampaignStatus = "approved"
+	SMSCampaignStatusRejected           SMSCampaignStatus = "rejected"
+)
+
+// String returns the string representation of the status
+func (s SMSCampaignStatus) String() string {
+	return string(s)
+}
+
+// Valid checks if the status is valid
+func (s SMSCampaignStatus) Valid() bool {
+	switch s {
+	case SMSCampaignStatusInitiated, SMSCampaignStatusInProgress,
+		SMSCampaignStatusWaitingForApproval, SMSCampaignStatusApproved,
+		SMSCampaignStatusRejected:
+		return true
+	default:
+		return false
+	}
+}
+
+// Scan implements the sql.Scanner interface for SMSCampaignStatus
+func (s *SMSCampaignStatus) Scan(value any) error {
+	if value == nil {
+		*s = ""
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string:
+		*s = SMSCampaignStatus(v)
+	case []byte:
+		*s = SMSCampaignStatus(string(v))
+	default:
+		return fmt.Errorf("cannot scan %T into SMSCampaignStatus", value)
+	}
+
+	return nil
+}
+
+// Value implements the driver.Valuer interface for SMSCampaignStatus
+func (s SMSCampaignStatus) Value() (driver.Value, error) {
+	if !s.Valid() {
+		return nil, fmt.Errorf("invalid SMSCampaignStatus: %s", s)
+	}
+	return string(s), nil
+}
+
+// SMSCampaignSpec represents the JSON specification for an SMS campaign
+type SMSCampaignSpec struct {
+	// Campaign details
+	Title string `json:"title"`
+
+	// Target audience
+	Segment    string   `json:"segment"`
+	Subsegment []string `json:"subsegment"`
+	Sex        string   `json:"sex"`
+	City       []string `json:"city"`
+
+	// Campaign content
+	AdLink  string `json:"adlink"`
+	Content string `json:"content"`
+
+	// Scheduling and configuration
+	ScheduleAt *time.Time `json:"schedule_at"`
+	LineNumber string     `json:"line_number"`
+
+	// Budget
+	Budget uint64 `json:"budget"`
+}
+
+// Value implements the driver.Valuer interface for SMSCampaignSpec
+func (s SMSCampaignSpec) Value() (driver.Value, error) {
+	return json.Marshal(s)
+}
+
+// Scan implements the sql.Scanner interface for SMSCampaignSpec
+func (s *SMSCampaignSpec) Scan(value any) error {
+	if value == nil {
+		*s = SMSCampaignSpec{}
+		return nil
+	}
+
+	var bytes []byte
+	switch v := value.(type) {
+	case []byte:
+		bytes = v
+	case string:
+		bytes = []byte(v)
+	default:
+		return fmt.Errorf("cannot scan %T into SMSCampaignSpec", value)
+	}
+
+	return json.Unmarshal(bytes, s)
+}
+
+// SMSCampaign represents an SMS campaign in the database
+type SMSCampaign struct {
+	ID         int               `json:"id" db:"id"`
+	UUID       uuid.UUID         `json:"uuid" db:"uuid"`
+	CustomerID int               `json:"customer_id" db:"customer_id"`
+	Status     SMSCampaignStatus `json:"status" db:"status"`
+	CreatedAt  time.Time         `json:"created_at" db:"created_at"`
+	UpdatedAt  *time.Time        `json:"updated_at,omitempty" db:"updated_at"`
+	Spec       SMSCampaignSpec   `json:"spec" db:"spec"`
+
+	// Optional joined fields
+	Customer *Customer `json:"customer,omitempty" db:"-"`
+}
+
+// TableName returns the table name for the model
+func (SMSCampaign) TableName() string {
+	return "sms_campaigns"
+}
+
+// BeforeCreate is called before creating a new record
+func (c *SMSCampaign) BeforeCreate() error {
+	if c.UUID == uuid.Nil {
+		c.UUID = uuid.New()
+	}
+	if c.Status == "" {
+		c.Status = SMSCampaignStatusInitiated
+	}
+	if c.CreatedAt.IsZero() {
+		c.CreatedAt = time.Now().UTC()
+	}
+	return nil
+}
+
+// BeforeUpdate is called before updating a record
+func (c *SMSCampaign) BeforeUpdate() error {
+	now := time.Now().UTC()
+	c.UpdatedAt = &now
+	return nil
+}
+
+// IsEditable checks if the campaign can be edited
+func (c *SMSCampaign) IsEditable() bool {
+	return c.Status == SMSCampaignStatusInitiated ||
+		c.Status == SMSCampaignStatusInProgress
+}
+
+// IsDeletable checks if the campaign can be deleted
+func (c *SMSCampaign) IsDeletable() bool {
+	return false
+}
+
+// CanTransitionTo checks if the campaign can transition to the given status
+func (c *SMSCampaign) CanTransitionTo(newStatus SMSCampaignStatus) bool {
+	switch c.Status {
+	case SMSCampaignStatusInitiated:
+		return newStatus == SMSCampaignStatusInProgress ||
+			newStatus == SMSCampaignStatusWaitingForApproval ||
+			newStatus == SMSCampaignStatusRejected
+	case SMSCampaignStatusInProgress:
+		return newStatus == SMSCampaignStatusWaitingForApproval ||
+			newStatus == SMSCampaignStatusRejected
+	case SMSCampaignStatusWaitingForApproval:
+		return newStatus == SMSCampaignStatusApproved ||
+			newStatus == SMSCampaignStatusRejected
+	default:
+		return false
+	}
+}
+
+// GetStatusDisplayName returns a human-readable status name
+func (c *SMSCampaign) GetStatusDisplayName() string {
+	switch c.Status {
+	case SMSCampaignStatusInitiated:
+		return "Initiated"
+	case SMSCampaignStatusInProgress:
+		return "In Progress"
+	case SMSCampaignStatusWaitingForApproval:
+		return "Waiting for Approval"
+	case SMSCampaignStatusApproved:
+		return "Approved"
+	case SMSCampaignStatusRejected:
+		return "Rejected"
+	default:
+		return "Unknown"
+	}
+}
+
+// GetStatusColor returns a color code for the status (for UI purposes)
+func (c *SMSCampaign) GetStatusColor() string {
+	switch c.Status {
+	case SMSCampaignStatusInitiated:
+		return "#6c757d" // gray
+	case SMSCampaignStatusInProgress:
+		return "#007bff" // blue
+	case SMSCampaignStatusWaitingForApproval:
+		return "#ffc107" // yellow
+	case SMSCampaignStatusApproved:
+		return "#28a745" // green
+	case SMSCampaignStatusRejected:
+		return "#dc3545" // red
+	default:
+		return "#6c757d" // gray
+	}
+}
