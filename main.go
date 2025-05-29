@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
+	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
 	"github.com/amirphl/Yamata-no-Orochi/app/router"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
 	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
@@ -145,6 +146,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	otpRepo := repository.NewOTPVerificationRepository(db)
 	sessionRepo := repository.NewCustomerSessionRepository(db)
 	auditRepo := repository.NewAuditLogRepository(db)
+	smsCampaignRepo := repository.NewSMSCampaignRepository(db)
 
 	// Initialize services
 	tokenService, err := services.NewTokenService(
@@ -186,11 +188,22 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		db,
 	)
 
+	smsCampaignFlow := businessflow.NewSMSCampaignFlow(
+		smsCampaignRepo,
+		customerRepo,
+		auditRepo,
+		db,
+	)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
+	smsCampaignHandler := handlers.NewSMSCampaignHandler(smsCampaignFlow)
+
+	// Initialize auth middleware
+	authMiddleware := middleware.NewAuthMiddleware(tokenService)
 
 	// Initialize router
-	appRouter := router.NewFiberRouter(authHandler)
+	appRouter := router.NewFiberRouter(authHandler, smsCampaignHandler, authMiddleware)
 
 	// Log that services are initialized
 	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
