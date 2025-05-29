@@ -59,7 +59,7 @@ func NewSignupFlow(
 	}
 }
 
-// InitiateSignup handles the complete signup process
+// Signup handles the complete signup process
 func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, metadata *ClientMetadata) (*dto.SignupResponse, error) {
 	// Validate business rules
 	if err := s.validateSignupRequest(ctx, req); err != nil {
