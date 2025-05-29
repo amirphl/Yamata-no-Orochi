@@ -10,6 +10,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -190,6 +191,7 @@ func (s *SMSCampaignFlowImpl) createCampaign(ctx context.Context, req *dto.Creat
 
 	// Create campaign model
 	campaign := models.SMSCampaign{
+		UUID:       uuid.New(),
 		CustomerID: customer.ID,
 		Status:     models.SMSCampaignStatusInitiated,
 		Spec:       spec,
@@ -202,7 +204,7 @@ func (s *SMSCampaignFlowImpl) createCampaign(ctx context.Context, req *dto.Creat
 	}
 
 	// Get the created campaign with ID
-	createdCampaign, err := s.campaignRepo.ByID(ctx, campaign.ID)
+	createdCampaign, err := s.campaignRepo.ByUUID(ctx, campaign.UUID.String())
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve created campaign: %w", err)
 	}
