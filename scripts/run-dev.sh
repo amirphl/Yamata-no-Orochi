@@ -140,7 +140,7 @@ set_environment() {
     print_status "Setting development environment variables..."
     
     # Generate JWT secret
-    local jwt_secret=$(generate_jwt_secret)
+    local jwt_secret=40c9d3bc3309d4171dd7106a7db72a3dc5ecb4965e1dcf2c8a5cb335aabe782c
     
     # Set environment variables
     export APP_ENV=development
@@ -155,7 +155,7 @@ set_environment() {
     export DB_CONN_MAX_LIFETIME=30m
     export DB_CONN_MAX_IDLE_TIME=15m
     export JWT_SECRET_KEY="$jwt_secret"
-    export JWT_ACCESS_TOKEN_TTL=15m
+    export JWT_ACCESS_TOKEN_TTL=60m
     export JWT_REFRESH_TOKEN_TTL=7d
     export JWT_ISSUER=yamata-dev
     export JWT_AUDIENCE=yamata-users
