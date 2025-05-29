@@ -12,6 +12,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
+	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
 	_ "github.com/amirphl/Yamata-no-Orochi/docs"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/gofiber/fiber/v3"
@@ -34,12 +35,14 @@ type Router interface {
 
 // FiberRouter implements Router using Fiber v3
 type FiberRouter struct {
-	app         *fiber.App
-	authHandler handlers.AuthHandlerInterface
+	app             *fiber.App
+	authHandler     handlers.AuthHandlerInterface
+	campaignHandler handlers.SMSCampaignHandlerInterface
+	authMiddleware  *middleware.AuthMiddleware
 }
 
 // NewFiberRouter creates a new Fiber router
-func NewFiberRouter(authHandler handlers.AuthHandlerInterface) Router {
+func NewFiberRouter(authHandler handlers.AuthHandlerInterface, campaignHandler handlers.SMSCampaignHandlerInterface, authMiddleware *middleware.AuthMiddleware) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "Yamata no Orochi API",
@@ -54,8 +57,10 @@ func NewFiberRouter(authHandler handlers.AuthHandlerInterface) Router {
 	})
 
 	return &FiberRouter{
-		app:         app,
-		authHandler: authHandler,
+		app:             app,
+		authHandler:     authHandler,
+		campaignHandler: campaignHandler,
+		authMiddleware:  authMiddleware,
 	}
 }
 
@@ -138,6 +143,11 @@ func (r *FiberRouter) SetupRoutes() {
 	auth.Post("/login", r.authHandler.Login)
 	auth.Post("/forgot-password", r.authHandler.ForgotPassword)
 	auth.Post("/reset", r.authHandler.ResetPassword)
+
+	// SMS Campaign routes (protected with authentication)
+	campaigns := api.Group("/sms-campaigns")
+	campaigns.Use(r.authMiddleware.Authenticate()) // Require authentication
+	campaigns.Post("/", r.campaignHandler.CreateCampaign)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
