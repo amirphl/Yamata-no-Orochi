@@ -45,5 +45,8 @@
 \echo 'Running 0014_create_sms_campaigns.sql...'
 \i migrations/0014_create_sms_campaigns.sql
 
+\echo 'Running 0015_add_sms_campaign_audit_actions.sql...'
+\i migrations/0015_add_sms_campaign_audit_actions.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi signup system.' 

@@ -24,7 +24,8 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 11. **0011_add_new_audit_actions** - Adds new audit action enum values
 12. **0012_update_timestamp_defaults_to_utc** - Updates timestamp defaults to UTC
 13. **0013_relax_name_validation** - Removes name format constraints to allow any characters
-14. 
+14. **0014_create_sms_campaigns** - Creates SMS campaign management system
+15. **0015_add_sms_campaign_audit_actions** - Adds audit actions for SMS campaign operations 
 
 ## Database Schema Overview
 
@@ -99,6 +100,8 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 \i migrations/0011_add_new_audit_actions.sql
 \i migrations/0012_update_timestamp_defaults_to_utc.sql
 \i migrations/0013_relax_name_validation.sql
+\i migrations/0014_create_sms_campaigns.sql
+\i migrations/0015_add_sms_campaign_audit_actions.sql
 ```
 
 ### Rollback All Migrations (Down)

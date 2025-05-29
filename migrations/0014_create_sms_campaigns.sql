@@ -25,10 +25,7 @@ CREATE TABLE sms_campaigns (
         ON DELETE CASCADE,
     
     -- Indexes for performance
-    CONSTRAINT idx_sms_campaigns_uuid UNIQUE (uuid),
-    CONSTRAINT idx_sms_campaigns_customer_id (customer_id),
-    CONSTRAINT idx_sms_campaigns_status (status),
-    CONSTRAINT idx_sms_campaigns_created_at (created_at)
+    CONSTRAINT idx_sms_campaigns_uuid UNIQUE (uuid)
 );
 
 -- Create indexes for better query performance
