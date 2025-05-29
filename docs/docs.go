@@ -494,6 +494,70 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/api/v1/sms-campaigns": {
+            "post": {
+                "description": "Create a new SMS campaign with the specified parameters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SMS Campaigns"
+                ],
+                "summary": "Create SMS Campaign",
+                "parameters": [
+                    {
+                        "description": "SMS campaign creation data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreateSMSCampaignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Campaign created successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CreateSMSCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -564,6 +628,64 @@ const docTemplate = `{
                 "uuid": {
                     "type": "string",
                     "example": "550e8400-e29b-41d4-a716-446655440000"
+                }
+            }
+        },
+        "dto.CreateSMSCampaignRequest": {
+            "type": "object",
+            "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "schedule_at": {
+                    "type": "string"
+                },
+                "segment": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "subsegment": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CreateSMSCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
                 }
             }
         },

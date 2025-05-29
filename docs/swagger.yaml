@@ -50,6 +50,44 @@ definitions:
         example: 550e8400-e29b-41d4-a716-446655440000
         type: string
     type: object
+  dto.CreateSMSCampaignRequest:
+    properties:
+      adlink:
+        type: string
+      budget:
+        type: integer
+      city:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      line_number:
+        type: string
+      schedule_at:
+        type: string
+      segment:
+        type: string
+      sex:
+        type: string
+      subsegment:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
+  dto.CreateSMSCampaignResponse:
+    properties:
+      created_at:
+        type: string
+      message:
+        type: string
+      status:
+        type: string
+      uuid:
+        type: string
+    type: object
   dto.ForgotPasswordRequest:
     properties:
       identifier:
@@ -495,4 +533,43 @@ paths:
       summary: Health Check
       tags:
       - Health
+  /api/v1/sms-campaigns:
+    post:
+      consumes:
+      - application/json
+      description: Create a new SMS campaign with the specified parameters
+      parameters:
+      - description: SMS campaign creation data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateSMSCampaignRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Campaign created successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreateSMSCampaignResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Create SMS Campaign
+      tags:
+      - SMS Campaigns
 swagger: "2.0"
