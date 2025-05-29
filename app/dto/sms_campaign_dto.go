@@ -21,7 +21,10 @@ type CreateSMSCampaignRequest struct {
 
 // CreateSMSCampaignResponse represents the response to create a new SMS campaign
 type CreateSMSCampaignResponse struct {
-	UUID string `json:"uuid"`
+	Message   string `json:"message"`
+	UUID      string `json:"uuid"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
 }
 
 // UpdateSMSCampaignRequest represents the request to update an existing SMS campaign
@@ -38,6 +41,11 @@ type UpdateSMSCampaignRequest struct {
 	ScheduleAt *time.Time `json:"scheduleat,omitempty"`
 	LineNumber *string    `json:"line_number,omitempty"`
 	Budget     *uint64    `json:"budget,omitempty"`
+}
+
+// UpdateSMSCampaignResponse represents the response to update an existing SMS campaign
+type UpdateSMSCampaignResponse struct {
+	Message string `json:"message"`
 }
 
 // GetSMSCampaignRequest represents the request to get an existing SMS campaign

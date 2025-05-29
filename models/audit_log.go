@@ -51,6 +51,10 @@ const (
 	AuditActionOTPResendFailed        = "otp_resend_failed"
 	AuditActionOTPExpired             = "otp_expired"
 	AuditActionOTPResent              = "otp_resent"
+
+	// SMS Campaign actions
+	AuditActionCampaignCreated        = "campaign_created"
+	AuditActionCampaignCreationFailed = "campaign_creation_failed"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries
