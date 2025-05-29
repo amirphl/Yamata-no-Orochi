@@ -247,6 +247,7 @@ func runTestMigrations(databaseURL, dbName string) error {
 		"0012_update_timestamp_defaults_to_utc.sql",
 		"0013_relax_name_validation.sql",
 		"0014_create_sms_campaigns.sql",
+		"0015_add_sms_campaign_audit_actions.sql",
 	}
 
 	// Execute each migration file

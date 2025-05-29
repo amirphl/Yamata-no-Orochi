@@ -53,8 +53,7 @@ type TokenServiceImpl struct {
 	useRSAKeys      bool
 	issuer          string
 	audience        string
-	revokedTokens   map[string]bool // In-memory map for revoked tokens
-	mu              sync.RWMutex    // Mutex for concurrent access to revokedTokens
+	mu              sync.RWMutex // Mutex for concurrent access to revokedTokens
 }
 
 // NewTokenService creates a new token service
@@ -91,7 +90,6 @@ func NewTokenService(accessTokenTTL, refreshTokenTTL time.Duration, issuer, audi
 		useRSAKeys:      useRSAKeys,
 		issuer:          issuer,
 		audience:        audience,
-		revokedTokens:   make(map[string]bool),
 	}, nil
 }
 
@@ -189,6 +187,7 @@ func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
 	if s.useRSAKeys {
 		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
 			// Validate signing method
+
 			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 			}
@@ -299,14 +298,14 @@ func (s *TokenServiceImpl) RevokeToken(token string) error {
 	// 3. Store the token ID in a revocation list (Redis/database)
 	// 4. Set an expiration on the revoked token entry
 
-	claims, err := s.ValidateToken(token)
-	if err != nil {
-		return fmt.Errorf("invalid token: %w", err)
-	}
+	// claims, err := s.ValidateToken(token)
+	// if err != nil {
+	// 	return fmt.Errorf("invalid token: %w", err)
+	// }
 
 	// For now, we'll just validate the token
 	// In production, you'd add the token ID to a revocation list
-	s.revokedTokens[claims.TokenID] = true
+	// TODO:
 
 	return nil
 }
@@ -314,7 +313,8 @@ func (s *TokenServiceImpl) RevokeToken(token string) error {
 // GetTokenClaims extracts claims from a token without full validation
 func (s *TokenServiceImpl) GetTokenClaims(token string) (*TokenClaims, error) {
 	// Use ValidateToken to ensure proper validation and security
-	return s.ValidateToken(token)
+	// TODO:
+	return nil, nil
 }
 
 // IsTokenRevoked checks if a token has been revoked
@@ -324,13 +324,14 @@ func (s *TokenServiceImpl) IsTokenRevoked(token string) bool {
 	defer s.mu.RUnlock()
 
 	// Extract token ID from the token
-	claims, err := s.GetTokenClaims(token)
-	if err != nil {
-		return true // Consider invalid tokens as revoked
-	}
+	// claims, err := s.GetTokenClaims(token)
+	// if err != nil {
+	// 	return true // Consider invalid tokens as revoked
+	// }
 
-	_, exists := s.revokedTokens[claims.TokenID]
-	return exists
+	// TODO:
+
+	return false
 }
 
 // generateToken creates a signed JWT token
