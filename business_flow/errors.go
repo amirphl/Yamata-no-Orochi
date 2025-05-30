@@ -32,6 +32,12 @@ var (
 	ErrOTPExpired      = errors.New("OTP has expired")
 
 	ErrAlreadyVerified = errors.New("already verified")
+
+	// SMS Campaign-related errors
+	ErrCampaignNotFound         = errors.New("campaign not found")
+	ErrCampaignAccessDenied     = errors.New("campaign access denied")
+	ErrCampaignUpdateNotAllowed = errors.New("campaign update not allowed")
+	ErrInsufficientCampaignCapacity = errors.New("insufficient campaign capacity")
 )
 
 type BusinessError struct {
@@ -97,6 +103,18 @@ func IsNationalIDAlreadyExists(err error) bool {
 
 func IsCompanyFieldsRequired(err error) bool {
 	return errors.Is(err, ErrCompanyFieldsRequired)
+}
+
+func IsCampaignNotFound(err error) bool {
+	return errors.Is(err, ErrCampaignNotFound)
+}
+
+func IsCampaignAccessDenied(err error) bool {
+	return errors.Is(err, ErrCampaignAccessDenied)
+}
+
+func IsCampaignUpdateNotAllowed(err error) bool {
+	return errors.Is(err, ErrCampaignUpdateNotAllowed)
 }
 
 func IsReferrerAgencyNotFound(err error) bool {
