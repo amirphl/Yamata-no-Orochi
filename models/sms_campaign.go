@@ -67,24 +67,24 @@ func (s SMSCampaignStatus) Value() (driver.Value, error) {
 // SMSCampaignSpec represents the JSON specification for an SMS campaign
 type SMSCampaignSpec struct {
 	// Campaign details
-	Title string `json:"title"`
+	Title *string `json:"title,omitempty"`
 
 	// Target audience
-	Segment    string   `json:"segment"`
-	Subsegment []string `json:"subsegment"`
-	Sex        string   `json:"sex"`
-	City       []string `json:"city"`
+	Segment    *string  `json:"segment,omitempty"`
+	Subsegment []string `json:"subsegment,omitempty"`
+	Sex        *string  `json:"sex,omitempty"`
+	City       []string `json:"city,omitempty"`
 
 	// Campaign content
-	AdLink  string `json:"adlink"`
-	Content string `json:"content"`
+	AdLink  *string `json:"adlink,omitempty"`
+	Content *string `json:"content,omitempty"`
 
 	// Scheduling and configuration
-	ScheduleAt *time.Time `json:"schedule_at"`
-	LineNumber string     `json:"line_number"`
+	ScheduleAt *time.Time `json:"schedule_at,omitempty"`
+	LineNumber *string    `json:"line_number,omitempty"`
 
 	// Budget
-	Budget uint64 `json:"budget"`
+	Budget *uint64 `json:"budget,omitempty"`
 }
 
 // Value implements the driver.Valuer interface for SMSCampaignSpec
@@ -121,6 +121,7 @@ type SMSCampaign struct {
 	CreatedAt  time.Time         `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sms_campaigns_created_at" json:"created_at"`
 	UpdatedAt  *time.Time        `gorm:"index:idx_sms_campaigns_updated_at" json:"updated_at,omitempty"`
 	Spec       SMSCampaignSpec   `gorm:"type:jsonb;not null" json:"spec"`
+	Comment    *string           `gorm:"type:text" json:"comment,omitempty"`
 
 	// Relations
 	Customer *Customer `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`

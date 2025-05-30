@@ -55,6 +55,8 @@ const (
 	// SMS Campaign actions
 	AuditActionCampaignCreated        = "campaign_created"
 	AuditActionCampaignCreationFailed = "campaign_creation_failed"
+	AuditActionCampaignUpdated        = "campaign_updated"
+	AuditActionCampaignUpdateFailed   = "campaign_update_failed"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries
