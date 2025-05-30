@@ -248,6 +248,7 @@ func runTestMigrations(databaseURL, dbName string) error {
 		"0013_relax_name_validation.sql",
 		"0014_create_sms_campaigns.sql",
 		"0015_add_sms_campaign_audit_actions.sql",
+		"0016_add_comment_to_sms_campaigns.sql",
 	}
 
 	// Execute each migration file
