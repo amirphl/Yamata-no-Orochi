@@ -26,6 +26,7 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 13. **0013_relax_name_validation** - Removes name format constraints to allow any characters
 14. **0014_create_sms_campaigns** - Creates SMS campaign management system
 15. **0015_add_sms_campaign_audit_actions** - Adds audit actions for SMS campaign operations 
+0016
 
 ## Database Schema Overview
 
@@ -102,11 +103,15 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 \i migrations/0013_relax_name_validation.sql
 \i migrations/0014_create_sms_campaigns.sql
 \i migrations/0015_add_sms_campaign_audit_actions.sql
+0016
 ```
 
 ### Rollback All Migrations (Down)
 ```sql
 -- Run in reverse order:
+0016
+0015
+0014
 \i migrations/0013_relax_name_validation_down.sql
 \i migrations/0012_update_timestamp_defaults_to_utc_down.sql
 \i migrations/0011_add_new_audit_actions_down.sql

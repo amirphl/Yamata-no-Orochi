@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0016_add_comment_to_sms_campaigns_down.sql...'
+\i migrations/0016_add_comment_to_sms_campaigns_down.sql
+
 \echo 'Running 0015_add_sms_campaign_audit_actions_down.sql...'
 \i migrations/0015_add_sms_campaign_audit_actions_down.sql
 
