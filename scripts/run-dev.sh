@@ -257,14 +257,14 @@ run_migrations() {
         return 1
     fi
     
-    # Run migrations
-    if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$run_all_up" >/dev/null 2>&1; then
+    # Run migrations with strict error handling and verbose output
+    if PGPASSWORD="$DB_PASSWORD" psql -v ON_ERROR_STOP=1 -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -f "$run_all_up"; then
         print_success "Database migrations applied successfully"
         # verify_schema
     else
         print_error "Failed to apply database migrations"
         print_warning "You can run migrations manually:"
-        print_warning "  psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f $run_all_up"
+        print_warning "  PGPASSWORD=****** psql -v ON_ERROR_STOP=1 -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME -f $run_all_up"
         return 1
     fi
 }
