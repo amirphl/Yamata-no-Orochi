@@ -88,6 +88,9 @@ $$ LANGUAGE plpgsql;
 \echo 'Running 0015_add_sms_campaign_audit_actions.sql...'
 \i /migrations/0015_add_sms_campaign_audit_actions.sql
 
+\echo 'Running 0016_add_comment_to_sms_campaigns.sql...'
+\i /migrations/0016_add_comment_to_sms_campaigns.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi signup system.'
 
