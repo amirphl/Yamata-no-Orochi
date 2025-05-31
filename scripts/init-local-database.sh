@@ -119,8 +119,8 @@ apply_migrations() {
     docker exec yamata-postgres-local mkdir -p /tmp/migrations
     docker cp "$PROJECT_ROOT/migrations" yamata-postgres-local:/tmp/
     
-    # Apply migrations
-    if docker exec yamata-postgres-local psql -U "$DB_USER" -d "$DB_NAME" -f /tmp/migrations/run_all_up.sql; then
+    # Apply migrations with strict error handling
+    if docker exec -e PGTZ=UTC -e PGPASSWORD="$DB_PASSWORD" yamata-postgres-local psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" -f /tmp/migrations/run_all_up.sql; then
         print_success "All migrations applied successfully"
     else
         print_error "Failed to apply migrations"

@@ -140,7 +140,7 @@ apply_migrations() {
         local filename=$(basename "$file")
         print_status "Applying migration: $filename"
         
-        if docker exec -i yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" < "$file"; then
+        if docker exec -i -e PGPASSWORD="$DB_PASSWORD" yamata-postgres-beta psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" < "$file"; then
             print_success "Migration '$filename' applied successfully"
         else
             print_error "Failed to apply migration '$filename'"
