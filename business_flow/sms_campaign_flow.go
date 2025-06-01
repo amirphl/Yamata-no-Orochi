@@ -566,6 +566,7 @@ func (s *SMSCampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.Updat
 
 	// Update the campaign spec
 	existingCampaign.Spec = spec
+	existingCampaign.Status = models.SMSCampaignStatusWaitingForApproval
 
 	// Save to database
 	err := s.campaignRepo.Update(ctx, *existingCampaign)
