@@ -148,6 +148,15 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns := api.Group("/sms-campaigns")
 	campaigns.Use(r.authMiddleware.Authenticate()) // Require authentication
 	campaigns.Post("/", r.campaignHandler.CreateCampaign)
+	campaigns.Put("/:uuid", r.campaignHandler.UpdateCampaign)
+	campaigns.Get("/", r.campaignHandler.ListCampaigns)
+	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
+	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
+
+	// Wallet routes (protected with authentication)
+	wallet := api.Group("/wallet")
+	wallet.Use(r.authMiddleware.Authenticate()) // Require authentication
+	wallet.Get("/balance", r.campaignHandler.GetWalletBalance)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
