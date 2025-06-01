@@ -50,6 +50,82 @@ definitions:
         example: 550e8400-e29b-41d4-a716-446655440000
         type: string
     type: object
+  dto.CalculateCampaignCapacityRequest:
+    properties:
+      adlink:
+        type: string
+      budget:
+        type: integer
+      city:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      line_number:
+        type: string
+      scheduleat:
+        type: string
+      segment:
+        type: string
+      sex:
+        type: string
+      subsegment:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
+  dto.CalculateCampaignCapacityResponse:
+    properties:
+      capacity:
+        type: integer
+      message:
+        type: string
+    type: object
+  dto.CalculateCampaignCostRequest:
+    properties:
+      adlink:
+        type: string
+      budget:
+        type: integer
+      city:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      line_number:
+        type: string
+      scheduleat:
+        type: string
+      segment:
+        type: string
+      sex:
+        type: string
+      subsegment:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
+  dto.CalculateCampaignCostResponse:
+    properties:
+      max_msg_target:
+        type: integer
+      message:
+        type: string
+      msg_target:
+        type: integer
+      sub_total:
+        type: integer
+      tax:
+        type: integer
+      total:
+        type: integer
+    type: object
   dto.CreateSMSCampaignRequest:
     properties:
       adlink:
@@ -98,6 +174,79 @@ definitions:
     required:
     - identifier
     type: object
+  dto.GetSMSCampaignResponse:
+    properties:
+      adlink:
+        type: string
+      budget:
+        type: integer
+      city:
+        items:
+          type: string
+        type: array
+      comment:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      line_number:
+        type: string
+      scheduleat:
+        type: string
+      segment:
+        type: string
+      sex:
+        type: string
+      status:
+        type: string
+      subsegment:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.GetWalletBalanceResponse:
+    properties:
+      balance_status:
+        type: string
+      credit_limit:
+        type: integer
+      currency:
+        type: string
+      free:
+        type: integer
+      frozen:
+        type: integer
+      last_updated:
+        type: string
+      locked:
+        type: integer
+      message:
+        type: string
+      minimum_balance:
+        type: integer
+      pending_transactions:
+        type: integer
+      total:
+        type: integer
+    type: object
+  dto.ListSMSCampaignsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.GetSMSCampaignResponse'
+        type: array
+      message:
+        type: string
+      pagination:
+        $ref: '#/definitions/dto.PaginationInfo'
+    type: object
   dto.LoginRequest:
     properties:
       identifier:
@@ -142,6 +291,17 @@ definitions:
     - customer_id
     - otp_code
     - otp_type
+    type: object
+  dto.PaginationInfo:
+    properties:
+      limit:
+        type: integer
+      page:
+        type: integer
+      total:
+        type: integer
+      total_pages:
+        type: integer
     type: object
   dto.ResetPasswordRequest:
     properties:
@@ -232,6 +392,38 @@ definitions:
         type: boolean
       otp_target:
         description: Mobile number (masked for security)
+        type: string
+    type: object
+  dto.UpdateSMSCampaignRequest:
+    properties:
+      adlink:
+        type: string
+      budget:
+        type: integer
+      city:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      line_number:
+        type: string
+      scheduleat:
+        type: string
+      segment:
+        type: string
+      sex:
+        type: string
+      subsegment:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
+  dto.UpdateSMSCampaignResponse:
+    properties:
+      message:
         type: string
     type: object
 info:
@@ -534,6 +726,62 @@ paths:
       tags:
       - Health
   /api/v1/sms-campaigns:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve the authenticated user's campaigns with pagination, ordering,
+        and filters
+      parameters:
+      - description: Page number
+        in: query
+        name: page
+        required: true
+        type: integer
+      - description: Items per page (max 100)
+        in: query
+        name: limit
+        required: true
+        type: integer
+      - default: newest
+        description: Order by (newest|oldest)
+        in: query
+        name: orderby
+        type: string
+      - description: Filter by title (contains)
+        in: query
+        name: title
+        type: string
+      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected)
+        in: query
+        name: status
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListSMSCampaignsResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List SMS Campaigns
+      tags:
+      - SMS Campaigns
     post:
       consumes:
       - application/json
@@ -572,4 +820,157 @@ paths:
       summary: Create SMS Campaign
       tags:
       - SMS Campaigns
+  /api/v1/sms-campaigns/{uuid}:
+    put:
+      consumes:
+      - application/json
+      description: Update an existing SMS campaign with the specified parameters
+      parameters:
+      - description: Campaign UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: SMS campaign update data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateSMSCampaignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Campaign updated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UpdateSMSCampaignResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden - campaign access denied or update not allowed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Update SMS Campaign
+      tags:
+      - SMS Campaigns
+  /api/v1/sms-campaigns/calculate-capacity:
+    post:
+      consumes:
+      - application/json
+      description: Calculate the potential reach and capacity of an SMS campaign based
+        on parameters
+      parameters:
+      - description: Campaign parameters for capacity calculation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CalculateCampaignCapacityRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Capacity calculated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CalculateCampaignCapacityResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Calculate SMS Campaign Capacity
+      tags:
+      - SMS Campaigns
+  /api/v1/sms-campaigns/calculate-cost:
+    post:
+      consumes:
+      - application/json
+      description: Calculate the total cost of an SMS campaign based on content, target
+        audience, and pricing factors
+      parameters:
+      - description: Campaign parameters for cost calculation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CalculateCampaignCostRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cost calculated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CalculateCampaignCostResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Calculate SMS Campaign Cost
+      tags:
+      - SMS Campaigns
+  /api/v1/wallet/balance:
+    get:
+      consumes:
+      - application/json
+      description: Retrieve the current wallet balance and financial information for
+        the authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Wallet balance retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.GetWalletBalanceResponse'
+              type: object
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get User Wallet Balance
+      tags:
+      - Wallet
 swagger: "2.0"

@@ -485,6 +485,92 @@
             }
         },
         "/api/v1/sms-campaigns": {
+            "get": {
+                "description": "Retrieve the authenticated user's campaigns with pagination, ordering, and filters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SMS Campaigns"
+                ],
+                "summary": "List SMS Campaigns",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (max 100)",
+                        "name": "limit",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "newest",
+                        "description": "Order by (newest|oldest)",
+                        "name": "orderby",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by title (contains)",
+                        "name": "title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected)",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListSMSCampaignsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
             "post": {
                 "description": "Create a new SMS campaign with the specified parameters",
                 "consumes": [
@@ -531,6 +617,252 @@
                         "description": "Validation error or invalid request",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/sms-campaigns/calculate-capacity": {
+            "post": {
+                "description": "Calculate the potential reach and capacity of an SMS campaign based on parameters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SMS Campaigns"
+                ],
+                "summary": "Calculate SMS Campaign Capacity",
+                "parameters": [
+                    {
+                        "description": "Campaign parameters for capacity calculation",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CalculateCampaignCapacityRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Capacity calculated successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CalculateCampaignCapacityResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/sms-campaigns/calculate-cost": {
+            "post": {
+                "description": "Calculate the total cost of an SMS campaign based on content, target audience, and pricing factors",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SMS Campaigns"
+                ],
+                "summary": "Calculate SMS Campaign Cost",
+                "parameters": [
+                    {
+                        "description": "Campaign parameters for cost calculation",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CalculateCampaignCostRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cost calculated successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CalculateCampaignCostResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/sms-campaigns/{uuid}": {
+            "put": {
+                "description": "Update an existing SMS campaign with the specified parameters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "SMS Campaigns"
+                ],
+                "summary": "Update SMS Campaign",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "SMS campaign update data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UpdateSMSCampaignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Campaign updated successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.UpdateSMSCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - campaign access denied or update not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/wallet/balance": {
+            "get": {
+                "description": "Retrieve the current wallet balance and financial information for the authenticated user",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Wallet"
+                ],
+                "summary": "Get User Wallet Balance",
+                "responses": {
+                    "200": {
+                        "description": "Wallet balance retrieved successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.GetWalletBalanceResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "401": {
@@ -620,6 +952,122 @@
                 }
             }
         },
+        "dto.CalculateCampaignCapacityRequest": {
+            "type": "object",
+            "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "segment": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "subsegment": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CalculateCampaignCapacityResponse": {
+            "type": "object",
+            "properties": {
+                "capacity": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CalculateCampaignCostRequest": {
+            "type": "object",
+            "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "segment": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "subsegment": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CalculateCampaignCostResponse": {
+            "type": "object",
+            "properties": {
+                "max_msg_target": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "msg_target": {
+                    "type": "integer"
+                },
+                "sub_total": {
+                    "type": "integer"
+                },
+                "tax": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.CreateSMSCampaignRequest": {
             "type": "object",
             "properties": {
@@ -692,6 +1140,117 @@
                 }
             }
         },
+        "dto.GetSMSCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "comment": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "segment": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subsegment": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.GetWalletBalanceResponse": {
+            "type": "object",
+            "properties": {
+                "balance_status": {
+                    "type": "string"
+                },
+                "credit_limit": {
+                    "type": "integer"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "free": {
+                    "type": "integer"
+                },
+                "frozen": {
+                    "type": "integer"
+                },
+                "last_updated": {
+                    "type": "string"
+                },
+                "locked": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "minimum_balance": {
+                    "type": "integer"
+                },
+                "pending_transactions": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.ListSMSCampaignsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.GetSMSCampaignResponse"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "$ref": "#/definitions/dto.PaginationInfo"
+                }
+            }
+        },
         "dto.LoginRequest": {
             "type": "object",
             "required": [
@@ -752,6 +1311,23 @@
                         "mobile",
                         "email"
                     ]
+                }
+            }
+        },
+        "dto.PaginationInfo": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "type": "integer"
                 }
             }
         },
@@ -872,6 +1448,55 @@
                 },
                 "otp_target": {
                     "description": "Mobile number (masked for security)",
+                    "type": "string"
+                }
+            }
+        },
+        "dto.UpdateSMSCampaignRequest": {
+            "type": "object",
+            "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "segment": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "subsegment": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.UpdateSMSCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
                     "type": "string"
                 }
             }
