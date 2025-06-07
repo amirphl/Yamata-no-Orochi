@@ -513,12 +513,6 @@ main() {
 	# Create beta environment file
 	create_beta_env "$domain"
 	
-	# Start services
-	start_services
-	
-	# Initialize database and apply migrations
-	print_status "Initializing database and applying migrations..."
-	
 	# Source environment variables for database initialization
 	if [ -f "$ENV_FILE" ]; then
 		# Use set -a to automatically export variables, then source the file
@@ -526,6 +520,12 @@ main() {
 		source "$ENV_FILE"
 		set +a
 	fi
+
+	# Start services
+	start_services
+	
+	# Initialize database and apply migrations
+	print_status "Initializing database and applying migrations..."	
 	
 	if ./scripts/init-beta-database.sh; then
 		print_success "Database initialization completed"
