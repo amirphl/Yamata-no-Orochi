@@ -236,3 +236,6 @@ migrations/custom_*
 
 app/services/jwt_private.pem
 app/services/jwt_public.pem
+
+.env.local
+.env.beta
