@@ -41,6 +41,17 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# Helper to resolve docker command (uses sudo if required)
+get_docker_cmd() {
+    if docker info >/dev/null 2>&1; then
+        echo "docker"
+    elif command_exists sudo && sudo -n docker info >/dev/null 2>&1; then
+        echo "sudo docker"
+    else
+        echo "docker"
+    fi
+}
+
 # Function to generate random password
 generate_password() {
     openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
@@ -441,6 +452,10 @@ get_proxy_env() {
 start_services() {
     print_status "Starting Docker Compose services..."
     
+    # Resolve docker command (fallback to sudo if needed)
+    local docker_cmd
+    docker_cmd=$(get_docker_cmd)
+    
     # Check for HTTP proxy configuration
     if check_http_proxy; then
         print_status "Using HTTP proxy for Docker build"
@@ -450,18 +465,18 @@ start_services() {
         # Build with proxy arguments
         if [ -n "$proxy_args" ]; then
             print_status "Building with proxy: $proxy_args"
-            docker build $proxy_args --network host -f docker/Dockerfile.production -t yamata-no-orochi .
+            $docker_cmd build $proxy_args --network host -f docker/Dockerfile.production -t yamata-no-orochi .
         else
             print_status "Building without proxy"
-            docker build --network host -f docker/Dockerfile.production -t yamata-no-orochi .
+            $docker_cmd build --network host -f docker/Dockerfile.production -t yamata-no-orochi .
         fi
     else
         print_status "Building without proxy"
-        docker build --network host -f docker/Dockerfile.production -t yamata-no-orochi .
+        $docker_cmd build --network host -f docker/Dockerfile.production -t yamata-no-orochi .
     fi
     
     # Start services
-    docker compose -f docker-compose.local.yml up -d
+    $docker_cmd compose -f docker-compose.local.yml up -d
     
     print_success "Services started successfully"
 }
@@ -470,11 +485,15 @@ start_services() {
 wait_for_services() {
     print_status "Waiting for services to be ready..."
     
+    # Resolve docker command (fallback to sudo if needed)
+    local docker_cmd
+    docker_cmd=$(get_docker_cmd)
+    
     local max_attempts=30
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if docker-compose -f docker-compose.local.yml ps | grep -q "Up"; then
+        if $docker_cmd compose -f docker-compose.local.yml ps | grep -q "Up"; then
             print_success "Services are ready!"
             return 0
         fi
