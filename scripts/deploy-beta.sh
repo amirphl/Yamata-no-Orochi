@@ -172,7 +172,7 @@ generate_nginx_config() {
 	print_status "Generating nginx configuration for domain: $domain"
 	
 	# Create generated directory if it doesn't exist
-	sudo mkdir -p "$NGINX_CONF_DIR/generated/beta"
+	mkdir -p "$NGINX_CONF_DIR/generated/beta"
 	
 	# Set environment variables for template processing
 	export DOMAIN="$domain"
@@ -212,6 +212,8 @@ create_beta_env() {
 		print_warning "If you want to regenerate the .env.beta file, please remove it first: rm $ENV_FILE"
 		return 0
 	fi
+
+	print_error "No $ENV_FILE file found"
 	
 	exit 1
 }
