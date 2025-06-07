@@ -227,16 +227,23 @@ main() {
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             print_status "Dropping existing database..."
             docker exec yamata-postgres-beta dropdb -U "$DB_USER" "$DB_NAME" 2>/dev/null || true
-            create_database
+            create_database || true
         else
             print_status "Skipping database creation"
         fi
     else
-        create_database
+        create_database || true
     fi
     
     # Apply migrations
-    apply_migrations
+    print_status "Ready to apply database migrations."
+    read -p "Do you want to proceed with applying migrations? [y/N]: " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        apply_migrations
+    else
+        print_status "Migration step skipped."
+    fi
     
     # Verify database setup
     verify_database_setup
