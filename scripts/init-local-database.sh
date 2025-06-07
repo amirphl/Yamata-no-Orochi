@@ -178,8 +178,15 @@ main() {
         create_database
     fi
     
-    # Apply migrations
-    apply_migrations
+    # Ask for confirmation before applying migrations
+    print_status "Ready to apply database migrations."
+    read -p "Do you want to proceed with applying migrations? [y/N]: " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        apply_migrations
+    else
+        print_status "Migration step skipped."
+    fi
     
     # Verify schema
     verify_schema

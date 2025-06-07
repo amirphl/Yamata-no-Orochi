@@ -234,6 +234,10 @@ migrations/local_*
 migrations/dev_*
 migrations/custom_*
 
+# Migration tracker files
+.migration_tracker*
+migration_tracker*
+
 app/services/jwt_private.pem
 app/services/jwt_public.pem
 

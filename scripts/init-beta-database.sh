@@ -108,7 +108,7 @@ create_database() {
         print_success "Database '$DB_NAME' created successfully"
         return 0
     else
-        print_warning "Database '$DB_NAME' might already exist or creation failed"
+        print_warning "Database '$DB_NAME' might already exist, already in use or creation failed"
         return 1
     fi
 }
@@ -117,13 +117,28 @@ create_database() {
 apply_migrations() {
     print_status "Applying database migrations..."
     
+    # Migration tracking file
+    local tracking_file="$PROJECT_ROOT/.migration_tracker_beta"
+    local last_migration=""
+    
+    # Read last applied migration if tracking file exists
+    if [ -f "$tracking_file" ]; then
+        last_migration=$(cat "$tracking_file" 2>/dev/null || echo "")
+        if [ -n "$last_migration" ]; then
+            print_status "Last applied migration: $last_migration"
+            print_status "Will resume from the next migration after this one"
+        fi
+    fi
+    
     # Get all migration files
     local migration_dir="$PROJECT_ROOT/migrations"
     local migration_files=()
     
-    # Find all .sql files that are not down migrations
+    # Find all .sql files that are not down migrations and not run_all_up.sql
     while IFS= read -r -d '' file; do
-        if [[ "$file" != *"_down.sql" ]]; then
+        local filename=$(basename "$file")
+        # Skip down migrations and run_all_up.sql
+        if [[ "$filename" != *"_down.sql" && "$filename" != "run_all_up.sql" ]]; then
             migration_files+=("$file")
         fi
     done < <(find "$migration_dir" -name "*.sql" -type f -print0 | sort -z)
@@ -133,22 +148,54 @@ apply_migrations() {
         return 0
     fi
     
-    print_status "Found ${#migration_files[@]} migration files"
+    print_status "Found ${#migration_files[@]} migration files (excluding run_all_up.sql)"
+    
+    # Filter migrations to apply only those after the last applied one
+    local migrations_to_apply=()
+    local found_last=false
+    
+    if [ -z "$last_migration" ]; then
+        # First run, apply all migrations
+        migrations_to_apply=("${migration_files[@]}")
+        print_status "First run - will apply all migrations"
+    else
+        # Find migrations after the last applied one
+        for file in "${migration_files[@]}"; do
+            local filename=$(basename "$file")
+            if [ "$found_last" = true ]; then
+                migrations_to_apply+=("$file")
+            elif [ "$filename" = "$last_migration" ]; then
+                found_last=true
+                print_status "Found last applied migration: $filename"
+            fi
+        done
+        
+        if [ ${#migrations_to_apply[@]} -eq 0 ]; then
+            print_success "All migrations are already applied (last: $last_migration)"
+            return 0
+        fi
+        
+        print_status "Found ${#migrations_to_apply[@]} new migrations to apply"
+    fi
     
     # Apply each migration
-    for file in "${migration_files[@]}"; do
+    for file in "${migrations_to_apply[@]}"; do
         local filename=$(basename "$file")
         print_status "Applying migration: $filename"
         
         if docker exec -i -e PGPASSWORD="$DB_PASSWORD" yamata-postgres-beta psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" < "$file"; then
             print_success "Migration '$filename' applied successfully"
+            
+            # Update tracking file with the last applied migration
+            echo "$filename" > "$tracking_file"
+            print_status "Updated migration tracker: $filename"
         else
             print_error "Failed to apply migration '$filename'"
             return 1
         fi
     done
     
-    print_success "All migrations applied successfully"
+    print_success "All pending migrations applied successfully"
     return 0
 }
 
@@ -207,6 +254,58 @@ show_database_info() {
     done
 }
 
+# Function to show migration status
+show_migration_status() {
+    local tracking_file="$PROJECT_ROOT/.migration_tracker_beta"
+    local migration_dir="$PROJECT_ROOT/migrations"
+    
+    print_status "Migration Status:"
+    
+    if [ -f "$tracking_file" ]; then
+        local last_migration=$(cat "$tracking_file" 2>/dev/null || echo "")
+        if [ -n "$last_migration" ]; then
+            echo "  Last applied migration: $last_migration"
+        else
+            echo "  No migrations have been applied yet"
+        fi
+    else
+        echo "  No migration tracking file found (first run)"
+    fi
+    
+    # Count total available migrations
+    local total_migrations=0
+    local applied_migrations=0
+    
+    while IFS= read -r -d '' file; do
+        local filename=$(basename "$file")
+        if [[ "$filename" != *"_down.sql" && "$filename" != "run_all_up.sql" ]]; then
+            total_migrations=$((total_migrations + 1))
+            
+            # Check if this migration is already applied
+            if [ -f "$tracking_file" ]; then
+                local last_applied=$(cat "$tracking_file" 2>/dev/null || echo "")
+                if [ "$filename" = "$last_applied" ] || [ "$filename" \< "$last_applied" ]; then
+                    applied_migrations=$((applied_migrations + 1))
+                fi
+            fi
+        fi
+    done < <(find "$migration_dir" -name "*.sql" -type f -print0 | sort -z)
+    
+    echo "  Total migrations available: $total_migrations"
+    echo "  Migrations already applied: $applied_migrations"
+    echo "  Pending migrations: $((total_migrations - applied_migrations))"
+    echo ""
+}
+
+# Function to reset migration tracker
+reset_migration_tracker() {
+    local tracking_file="$PROJECT_ROOT/.migration_tracker_beta"
+    if [ -f "$tracking_file" ]; then
+        rm "$tracking_file"
+        print_status "Migration tracker reset"
+    fi
+}
+
 # Main function
 main() {
     echo "🗄️  Yamata no Orochi - Beta Database Initialization"
@@ -228,11 +327,26 @@ main() {
             print_status "Dropping existing database..."
             docker exec yamata-postgres-beta dropdb -U "$DB_USER" "$DB_NAME" 2>/dev/null || true
             create_database || true
+            # Reset migration tracker when reinitializing database
+            reset_migration_tracker
         else
             print_status "Skipping database creation"
         fi
     else
         create_database || true
+    fi
+    
+    # Show migration status before asking for confirmation
+    show_migration_status
+    
+    # Ask if user wants to reset migration tracker
+    if [ -f "$PROJECT_ROOT/.migration_tracker_beta" ]; then
+        read -p "Do you want to reset the migration tracker and start fresh? [y/N]: " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            reset_migration_tracker
+            print_status "Migration tracker reset. Will apply all migrations from the beginning."
+        fi
     fi
     
     # Apply migrations
