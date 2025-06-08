@@ -616,8 +616,8 @@ main() {
         exit 1
     fi
     
-    # Validate domain format
-    if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9-]{1,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}$ ]]; then
+    # Validate domain format (supports subdomains)
+    if [[ ! "$domain" =~ ^([a-zA-Z0-9]([-a-zA-Z0-9]{0,61}[a-zA-Z0-9])\.)+[a-zA-Z]{2,}$ ]]; then
         print_error "Invalid domain format: $domain"
         echo "Please provide a valid domain name (e.g., thewritingonthewall.com)"
         exit 1

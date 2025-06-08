@@ -107,7 +107,7 @@ create_database() {
     if docker exec yamata-postgres-local createdb -U "$DB_USER" "$DB_NAME" 2>/dev/null; then
         print_success "Database '$DB_NAME' created successfully"
     else
-        print_warning "Database '$DB_NAME' might already exist or creation failed"
+        print_warning "Database '$DB_NAME' might already exist, already in use or creation failed"
     fi
 }
 
