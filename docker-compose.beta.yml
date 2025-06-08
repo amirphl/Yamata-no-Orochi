@@ -298,9 +298,9 @@ services:
       - ./docker/nginx/proxy.conf:/etc/nginx/proxy.conf:ro
       - nginx_logs_beta:/var/log/nginx
       - /etc/letsencrypt:/etc/letsencrypt:ro  # Let's Encrypt certificates
-    # ports:
-    #   - "80:80"
-    #   - "443:443"
+    ports:
+      - "80:80"
+      - "443:443"
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.30
