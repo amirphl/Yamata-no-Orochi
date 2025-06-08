@@ -333,6 +333,19 @@ start_services() {
 	local docker_cmd
 	docker_cmd=$(get_docker_cmd)
 	
+	# Process init.sql with environment variables for beta environment
+	print_status "Processing PostgreSQL init.sql for beta environment..."
+	if [ -f "docker/postgres/process-init-beta.sh" ]; then
+		./docker/postgres/process-init-beta.sh
+		if [ $? -ne 0 ]; then
+			print_error "Failed to process init.sql for beta environment"
+			return 1
+		fi
+	else
+		print_error "process-init-beta.sh not found"
+		return 1
+	fi
+	
 	# Check for HTTP proxy configuration
 	if check_http_proxy; then
 		print_status "Using HTTP proxy for Docker build"

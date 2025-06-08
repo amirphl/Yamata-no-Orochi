@@ -456,6 +456,19 @@ start_services() {
     local docker_cmd
     docker_cmd=$(get_docker_cmd)
     
+    # Process init.sql with environment variables for local environment
+    print_status "Processing PostgreSQL init.sql for local environment..."
+    if [ -f "docker/postgres/process-init-local.sh" ]; then
+        ./docker/postgres/process-init-local.sh
+        if [ $? -ne 0 ]; then
+            print_error "Failed to process init.sql for local environment"
+            return 1
+        fi
+    else
+        print_error "process-init-local.sh not found"
+        return 1
+    fi
+    
     # Check for HTTP proxy configuration
     if check_http_proxy; then
         print_status "Using HTTP proxy for Docker build"
@@ -633,9 +646,6 @@ main() {
     # Add domain to hosts file
     add_to_hosts "$domain"
     
-    # Start services
-    start_services
-    
     # Initialize database and apply migrations
     print_status "Initializing database and applying migrations..."
     
@@ -652,6 +662,9 @@ main() {
     else
         print_warning "Database initialization failed or was skipped"
     fi
+    
+    # Start services
+    start_services
     
     # Wait for services to be ready
     wait_for_services
