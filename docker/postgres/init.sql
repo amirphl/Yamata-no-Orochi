@@ -1,7 +1,7 @@
 -- Database initialization for Yamata no Orochi
 -- This script runs when the PostgreSQL container starts for the first time
 
--- Enable required extensions
+-- Enable required extensions in the postgres database
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
@@ -17,28 +17,17 @@ BEGIN
     END IF;
 END $$;
 
--- Create audit schema for enhanced security logging
-CREATE SCHEMA IF NOT EXISTS audit;
+-- Create the target database if it doesn't exist
+-- Note: This runs in the postgres database context
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DB_NAME:-yamata_no_orochi}') THEN
+        CREATE DATABASE "${DB_NAME:-yamata_no_orochi}";
+    END IF;
+END $$;
 
 -- Grant necessary permissions to the main application user
-GRANT CONNECT ON DATABASE ${DB_NAME:-yamata_no_orochi} TO ${DB_USER:-yamata_user};
-GRANT USAGE ON SCHEMA public TO ${DB_USER:-yamata_user};
-GRANT CREATE ON SCHEMA public TO ${DB_USER:-yamata_user};
-GRANT USAGE ON SCHEMA audit TO ${DB_USER:-yamata_user};
-
--- Set default privileges for future tables
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${DB_USER:-yamata_user};
-ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO ${DB_USER:-yamata_user};
-ALTER DEFAULT PRIVILEGES IN SCHEMA audit GRANT SELECT, INSERT ON TABLES TO ${DB_USER:-yamata_user};
-
--- Create function for updating updated_at timestamps
-CREATE OR REPLACE FUNCTION trigger_set_timestamp()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+GRANT CONNECT ON DATABASE "${DB_NAME:-yamata_no_orochi}" TO "${DB_USER:-yamata_user}";
 
 -- Database settings for production
 -- Note: pg_stat_statements extension is loaded via shared_preload_libraries in postgresql.conf

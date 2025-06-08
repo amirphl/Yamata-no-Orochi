@@ -240,9 +240,10 @@ migration_tracker*
 
 # Processed database init files
 docker/postgres/init-processed.sql
-docker/postgres/init-*.sql
+docker/postgres/init.sql
 docker/postgres/init-local-processed.sql
 docker/postgres/init-beta-processed.sql
+docker/postgres/init-database-*-processed.sql
 
 app/services/jwt_private.pem
 app/services/jwt_public.pem

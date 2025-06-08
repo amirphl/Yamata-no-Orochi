@@ -48,6 +48,7 @@ DB_USER=${DB_USER:-yamata_user}
 
 # Create processed init file for beta environment
 PROCESSED_INIT="$SCRIPT_DIR/init-beta-processed.sql"
+PROCESSED_DB_INIT="$SCRIPT_DIR/init-database-beta-processed.sql"
 
 print_status "Environment variables:"
 echo "  DB_NAME: $DB_NAME"
@@ -58,5 +59,11 @@ sed -e "s/\${DB_NAME:-yamata_no_orochi}/$DB_NAME/g" \
     -e "s/\${DB_USER:-yamata_user}/$DB_USER/g" \
     "$SCRIPT_DIR/init.sql" > "$PROCESSED_INIT"
 
+# Substitute variables in init-database.sql and create processed version
+sed -e "s/\${DB_NAME:-yamata_no_orochi}/$DB_NAME/g" \
+    -e "s/\${DB_USER:-yamata_user}/$DB_USER/g" \
+    "$SCRIPT_DIR/init-database.sql" > "$PROCESSED_DB_INIT"
+
 print_success "Created processed init file for BETA: $PROCESSED_INIT"
+print_success "Created processed database init file for BETA: $PROCESSED_DB_INIT"
 print_status "Ready for Docker Compose beta environment" 
