@@ -14,6 +14,10 @@ volumes:
     driver: local
   app_logs_local:
     driver: local
+  prometheus_data_local:
+    driver: local
+  grafana_data_local:
+    driver: local
 
 services:
   # PostgreSQL Database
@@ -319,9 +323,10 @@ services:
     image: prom/prometheus:v3.5.0
     container_name: yamata-prometheus-local
     restart: unless-stopped
-    # volumes:
-    #   - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    #   - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+    volumes:
+      - prometheus_data_local:/prometheus
+      # - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # - ./docker/prometheus/rules:/etc/prometheus/rules:ro
     # ports:
     #   - "127.0.0.1:9091:9090"  # Only accessible from localhost
     networks:
@@ -349,9 +354,10 @@ services:
       GF_SECURITY_COOKIE_SECURE: true
       GF_SECURITY_COOKIE_SAMESITE: strict
       GF_SECURITY_STRICT_TRANSPORT_SECURITY: true
-    # volumes:
-    #   - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
-    #   - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    volumes:
+      - grafana_data_local:/var/lib/grafana
+      # - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      # - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
     # ports:
     #   - "127.0.0.1:3000:3000"  # Only accessible from localhost
     networks:
