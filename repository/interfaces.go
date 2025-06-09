@@ -83,7 +83,6 @@ type AuditLogRepository interface {
 // SMSCampaignRepository defines the interface for SMS campaign data access
 type SMSCampaignRepository interface {
 	Repository[models.SMSCampaign, models.SMSCampaignFilter]
-	Create(ctx context.Context, campaign models.SMSCampaign) error
 	ByID(ctx context.Context, id uint) (*models.SMSCampaign, error)
 	ByUUID(ctx context.Context, uuid string) (*models.SMSCampaign, error)
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.SMSCampaign, error)
@@ -102,7 +101,7 @@ type WalletRepository interface {
 	ByID(ctx context.Context, id uint) (*models.Wallet, error)
 	ByUUID(ctx context.Context, uuid string) (*models.Wallet, error)
 	ByCustomerID(ctx context.Context, customerID uint) (*models.Wallet, error)
-	CreateWithInitialSnapshot(ctx context.Context, wallet *models.Wallet, initialSnapshot *models.BalanceSnapshot) error
+	SaveWithInitialSnapshot(ctx context.Context, wallet *models.Wallet) error
 	GetCurrentBalance(ctx context.Context, walletID uint) (*models.BalanceSnapshot, error)
 	GetBalanceAtTime(ctx context.Context, walletID uint, timestamp time.Time) (*models.BalanceSnapshot, error)
 	GetBalanceHistory(ctx context.Context, walletID uint, limit, offset int) ([]*models.BalanceSnapshot, error)
@@ -133,7 +132,6 @@ type BalanceSnapshotRepository interface {
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.BalanceSnapshot, error)
 	GetLatestByWalletID(ctx context.Context, walletID uint) (*models.BalanceSnapshot, error)
 	GetLatestByWalletIDBeforeTime(ctx context.Context, walletID uint, timestamp time.Time) (*models.BalanceSnapshot, error)
-	GetBalanceHistory(ctx context.Context, walletID uint, limit, offset int) ([]*models.BalanceSnapshot, error)
 }
 
 // PaymentRequestRepository defines the interface for payment request data access

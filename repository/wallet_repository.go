@@ -2,9 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -24,8 +26,11 @@ func NewWalletRepository(db *gorm.DB) WalletRepository {
 func (r *WalletRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Wallet, error) {
 	db := r.getDB(ctx)
 	var wallet models.Wallet
-	err := db.First(&wallet, id).Error
+	err := db.Last(&wallet, id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &wallet, nil
@@ -35,8 +40,11 @@ func (r *WalletRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Walle
 func (r *WalletRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.Wallet, error) {
 	db := r.getDB(ctx)
 	var wallet models.Wallet
-	err := db.Where("uuid = ?", uuid).First(&wallet).Error
+	err := db.Where("uuid = ?", uuid).Last(&wallet).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &wallet, nil
@@ -46,33 +54,61 @@ func (r *WalletRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models
 func (r *WalletRepositoryImpl) ByCustomerID(ctx context.Context, customerID uint) (*models.Wallet, error) {
 	db := r.getDB(ctx)
 	var wallet models.Wallet
-	err := db.Where("customer_id = ?", customerID).First(&wallet).Error
+	err := db.Where("customer_id = ?", customerID).Last(&wallet).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &wallet, nil
 }
 
-// CreateWithInitialSnapshot creates a wallet with an initial balance snapshot
-func (r *WalletRepositoryImpl) CreateWithInitialSnapshot(ctx context.Context, wallet *models.Wallet, initialSnapshot *models.BalanceSnapshot) error {
-	db := r.getDB(ctx)
-	return db.Transaction(func(tx *gorm.DB) error {
-		// Create wallet first
-		if err := tx.Create(wallet).Error; err != nil {
-			return err
-		}
+// SaveWithInitialSnapshot creates a wallet with an initial balance snapshot
+func (r *WalletRepositoryImpl) SaveWithInitialSnapshot(ctx context.Context, wallet *models.Wallet) error {
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
 
-		// Set wallet ID in snapshot
-		initialSnapshot.WalletID = wallet.ID
-		initialSnapshot.CustomerID = wallet.CustomerID
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
 
-		// Create initial balance snapshot
-		if err := tx.Create(initialSnapshot).Error; err != nil {
-			return err
-		}
+	// Create wallet first
+	if err := db.Create(wallet).Error; err != nil {
+		return err
+	}
 
-		return nil
-	})
+	initialSnapshot := &models.BalanceSnapshot{
+		UUID:          uuid.New(),
+		CorrelationID: uuid.New(),
+		WalletID:      wallet.ID,
+		CustomerID:    wallet.CustomerID,
+		FreeBalance:   0,
+		FrozenBalance: 0,
+		LockedBalance: 0,
+		TotalBalance:  0,
+		Reason:        "initial_snapshot",
+		Description:   "Initial balance snapshot",
+		Metadata:      map[string]any{},
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+	}
+
+	// Create initial balance snapshot
+	if err := db.Create(initialSnapshot).Error; err != nil {
+		return err
+	}
+
+	return nil
+
 }
 
 // GetCurrentBalance gets the current balance snapshot for a wallet
@@ -83,6 +119,9 @@ func (r *WalletRepositoryImpl) GetCurrentBalance(ctx context.Context, walletID u
 		Order("created_at DESC").
 		First(&snapshot).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &snapshot, nil
@@ -96,6 +135,9 @@ func (r *WalletRepositoryImpl) GetBalanceAtTime(ctx context.Context, walletID ui
 		Order("created_at DESC").
 		First(&snapshot).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &snapshot, nil
@@ -143,8 +185,27 @@ func (r *WalletRepositoryImpl) ByFilter(ctx context.Context, filter models.Walle
 
 // Save inserts a new wallet
 func (r *WalletRepositoryImpl) Save(ctx context.Context, wallet *models.Wallet) error {
-	db := r.getDB(ctx)
-	return db.Create(wallet).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Save(wallet).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SaveBatch inserts multiple wallets in a single transaction
@@ -153,8 +214,27 @@ func (r *WalletRepositoryImpl) SaveBatch(ctx context.Context, wallets []*models.
 		return nil
 	}
 
-	db := r.getDB(ctx)
-	return db.CreateInBatches(wallets, 100).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.CreateInBatches(wallets, 100).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Count returns the number of wallets matching the filter

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"gorm.io/gorm"
@@ -23,8 +24,11 @@ func NewCommissionRateRepository(db *gorm.DB) CommissionRateRepository {
 func (r *CommissionRateRepositoryImpl) ByID(ctx context.Context, id uint) (*models.CommissionRate, error) {
 	db := r.getDB(ctx)
 	var rate models.CommissionRate
-	err := db.First(&rate, id).Error
+	err := db.Last(&rate, id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &rate, nil
@@ -34,8 +38,11 @@ func (r *CommissionRateRepositoryImpl) ByID(ctx context.Context, id uint) (*mode
 func (r *CommissionRateRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.CommissionRate, error) {
 	db := r.getDB(ctx)
 	var rate models.CommissionRate
-	err := db.Where("uuid = ?", uuid).First(&rate).Error
+	err := db.Where("uuid = ?", uuid).Last(&rate).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &rate, nil
@@ -45,7 +52,7 @@ func (r *CommissionRateRepositoryImpl) ByUUID(ctx context.Context, uuid string) 
 func (r *CommissionRateRepositoryImpl) ByAgencyID(ctx context.Context, agencyID uint) ([]*models.CommissionRate, error) {
 	db := r.getDB(ctx)
 	var rates []*models.CommissionRate
-	err := db.Where("agency_id = ?", agencyID).Find(&rates).Error
+	err := db.Where("agency_id = ?", agencyID).Order("created_at DESC").Find(&rates).Error
 	if err != nil {
 		return nil, err
 	}
@@ -56,8 +63,11 @@ func (r *CommissionRateRepositoryImpl) ByAgencyID(ctx context.Context, agencyID 
 func (r *CommissionRateRepositoryImpl) ByAgencyAndTransactionType(ctx context.Context, agencyID uint, transactionType string) (*models.CommissionRate, error) {
 	db := r.getDB(ctx)
 	var rate models.CommissionRate
-	err := db.Where("agency_id = ? AND transaction_type = ?", agencyID, transactionType).First(&rate).Error
+	err := db.Where("agency_id = ? AND transaction_type = ?", agencyID, transactionType).Last(&rate).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &rate, nil
@@ -132,8 +142,26 @@ func (r *CommissionRateRepositoryImpl) ByFilter(ctx context.Context, filter mode
 
 // Save inserts a new commission rate
 func (r *CommissionRateRepositoryImpl) Save(ctx context.Context, rate *models.CommissionRate) error {
-	db := r.getDB(ctx)
-	return db.Create(rate).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Create(rate).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // SaveBatch inserts multiple commission rates in a single transaction
@@ -142,8 +170,26 @@ func (r *CommissionRateRepositoryImpl) SaveBatch(ctx context.Context, rates []*m
 		return nil
 	}
 
-	db := r.getDB(ctx)
-	return db.CreateInBatches(rates, 100).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.CreateInBatches(rates, 100).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Count returns the number of commission rates matching the filter

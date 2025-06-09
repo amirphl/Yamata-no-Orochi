@@ -3,7 +3,7 @@ package repository
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -31,10 +31,10 @@ func (r *OTPVerificationRepositoryImpl) ByID(ctx context.Context, id uint) (*mod
 	err := db.Preload("Customer").
 		Last(&otp, id).Error
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find OTP verification by ID %d: %w", id, err)
+		return nil, err
 	}
 
 	return &otp, nil
@@ -49,7 +49,7 @@ func (r *OTPVerificationRepositoryImpl) ByCustomerAndType(ctx context.Context, c
 
 	otps, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find OTPs by customer and type: %w", err)
+		return nil, err
 	}
 
 	return otps, nil
@@ -65,10 +65,10 @@ func (r *OTPVerificationRepositoryImpl) ByTargetAndType(ctx context.Context, tar
 		Last(&otp).Error
 
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find OTP by target and type: %w", err)
+		return nil, err
 	}
 
 	return &otp, nil
@@ -84,7 +84,7 @@ func (r *OTPVerificationRepositoryImpl) ListActiveOTPs(ctx context.Context, cust
 
 	otps, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list active OTPs: %w", err)
+		return nil, err
 	}
 
 	return otps, nil
@@ -114,7 +114,7 @@ func (r *OTPVerificationRepositoryImpl) ExpireOldOTPs(ctx context.Context, custo
 		Find(&oldOTPs).Error
 
 	if err != nil {
-		return fmt.Errorf("failed to find old OTPs: %w", err)
+		return err
 	}
 
 	// Create new expired records for each old OTP (immutable approach)
@@ -136,18 +136,15 @@ func (r *OTPVerificationRepositoryImpl) ExpireOldOTPs(ctx context.Context, custo
 
 		err = db.Create(&expiredOTP).Error
 		if err != nil {
-			return fmt.Errorf("failed to create expired OTP record: %w", err)
+			return err
 		}
 	}
 
 	return nil
 }
 
-// ByFilter retrieves OTP verifications based on filter criteria
-func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter models.OTPVerificationFilter, orderBy string, limit, offset int) ([]*models.OTPVerification, error) {
-	db := r.getDB(ctx)
-	query := db.Model(&models.OTPVerification{})
-
+// applyFilter applies filter criteria to a GORM query
+func (r *OTPVerificationRepositoryImpl) applyFilter(query *gorm.DB, filter models.OTPVerificationFilter) *gorm.DB {
 	// Apply filters based on provided values
 	if filter.ID != nil {
 		query = query.Where("id = ?", *filter.ID)
@@ -182,25 +179,36 @@ func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	}
 
 	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+		query = query.Where("created_at > ?", *filter.CreatedAfter)
 	}
 
 	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+		query = query.Where("created_at < ?", *filter.CreatedBefore)
 	}
 
 	if filter.ExpiresAfter != nil {
-		query = query.Where("expires_at >= ?", *filter.ExpiresAfter)
+		query = query.Where("expires_at > ?", *filter.ExpiresAfter)
 	}
 
 	if filter.ExpiresBefore != nil {
-		query = query.Where("expires_at <= ?", *filter.ExpiresBefore)
+		query = query.Where("expires_at < ?", *filter.ExpiresBefore)
 	}
 
 	// Special handling for IsActive - filter non-expired pending OTPs
 	if filter.IsActive != nil && *filter.IsActive {
 		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, utils.UTCNow())
 	}
+
+	return query
+}
+
+// ByFilter retrieves OTP verifications based on filter criteria
+func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter models.OTPVerificationFilter, orderBy string, limit, offset int) ([]*models.OTPVerification, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.OTPVerification{})
+
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	// Apply ordering (default to id DESC)
 	if orderBy == "" {
@@ -219,7 +227,7 @@ func (r *OTPVerificationRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	var otps []*models.OTPVerification
 	err := query.Find(&otps).Error
 	if err != nil {
-		return nil, fmt.Errorf("failed to find OTP verifications by filter: %w", err)
+		return nil, err
 	}
 
 	return otps, nil
@@ -230,64 +238,13 @@ func (r *OTPVerificationRepositoryImpl) Count(ctx context.Context, filter models
 	db := r.getDB(ctx)
 	query := db.Model(&models.OTPVerification{})
 
-	// Apply filters based on provided values
-	if filter.ID != nil {
-		query = query.Where("id = ?", *filter.ID)
-	}
-
-	if filter.CorrelationID != nil {
-		query = query.Where("correlation_id = ?", *filter.CorrelationID)
-	}
-
-	if filter.CustomerID != nil {
-		query = query.Where("customer_id = ?", *filter.CustomerID)
-	}
-
-	if filter.OTPType != nil {
-		query = query.Where("otp_type = ?", *filter.OTPType)
-	}
-
-	if filter.OTPCode != nil {
-		query = query.Where("otp_code = ?", *filter.OTPCode)
-	}
-
-	if filter.TargetValue != nil {
-		query = query.Where("target_value = ?", *filter.TargetValue)
-	}
-
-	if filter.Status != nil {
-		query = query.Where("status = ?", *filter.Status)
-	}
-
-	if filter.IPAddress != nil {
-		query = query.Where("ip_address = ?", *filter.IPAddress)
-	}
-
-	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
-	}
-
-	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
-	}
-
-	if filter.ExpiresAfter != nil {
-		query = query.Where("expires_at >= ?", *filter.ExpiresAfter)
-	}
-
-	if filter.ExpiresBefore != nil {
-		query = query.Where("expires_at <= ?", *filter.ExpiresBefore)
-	}
-
-	// Special handling for IsActive - filter non-expired pending OTPs
-	if filter.IsActive != nil && *filter.IsActive {
-		query = query.Where("status = ? AND expires_at > ?", models.OTPStatusPending, utils.UTCNow())
-	}
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	var count int64
 	err := query.Count(&count).Error
 	if err != nil {
-		return 0, fmt.Errorf("failed to count OTP verifications: %w", err)
+		return 0, err
 	}
 
 	return count, nil
@@ -313,10 +270,10 @@ func (r *OTPVerificationRepositoryImpl) GetLatestByCorrelationID(ctx context.Con
 		First(&otp).Error
 
 	if err != nil {
-		if err.Error() == "record not found" {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find latest OTP by correlation ID: %w", err)
+		return nil, err
 	}
 
 	return &otp, nil
@@ -332,7 +289,7 @@ func (r *OTPVerificationRepositoryImpl) GetHistoryByCorrelationID(ctx context.Co
 		Find(&otps).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to find OTP history by correlation ID: %w", err)
+		return nil, err
 	}
 
 	return otps, nil

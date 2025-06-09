@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -25,8 +26,11 @@ func NewBalanceSnapshotRepository(db *gorm.DB) BalanceSnapshotRepository {
 func (r *BalanceSnapshotRepositoryImpl) ByID(ctx context.Context, id uint) (*models.BalanceSnapshot, error) {
 	db := r.getDB(ctx)
 	var snapshot models.BalanceSnapshot
-	err := db.First(&snapshot, id).Error
+	err := db.Last(&snapshot, id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &snapshot, nil
@@ -36,8 +40,11 @@ func (r *BalanceSnapshotRepositoryImpl) ByID(ctx context.Context, id uint) (*mod
 func (r *BalanceSnapshotRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.BalanceSnapshot, error) {
 	db := r.getDB(ctx)
 	var snapshot models.BalanceSnapshot
-	err := db.Where("uuid = ?", uuid).First(&snapshot).Error
+	err := db.Where("uuid = ?", uuid).Last(&snapshot).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &snapshot, nil
@@ -47,7 +54,7 @@ func (r *BalanceSnapshotRepositoryImpl) ByUUID(ctx context.Context, uuid string)
 func (r *BalanceSnapshotRepositoryImpl) ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.BalanceSnapshot, error) {
 	db := r.getDB(ctx)
 	var snapshots []*models.BalanceSnapshot
-	err := db.Where("correlation_id = ?", correlationID).Find(&snapshots).Error
+	err := db.Where("correlation_id = ?", correlationID).Order("created_at DESC").Find(&snapshots).Error
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +109,9 @@ func (r *BalanceSnapshotRepositoryImpl) GetLatestByWalletID(ctx context.Context,
 		Order("created_at DESC").
 		First(&snapshot).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &snapshot, nil
@@ -115,14 +125,12 @@ func (r *BalanceSnapshotRepositoryImpl) GetLatestByWalletIDBeforeTime(ctx contex
 		Order("created_at DESC").
 		First(&snapshot).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &snapshot, nil
-}
-
-// GetBalanceHistory gets the balance history for a wallet
-func (r *BalanceSnapshotRepositoryImpl) GetBalanceHistory(ctx context.Context, walletID uint, limit, offset int) ([]*models.BalanceSnapshot, error) {
-	return r.ByWalletID(ctx, walletID, limit, offset)
 }
 
 // ByFilter retrieves balance snapshots based on filter criteria
@@ -154,8 +162,26 @@ func (r *BalanceSnapshotRepositoryImpl) ByFilter(ctx context.Context, filter mod
 
 // Save inserts a new balance snapshot
 func (r *BalanceSnapshotRepositoryImpl) Save(ctx context.Context, snapshot *models.BalanceSnapshot) error {
-	db := r.getDB(ctx)
-	return db.Create(snapshot).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Create(snapshot).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // SaveBatch inserts multiple balance snapshots in a single transaction
@@ -164,8 +190,26 @@ func (r *BalanceSnapshotRepositoryImpl) SaveBatch(ctx context.Context, snapshots
 		return nil
 	}
 
-	db := r.getDB(ctx)
-	return db.CreateInBatches(snapshots, 100).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.CreateInBatches(snapshots, 100).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Count returns the number of balance snapshots matching the filter

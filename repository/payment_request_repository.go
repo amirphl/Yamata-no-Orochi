@@ -2,9 +2,10 @@ package repository
 
 import (
 	"context"
-	"time"
+	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -27,6 +28,9 @@ func (r *PaymentRequestRepositoryImpl) ByID(ctx context.Context, id uint) (*mode
 	var request models.PaymentRequest
 	err := db.First(&request, id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &request, nil
@@ -36,8 +40,11 @@ func (r *PaymentRequestRepositoryImpl) ByID(ctx context.Context, id uint) (*mode
 func (r *PaymentRequestRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.PaymentRequest, error) {
 	db := r.getDB(ctx)
 	var request models.PaymentRequest
-	err := db.Where("uuid = ?", uuid).First(&request).Error
+	err := db.Where("uuid = ?", uuid).Last(&request).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &request, nil
@@ -47,7 +54,7 @@ func (r *PaymentRequestRepositoryImpl) ByUUID(ctx context.Context, uuid string) 
 func (r *PaymentRequestRepositoryImpl) ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.PaymentRequest, error) {
 	db := r.getDB(ctx)
 	var requests []*models.PaymentRequest
-	err := db.Where("correlation_id = ?", correlationID).Find(&requests).Error
+	err := db.Where("correlation_id = ?", correlationID).Order("created_at DESC").Find(&requests).Error
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +65,11 @@ func (r *PaymentRequestRepositoryImpl) ByCorrelationID(ctx context.Context, corr
 func (r *PaymentRequestRepositoryImpl) ByInvoiceNumber(ctx context.Context, invoiceNumber string) (*models.PaymentRequest, error) {
 	db := r.getDB(ctx)
 	var request models.PaymentRequest
-	err := db.Where("invoice_number = ?", invoiceNumber).First(&request).Error
+	err := db.Where("invoice_number = ?", invoiceNumber).Last(&request).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &request, nil
@@ -69,8 +79,11 @@ func (r *PaymentRequestRepositoryImpl) ByInvoiceNumber(ctx context.Context, invo
 func (r *PaymentRequestRepositoryImpl) ByAtipayToken(ctx context.Context, atipayToken string) (*models.PaymentRequest, error) {
 	db := r.getDB(ctx)
 	var request models.PaymentRequest
-	err := db.Where("atipay_token = ?", atipayToken).First(&request).Error
+	err := db.Where("atipay_token = ?", atipayToken).Last(&request).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &request, nil
@@ -80,8 +93,11 @@ func (r *PaymentRequestRepositoryImpl) ByAtipayToken(ctx context.Context, atipay
 func (r *PaymentRequestRepositoryImpl) ByPaymentReference(ctx context.Context, paymentReference string) (*models.PaymentRequest, error) {
 	db := r.getDB(ctx)
 	var request models.PaymentRequest
-	err := db.Where("payment_reference = ?", paymentReference).First(&request).Error
+	err := db.Where("payment_reference = ?", paymentReference).Last(&request).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &request, nil
@@ -157,7 +173,7 @@ func (r *PaymentRequestRepositoryImpl) GetExpiredRequests(ctx context.Context, l
 	db := r.getDB(ctx)
 	var requests []*models.PaymentRequest
 
-	query := db.Where("expires_at < ?", time.Now()).Order("created_at DESC")
+	query := db.Where("expires_at < ?", utils.UTCNow()).Order("created_at DESC")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
@@ -206,8 +222,27 @@ func (r *PaymentRequestRepositoryImpl) ByFilter(ctx context.Context, filter mode
 
 // Save inserts a new payment request
 func (r *PaymentRequestRepositoryImpl) Save(ctx context.Context, request *models.PaymentRequest) error {
-	db := r.getDB(ctx)
-	return db.Create(request).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Create(request).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SaveBatch inserts multiple payment requests in a single transaction
@@ -216,8 +251,27 @@ func (r *PaymentRequestRepositoryImpl) SaveBatch(ctx context.Context, requests [
 		return nil
 	}
 
-	db := r.getDB(ctx)
-	return db.CreateInBatches(requests, 100).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.CreateInBatches(requests, 100).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Count returns the number of payment requests matching the filter

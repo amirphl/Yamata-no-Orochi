@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,8 +23,8 @@ func NewSMSCampaignRepository(db *gorm.DB) SMSCampaignRepository {
 	}
 }
 
-// Create creates a new SMS campaign
-func (r *SMSCampaignRepositoryImpl) Create(ctx context.Context, campaign models.SMSCampaign) error {
+// Save creates a new SMS campaign
+func (r *SMSCampaignRepositoryImpl) Save(ctx context.Context, campaign *models.SMSCampaign) error {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -39,17 +40,9 @@ func (r *SMSCampaignRepositoryImpl) Create(ctx context.Context, campaign models.
 		}()
 	}
 
-	// Set default values if not set
-	if campaign.CreatedAt.IsZero() {
-		campaign.CreatedAt = time.Now().UTC()
-	}
-	if campaign.Status == "" {
-		campaign.Status = models.SMSCampaignStatusInitiated
-	}
-
 	err = db.Create(&campaign).Error
 	if err != nil {
-		return fmt.Errorf("failed to create SMS campaign: %w", err)
+		return err
 	}
 
 	return nil
@@ -64,10 +57,10 @@ func (r *SMSCampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.
 		Preload("Customer.AccountType").
 		Last(&campaign, id).Error
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find SMS campaign by ID %d: %w", id, err)
+		return nil, err
 	}
 
 	return &campaign, nil
@@ -77,13 +70,13 @@ func (r *SMSCampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.
 func (r *SMSCampaignRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.SMSCampaign, error) {
 	parsedUUID, err := utils.ParseUUID(uuid)
 	if err != nil {
-		return nil, fmt.Errorf("invalid UUID format: %w", err)
+		return nil, err
 	}
 
 	filter := models.SMSCampaignFilter{UUID: &parsedUUID}
 	campaigns, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find SMS campaign by UUID: %w", err)
+		return nil, err
 	}
 
 	if len(campaigns) == 0 {
@@ -123,12 +116,12 @@ func (r *SMSCampaignRepositoryImpl) Update(ctx context.Context, campaign models.
 	}
 
 	// Set updated_at timestamp
-	now := time.Now().UTC()
+	now := utils.UTCNow()
 	campaign.UpdatedAt = &now
 
 	err = db.Save(&campaign).Error
 	if err != nil {
-		return fmt.Errorf("failed to update SMS campaign: %w", err)
+		return err
 	}
 
 	return nil
@@ -151,16 +144,16 @@ func (r *SMSCampaignRepositoryImpl) UpdateStatus(ctx context.Context, id uint, s
 		}()
 	}
 
-	now := time.Now().UTC()
+	now := utils.UTCNow()
 	err = db.Model(&models.SMSCampaign{}).
 		Where("id = ?", id).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"status":     status,
 			"updated_at": now,
 		}).Error
 
 	if err != nil {
-		return fmt.Errorf("failed to update SMS campaign status: %w", err)
+		return err
 	}
 
 	return nil
@@ -228,7 +221,7 @@ func (r *SMSCampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.
 
 	err := query.Find(&campaigns).Error
 	if err != nil {
-		return nil, fmt.Errorf("failed to find SMS campaigns by filter: %w", err)
+		return nil, err
 	}
 
 	return campaigns, nil
@@ -244,7 +237,7 @@ func (r *SMSCampaignRepositoryImpl) Count(ctx context.Context, filter models.SMS
 
 	err := query.Count(&count).Error
 	if err != nil {
-		return 0, fmt.Errorf("failed to count SMS campaigns: %w", err)
+		return 0, err
 	}
 
 	return count, nil
@@ -293,19 +286,19 @@ func (r *SMSCampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.SMSCa
 		db = db.Where("created_at >= ?", *filter.CreatedAfter)
 	}
 	if filter.CreatedBefore != nil {
-		db = db.Where("created_at <= ?", *filter.CreatedBefore)
+		db = db.Where("created_at < ?", *filter.CreatedBefore)
 	}
 	if filter.UpdatedAfter != nil {
-		db = db.Where("updated_at >= ?", *filter.UpdatedAfter)
+		db = db.Where("updated_at > ?", *filter.UpdatedAfter)
 	}
 	if filter.UpdatedBefore != nil {
-		db = db.Where("updated_at <= ?", *filter.UpdatedBefore)
+		db = db.Where("updated_at < ?", *filter.UpdatedBefore)
 	}
 	if filter.ScheduleAfter != nil {
-		db = db.Where("spec->>'schedule_at' >= ?", filter.ScheduleAfter.Format(time.RFC3339))
+		db = db.Where("spec->>'schedule_at' > ?", filter.ScheduleAfter.Format(time.RFC3339))
 	}
 	if filter.ScheduleBefore != nil {
-		db = db.Where("spec->>'schedule_at' <= ?", filter.ScheduleBefore.Format(time.RFC3339))
+		db = db.Where("spec->>'schedule_at' < ?", filter.ScheduleBefore.Format(time.RFC3339))
 	}
 	if filter.MinBudget != nil {
 		db = db.Where("CAST(spec->>'budget' AS BIGINT) >= ?", *filter.MinBudget)

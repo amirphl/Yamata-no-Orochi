@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -25,8 +26,11 @@ func NewAgencyCommissionRepository(db *gorm.DB) AgencyCommissionRepository {
 func (r *AgencyCommissionRepositoryImpl) ByID(ctx context.Context, id uint) (*models.AgencyCommission, error) {
 	db := r.getDB(ctx)
 	var commission models.AgencyCommission
-	err := db.First(&commission, id).Error
+	err := db.Last(&commission, id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &commission, nil
@@ -36,8 +40,11 @@ func (r *AgencyCommissionRepositoryImpl) ByID(ctx context.Context, id uint) (*mo
 func (r *AgencyCommissionRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.AgencyCommission, error) {
 	db := r.getDB(ctx)
 	var commission models.AgencyCommission
-	err := db.Where("uuid = ?", uuid).First(&commission).Error
+	err := db.Where("uuid = ?", uuid).Last(&commission).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &commission, nil
@@ -47,7 +54,7 @@ func (r *AgencyCommissionRepositoryImpl) ByUUID(ctx context.Context, uuid string
 func (r *AgencyCommissionRepositoryImpl) ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.AgencyCommission, error) {
 	db := r.getDB(ctx)
 	var commissions []*models.AgencyCommission
-	err := db.Where("correlation_id = ?", correlationID).Find(&commissions).Error
+	err := db.Where("correlation_id = ?", correlationID).Order("created_at DESC").Find(&commissions).Error
 	if err != nil {
 		return nil, err
 	}
@@ -235,8 +242,26 @@ func (r *AgencyCommissionRepositoryImpl) ByFilter(ctx context.Context, filter mo
 
 // Save inserts a new agency commission
 func (r *AgencyCommissionRepositoryImpl) Save(ctx context.Context, commission *models.AgencyCommission) error {
-	db := r.getDB(ctx)
-	return db.Create(commission).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Create(commission).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // SaveBatch inserts multiple agency commissions in a single transaction
@@ -245,8 +270,26 @@ func (r *AgencyCommissionRepositoryImpl) SaveBatch(ctx context.Context, commissi
 		return nil
 	}
 
-	db := r.getDB(ctx)
-	return db.CreateInBatches(commissions, 100).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.CreateInBatches(commissions, 100).Error
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // Count returns the number of agency commissions matching the filter

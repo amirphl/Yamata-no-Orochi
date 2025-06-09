@@ -3,7 +3,8 @@ package repository
 
 import (
 	"context"
-	"fmt"
+	"errors"
+	"strconv"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -32,10 +33,10 @@ func (r *CustomerRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Cus
 		Preload("ReferrerAgency").
 		Last(&customer, id).Error
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find customer by ID %d: %w", id, err)
+		return nil, err
 	}
 
 	return &customer, nil
@@ -46,7 +47,7 @@ func (r *CustomerRepositoryImpl) ByEmail(ctx context.Context, email string) (*mo
 	filter := models.CustomerFilter{Email: &email}
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find customer by email: %w", err)
+		return nil, err
 	}
 
 	if len(customers) == 0 {
@@ -61,7 +62,7 @@ func (r *CustomerRepositoryImpl) ByMobile(ctx context.Context, mobile string) (*
 	filter := models.CustomerFilter{RepresentativeMobile: &mobile}
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find customer by mobile: %w", err)
+		return nil, err
 	}
 
 	if len(customers) == 0 {
@@ -75,13 +76,13 @@ func (r *CustomerRepositoryImpl) ByMobile(ctx context.Context, mobile string) (*
 func (r *CustomerRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.Customer, error) {
 	parsedUUID, err := utils.ParseUUID(uuid)
 	if err != nil {
-		return nil, fmt.Errorf("invalid UUID format: %w", err)
+		return nil, err
 	}
 
 	filter := models.CustomerFilter{UUID: &parsedUUID}
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find customer by UUID: %w", err)
+		return nil, err
 	}
 
 	if len(customers) == 0 {
@@ -96,7 +97,7 @@ func (r *CustomerRepositoryImpl) ByAgencyRefererCode(ctx context.Context, agency
 	filter := models.CustomerFilter{AgencyRefererCode: &agencyRefererCode}
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find customer by agency referer code: %w", err)
+		return nil, err
 	}
 
 	if len(customers) == 0 {
@@ -111,7 +112,7 @@ func (r *CustomerRepositoryImpl) ByNationalID(ctx context.Context, nationalID st
 	filter := models.CustomerFilter{NationalID: &nationalID}
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find customer by national ID: %w", err)
+		return nil, err
 	}
 
 	if len(customers) == 0 {
@@ -130,7 +131,7 @@ func (r *CustomerRepositoryImpl) ListByAgency(ctx context.Context, agencyID uint
 
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list customers by agency: %w", err)
+		return nil, err
 	}
 
 	return customers, nil
@@ -149,17 +150,14 @@ func (r *CustomerRepositoryImpl) ListActiveCustomers(ctx context.Context, limit,
 		Find(&customers).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to list active customers: %w", err)
+		return nil, err
 	}
 
 	return customers, nil
 }
 
-// ByFilter retrieves customers based on filter criteria
-func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerFilter, orderBy string, limit, offset int) ([]*models.Customer, error) {
-	db := r.getDB(ctx)
-	query := db.Model(&models.Customer{})
-
+// applyFilter applies filter criteria to a GORM query
+func (r *CustomerRepositoryImpl) applyFilter(query *gorm.DB, filter models.CustomerFilter) *gorm.DB {
 	// Apply filters based on provided values
 	if filter.ID != nil {
 		query = query.Where("id = ?", *filter.ID)
@@ -206,19 +204,19 @@ func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.Cus
 	}
 
 	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+		query = query.Where("created_at > ?", *filter.CreatedAfter)
 	}
 
 	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+		query = query.Where("created_at < ?", *filter.CreatedBefore)
 	}
 
 	if filter.LastLoginAfter != nil {
-		query = query.Where("last_login_at >= ?", *filter.LastLoginAfter)
+		query = query.Where("last_login_at > ?", *filter.LastLoginAfter)
 	}
 
 	if filter.LastLoginBefore != nil {
-		query = query.Where("last_login_at <= ?", *filter.LastLoginBefore)
+		query = query.Where("last_login_at < ?", *filter.LastLoginBefore)
 	}
 
 	// Special handling for AccountTypeName - join with account_types table
@@ -226,6 +224,17 @@ func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.Cus
 		query = query.Joins("JOIN account_types ON customers.account_type_id = account_types.id").
 			Where("account_types.type_name = ?", *filter.AccountTypeName)
 	}
+
+	return query
+}
+
+// ByFilter retrieves customers based on filter criteria
+func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerFilter, orderBy string, limit, offset int) ([]*models.Customer, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.Customer{})
+
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	// Apply ordering (default to id DESC)
 	if orderBy == "" {
@@ -244,7 +253,7 @@ func (r *CustomerRepositoryImpl) ByFilter(ctx context.Context, filter models.Cus
 	var customers []*models.Customer
 	err := query.Preload("AccountType").Find(&customers).Error
 	if err != nil {
-		return nil, fmt.Errorf("failed to find customers by filter: %w", err)
+		return nil, err
 	}
 
 	return customers, nil
@@ -255,77 +264,13 @@ func (r *CustomerRepositoryImpl) Count(ctx context.Context, filter models.Custom
 	db := r.getDB(ctx)
 	query := db.Model(&models.Customer{})
 
-	// Apply filters based on provided values
-	if filter.ID != nil {
-		query = query.Where("id = ?", *filter.ID)
-	}
-
-	if filter.UUID != nil {
-		query = query.Where("uuid = ?", *filter.UUID)
-	}
-
-	if filter.AccountTypeID != nil {
-		query = query.Where("account_type_id = ?", *filter.AccountTypeID)
-	}
-
-	if filter.Email != nil {
-		query = query.Where("email = ?", *filter.Email)
-	}
-
-	if filter.RepresentativeMobile != nil {
-		query = query.Where("representative_mobile = ?", *filter.RepresentativeMobile)
-	}
-
-	if filter.CompanyName != nil {
-		query = query.Where("company_name = ?", *filter.CompanyName)
-	}
-
-	if filter.NationalID != nil {
-		query = query.Where("national_id = ?", *filter.NationalID)
-	}
-
-	if filter.AgencyRefererCode != nil {
-		query = query.Where("agency_referer_code = ?", *filter.AgencyRefererCode)
-	}
-
-	if filter.IsEmailVerified != nil {
-		query = query.Where("is_email_verified = ?", *filter.IsEmailVerified)
-	}
-
-	if filter.IsMobileVerified != nil {
-		query = query.Where("is_mobile_verified = ?", *filter.IsMobileVerified)
-	}
-
-	if filter.IsActive != nil {
-		query = query.Where("is_active = ?", *filter.IsActive)
-	}
-
-	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
-	}
-
-	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
-	}
-
-	if filter.LastLoginAfter != nil {
-		query = query.Where("last_login_at >= ?", *filter.LastLoginAfter)
-	}
-
-	if filter.LastLoginBefore != nil {
-		query = query.Where("last_login_at <= ?", *filter.LastLoginBefore)
-	}
-
-	// Special handling for AccountTypeName - join with account_types table
-	if filter.AccountTypeName != nil {
-		query = query.Joins("JOIN account_types ON customers.account_type_id = account_types.id").
-			Where("account_types.type_name = ?", *filter.AccountTypeName)
-	}
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	var count int64
 	err := query.Count(&count).Error
 	if err != nil {
-		return 0, fmt.Errorf("failed to count customers: %w", err)
+		return 0, err
 	}
 
 	return count, nil
@@ -344,19 +289,33 @@ func (r *CustomerRepositoryImpl) Exists(ctx context.Context, filter models.Custo
 // UpdatePassword updates the password hash for an existing customer
 // This is a special case that allows updating the password while maintaining referential integrity
 func (r *CustomerRepositoryImpl) UpdatePassword(ctx context.Context, customerID uint, passwordHash string) error {
-	db := r.getDB(ctx)
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
 
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	// TODO: update updated_at
 	// Use direct SQL update to change only the password hash
 	result := db.Model(&models.Customer{}).
 		Where("id = ?", customerID).
 		Update("password_hash", passwordHash)
 
 	if result.Error != nil {
-		return fmt.Errorf("failed to update password: %w", result.Error)
+		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("customer not found with ID: %d", customerID)
+		return errors.New("customer not found with ID: " + strconv.Itoa(int(customerID)))
 	}
 
 	return nil
@@ -365,9 +324,22 @@ func (r *CustomerRepositoryImpl) UpdatePassword(ctx context.Context, customerID 
 // UpdateVerificationStatus updates verification fields for an existing customer
 // This is a special case that allows updating verification status while maintaining referential integrity
 func (r *CustomerRepositoryImpl) UpdateVerificationStatus(ctx context.Context, customerID uint, isMobileVerified, isEmailVerified *bool, mobileVerifiedAt, emailVerifiedAt *time.Time) error {
-	db := r.getDB(ctx)
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
 
-	updates := make(map[string]interface{})
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	updates := make(map[string]any)
 
 	if isMobileVerified != nil {
 		updates["is_mobile_verified"] = *isMobileVerified
@@ -386,16 +358,17 @@ func (r *CustomerRepositoryImpl) UpdateVerificationStatus(ctx context.Context, c
 		return nil // No updates needed
 	}
 
+	// TODO: update updated_at
 	result := db.Model(&models.Customer{}).
 		Where("id = ?", customerID).
 		Updates(updates)
 
 	if result.Error != nil {
-		return fmt.Errorf("failed to update verification status: %w", result.Error)
+		return result.Error
 	}
 
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("customer not found with ID: %d", customerID)
+		return errors.New("customer not found with ID: " + strconv.Itoa(int(customerID)))
 	}
 
 	return nil

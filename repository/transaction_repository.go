@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/google/uuid"
@@ -24,8 +25,11 @@ func NewTransactionRepository(db *gorm.DB) TransactionRepository {
 func (r *TransactionRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Transaction, error) {
 	db := r.getDB(ctx)
 	var transaction models.Transaction
-	err := db.First(&transaction, id).Error
+	err := db.Last(&transaction, id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &transaction, nil
@@ -35,8 +39,11 @@ func (r *TransactionRepositoryImpl) ByID(ctx context.Context, id uint) (*models.
 func (r *TransactionRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.Transaction, error) {
 	db := r.getDB(ctx)
 	var transaction models.Transaction
-	err := db.Where("uuid = ?", uuid).First(&transaction).Error
+	err := db.Where("uuid = ?", uuid).Last(&transaction).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &transaction, nil
@@ -46,7 +53,7 @@ func (r *TransactionRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*m
 func (r *TransactionRepositoryImpl) ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.Transaction, error) {
 	db := r.getDB(ctx)
 	var transactions []*models.Transaction
-	err := db.Where("correlation_id = ?", correlationID).Find(&transactions).Error
+	err := db.Where("correlation_id = ?", correlationID).Order("created_at DESC").Find(&transactions).Error
 	if err != nil {
 		return nil, err
 	}
@@ -137,8 +144,11 @@ func (r *TransactionRepositoryImpl) ByStatus(ctx context.Context, status models.
 func (r *TransactionRepositoryImpl) ByExternalReference(ctx context.Context, externalReference string) (*models.Transaction, error) {
 	db := r.getDB(ctx)
 	var transaction models.Transaction
-	err := db.Where("external_reference = ?", externalReference).First(&transaction).Error
+	err := db.Where("external_reference = ?", externalReference).Last(&transaction).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &transaction, nil
@@ -183,8 +193,27 @@ func (r *TransactionRepositoryImpl) ByFilter(ctx context.Context, filter models.
 
 // Save inserts a new transaction
 func (r *TransactionRepositoryImpl) Save(ctx context.Context, transaction *models.Transaction) error {
-	db := r.getDB(ctx)
-	return db.Create(transaction).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Create(transaction).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // SaveBatch inserts multiple transactions in a single transaction
@@ -193,8 +222,27 @@ func (r *TransactionRepositoryImpl) SaveBatch(ctx context.Context, transactions 
 		return nil
 	}
 
-	db := r.getDB(ctx)
-	return db.CreateInBatches(transactions, 100).Error
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.CreateInBatches(transactions, 100).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Count returns the number of transactions matching the filter
