@@ -91,6 +91,8 @@ Recent schema changes:
 - `0014_create_sms_campaigns.sql`: adds `sms_campaigns` table
 - `0015_add_sms_campaign_audit_actions.sql`: adds campaign audit actions to enum
 - `0016_add_comment_to_sms_campaigns.sql`: adds nullable `comment TEXT` to `sms_campaigns`
+- `0017_create_wallet_models.sql`: creates immutable accounting system with `wallets`, `transactions`, `balance_snapshots`, and `payment_requests` tables
+- `0018_create_agency_commission_models.sql`: creates agency commission tracking and distribution system
 
 ## API Endpoints
 All endpoints are under `/api/v1`.

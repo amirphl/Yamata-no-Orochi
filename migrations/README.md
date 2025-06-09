@@ -25,8 +25,10 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 12. **0012_update_timestamp_defaults_to_utc** - Updates timestamp defaults to UTC
 13. **0013_relax_name_validation** - Removes name format constraints to allow any characters
 14. **0014_create_sms_campaigns** - Creates SMS campaign management system
-15. **0015_add_sms_campaign_audit_actions** - Adds audit actions for SMS campaign operations 
-0016
+15. **0015_add_sms_campaign_audit_actions** - Adds audit actions for SMS campaign operations
+16. **0016_add_comment_to_sms_campaigns** - Adds comment field for admin rejection notes
+17. **0017_create_wallet_models** - Creates immutable accounting system for wallet, transactions, and payments
+18. **0018_create_agency_commission_models** - Creates agency commission tracking and distribution system
 
 ## Database Schema Overview
 
@@ -61,6 +63,13 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 - Security event monitoring
 - JSONB metadata for flexible data storage
 - Request correlation support
+
+#### Wallet & Payment System
+- Immutable accounting system with correlation IDs
+- Balance snapshots for audit trail
+- Atipay payment integration
+- Transaction lifecycle tracking
+- Support for freeze/unfreeze, lock/unlock operations
 
 ## Field Validation Rules
 
@@ -103,15 +112,19 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 \i migrations/0013_relax_name_validation.sql
 \i migrations/0014_create_sms_campaigns.sql
 \i migrations/0015_add_sms_campaign_audit_actions.sql
-0016
+\i migrations/0016_add_comment_to_sms_campaigns.sql
+\i migrations/0017_create_wallet_models.sql
+\i migrations/0018_create_agency_commission_models.sql
 ```
 
 ### Rollback All Migrations (Down)
 ```sql
 -- Run in reverse order:
-0016
-0015
-0014
+\i migrations/0018_create_agency_commission_models_down.sql
+\i migrations/0017_create_wallet_models_down.sql
+\i migrations/0016_add_comment_to_sms_campaigns_down.sql
+\i migrations/0015_add_sms_campaign_audit_actions_down.sql
+\i migrations/0014_create_sms_campaigns_down.sql
 \i migrations/0013_relax_name_validation_down.sql
 \i migrations/0012_update_timestamp_defaults_to_utc_down.sql
 \i migrations/0011_add_new_audit_actions_down.sql

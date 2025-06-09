@@ -51,5 +51,11 @@
 \echo 'Running 0016_add_comment_to_sms_campaigns.sql...'
 \i migrations/0016_add_comment_to_sms_campaigns.sql
 
+\echo 'Running 0017_create_wallet_models.sql...'
+\i migrations/0017_create_wallet_models.sql
+
+\echo 'Running 0018_create_agency_commission_models.sql...'
+\i migrations/0018_create_agency_commission_models.sql
+
 \echo 'All migrations completed successfully!'
-\echo 'Database schema is now ready for the Yamata no Orochi signup system.' 
+\echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system.' 
