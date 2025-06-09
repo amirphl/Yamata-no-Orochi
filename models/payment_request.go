@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -33,7 +34,7 @@ type PaymentRequest struct {
 
 	// Payment details
 	Amount      uint64 `gorm:"not null" json:"amount"` // Amount in Tomans
-	Currency    string `gorm:"type:varchar(3);not null;default:'IRR'" json:"currency"`
+	Currency    string `gorm:"type:varchar(3);not null;default:'TMN'" json:"currency"`
 	Description string `gorm:"type:text" json:"description"`
 
 	// Atipay request parameters
@@ -50,7 +51,7 @@ type PaymentRequest struct {
 	PaymentStatus      string `gorm:"type:varchar(50)" json:"payment_status"`           // Atipay status parameter
 	PaymentReference   string `gorm:"type:varchar(255);index" json:"payment_reference"` // Atipay referenceNumber
 	PaymentReservation string `gorm:"type:varchar(255)" json:"payment_reservation"`     // Atipay reservationNumber
-	PaymentTerminal    string `gorm:"type:varchar(50)" json:"payment_terminal"`         // Atipay terminalId
+	PaymentTerminal    string `gorm:"type:varchar(255)" json:"payment_terminal"`        // Atipay terminalId
 	PaymentTrace       string `gorm:"type:varchar(255)" json:"payment_trace"`           // Atipay traceNumber
 	PaymentMaskedPAN   string `gorm:"type:varchar(255)" json:"payment_masked_pan"`      // Atipay maskedPan
 	PaymentRRN         string `gorm:"type:varchar(255)" json:"payment_rrn"`             // Atipay RRN
@@ -60,10 +61,10 @@ type PaymentRequest struct {
 	StatusReason string               `gorm:"type:text" json:"status_reason"` // Reason for status change
 
 	// Metadata and audit
-	Metadata  map[string]interface{} `gorm:"type:jsonb;default:'{}'" json:"metadata"`
-	CreatedAt time.Time              `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt time.Time              `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
-	DeletedAt gorm.DeletedAt         `gorm:"index" json:"deleted_at,omitempty"`
+	Metadata  map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
 	// Expiration tracking
 	ExpiresAt *time.Time `gorm:"index" json:"expires_at"` // When payment request expires
@@ -105,7 +106,7 @@ func (pr *PaymentRequest) IsExpired() bool {
 	if pr.ExpiresAt == nil {
 		return false
 	}
-	return time.Now().After(*pr.ExpiresAt)
+	return utils.UTCNow().After(*pr.ExpiresAt)
 }
 
 // CanBeProcessed returns true if the payment request can still be processed

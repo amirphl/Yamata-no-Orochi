@@ -41,7 +41,7 @@ type AgencyCommission struct {
 	// Commission details
 	Type       CommissionType   `gorm:"type:varchar(30);not null;index" json:"type"`
 	Status     CommissionStatus `gorm:"type:varchar(20);not null;default:'pending';index" json:"status"`
-	Amount     uint64           `gorm:"not null" json:"amount"`                       // Commission amount in Rials
+	Amount     uint64           `gorm:"not null" json:"amount"`                       // Commission amount in Tomans
 	Percentage float64          `gorm:"type:decimal(5,4);not null" json:"percentage"` // Commission percentage (e.g., 0.15 for 15%)
 	BaseAmount uint64           `gorm:"not null" json:"base_amount"`                  // Original transaction amount that generated commission
 
@@ -50,8 +50,8 @@ type AgencyCommission struct {
 	SourceCampaignID    *uint `gorm:"index" json:"source_campaign_id"`    // SMS campaign if applicable
 
 	// Commission metadata
-	Description string                 `gorm:"type:text" json:"description"`
-	Metadata    map[string]interface{} `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Description string         `gorm:"type:text" json:"description"`
+	Metadata    map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Payment tracking
 	PaidAt               *time.Time `gorm:"index" json:"paid_at"`                // When commission was paid

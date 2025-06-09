@@ -42,8 +42,8 @@ type Transaction struct {
 	// Transaction details
 	Type     TransactionType   `gorm:"type:varchar(20);not null;index" json:"type"`
 	Status   TransactionStatus `gorm:"type:varchar(20);not null;default:'pending';index" json:"status"`
-	Amount   uint64            `gorm:"not null" json:"amount"` // Amount in Rials
-	Currency string            `gorm:"type:varchar(3);not null;default:'IRR'" json:"currency"`
+	Amount   uint64            `gorm:"not null" json:"amount"` // Amount in Tomans
+	Currency string            `gorm:"type:varchar(3);not null;default:'TMN'" json:"currency"`
 
 	// Wallet and customer information
 	WalletID   uint `gorm:"not null;index" json:"wallet_id"`
@@ -60,8 +60,8 @@ type Transaction struct {
 	ExternalMaskedPAN string `gorm:"type:varchar(255)" json:"external_masked_pan"`      // Masked card number
 
 	// Transaction metadata
-	Description string                 `gorm:"type:text" json:"description"`
-	Metadata    map[string]interface{} `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Description string         `gorm:"type:text" json:"description"`
+	Metadata    map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Audit fields
 	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`

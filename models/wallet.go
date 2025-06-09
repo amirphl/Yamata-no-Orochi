@@ -15,7 +15,7 @@ type Wallet struct {
 	CustomerID uint      `gorm:"not null;uniqueIndex;index" json:"customer_id"`
 
 	// Metadata for additional wallet information
-	Metadata map[string]interface{} `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Metadata map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Audit fields
 	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`

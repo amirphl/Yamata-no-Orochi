@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 )
 
@@ -142,14 +143,14 @@ func (c *SMSCampaign) BeforeCreate() error {
 		c.Status = SMSCampaignStatusInitiated
 	}
 	if c.CreatedAt.IsZero() {
-		c.CreatedAt = time.Now().UTC()
+		c.CreatedAt = utils.UTCNow()
 	}
 	return nil
 }
 
 // BeforeUpdate is called before updating a record
 func (c *SMSCampaign) BeforeUpdate() error {
-	now := time.Now().UTC()
+	now := utils.UTCNow()
 	c.UpdatedAt = &now
 	return nil
 }

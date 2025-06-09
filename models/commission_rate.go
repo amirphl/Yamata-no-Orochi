@@ -23,8 +23,8 @@ type CommissionRate struct {
 	IsActive  bool    `gorm:"not null;default:true;index" json:"is_active"`            // Whether this rate is currently active
 
 	// Rate metadata
-	Description string                 `gorm:"type:text" json:"description"`
-	Metadata    map[string]interface{} `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Description string         `gorm:"type:text" json:"description"`
+	Metadata    map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Audit fields
 	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`

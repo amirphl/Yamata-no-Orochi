@@ -57,6 +57,17 @@ const (
 	AuditActionCampaignCreationFailed = "campaign_creation_failed"
 	AuditActionCampaignUpdated        = "campaign_updated"
 	AuditActionCampaignUpdateFailed   = "campaign_update_failed"
+
+	// Payment actions
+	AuditActionWalletChargeInitiated    = "wallet_charge_initiated"
+	AuditActionWalletChargeCompleted    = "wallet_charge_completed"
+	AuditActionWalletChargeFailed       = "wallet_charge_failed"
+	AuditActionWalletCreated            = "wallet_created"
+	AuditActionPaymentCallbackProcessed = "payment_callback_processed"
+	AuditActionPaymentCompleted         = "payment_completed"
+	AuditActionPaymentFailed            = "payment_failed"
+	AuditActionPaymentCancelled         = "payment_cancelled"
+	AuditActionPaymentExpired           = "payment_expired"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries

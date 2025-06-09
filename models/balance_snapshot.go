@@ -25,9 +25,9 @@ type BalanceSnapshot struct {
 	TotalBalance  uint64 `gorm:"not null" json:"total_balance"`  // Calculated field (free + frozen + locked)
 
 	// Snapshot metadata
-	Reason      string                 `gorm:"type:varchar(100);not null" json:"reason"` // e.g., "transaction_created", "daily_snapshot"
-	Description string                 `gorm:"type:text" json:"description"`
-	Metadata    map[string]interface{} `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Reason      string         `gorm:"type:varchar(100);not null" json:"reason"` // e.g., "transaction_created", "daily_snapshot"
+	Description string         `gorm:"type:text" json:"description"`
+	Metadata    map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Audit fields
 	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
