@@ -124,7 +124,8 @@ type SMSCampaign struct {
 	Comment    *string           `gorm:"type:text" json:"comment,omitempty"`
 
 	// Relations
-	Customer *Customer `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
+	Customer          *Customer          `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
+	AgencyCommissions []AgencyCommission `gorm:"foreignKey:SourceCampaignID" json:"agency_commissions,omitempty"`
 }
 
 // TableName returns the table name for the model

@@ -34,10 +34,23 @@ var (
 	ErrAlreadyVerified = errors.New("already verified")
 
 	// SMS Campaign-related errors
-	ErrCampaignNotFound         = errors.New("campaign not found")
-	ErrCampaignAccessDenied     = errors.New("campaign access denied")
-	ErrCampaignUpdateNotAllowed = errors.New("campaign update not allowed")
+	ErrCampaignNotFound             = errors.New("campaign not found")
+	ErrCampaignAccessDenied         = errors.New("campaign access denied")
+	ErrCampaignUpdateNotAllowed     = errors.New("campaign update not allowed")
 	ErrInsufficientCampaignCapacity = errors.New("insufficient campaign capacity")
+
+	// Payment-related errors
+	ErrWalletNotFound    = errors.New("wallet not found")
+	ErrAmountTooLow      = errors.New("amount is too low")
+	ErrAmountNotMultiple = errors.New("amount must be a multiple of 10000")
+	ErrAtipayTokenEmpty  = errors.New("atipay token is empty")
+
+	// Payment callback errors
+	ErrCallbackRequestNil        = errors.New("callback request is nil")
+	ErrReservationNumberRequired = errors.New("reservation number is required")
+	ErrReferenceNumberRequired   = errors.New("reference number is required")
+	ErrStatusRequired            = errors.New("status is required")
+	ErrStateRequired             = errors.New("state is required")
 )
 
 type BusinessError struct {
