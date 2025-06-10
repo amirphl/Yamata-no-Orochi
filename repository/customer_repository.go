@@ -31,6 +31,7 @@ func (r *CustomerRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Cus
 	var customer models.Customer
 	err := db.Preload("AccountType").
 		Preload("ReferrerAgency").
+		Preload("Wallet").
 		Last(&customer, id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
