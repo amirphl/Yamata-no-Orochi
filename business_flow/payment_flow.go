@@ -5,72 +5,43 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// // VerifyPaymentRequest represents the request to verify payment with Atipay
-// type VerifyPaymentRequest struct {
-// 	ReferenceNumber string `json:"reference_number" validate:"required"` // Value received from Atipay callback
-// }
-
-// // VerifyPaymentResponse represents the response after payment verification
-// type VerifyPaymentResponse struct {
-// 	Message         string    `json:"message"`
-// 	Success         bool      `json:"success"`
-// 	Amount          uint64    `json:"amount"`           // Verified amount from Atipay
-// 	ReferenceNumber string    `json:"reference_number"` // Atipay reference number
-// 	VerifiedAt      time.Time `json:"verified_at"`      // When verification was completed
-// 	Status          string    `json:"status"`           // Final payment status
-// }
-
-// // PaymentStatus represents the status of a payment request
-// type PaymentStatus string
-
-// const (
-// 	PaymentStatusCreated   PaymentStatus = "created"   // Payment request created, waiting for Atipay token
-// 	PaymentStatusTokenized PaymentStatus = "tokenized" // Atipay token received, waiting for user payment
-// 	PaymentStatusPending   PaymentStatus = "pending"   // User redirected to Atipay, payment in progress
-// 	PaymentStatusCompleted PaymentStatus = "completed" // Payment completed successfully
-// 	PaymentStatusFailed    PaymentStatus = "failed"    // Payment failed
-// 	PaymentStatusCancelled PaymentStatus = "cancelled" // User cancelled payment
-// 	PaymentStatusExpired   PaymentStatus = "expired"   // Payment request expired
-// 	PaymentStatusRefunded  PaymentStatus = "refunded"  // Payment was refunded
-// )
-
-// // PaymentError represents payment-related errors
-// type PaymentError struct {
-// 	Code        string `json:"code"`
-// 	Message     string `json:"message"`
-// 	Description string `json:"description,omitempty"`
-// }
-
 // PaymentFlow handles the complete payment business logic
 type PaymentFlow interface {
 	ChargeWallet(ctx context.Context, req *dto.ChargeWalletRequest, metadata *ClientMetadata) (*dto.ChargeWalletResponse, error)
-	HandlePaymentCallback(ctx context.Context, callback *dto.PaymentCallbackRequest, metadata *ClientMetadata) (*dto.PaymentCallbackResponse, error)
+	PaymentCallback(ctx context.Context, callback *dto.PaymentCallbackRequest, metadata *ClientMetadata) (string, error)
 }
 
 // PaymentFlowImpl implements the payment business flow
 type PaymentFlowImpl struct {
-	paymentRequestRepo repository.PaymentRequestRepository
-	walletRepo         repository.WalletRepository
-	customerRepo       repository.CustomerRepository
-	auditRepo          repository.AuditLogRepository
-	db                 *gorm.DB
+	paymentRequestRepo  repository.PaymentRequestRepository
+	walletRepo          repository.WalletRepository
+	customerRepo        repository.CustomerRepository
+	auditRepo           repository.AuditLogRepository
+	balanceSnapshotRepo repository.BalanceSnapshotRepository
+	transactionRepo     repository.TransactionRepository
+	db                  *gorm.DB
 
 	// Atipay configuration
 	atipayBaseURL  string
 	atipayAPIKey   string
 	atipayTerminal string
+
+	// Domain configuration for redirect URLs
+	domain string
 }
 
 // NewPaymentFlow creates a new payment flow instance
@@ -79,18 +50,24 @@ func NewPaymentFlow(
 	walletRepo repository.WalletRepository,
 	customerRepo repository.CustomerRepository,
 	auditRepo repository.AuditLogRepository,
+	balanceSnapshotRepo repository.BalanceSnapshotRepository,
+	transactionRepo repository.TransactionRepository,
 	db *gorm.DB,
 	atipayBaseURL, atipayAPIKey, atipayTerminal string,
+	domain string,
 ) PaymentFlow {
 	return &PaymentFlowImpl{
-		paymentRequestRepo: paymentRequestRepo,
-		walletRepo:         walletRepo,
-		customerRepo:       customerRepo,
-		auditRepo:          auditRepo,
-		db:                 db,
-		atipayBaseURL:      atipayBaseURL,
-		atipayAPIKey:       atipayAPIKey,
-		atipayTerminal:     atipayTerminal,
+		paymentRequestRepo:  paymentRequestRepo,
+		walletRepo:          walletRepo,
+		customerRepo:        customerRepo,
+		auditRepo:           auditRepo,
+		balanceSnapshotRepo: balanceSnapshotRepo,
+		transactionRepo:     transactionRepo,
+		db:                  db,
+		atipayBaseURL:       atipayBaseURL,
+		atipayAPIKey:        atipayAPIKey,
+		atipayTerminal:      atipayTerminal,
+		domain:              domain,
 	}
 }
 
@@ -106,19 +83,17 @@ type CallAtipayGetTokenRequest struct {
 func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalletRequest, metadata *ClientMetadata) (*dto.ChargeWalletResponse, error) {
 	// Validate business rules
 	if err := p.validateChargeWalletRequest(ctx, req); err != nil {
-		if errors.Is(err, ErrWalletNotFound) {
-			// TODO
-		}
-
-		return nil, NewBusinessError("PAYMENT_VALIDATION_FAILED", "Payment validation failed", err)
+		return nil, NewBusinessError("CHARGE_WALLET_FAILED", "Charge wallet failed", err)
 	}
 
+	var customer *models.Customer
 	// Use transaction for atomicity
 	var paymentRequest *models.PaymentRequest
 	var atipayToken string
 
 	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
-		customer, err := p.customerRepo.ByID(txCtx, req.CustomerID)
+		var err error
+		customer, err = p.customerRepo.ByID(txCtx, req.CustomerID)
 		if err != nil {
 			return err
 		}
@@ -126,28 +101,65 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 			return ErrCustomerNotFound
 		}
 
+		// Check if customer has a wallet, create one if it doesn't exist
+		wallet, err := p.walletRepo.ByCustomerID(txCtx, req.CustomerID)
+		if err != nil {
+			return err
+		}
+
+		if wallet == nil {
+			// Create new wallet for customer
+			wallet = &models.Wallet{
+				UUID:       uuid.New(),
+				CustomerID: customer.ID,
+				Metadata: map[string]any{
+					"created_via": "charge_wallet",
+					"created_at":  utils.UTCNow().Format(time.RFC3339),
+				},
+			}
+
+			if err := p.walletRepo.SaveWithInitialSnapshot(txCtx, wallet); err != nil {
+				return err
+			}
+
+			// Create audit log for wallet creation
+			walletCreatedMsg := fmt.Sprintf("Wallet created for customer %d", customer.ID)
+			_ = p.createAuditLog(txCtx, customer, models.AuditActionWalletCreated, walletCreatedMsg, true, nil, metadata)
+
+			// Update customer with wallet reference
+			customer.Wallet = wallet
+		}
+
 		// Create payment request
-		paymentRequest, err = p.createPaymentRequest(txCtx, *customer)
+		paymentRequest, err = p.createPaymentRequest(txCtx, *customer, req.Amount)
 		if err != nil {
 			return err
 		}
 
 		// Call Atipay to get token
-		callAtipayGetTokenRequest := CallAtipayGetTokenRequest{
+		atipayRequest := CallAtipayGetTokenRequest{
 			Amount:        req.Amount,
 			CellNumber:    customer.RepresentativeMobile,
-			Description:   "charge wallet",
+			Description:   paymentRequest.Description,
 			InvoiceNumber: paymentRequest.InvoiceNumber,
-			RedirectURL:   "",
+			RedirectURL:   paymentRequest.RedirectURL,
 		}
-		atipayToken, err = p.callAtipayGetToken(txCtx, callAtipayGetTokenRequest, paymentRequest)
+		atipayToken, err = p.callAtipayGetToken(txCtx, atipayRequest, *paymentRequest)
 		if err != nil {
 			return err
 		}
 
 		// Update payment request with Atipay token
 		paymentRequest.AtipayToken = atipayToken
+		paymentRequest.AtipayStatus = "OK"
 		paymentRequest.Status = models.PaymentRequestStatusTokenized
+		paymentRequest.StatusReason = "payment request tokenized successfully"
+		paymentRequest.UpdatedAt = utils.UTCNow()
+		paymentRequest.Metadata["atipay_token"] = atipayToken
+		paymentRequest.Metadata["atipay_status"] = "OK"
+		paymentRequest.Metadata["atipay_status_reason"] = "payment request tokenized successfully"
+		paymentRequest.Metadata["atipay_status_updated_at"] = utils.UTCNow().Format(time.RFC3339)
+
 		if err := p.paymentRequestRepo.Save(txCtx, paymentRequest); err != nil {
 			return err
 		}
@@ -157,14 +169,14 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Charge wallet failed: %s", err.Error())
-		_ = p.createAuditLog(ctx, nil, "charge_wallet_failed", errMsg, false, &errMsg, metadata)
+		_ = p.createAuditLog(ctx, customer, models.AuditActionWalletChargeFailed, errMsg, false, &errMsg, metadata)
 
 		return nil, NewBusinessError("CHARGE_WALLET_FAILED", "Failed to charge wallet", err)
 	}
 
 	// Create success audit log
 	msg := fmt.Sprintf("Charge wallet successfully: %s", paymentRequest.UUID)
-	_ = p.createAuditLog(ctx, nil, "charge_wallet_success", msg, true, nil, metadata)
+	_ = p.createAuditLog(ctx, customer, models.AuditActionWalletChargeCompleted, msg, true, nil, metadata)
 
 	// Build response
 	response := &dto.ChargeWalletResponse{
@@ -190,15 +202,6 @@ func (p *PaymentFlowImpl) validateChargeWalletRequest(ctx context.Context, req *
 		return ErrAccountInactive
 	}
 
-	// Check if customer has a wallet
-	wallet, err := p.walletRepo.ByCustomerID(ctx, req.CustomerID)
-	if err != nil {
-		return err
-	}
-	if wallet == nil {
-		return ErrWalletNotFound
-	}
-
 	// Validate amount (minimum 10000 Tomans and must be multiple of 10000)
 	if req.Amount < 10000 {
 		return ErrAmountTooLow
@@ -211,18 +214,12 @@ func (p *PaymentFlowImpl) validateChargeWalletRequest(ctx context.Context, req *
 }
 
 // createPaymentRequest creates a new payment request record
-func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer models.Customer) (*models.PaymentRequest, error) {
+func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer models.Customer, amount uint64) (*models.PaymentRequest, error) {
 	// Generate unique invoice number
 	invoiceNumber := fmt.Sprintf("INV-%s-%d", uuid.New().String(), time.Now().Unix())
 
 	// Set expiration time (30 minutes from now)
 	expiresAt := time.Now().Add(30 * time.Minute)
-
-	// Get current wallet balance
-	currentBalance, err := p.walletRepo.GetCurrentBalance(ctx, customer.Wallet.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get wallet balance: %w", err)
-	}
 
 	// Create payment request
 	paymentRequest := &models.PaymentRequest{
@@ -230,15 +227,18 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 		CorrelationID: uuid.New(),
 		CustomerID:    customer.ID,
 		WalletID:      customer.Wallet.ID,
-		Amount:        currentBalance.FreeBalance,
+		Amount:        amount,
 		Currency:      "TMN",
 		Description:   "charge wallet",
 		InvoiceNumber: invoiceNumber,
 		CellNumber:    customer.RepresentativeMobile,
-		RedirectURL:   "",
+		RedirectURL:   fmt.Sprintf("https://%s/api/v1/payment-result", p.domain),
+		AtipayToken:   "",
+		AtipayStatus:  "",
 		Status:        models.PaymentRequestStatusCreated,
+		StatusReason:  "payment request created",
 		ExpiresAt:     &expiresAt,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"source": "wallet_recharge",
 		},
 	}
@@ -252,14 +252,14 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 }
 
 // callAtipayGetToken calls Atipay's get-token API
-func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, req CallAtipayGetTokenRequest, paymentRequest *models.PaymentRequest) (string, error) {
+func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, atipayRequest CallAtipayGetTokenRequest, paymentRequest models.PaymentRequest) (string, error) {
 	// Prepare Atipay request payload
-	atipayPayload := map[string]interface{}{
-		"amount":        req.Amount,
-		"cellNumber":    req.CellNumber,
-		"description":   req.Description,
+	atipayPayload := map[string]any{
+		"amount":        atipayRequest.Amount * 10, // TMN to IRR
+		"cellNumber":    atipayRequest.CellNumber,
+		"description":   atipayRequest.Description,
 		"invoiceNumber": paymentRequest.InvoiceNumber,
-		"redirectUrl":   req.RedirectURL,
+		"redirectUrl":   atipayRequest.RedirectURL,
 		"apiKey":        p.atipayAPIKey,
 	}
 
@@ -270,7 +270,7 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, req CallAtipay
 	}
 
 	// Create HTTP request
-	url := fmt.Sprintf("%s/get-token", p.atipayBaseURL)
+	url := fmt.Sprintf("%s/v1/get-token", p.atipayBaseURL)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payloadBytes))
 	if err != nil {
 		return "", err
@@ -345,12 +345,6 @@ func (p *PaymentFlowImpl) validateCallbackRequest(callback *dto.PaymentCallbackR
 		return ErrStateRequired
 	}
 	return nil
-}
-
-// parseAtipayStatus parses Atipay status and state into meaningful values
-func (p *PaymentFlowImpl) parseAtipayStatus(status, state string) (string, string) {
-	// Return the raw values for now, can be enhanced with mapping if needed
-	return status, state
 }
 
 // PaymentStatusMapping maps Atipay status codes to our payment statuses
@@ -445,6 +439,12 @@ func (p *PaymentFlowImpl) getPaymentStatusMapping(status, state string) PaymentS
 func (p *PaymentFlowImpl) updatePaymentRequestWithCallback(paymentRequest *models.PaymentRequest, callback *dto.PaymentCallbackRequest, mapping PaymentStatusMapping) {
 	paymentRequest.Status = mapping.Status
 	paymentRequest.StatusReason = mapping.Description
+	paymentRequest.UpdatedAt = utils.UTCNow()
+	paymentRequest.Metadata["atipay_callback_status"] = mapping.Status
+	paymentRequest.Metadata["atipay_callback_status_message"] = mapping.Message
+	paymentRequest.Metadata["atipay_callback_status_description"] = mapping.Description
+	paymentRequest.Metadata["atipay_callback_status_updated_at"] = utils.UTCNow().Format(time.RFC3339)
+	paymentRequest.Metadata["atipay_callback_status_success"] = mapping.Success
 
 	// Only update payment details for successful payments
 	if mapping.Success {
@@ -457,68 +457,134 @@ func (p *PaymentFlowImpl) updatePaymentRequestWithCallback(paymentRequest *model
 	}
 }
 
-// HandlePaymentCallback handles the callback from Atipay after payment completion
-func (p *PaymentFlowImpl) HandlePaymentCallback(ctx context.Context, callback *dto.PaymentCallbackRequest, metadata *ClientMetadata) (*dto.PaymentCallbackResponse, error) {
+// VerifyPaymentRequest represents the request to verify payment with Atipay
+type VerifyPaymentRequest struct {
+	ReferenceNumber string `json:"reference_number" validate:"required"`
+}
+
+// VerifyPaymentResponse represents the response after payment verification
+type VerifyPaymentResponse struct {
+	Message         string    `json:"message"`
+	Success         bool      `json:"success"`
+	Amount          uint64    `json:"amount"`
+	ReferenceNumber string    `json:"reference_number"`
+	VerifiedAt      time.Time `json:"verified_at"`
+	Status          string    `json:"status"`
+}
+
+// PaymentCallback handles the callback from Atipay after payment completion
+func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, callback *dto.PaymentCallbackRequest, metadata *ClientMetadata) (string, error) {
 	// Validate callback data
 	if err := p.validateCallbackRequest(callback); err != nil {
-		return nil, fmt.Errorf("callback validation failed: %w", err)
+		return "", NewBusinessError("PAYMENT_CALLBACK_VALIDATION_FAILED", "Payment callback validation failed", err)
 	}
 
-	var response *dto.PaymentCallbackResponse
+	var customer *models.Customer
+	var paymentRequest *models.PaymentRequest
+	var mapping PaymentStatusMapping
 
 	// Process callback within transaction
 	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		var err error
+
 		// Find the payment request by reservation number (our invoice number)
-		paymentRequest, err := p.paymentRequestRepo.ByInvoiceNumber(txCtx, callback.ReservationNumber)
+		paymentRequest, err = p.paymentRequestRepo.ByInvoiceNumber(txCtx, callback.ReservationNumber)
 		if err != nil {
-			return fmt.Errorf("failed to find payment request: %w", err)
+			return err
 		}
 		if paymentRequest == nil {
-			return NewBusinessError("PAYMENT_CALLBACK_FAILED", "Payment request not found for reservation number", nil)
+			return ErrPaymentRequestNotFound
+		}
+
+		customer, err = p.customerRepo.ByID(txCtx, paymentRequest.CustomerID)
+		if err != nil {
+			return err
+		}
+		if customer == nil {
+			return ErrCustomerNotFound
 		}
 
 		// Check if this callback has already been processed
 		if paymentRequest.Status != models.PaymentRequestStatusPending {
-			response = &dto.PaymentCallbackResponse{
-				Message: "Callback already processed",
-				Success: true,
-			}
-			return nil
+			return ErrPaymentRequestAlreadyProcessed
 		}
 
 		// Determine payment status based on callback
-		mapping := p.getPaymentStatusMapping(callback.Status, callback.State)
+		mapping = p.getPaymentStatusMapping(callback.Status, callback.State)
+
+		// TODO: Check expiration time
 
 		// Update payment request with callback data
 		p.updatePaymentRequestWithCallback(paymentRequest, callback, mapping)
 
 		// Save updated payment request
 		if err := p.paymentRequestRepo.Save(txCtx, paymentRequest); err != nil {
-			return fmt.Errorf("failed to update payment request status: %w", err)
+			return err
 		}
 
-		// Create audit log
+		// Create audit log for callback processing
 		if err := p.createPaymentCallbackAuditLog(txCtx, paymentRequest, mapping, metadata); err != nil {
-			// Log error but don't fail the callback processing
-			// Note: In production, you might want to log this to a proper logging system
+			return err
 		}
 
-		// Set response
-		response = &dto.PaymentCallbackResponse{
-			Message:          mapping.Message,
-			Success:          mapping.Success,
-			PaymentRequestID: paymentRequest.ID,
-			Status:           string(mapping.Status),
+		// If payment was successful, increase user balance
+		if mapping.Success {
+			// Verify payment with Atipay before finalizing
+			verificationResult, err := p.verifyPaymentWithAtipay(txCtx, callback.ReferenceNumber)
+			if err != nil {
+				return err
+			}
+
+			// Check if verified amount matches the original amount
+			if verificationResult.Amount != paymentRequest.Amount*10 { // Convert Tomans to Rials
+				// Amount mismatch - mark payment as failed and refund will occur
+				mapping.Status = models.PaymentRequestStatusFailed
+				mapping.Success = false
+				mapping.Message = "Payment verification failed: amount mismatch"
+				mapping.Description = fmt.Sprintf("Verified amount (%d Rials) does not match original amount (%d Rials)",
+					verificationResult.Amount, paymentRequest.Amount*10)
+
+				// Update payment request status
+				p.updatePaymentRequestWithCallback(paymentRequest, callback, mapping)
+
+				// Create audit log for verification failure
+				verificationFailedMsg := fmt.Sprintf("Payment verification failed for request %s: amount mismatch", paymentRequest.UUID)
+				_ = p.createAuditLog(txCtx, customer, models.AuditActionPaymentFailed, verificationFailedMsg, false, nil, metadata)
+
+				return nil
+			}
+
+			// Verification successful - proceed with balance increase
+			if err := p.increaseUserBalance(txCtx, paymentRequest, callback); err != nil {
+				return err
+			}
+
+			// Create audit log for successful balance increase
+			balanceIncreaseMsg := fmt.Sprintf("Wallet balance increased by %d Tomans for payment request %s",
+				paymentRequest.Amount, paymentRequest.UUID)
+			_ = p.createAuditLog(txCtx, customer, models.AuditActionWalletChargeCompleted, balanceIncreaseMsg, true, nil, metadata)
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("payment callback processing failed: %w", err)
+		errMsg := fmt.Sprintf("Payment callback failed: %s", err.Error())
+		_ = p.createAuditLog(ctx, customer, models.AuditActionPaymentCallbackProcessed, errMsg, false, &errMsg, metadata)
+
+		return "", NewBusinessError("PAYMENT_CALLBACK_FAILED", "Payment callback failed", err)
 	}
 
-	return response, nil
+	msg := fmt.Sprintf("Payment callback processed: %s", paymentRequest.UUID)
+	_ = p.createAuditLog(ctx, customer, models.AuditActionPaymentCallbackProcessed, msg, true, nil, metadata)
+
+	// Generate HTML response based on payment status
+	htmlResponse, err := p.generatePaymentResultHTML(paymentRequest, callback, mapping)
+	if err != nil {
+		return "", NewBusinessError("PAYMENT_CALLBACK_HTML_GENERATION_FAILED", "Failed to generate HTML response", err)
+	}
+
+	return htmlResponse, nil
 }
 
 // createPaymentCallbackAuditLog creates an audit log entry for payment callback processing
@@ -526,56 +592,59 @@ func (p *PaymentFlowImpl) createPaymentCallbackAuditLog(ctx context.Context, pay
 	// Find customer for audit logging
 	customer, err := p.customerRepo.ByID(ctx, paymentRequest.CustomerID)
 	if err != nil {
-		return fmt.Errorf("failed to find customer for audit logging: %w", err)
+		return err
+	}
+	if customer == nil {
+		return ErrCustomerNotFound
 	}
 
 	// Determine audit action based on payment success
-	auditAction := "payment_callback_processed"
-	if mapping.Success {
-		auditAction = "payment_completed"
+	var auditAction string
+	switch mapping.Status {
+	case models.PaymentRequestStatusCompleted:
+		auditAction = models.AuditActionPaymentCompleted
+	case models.PaymentRequestStatusFailed:
+		auditAction = models.AuditActionPaymentFailed
+	case models.PaymentRequestStatusCancelled:
+		auditAction = models.AuditActionPaymentCancelled
+	case models.PaymentRequestStatusExpired:
+		auditAction = models.AuditActionPaymentExpired
+	default:
+		auditAction = models.AuditActionPaymentCallbackProcessed
 	}
 
 	// Create audit log
 	return p.createAuditLog(ctx, customer, auditAction, mapping.Description, mapping.Success, nil, metadata)
 }
 
-// verifyPayment verifies the payment with Atipay
-func (p *PaymentFlowImpl) verifyPayment(ctx context.Context, req *dto.VerifyPaymentRequest, metadata *ClientMetadata) (*dto.VerifyPaymentResponse, error) {
-	// TODO: Implement payment verification
-	// This would involve:
-	// 1. Calling Atipay's verify-payment API
-	// 2. Processing the verification result
-	// 3. Updating the payment request status
-	// 4. Creating audit logs
-
-	return &dto.VerifyPaymentResponse{
-		Message:         "Payment verification completed",
-		Success:         true,
-		Amount:          0, // TODO: Get from Atipay
-		ReferenceNumber: req.ReferenceNumber,
-		VerifiedAt:      time.Now(),
-		Status:          "verified",
-	}, nil
-}
-
 // createAuditLog creates an audit log entry
 func (p *PaymentFlowImpl) createAuditLog(ctx context.Context, customer *models.Customer, action string, description string, success bool, errorDetails *string, metadata *ClientMetadata) error {
-	auditLog := &models.AuditLog{
-		Action:      action,
-		Description: &description,
-		Success:     &success,
-		IPAddress:   &metadata.IPAddress,
-		UserAgent:   &metadata.UserAgent,
-		Metadata:    json.RawMessage(`{"source": "payment_flow"}`),
+	var customerID *uint
+	if customer != nil {
+		customerID = &customer.ID
 	}
 
-	if customer != nil {
-		auditLog.CustomerID = &customer.ID
+	ipAddress := "127.0.0.1"
+	userAgent := ""
+	if metadata != nil {
+		ipAddress = metadata.IPAddress
+		userAgent = metadata.UserAgent
+	}
+
+	auditLog := &models.AuditLog{
+		CustomerID:   customerID,
+		Action:       action,
+		Description:  &description,
+		Success:      &success,
+		IPAddress:    &ipAddress,
+		UserAgent:    &userAgent,
+		Metadata:     json.RawMessage(`{"source": "payment_flow"}`),
+		ErrorMessage: errorDetails,
 	}
 
 	if errorDetails != nil {
 		// Create metadata with error details
-		metadataMap := map[string]interface{}{
+		metadataMap := map[string]any{
 			"source":        "payment_flow",
 			"error_details": *errorDetails,
 		}
@@ -583,5 +652,191 @@ func (p *PaymentFlowImpl) createAuditLog(ctx context.Context, customer *models.C
 		auditLog.Metadata = metadataBytes
 	}
 
+	// Extract request ID from context if available
+	requestID := ctx.Value(RequestIDKey)
+	if requestID != nil {
+		requestIDStr, ok := requestID.(string)
+		if ok {
+			auditLog.RequestID = &requestIDStr
+		}
+	}
+
 	return p.auditRepo.Save(ctx, auditLog)
+}
+
+// increaseUserBalance increases the user's wallet balance when a payment is successful
+func (p *PaymentFlowImpl) increaseUserBalance(ctx context.Context, paymentRequest *models.PaymentRequest, callbackRequest *dto.PaymentCallbackRequest) error {
+	// Get current balance snapshot
+	currentBalance, err := p.walletRepo.GetCurrentBalance(ctx, paymentRequest.WalletID)
+	if err != nil {
+		return err
+	}
+	if currentBalance == nil {
+		return ErrBalanceSnapshotNotFound
+	}
+
+	newFreeBalance := currentBalance.FreeBalance + paymentRequest.Amount
+
+	// Create new balance snapshot
+	newBalanceSnapshot := &models.BalanceSnapshot{
+		UUID:          uuid.New(),
+		CorrelationID: paymentRequest.CorrelationID,
+		WalletID:      paymentRequest.WalletID,
+		CustomerID:    paymentRequest.CustomerID,
+		FreeBalance:   newFreeBalance,
+		FrozenBalance: currentBalance.FrozenBalance,
+		LockedBalance: currentBalance.LockedBalance,
+		TotalBalance:  newFreeBalance + currentBalance.FrozenBalance + currentBalance.LockedBalance,
+		Reason:        "wallet_recharge",
+		Description:   fmt.Sprintf("Wallet recharged with %d Tomans via Atipay", paymentRequest.Amount),
+		Metadata: map[string]any{
+			"source":             "payment_callback",
+			"payment_request_id": paymentRequest.ID,
+			"payment_reference":  callbackRequest.ReferenceNumber,
+			"payment_trace":      callbackRequest.TraceNumber,
+			"previous_balance":   currentBalance.FreeBalance,
+			"recharge_amount":    paymentRequest.Amount,
+			"new_balance":        newFreeBalance,
+		},
+	}
+
+	// Save new balance snapshot
+	if err := p.balanceSnapshotRepo.Save(ctx, newBalanceSnapshot); err != nil {
+		return err
+	}
+
+	// Create transaction record
+	transaction := &models.Transaction{
+		UUID:              uuid.New(),
+		CorrelationID:     paymentRequest.CorrelationID,
+		Type:              models.TransactionTypeDeposit,
+		Status:            models.TransactionStatusCompleted,
+		Amount:            paymentRequest.Amount,
+		Currency:          "TMN",
+		WalletID:          paymentRequest.WalletID,
+		CustomerID:        paymentRequest.CustomerID,
+		BalanceBefore:     currentBalance.GetBalanceMap(),
+		BalanceAfter:      newBalanceSnapshot.GetBalanceMap(),
+		ExternalReference: callbackRequest.ReferenceNumber,
+		ExternalTrace:     callbackRequest.TraceNumber,
+		ExternalRRN:       callbackRequest.RRN,
+		ExternalMaskedPAN: callbackRequest.MaskedPAN,
+		Description:       fmt.Sprintf("Wallet recharge: %d Tomans", paymentRequest.Amount),
+		Metadata: map[string]any{
+			"source":             "payment_callback",
+			"payment_request_id": paymentRequest.ID,
+			"amount_tomans":      paymentRequest.Amount,
+		},
+	}
+
+	// Save transaction
+	if err := p.transactionRepo.Save(ctx, transaction); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// generatePaymentResultHTML generates HTML response based on payment status
+func (p *PaymentFlowImpl) generatePaymentResultHTML(paymentRequest *models.PaymentRequest, callback *dto.PaymentCallbackRequest, mapping PaymentStatusMapping) (string, error) {
+	// Read template files
+	var templateContent string
+	var err error
+
+	if mapping.Success {
+		templateContent, err = p.readTemplate("templates/payment_success.html")
+	} else {
+		templateContent, err = p.readTemplate("templates/payment_failure.html")
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to read template: %w", err)
+	}
+
+	// Prepare template data
+	data := map[string]any{
+		"Status":          mapping.Status,
+		"Message":         mapping.Message,
+		"Description":     mapping.Description,
+		"Amount":          paymentRequest.Amount,
+		"ReferenceNumber": callback.ReferenceNumber,
+		"TraceNumber":     callback.TraceNumber,
+		"RRN":             callback.RRN,
+		"MaskedPAN":       callback.MaskedPAN,
+		"ProcessedAt":     utils.UTCNow().Format("2006-01-02 15:04:05"),
+	}
+
+	// Simple template replacement (you could use a proper template engine like html/template)
+	html := templateContent
+	for key, value := range data {
+		if value != nil {
+			placeholder := "{{." + key + "}}"
+			html = strings.ReplaceAll(html, placeholder, fmt.Sprintf("%v", value))
+		}
+	}
+
+	return html, nil
+}
+
+// readTemplate reads a template file from the filesystem
+func (p *PaymentFlowImpl) readTemplate(filename string) (string, error) {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return "", fmt.Errorf("failed to read template file %s: %w", filename, err)
+	}
+	return string(content), nil
+}
+
+// verifyPaymentWithAtipay calls Atipay's verify-payment API to finalize the transaction
+func (p *PaymentFlowImpl) verifyPaymentWithAtipay(ctx context.Context, referenceNumber string) (*AtipayVerificationResponse, error) {
+	// Prepare Atipay verification request payload
+	verificationPayload := map[string]any{
+		"referenceNumber": referenceNumber,
+		"apiKey":          p.atipayAPIKey,
+	}
+
+	// Convert to JSON
+	payloadBytes, err := json.Marshal(verificationPayload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal verification payload: %w", err)
+	}
+
+	// Create HTTP request
+	url := fmt.Sprintf("%s/v1/verify-payment", p.atipayBaseURL)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create verification request: %w", err)
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 10 * time.Second, // Longer timeout for verification
+	}
+
+	// Make HTTP request
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to call Atipay verification API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("atipay verification API returned non-OK status: %d", resp.StatusCode)
+	}
+
+	// Parse response body
+	var atipayResponse AtipayVerificationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&atipayResponse); err != nil {
+		return nil, fmt.Errorf("failed to decode verification response: %w", err)
+	}
+
+	return &atipayResponse, nil
+}
+
+// AtipayVerificationResponse represents the response from Atipay's verify-payment API
+type AtipayVerificationResponse struct {
+	Amount uint64 `json:"amount"` // Amount in Rials
 }

@@ -377,7 +377,7 @@ func (s *SMSCampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context,
 
 	// Validate optional fields if provided
 	if req.ScheduleAt != nil {
-		if req.ScheduleAt.Before(time.Now().UTC()) {
+		if req.ScheduleAt.Before(utils.UTCNow()) {
 			return fmt.Errorf("schedule time cannot be in the past")
 		}
 	}
@@ -447,7 +447,7 @@ func (s *SMSCampaignFlowImpl) createCampaign(ctx context.Context, req *dto.Creat
 	}
 
 	// Save to database
-	err := s.campaignRepo.Create(ctx, campaign)
+	err := s.campaignRepo.Save(ctx, &campaign)
 	if err != nil {
 		return nil, fmt.Errorf("failed to save campaign to database: %w", err)
 	}
@@ -632,8 +632,8 @@ func (s *SMSCampaignFlowImpl) generateMockWalletBalance(customerID uint) *dto.Ge
 		Locked:              baseLocked,
 		Frozen:              baseFrozen,
 		Total:               total,
-		Currency:            "IRR",
-		LastUpdated:         time.Now().UTC().Format(time.RFC3339),
+		Currency:            "TMN",
+		LastUpdated:         utils.UTCNow().Format(time.RFC3339),
 		PendingTransactions: uint64(seed % 5),                   // 0 to 4
 		MinimumBalance:      100000,                             // 100K minimum
 		CreditLimit:         uint64(5000000 + int(seed)*100000), // 5M to 6M
