@@ -185,7 +185,7 @@ func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
 	var parsedToken *jwt.Token
 
 	if s.useRSAKeys {
-		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (any, error) {
 			// Validate signing method
 
 			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
@@ -195,7 +195,7 @@ func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
 			return s.publicKey, nil
 		})
 	} else {
-		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
+		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (any, error) {
 			// Validate signing method
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

@@ -46,11 +46,16 @@ var (
 	ErrAtipayTokenEmpty  = errors.New("atipay token is empty")
 
 	// Payment callback errors
-	ErrCallbackRequestNil        = errors.New("callback request is nil")
-	ErrReservationNumberRequired = errors.New("reservation number is required")
-	ErrReferenceNumberRequired   = errors.New("reference number is required")
-	ErrStatusRequired            = errors.New("status is required")
-	ErrStateRequired             = errors.New("state is required")
+	ErrCallbackRequestNil             = errors.New("callback request is nil")
+	ErrReservationNumberRequired      = errors.New("reservation number is required")
+	ErrReferenceNumberRequired        = errors.New("reference number is required")
+	ErrStatusRequired                 = errors.New("status is required")
+	ErrStateRequired                  = errors.New("state is required")
+	ErrPaymentRequestNotFound         = errors.New("payment request not found")
+	ErrPaymentRequestAlreadyProcessed = errors.New("payment request already processed")
+
+	// Balance snapshot errors
+	ErrBalanceSnapshotNotFound = errors.New("balance snapshot not found")
 )
 
 type BusinessError struct {
@@ -78,7 +83,7 @@ func NewBusinessError(code, message string, err error) *BusinessError {
 	}
 }
 
-func NewBusinessErrorf(code, message string, err error, args ...interface{}) *BusinessError {
+func NewBusinessErrorf(code, message string, err error, args ...any) *BusinessError {
 	return &BusinessError{
 		Code:    code,
 		Message: fmt.Sprintf(message, args...),
@@ -160,4 +165,51 @@ func IsOTPExpired(err error) bool {
 
 func IsAlreadyVerified(err error) bool {
 	return errors.Is(err, ErrAlreadyVerified)
+}
+
+func IsWalletNotFound(err error) bool {
+	return errors.Is(err, ErrWalletNotFound)
+}
+
+func IsAmountTooLow(err error) bool {
+	return errors.Is(err, ErrAmountTooLow)
+}
+
+func IsAmountNotMultiple(err error) bool {
+	return errors.Is(err, ErrAmountNotMultiple)
+}
+
+func IsAtipayTokenEmpty(err error) bool {
+	return errors.Is(err, ErrAtipayTokenEmpty)
+}
+func IsCallbackRequestNil(err error) bool {
+	return errors.Is(err, ErrCallbackRequestNil)
+}
+
+func IsReservationNumberRequired(err error) bool {
+	return errors.Is(err, ErrReservationNumberRequired)
+}
+
+func IsReferenceNumberRequired(err error) bool {
+	return errors.Is(err, ErrReferenceNumberRequired)
+}
+
+func IsStatusRequired(err error) bool {
+	return errors.Is(err, ErrStatusRequired)
+}
+
+func IsStateRequired(err error) bool {
+	return errors.Is(err, ErrStateRequired)
+}
+
+func IsPaymentRequestNotFound(err error) bool {
+	return errors.Is(err, ErrPaymentRequestNotFound)
+}
+
+func IsPaymentRequestAlreadyProcessed(err error) bool {
+	return errors.Is(err, ErrPaymentRequestAlreadyProcessed)
+}
+
+func IsBalanceSnapshotNotFound(err error) bool {
+	return errors.Is(err, ErrBalanceSnapshotNotFound)
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/config"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 )
 
 // SMSService handles SMS sending operations
@@ -146,7 +147,7 @@ func (m *MockSMSService) SendSMS(ctx context.Context, recipient, message string,
 		Recipient:  recipient,
 		Message:    message,
 		CustomerID: customerID,
-		SentAt:     time.Now().UTC(),
+		SentAt:     utils.UTCNow(),
 	}
 	fmt.Println("Mock SMS message sent:", mockMessage)
 	m.SentMessages = append(m.SentMessages, mockMessage)
