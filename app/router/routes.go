@@ -38,11 +38,12 @@ type FiberRouter struct {
 	app             *fiber.App
 	authHandler     handlers.AuthHandlerInterface
 	campaignHandler handlers.SMSCampaignHandlerInterface
+	paymentHandler  handlers.PaymentHandlerInterface
 	authMiddleware  *middleware.AuthMiddleware
 }
 
 // NewFiberRouter creates a new Fiber router
-func NewFiberRouter(authHandler handlers.AuthHandlerInterface, campaignHandler handlers.SMSCampaignHandlerInterface, authMiddleware *middleware.AuthMiddleware) Router {
+func NewFiberRouter(authHandler handlers.AuthHandlerInterface, campaignHandler handlers.SMSCampaignHandlerInterface, paymentHandler handlers.PaymentHandlerInterface, authMiddleware *middleware.AuthMiddleware) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "Yamata no Orochi API",
@@ -60,6 +61,7 @@ func NewFiberRouter(authHandler handlers.AuthHandlerInterface, campaignHandler h
 		app:             app,
 		authHandler:     authHandler,
 		campaignHandler: campaignHandler,
+		paymentHandler:  paymentHandler,
 		authMiddleware:  authMiddleware,
 	}
 }
@@ -157,6 +159,15 @@ func (r *FiberRouter) SetupRoutes() {
 	wallet := api.Group("/wallet")
 	wallet.Use(r.authMiddleware.Authenticate()) // Require authentication
 	wallet.Get("/balance", r.campaignHandler.GetWalletBalance)
+
+	// Payment routes
+	payments := api.Group("/payments")
+
+	// Charge wallet endpoint (protected with authentication)
+	payments.Post("/charge-wallet", r.authMiddleware.Authenticate(), r.paymentHandler.ChargeWallet)
+
+	// Payment callback endpoint (unprotected - called by Atipay)
+	payments.Post("/callback", r.paymentHandler.PaymentCallback)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
@@ -267,7 +278,7 @@ func (r *FiberRouter) setupMiddleware() {
 	// Recovery middleware with custom error handling
 	r.app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
-		StackTraceHandler: func(c fiber.Ctx, e interface{}) {
+		StackTraceHandler: func(c fiber.Ctx, e any) {
 			// Log panic with request context
 			log.Printf(`{"time":"%s","level":"error","request_id":"%s","event":"panic","error":"%v","path":"%s","method":"%s","ip":"%s"}`,
 				utils.UTCNow().Format(time.RFC3339),

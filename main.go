@@ -195,15 +195,37 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		db,
 	)
 
+	// Initialize additional repositories needed for PaymentFlow
+	walletRepo := repository.NewWalletRepository(db)
+	paymentRequestRepo := repository.NewPaymentRequestRepository(db)
+	balanceSnapshotRepo := repository.NewBalanceSnapshotRepository(db)
+	transactionRepo := repository.NewTransactionRepository(db)
+
+	// Initialize PaymentFlow
+	paymentFlow := businessflow.NewPaymentFlow(
+		paymentRequestRepo,
+		walletRepo,
+		customerRepo,
+		auditRepo,
+		balanceSnapshotRepo,
+		transactionRepo,
+		db,
+		"https://mipg.atipay.net", // atipayBaseURL - should come from config
+		"",                        // atipayAPIKey - should come from config
+		"",                        // atipayTerminal - should come from config
+		cfg.Deployment.Domain,     // domain from config
+	)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	smsCampaignHandler := handlers.NewSMSCampaignHandler(smsCampaignFlow)
+	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
 
 	// Initialize router
-	appRouter := router.NewFiberRouter(authHandler, smsCampaignHandler, authMiddleware)
+	appRouter := router.NewFiberRouter(authHandler, smsCampaignHandler, paymentHandler, authMiddleware)
 
 	// Log that services are initialized
 	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
