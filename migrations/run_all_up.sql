@@ -60,5 +60,8 @@
 \echo 'Running 0019_add_payment_audit_actions.sql...'
 \i migrations/0019_add_payment_audit_actions.sql
 
+\echo 'Running 0020_create_tax_wallet.sql...'
+\i migrations/0020_create_tax_wallet.sql
+
 \echo 'All migrations completed successfully!'
-\echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging.' 
+\echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 

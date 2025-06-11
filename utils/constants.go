@@ -1,6 +1,10 @@
 package utils
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Token and session time constants
 const (
@@ -28,3 +32,18 @@ const (
 	// CORSMaxAge is the maximum age for CORS preflight requests (24 hours)
 	CORSMaxAge = 86400
 )
+
+// Tax and payment constants
+const (
+	// TaxRate is the tax rate applied to payments (10%)
+	TaxRate = 0.10
+
+	// TaxWalletUUID is the UUID of the system tax wallet
+	TaxWalletUUID = "2672a1bf-b344-4d84-adee-5b92307a2e7c"
+)
+
+// GetTaxWalletUUID returns the tax wallet UUID as a uuid.UUID
+func GetTaxWalletUUID() uuid.UUID {
+	parsed, _ := uuid.Parse(TaxWalletUUID)
+	return parsed
+}

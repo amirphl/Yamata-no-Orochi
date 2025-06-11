@@ -169,6 +169,9 @@ func (r *FiberRouter) SetupRoutes() {
 	// Payment callback endpoint (unprotected - called by Atipay)
 	payments.Post("/callback", r.paymentHandler.PaymentCallback)
 
+	// Payment history endpoint (protected with authentication)
+	payments.Get("/history", r.authMiddleware.Authenticate(), r.paymentHandler.GetPaymentHistory)
+
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
 

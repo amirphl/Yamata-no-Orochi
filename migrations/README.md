@@ -30,6 +30,7 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 17. **0017_create_wallet_models** - Creates immutable accounting system for wallet, transactions, and payments
 18. **0018_create_agency_commission_models** - Creates agency commission tracking and distribution system
 19. **0019_add_payment_audit_actions** - Adds audit actions for payment operations
+20. **0020_create_tax_wallet_down.sql** - 
 
 ## Database Schema Overview
 
@@ -117,11 +118,13 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 \i migrations/0017_create_wallet_models.sql
 \i migrations/0018_create_agency_commission_models.sql
 \i migrations/0019_add_payment_audit_actions.sql
+\i migrations/0020_create_tax_wallet_down.sql
 ```
 
 ### Rollback All Migrations (Down)
 ```sql
 -- Run in reverse order:
+\i migrations/0020_create_tax_wallet_down.sql
 \i migrations/0019_add_payment_audit_actions_down.sql
 \i migrations/0018_create_agency_commission_models_down.sql
 \i migrations/0017_create_wallet_models_down.sql

@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0020_create_tax_wallet_down.sql...'
+\i migrations/0020_create_tax_wallet_down.sql
+
 \echo 'Running 0019_add_payment_audit_actions_down.sql...'
 \i migrations/0019_add_payment_audit_actions_down.sql
 

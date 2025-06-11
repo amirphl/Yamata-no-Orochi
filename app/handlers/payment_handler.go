@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -16,6 +17,7 @@ import (
 type PaymentHandlerInterface interface {
 	ChargeWallet(c fiber.Ctx) error
 	PaymentCallback(c fiber.Ctx) error
+	GetPaymentHistory(c fiber.Ctx) error
 }
 
 // PaymentHandler handles payment-related HTTP requests
@@ -203,4 +205,103 @@ func (h *PaymentHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint s
 func (h *PaymentHandler) setupCustomValidations() {
 	// Add custom validation rules if needed
 	// Example: h.validator.RegisterValidation("custom_rule", customValidationFunc)
+}
+
+// GetPaymentHistory handles the retrieval of payment history for a customer
+// @Summary Get Payment History
+// @Description Retrieve paginated payment history for the authenticated customer
+// @Tags Payments
+// @Accept json
+// @Produce json
+// @Param page query int false "Page number (default: 1)" minimum(1)
+// @Param page_size query int false "Number of items per page (default: 20, max: 100)" minimum(1) maximum(100)
+// @Param start_date query string false "Start date filter (ISO 8601 format)"
+// @Param end_date query string false "End date filter (ISO 8601 format)"
+// @Param type query string false "Transaction type filter"
+// @Param status query string false "Transaction status filter"
+// @Success 200 {object} dto.APIResponse{data=dto.PaymentHistoryResponse} "Payment history retrieved successfully"
+// @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized - customer not found or inactive"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/history [get]
+func (h *PaymentHandler) GetPaymentHistory(c fiber.Ctx) error {
+	// Get authenticated customer ID from context
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	// Parse query parameters
+	page := uint(1)
+	if pageStr := c.Query("page"); pageStr != "" {
+		if parsed, err := strconv.ParseUint(pageStr, 10, 32); err == nil {
+			page = uint(parsed)
+		}
+	}
+
+	pageSize := uint(20)
+	if pageSizeStr := c.Query("page_size"); pageSizeStr != "" {
+		if parsed, err := strconv.ParseUint(pageSizeStr, 10, 32); err == nil {
+			pageSize = uint(parsed)
+		}
+	}
+
+	// Parse date filters
+	var startDate, endDate *time.Time
+	if startDateStr := c.Query("start_date"); startDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, startDateStr); err == nil {
+			startDate = &parsed
+		}
+	}
+	if endDateStr := c.Query("end_date"); endDateStr != "" {
+		if parsed, err := time.Parse(time.RFC3339, endDateStr); err == nil {
+			endDate = &parsed
+		}
+	}
+
+	// Parse type and status filters
+	var transactionType, transactionStatus *string
+	if typeStr := c.Query("type"); typeStr != "" {
+		transactionType = &typeStr
+	}
+	if statusStr := c.Query("status"); statusStr != "" {
+		transactionStatus = &statusStr
+	}
+
+	// Build request
+	req := &dto.GetPaymentHistoryRequest{
+		CustomerID: customerID,
+		Page:       page,
+		PageSize:   pageSize,
+		StartDate:  startDate,
+		EndDate:    endDate,
+		Type:       transactionType,
+		Status:     transactionStatus,
+	}
+
+	// Get client information
+	ipAddress := c.IP()
+	userAgent := c.Get("User-Agent")
+	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+
+	// Call business logic
+	result, err := h.paymentFlow.GetPaymentHistory(h.createRequestContext(c, "/api/v1/payments/history"), req, metadata)
+	if err != nil {
+		// Handle specific business errors
+		if businessflow.IsCustomerNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+		if businessflow.IsWalletNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Wallet not found", "WALLET_NOT_FOUND", nil)
+		}
+
+		log.Println("Payment history retrieval failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to retrieve payment history", "PAYMENT_HISTORY_RETRIEVAL_FAILED", nil)
+	}
+
+	// Return successful response
+	return h.SuccessResponse(c, fiber.StatusOK, "Payment history retrieved successfully", result)
 }

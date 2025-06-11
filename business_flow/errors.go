@@ -56,6 +56,10 @@ var (
 
 	// Balance snapshot errors
 	ErrBalanceSnapshotNotFound = errors.New("balance snapshot not found")
+
+	// Tax wallet errors
+	ErrTaxWalletNotFound                = errors.New("tax wallet not found")
+	ErrTaxWalletBalanceSnapshotNotFound = errors.New("tax wallet balance snapshot not found")
 )
 
 type BusinessError struct {
