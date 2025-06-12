@@ -14,4 +14,5 @@
 -- - 'payment_completed'
 -- - 'payment_failed'
 -- - 'payment_cancelled'
--- - 'payment_expired' 
+-- - 'payment_expired'
+-- - 'transaction_history_retrieved'

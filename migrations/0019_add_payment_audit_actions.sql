@@ -10,4 +10,5 @@ ALTER TYPE audit_action_enum ADD VALUE IF NOT EXISTS 'payment_callback_processed
 ALTER TYPE audit_action_enum ADD VALUE IF NOT EXISTS 'payment_completed';
 ALTER TYPE audit_action_enum ADD VALUE IF NOT EXISTS 'payment_failed';
 ALTER TYPE audit_action_enum ADD VALUE IF NOT EXISTS 'payment_cancelled';
-ALTER TYPE audit_action_enum ADD VALUE IF NOT EXISTS 'payment_expired'; 
+ALTER TYPE audit_action_enum ADD VALUE IF NOT EXISTS 'payment_expired';
+ALTER TYPE audit_action_enum ADD VALUE IF NOT EXISTS 'transaction_history_retrieved';
