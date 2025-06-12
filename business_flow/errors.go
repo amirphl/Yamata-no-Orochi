@@ -53,6 +53,7 @@ var (
 	ErrStateRequired                  = errors.New("state is required")
 	ErrPaymentRequestNotFound         = errors.New("payment request not found")
 	ErrPaymentRequestAlreadyProcessed = errors.New("payment request already processed")
+	ErrPaymentRequestExpired          = errors.New("payment request expired")
 
 	// Balance snapshot errors
 	ErrBalanceSnapshotNotFound = errors.New("balance snapshot not found")
@@ -60,6 +61,11 @@ var (
 	// Tax wallet errors
 	ErrTaxWalletNotFound                = errors.New("tax wallet not found")
 	ErrTaxWalletBalanceSnapshotNotFound = errors.New("tax wallet balance snapshot not found")
+
+	// Transaction history errors
+	ErrInvalidPage           = errors.New("page must be at least 1")
+	ErrInvalidPageSize       = errors.New("page size must be between 1 and 100")
+	ErrStartDateAfterEndDate = errors.New("start date cannot be after end date")
 )
 
 type BusinessError struct {
@@ -214,6 +220,30 @@ func IsPaymentRequestAlreadyProcessed(err error) bool {
 	return errors.Is(err, ErrPaymentRequestAlreadyProcessed)
 }
 
+func IsPaymentRequestExpired(err error) bool {
+	return errors.Is(err, ErrPaymentRequestExpired)
+}
+
 func IsBalanceSnapshotNotFound(err error) bool {
 	return errors.Is(err, ErrBalanceSnapshotNotFound)
+}
+
+func IsTaxWalletNotFound(err error) bool {
+	return errors.Is(err, ErrTaxWalletNotFound)
+}
+
+func IsTaxWalletBalanceSnapshotNotFound(err error) bool {
+	return errors.Is(err, ErrTaxWalletBalanceSnapshotNotFound)
+}
+
+func IsInvalidPage(err error) bool {
+	return errors.Is(err, ErrInvalidPage)
+}
+
+func IsInvalidPageSize(err error) bool {
+	return errors.Is(err, ErrInvalidPageSize)
+}
+
+func IsStartDateAfterEndDate(err error) bool {
+	return errors.Is(err, ErrStartDateAfterEndDate)
 }

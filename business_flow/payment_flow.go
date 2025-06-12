@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,8 +23,8 @@ import (
 // PaymentFlow handles the complete payment business logic
 type PaymentFlow interface {
 	ChargeWallet(ctx context.Context, req *dto.ChargeWalletRequest, metadata *ClientMetadata) (*dto.ChargeWalletResponse, error)
-	PaymentCallback(ctx context.Context, callback *dto.PaymentCallbackRequest, metadata *ClientMetadata) (string, error)
-	GetPaymentHistory(ctx context.Context, req *dto.GetPaymentHistoryRequest, metadata *ClientMetadata) (*dto.PaymentHistoryResponse, error)
+	PaymentCallback(ctx context.Context, callback *dto.AtipayRequest, metadata *ClientMetadata) (string, error)
+	GetTransactionHistory(ctx context.Context, req *dto.GetTransactionHistoryRequest, metadata *ClientMetadata) (*dto.TransactionHistoryResponse, error)
 }
 
 // PaymentFlowImpl implements the payment business flow
@@ -37,7 +38,6 @@ type PaymentFlowImpl struct {
 	db                  *gorm.DB
 
 	// Atipay configuration
-	atipayBaseURL  string
 	atipayAPIKey   string
 	atipayTerminal string
 
@@ -54,7 +54,7 @@ func NewPaymentFlow(
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
 	db *gorm.DB,
-	atipayBaseURL, atipayAPIKey, atipayTerminal string,
+	atipayAPIKey, atipayTerminal string,
 	domain string,
 ) PaymentFlow {
 	return &PaymentFlowImpl{
@@ -65,19 +65,10 @@ func NewPaymentFlow(
 		balanceSnapshotRepo: balanceSnapshotRepo,
 		transactionRepo:     transactionRepo,
 		db:                  db,
-		atipayBaseURL:       atipayBaseURL,
 		atipayAPIKey:        atipayAPIKey,
 		atipayTerminal:      atipayTerminal,
 		domain:              domain,
 	}
-}
-
-type CallAtipayGetTokenRequest struct {
-	Amount        uint64
-	CellNumber    string
-	Description   string
-	InvoiceNumber string
-	RedirectURL   string
 }
 
 // ChargeWallet handles the complete process of charging a wallet
@@ -101,6 +92,9 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 		if customer == nil {
 			return ErrCustomerNotFound
 		}
+		if customer.IsActive != nil && !*customer.IsActive {
+			return ErrAccountInactive
+		}
 
 		// Check if customer has a wallet, create one if it doesn't exist
 		wallet, err := p.walletRepo.ByCustomerID(txCtx, req.CustomerID)
@@ -109,14 +103,20 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 		}
 
 		if wallet == nil {
+			meta := map[string]any{
+				"created_via": "charge_wallet",
+				"created_at":  utils.UTCNow(),
+			}
+			b, err := json.Marshal(meta)
+			if err != nil {
+				return err
+			}
+
 			// Create new wallet for customer
 			wallet = &models.Wallet{
 				UUID:       uuid.New(),
 				CustomerID: customer.ID,
-				Metadata: map[string]any{
-					"created_via": "charge_wallet",
-					"created_at":  utils.UTCNow().Format(time.RFC3339),
-				},
+				Metadata:   json.RawMessage(b),
 			}
 
 			if err := p.walletRepo.SaveWithInitialSnapshot(txCtx, wallet); err != nil {
@@ -137,15 +137,7 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 			return err
 		}
 
-		// Call Atipay to get token
-		atipayRequest := CallAtipayGetTokenRequest{
-			Amount:        req.Amount,
-			CellNumber:    customer.RepresentativeMobile,
-			Description:   paymentRequest.Description,
-			InvoiceNumber: paymentRequest.InvoiceNumber,
-			RedirectURL:   paymentRequest.RedirectURL,
-		}
-		atipayToken, err = p.callAtipayGetToken(txCtx, atipayRequest, *paymentRequest)
+		atipayToken, err = p.callAtipayGetToken(txCtx, *paymentRequest)
 		if err != nil {
 			return err
 		}
@@ -156,12 +148,15 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 		paymentRequest.Status = models.PaymentRequestStatusTokenized
 		paymentRequest.StatusReason = "payment request tokenized successfully"
 		paymentRequest.UpdatedAt = utils.UTCNow()
-		paymentRequest.Metadata["atipay_token"] = atipayToken
-		paymentRequest.Metadata["atipay_status"] = "OK"
-		paymentRequest.Metadata["atipay_status_reason"] = "payment request tokenized successfully"
-		paymentRequest.Metadata["atipay_status_updated_at"] = utils.UTCNow().Format(time.RFC3339)
 
-		if err := p.paymentRequestRepo.Save(txCtx, paymentRequest); err != nil {
+		if err := p.paymentRequestRepo.Update(txCtx, paymentRequest); err != nil {
+			return err
+		}
+
+		paymentRequest.Status = models.PaymentRequestStatusPending
+		paymentRequest.StatusReason = "payment request pending"
+		paymentRequest.UpdatedAt = utils.UTCNow()
+		if err := p.paymentRequestRepo.Update(txCtx, paymentRequest); err != nil {
 			return err
 		}
 
@@ -176,12 +171,12 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 	}
 
 	// Create success audit log
-	msg := fmt.Sprintf("Charge wallet successfully: %s", paymentRequest.UUID)
+	msg := fmt.Sprintf("Generated payment token for request %s", paymentRequest.UUID)
 	_ = p.createAuditLog(ctx, customer, models.AuditActionWalletChargeCompleted, msg, true, nil, metadata)
 
 	// Build response
 	response := &dto.ChargeWalletResponse{
-		Message: "Charge wallet successfully",
+		Message: "Generated payment token successfully",
 		Success: true,
 		Token:   atipayToken,
 	}
@@ -203,8 +198,8 @@ func (p *PaymentFlowImpl) validateChargeWalletRequest(ctx context.Context, req *
 		return ErrAccountInactive
 	}
 
-	// Validate amount (minimum 10000 Tomans and must be multiple of 10000)
-	if req.Amount < 10000 {
+	// Validate amount (minimum 100000 Tomans and must be multiple of 10000)
+	if req.Amount < 100000 {
 		return ErrAmountTooLow
 	}
 	if req.Amount%10000 != 0 {
@@ -233,15 +228,14 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 		Description:   "charge wallet",
 		InvoiceNumber: invoiceNumber,
 		CellNumber:    customer.RepresentativeMobile,
-		RedirectURL:   fmt.Sprintf("https://%s/api/v1/payment-result", p.domain),
-		AtipayToken:   "",
-		AtipayStatus:  "",
-		Status:        models.PaymentRequestStatusCreated,
-		StatusReason:  "payment request created",
-		ExpiresAt:     &expiresAt,
-		Metadata: map[string]any{
-			"source": "wallet_recharge",
-		},
+		RedirectURL:   fmt.Sprintf("https://%s/api/v1/payments/callback", p.domain),
+		AtipayToken:   "", // Will be set later
+		AtipayStatus:  "", // Will be set later
+		// Payment*: "",   // Will be set later
+		Status:       models.PaymentRequestStatusCreated,
+		StatusReason: "payment request created",
+		ExpiresAt:    &expiresAt,
+		Metadata:     json.RawMessage(`{"source": "wallet_recharge"}`),
 	}
 
 	// Save to database
@@ -253,14 +247,14 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 }
 
 // callAtipayGetToken calls Atipay's get-token API
-func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, atipayRequest CallAtipayGetTokenRequest, paymentRequest models.PaymentRequest) (string, error) {
+func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, paymentRequest models.PaymentRequest) (string, error) {
 	// Prepare Atipay request payload
 	atipayPayload := map[string]any{
-		"amount":        atipayRequest.Amount * 10, // TMN to IRR
-		"cellNumber":    atipayRequest.CellNumber,
-		"description":   atipayRequest.Description,
+		"amount":        paymentRequest.Amount * 10, // TMN to IRR
+		"cellNumber":    paymentRequest.CellNumber,
+		"description":   paymentRequest.Description,
 		"invoiceNumber": paymentRequest.InvoiceNumber,
-		"redirectUrl":   atipayRequest.RedirectURL,
+		"redirectUrl":   paymentRequest.RedirectURL,
 		"apiKey":        p.atipayAPIKey,
 	}
 
@@ -271,8 +265,7 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, atipayRequest 
 	}
 
 	// Create HTTP request
-	url := fmt.Sprintf("%s/v1/get-token", p.atipayBaseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payloadBytes))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://mipg.atipay.net/v1/get-token", bytes.NewReader(payloadBytes))
 	if err != nil {
 		return "", err
 	}
@@ -309,7 +302,7 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, atipayRequest 
 	}
 
 	// Check for errors in response
-	if atipayResponse.Status != "OK" {
+	if atipayResponse.Status != "200 OK" {
 		errorMsg := "unknown error"
 		if atipayResponse.ErrorDescription != "" {
 			errorMsg = atipayResponse.ErrorDescription
@@ -329,7 +322,7 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, atipayRequest 
 }
 
 // validateCallbackRequest validates the callback request from Atipay
-func (p *PaymentFlowImpl) validateCallbackRequest(callback *dto.PaymentCallbackRequest) error {
+func (p *PaymentFlowImpl) validateCallbackRequest(callback *dto.AtipayRequest) error {
 	if callback == nil {
 		return ErrCallbackRequestNil
 	}
@@ -436,47 +429,45 @@ func (p *PaymentFlowImpl) getPaymentStatusMapping(status, state string) PaymentS
 	}
 }
 
-// updatePaymentRequestWithCallback updates the payment request with callback data
-func (p *PaymentFlowImpl) updatePaymentRequestWithCallback(paymentRequest *models.PaymentRequest, callback *dto.PaymentCallbackRequest, mapping PaymentStatusMapping) {
+// updatePaymentRequest updates the payment request with callback data
+func (p *PaymentFlowImpl) updatePaymentRequest(ctx context.Context, paymentRequest *models.PaymentRequest, atipayRequest *dto.AtipayRequest, mapping PaymentStatusMapping) error {
+	metadata, _ := json.Marshal(map[string]any{
+		"atipay_callback_status":             string(mapping.Status),
+		"atipay_callback_status_message":     mapping.Message,
+		"atipay_callback_status_description": mapping.Description,
+		"atipay_callback_status_updated_at":  utils.UTCNow().Format(time.RFC3339),
+		"atipay_callback_status_success":     strconv.FormatBool(mapping.Success),
+	})
+
+	paymentRequest.Metadata = metadata
 	paymentRequest.Status = mapping.Status
 	paymentRequest.StatusReason = mapping.Description
 	paymentRequest.UpdatedAt = utils.UTCNow()
-	paymentRequest.Metadata["atipay_callback_status"] = mapping.Status
-	paymentRequest.Metadata["atipay_callback_status_message"] = mapping.Message
-	paymentRequest.Metadata["atipay_callback_status_description"] = mapping.Description
-	paymentRequest.Metadata["atipay_callback_status_updated_at"] = utils.UTCNow().Format(time.RFC3339)
-	paymentRequest.Metadata["atipay_callback_status_success"] = mapping.Success
 
 	// Only update payment details for successful payments
 	if mapping.Success {
-		paymentRequest.PaymentReference = callback.ReferenceNumber
-		paymentRequest.PaymentTrace = callback.TraceNumber
-		paymentRequest.PaymentMaskedPAN = callback.MaskedPAN
-		paymentRequest.PaymentRRN = callback.RRN
-		paymentRequest.PaymentState = callback.State
-		paymentRequest.PaymentStatus = callback.Status
+		paymentRequest.PaymentReference = atipayRequest.ReferenceNumber
+		paymentRequest.PaymentReservation = atipayRequest.ReservationNumber
+		paymentRequest.PaymentTerminal = atipayRequest.TerminalID
+		paymentRequest.PaymentTrace = atipayRequest.TraceNumber
+		paymentRequest.PaymentMaskedPAN = atipayRequest.MaskedPAN
+		paymentRequest.PaymentRRN = atipayRequest.RRN
+		paymentRequest.PaymentState = atipayRequest.State
+		paymentRequest.PaymentStatus = atipayRequest.Status
 	}
-}
 
-// VerifyPaymentRequest represents the request to verify payment with Atipay
-type VerifyPaymentRequest struct {
-	ReferenceNumber string `json:"reference_number" validate:"required"`
-}
+	// Save updated payment request
+	if err := p.paymentRequestRepo.Update(ctx, paymentRequest); err != nil {
+		return err
+	}
 
-// VerifyPaymentResponse represents the response after payment verification
-type VerifyPaymentResponse struct {
-	Message         string    `json:"message"`
-	Success         bool      `json:"success"`
-	Amount          uint64    `json:"amount"`
-	ReferenceNumber string    `json:"reference_number"`
-	VerifiedAt      time.Time `json:"verified_at"`
-	Status          string    `json:"status"`
+	return nil
 }
 
 // PaymentCallback handles the callback from Atipay after payment completion
-func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, callback *dto.PaymentCallbackRequest, metadata *ClientMetadata) (string, error) {
+func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dto.AtipayRequest, metadata *ClientMetadata) (string, error) {
 	// Validate callback data
-	if err := p.validateCallbackRequest(callback); err != nil {
+	if err := p.validateCallbackRequest(atipayRequest); err != nil {
 		return "", NewBusinessError("PAYMENT_CALLBACK_VALIDATION_FAILED", "Payment callback validation failed", err)
 	}
 
@@ -489,7 +480,7 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, callback *dto.Pay
 		var err error
 
 		// Find the payment request by reservation number (our invoice number)
-		paymentRequest, err = p.paymentRequestRepo.ByInvoiceNumber(txCtx, callback.ReservationNumber)
+		paymentRequest, err = p.paymentRequestRepo.ByInvoiceNumber(txCtx, atipayRequest.ReservationNumber)
 		if err != nil {
 			return err
 		}
@@ -504,36 +495,48 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, callback *dto.Pay
 		if customer == nil {
 			return ErrCustomerNotFound
 		}
+		if customer.IsActive != nil && !*customer.IsActive {
+			return ErrAccountInactive
+		}
 
 		// Check if this callback has already been processed
 		if paymentRequest.Status != models.PaymentRequestStatusPending {
 			return ErrPaymentRequestAlreadyProcessed
 		}
 
-		// Determine payment status based on callback
-		mapping = p.getPaymentStatusMapping(callback.Status, callback.State)
-
-		// TODO: Check expiration time
-
-		// Update payment request with callback data
-		p.updatePaymentRequestWithCallback(paymentRequest, callback, mapping)
-
-		// Save updated payment request
-		if err := p.paymentRequestRepo.Save(txCtx, paymentRequest); err != nil {
-			return err
+		if paymentRequest.ExpiresAt != nil && paymentRequest.ExpiresAt.Before(utils.UTCNow()) {
+			return ErrPaymentRequestExpired
 		}
 
-		// Create audit log for callback processing
-		if err := p.createPaymentCallbackAuditLog(txCtx, paymentRequest, mapping, metadata); err != nil {
+		// Determine payment status based on callback
+		mapping = p.getPaymentStatusMapping(atipayRequest.Status, atipayRequest.State)
+
+		// Update payment request with callback data
+		if err := p.updatePaymentRequest(txCtx, paymentRequest, atipayRequest, mapping); err != nil {
 			return err
 		}
 
 		// If payment was successful, increase user balance
 		if mapping.Success {
 			// Verify payment with Atipay before finalizing
-			verificationResult, err := p.verifyPaymentWithAtipay(txCtx, callback.ReferenceNumber)
+			verificationResult, err := p.verifyPaymentWithAtipay(txCtx, atipayRequest.ReferenceNumber)
 			if err != nil {
-				return err
+				// Failed but don't return error to avoid rollback
+				mapping.Status = models.PaymentRequestStatusFailed
+				mapping.Success = false
+				mapping.Message = "Payment verification failed"
+				mapping.Description = "Payment verification failed: " + err.Error()
+
+				// Update payment request status
+				if err := p.updatePaymentRequest(txCtx, paymentRequest, atipayRequest, mapping); err != nil {
+					return err
+				}
+
+				// Create audit log for verification failure
+				errMsg := fmt.Sprintf("Payment verification failed for request %s: %s", paymentRequest.UUID, err.Error())
+				_ = p.createAuditLog(txCtx, customer, models.AuditActionPaymentFailed, mapping.Description, false, &errMsg, metadata)
+
+				return nil
 			}
 
 			// Check if verified amount matches the original amount
@@ -546,23 +549,41 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, callback *dto.Pay
 					verificationResult.Amount, paymentRequest.Amount*10)
 
 				// Update payment request status
-				p.updatePaymentRequestWithCallback(paymentRequest, callback, mapping)
+				if err := p.updatePaymentRequest(txCtx, paymentRequest, atipayRequest, mapping); err != nil {
+					return err
+				}
 
 				// Create audit log for verification failure
 				verificationFailedMsg := fmt.Sprintf("Payment verification failed for request %s: amount mismatch", paymentRequest.UUID)
-				_ = p.createAuditLog(txCtx, customer, models.AuditActionPaymentFailed, verificationFailedMsg, false, nil, metadata)
+				_ = p.createAuditLog(txCtx, customer, models.AuditActionPaymentFailed, mapping.Description, false, &verificationFailedMsg, metadata)
 
 				return nil
 			}
 
 			// Verification successful - proceed with balance increase
-			if err := p.increaseUserBalance(txCtx, paymentRequest, callback); err != nil {
-				return err
+			if err := p.increaseUserBalance(txCtx, paymentRequest, atipayRequest); err != nil {
+				// Failed but don't return error to avoid rollback
+				mapping.Status = models.PaymentRequestStatusFailed
+				mapping.Success = false
+				mapping.Message = "Increase user balance failed"
+				mapping.Description = "Increase user balance failed: " + err.Error()
+
+				// Update payment request status
+				if err := p.updatePaymentRequest(txCtx, paymentRequest, atipayRequest, mapping); err != nil {
+					return err
+				}
+
+				// Create audit log for increase user balance failure
+				increaseUserBalanceFailedMsg := fmt.Sprintf("Increase user balance failed for request %s: %s", paymentRequest.UUID, err.Error())
+				_ = p.createAuditLog(txCtx, customer, models.AuditActionPaymentFailed, mapping.Description, false, &increaseUserBalanceFailedMsg, metadata)
+
+				return nil
 			}
 
 			// Create audit log for successful balance increase
-			taxAmount := uint64(float64(paymentRequest.Amount) * utils.TaxRate)
-			userAmount := paymentRequest.Amount - taxAmount
+			totalAmount := paymentRequest.Amount
+			userAmount := uint64(float64(totalAmount) / (1 + utils.TaxRate))
+			taxAmount := totalAmount - userAmount
 			balanceIncreaseMsg := fmt.Sprintf("Wallet balance increased by %d Tomans (after %d Tomans tax) for payment request %s",
 				userAmount, taxAmount, paymentRequest.UUID)
 			_ = p.createAuditLog(txCtx, customer, models.AuditActionWalletChargeCompleted, balanceIncreaseMsg, true, nil, metadata)
@@ -582,7 +603,7 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, callback *dto.Pay
 	_ = p.createAuditLog(ctx, customer, models.AuditActionPaymentCallbackProcessed, msg, true, nil, metadata)
 
 	// Generate HTML response based on payment status
-	htmlResponse, err := p.generatePaymentResultHTML(paymentRequest, callback, mapping)
+	htmlResponse, err := p.generatePaymentResultHTML(paymentRequest, atipayRequest, mapping)
 	if err != nil {
 		return "", NewBusinessError("PAYMENT_CALLBACK_HTML_GENERATION_FAILED", "Failed to generate HTML response", err)
 	}
@@ -590,34 +611,270 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, callback *dto.Pay
 	return htmlResponse, nil
 }
 
-// createPaymentCallbackAuditLog creates an audit log entry for payment callback processing
-func (p *PaymentFlowImpl) createPaymentCallbackAuditLog(ctx context.Context, paymentRequest *models.PaymentRequest, mapping PaymentStatusMapping, metadata *ClientMetadata) error {
-	// Find customer for audit logging
-	customer, err := p.customerRepo.ByID(ctx, paymentRequest.CustomerID)
+// increaseUserBalance increases the user's wallet balance when a payment is successful
+// It splits the payment amount: 90% goes to user wallet, 10% goes to tax wallet
+func (p *PaymentFlowImpl) increaseUserBalance(ctx context.Context, paymentRequest *models.PaymentRequest, atipayRequest *dto.AtipayRequest) error {
+	// Calculate amounts after tax
+	totalAmount := paymentRequest.Amount
+	userAmount := uint64(float64(totalAmount) / (1 + utils.TaxRate))
+	taxAmount := totalAmount - userAmount
+
+	// Get current balance snapshot for user wallet
+	currentBalance, err := p.walletRepo.GetCurrentBalance(ctx, paymentRequest.WalletID)
 	if err != nil {
 		return err
 	}
-	if customer == nil {
-		return ErrCustomerNotFound
+	if currentBalance == nil {
+		return ErrBalanceSnapshotNotFound
 	}
 
-	// Determine audit action based on payment success
-	var auditAction string
-	switch mapping.Status {
-	case models.PaymentRequestStatusCompleted:
-		auditAction = models.AuditActionPaymentCompleted
-	case models.PaymentRequestStatusFailed:
-		auditAction = models.AuditActionPaymentFailed
-	case models.PaymentRequestStatusCancelled:
-		auditAction = models.AuditActionPaymentCancelled
-	case models.PaymentRequestStatusExpired:
-		auditAction = models.AuditActionPaymentExpired
-	default:
-		auditAction = models.AuditActionPaymentCallbackProcessed
+	// Get tax wallet
+	taxWallet, err := p.walletRepo.ByUUID(ctx, utils.TaxWalletUUID)
+	if err != nil {
+		return err
+	}
+	if taxWallet == nil {
+		return ErrTaxWalletNotFound
 	}
 
-	// Create audit log
-	return p.createAuditLog(ctx, customer, auditAction, mapping.Description, mapping.Success, nil, metadata)
+	// Get current tax wallet balance
+	taxWalletBalance, err := p.walletRepo.GetCurrentBalance(ctx, taxWallet.ID)
+	if err != nil {
+		return err
+	}
+	if taxWalletBalance == nil {
+		return ErrTaxWalletBalanceSnapshotNotFound
+	}
+
+	metadata, err := json.Marshal(map[string]any{
+		"source":             "payment_callback",
+		"payment_request_id": paymentRequest.ID,
+		"amount":             userAmount,
+		"tax_amount":         taxAmount,
+		"total_payment":      totalAmount,
+		"atipay_response":    atipayRequest,
+	})
+	if err != nil {
+		return err
+	}
+
+	// Update user wallet balance
+	newUserFreeBalance := currentBalance.FreeBalance + userAmount
+	newUserBalanceSnapshot := &models.BalanceSnapshot{
+		UUID:          uuid.New(),
+		CorrelationID: paymentRequest.CorrelationID,
+		WalletID:      paymentRequest.WalletID,
+		CustomerID:    paymentRequest.CustomerID,
+		FreeBalance:   newUserFreeBalance,
+		FrozenBalance: currentBalance.FrozenBalance,
+		LockedBalance: currentBalance.LockedBalance,
+		TotalBalance:  newUserFreeBalance + currentBalance.FrozenBalance + currentBalance.LockedBalance,
+		Reason:        "wallet_recharge",
+		Description:   fmt.Sprintf("Wallet recharged with %d Tomans via Atipay (after %d Tomans tax)", userAmount, taxAmount),
+		Metadata:      metadata,
+	}
+
+	// Save new user balance snapshot
+	if err := p.balanceSnapshotRepo.Save(ctx, newUserBalanceSnapshot); err != nil {
+		return err
+	}
+
+	// Update tax wallet balance
+	newTaxFreeBalance := taxWalletBalance.FreeBalance + taxAmount
+	newTaxBalanceSnapshot := &models.BalanceSnapshot{
+		UUID:          uuid.New(),
+		CorrelationID: paymentRequest.CorrelationID,
+		WalletID:      taxWallet.ID,
+		CustomerID:    taxWallet.CustomerID,
+		FreeBalance:   newTaxFreeBalance,
+		FrozenBalance: taxWalletBalance.FrozenBalance,
+		LockedBalance: taxWalletBalance.LockedBalance,
+		TotalBalance:  newTaxFreeBalance + taxWalletBalance.FrozenBalance + taxWalletBalance.LockedBalance,
+		Reason:        "tax_collection",
+		Description:   fmt.Sprintf("Tax collected: %d Tomans from payment request %s", taxAmount, paymentRequest.UUID),
+		Metadata:      metadata,
+	}
+
+	// Save new tax balance snapshot
+	if err := p.balanceSnapshotRepo.Save(ctx, newTaxBalanceSnapshot); err != nil {
+		return err
+	}
+
+	balanceBefore, err := currentBalance.GetBalanceMap()
+	if err != nil {
+		return err
+	}
+	balanceAfter, err := newUserBalanceSnapshot.GetBalanceMap()
+	if err != nil {
+		return err
+	}
+	taxBalanceBefore, err := taxWalletBalance.GetBalanceMap()
+	if err != nil {
+		return err
+	}
+	taxBalanceAfter, err := newTaxBalanceSnapshot.GetBalanceMap()
+	if err != nil {
+		return err
+	}
+
+	// Create transaction record for user wallet
+	userTransaction := &models.Transaction{
+		UUID:              uuid.New(),
+		CorrelationID:     paymentRequest.CorrelationID,
+		Type:              models.TransactionTypeDeposit,
+		Status:            models.TransactionStatusCompleted,
+		Amount:            userAmount,
+		Currency:          "TMN",
+		WalletID:          paymentRequest.WalletID,
+		CustomerID:        paymentRequest.CustomerID,
+		BalanceBefore:     balanceBefore,
+		BalanceAfter:      balanceAfter,
+		ExternalReference: atipayRequest.ReferenceNumber,
+		ExternalTrace:     atipayRequest.TraceNumber,
+		ExternalRRN:       atipayRequest.RRN,
+		ExternalMaskedPAN: atipayRequest.MaskedPAN,
+		Description:       fmt.Sprintf("Wallet recharge: %d Tomans (after %d Tomans tax)", userAmount, taxAmount),
+		Metadata:          metadata,
+	}
+
+	// Create transaction record for tax wallet
+	taxTransaction := &models.Transaction{
+		UUID:              uuid.New(),
+		CorrelationID:     paymentRequest.CorrelationID,
+		Type:              models.TransactionTypeDeposit,
+		Status:            models.TransactionStatusCompleted,
+		Amount:            taxAmount,
+		Currency:          "TMN",
+		WalletID:          taxWallet.ID,
+		CustomerID:        taxWallet.CustomerID,
+		BalanceBefore:     taxBalanceBefore,
+		BalanceAfter:      taxBalanceAfter,
+		ExternalReference: atipayRequest.ReferenceNumber,
+		ExternalTrace:     atipayRequest.TraceNumber,
+		ExternalRRN:       atipayRequest.RRN,
+		ExternalMaskedPAN: atipayRequest.MaskedPAN,
+		Description:       fmt.Sprintf("Tax collection: %d Tomans from payment request %s", taxAmount, paymentRequest.UUID),
+		Metadata:          metadata,
+	}
+
+	// Save both transactions
+	if err := p.transactionRepo.Save(ctx, userTransaction); err != nil {
+		return err
+	}
+	if err := p.transactionRepo.Save(ctx, taxTransaction); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// generatePaymentResultHTML generates HTML response based on payment status
+func (p *PaymentFlowImpl) generatePaymentResultHTML(paymentRequest *models.PaymentRequest, callback *dto.AtipayRequest, mapping PaymentStatusMapping) (string, error) {
+	// Read template files
+	var templateContent string
+	var err error
+
+	if mapping.Success {
+		templateContent, err = p.readTemplate("templates/payment_success.html")
+	} else {
+		templateContent, err = p.readTemplate("templates/payment_failure.html")
+	}
+
+	if err != nil {
+		return "", err
+	}
+
+	// Calculate tax amounts
+	totalAmount := paymentRequest.Amount
+	userAmount := uint64(float64(totalAmount) / (1 + utils.TaxRate))
+	taxAmount := totalAmount - userAmount
+
+	// Prepare template data
+	data := map[string]any{
+		"Status":          mapping.Status,
+		"Message":         mapping.Message,
+		"TotalAmount":     totalAmount,
+		"TaxAmount":       taxAmount,
+		"NetAmount":       userAmount,
+		"ReferenceNumber": callback.ReferenceNumber,
+		"TraceNumber":     callback.TraceNumber,
+		"RRN":             callback.RRN,
+		"MaskedPAN":       callback.MaskedPAN,
+		"ProcessedAt":     utils.UTCNow().Format("2006-01-02 15:04:05"),
+	}
+
+	// Simple template replacement (you could use a proper template engine like html/template)
+	html := templateContent
+	for key, value := range data {
+		if value != nil {
+			placeholder := "{{." + key + "}}"
+			html = strings.ReplaceAll(html, placeholder, fmt.Sprintf("%v", value))
+		}
+	}
+
+	return html, nil
+}
+
+// readTemplate reads a template file from the filesystem
+func (p *PaymentFlowImpl) readTemplate(filename string) (string, error) {
+	content, err := os.ReadFile(filename)
+	if err != nil {
+		return "", err
+	}
+	return string(content), nil
+}
+
+// AtipayVerificationResponse represents the response from Atipay's verify-payment API
+type AtipayVerificationResponse struct {
+	Amount uint64 `json:"amount"` // Amount in Rials
+}
+
+// verifyPaymentWithAtipay calls Atipay's verify-payment API to finalize the transaction
+func (p *PaymentFlowImpl) verifyPaymentWithAtipay(ctx context.Context, referenceNumber string) (*AtipayVerificationResponse, error) {
+	// Prepare Atipay verification request payload
+	verificationPayload := map[string]any{
+		"referenceNumber": referenceNumber,
+		"apiKey":          p.atipayAPIKey,
+	}
+
+	// Convert to JSON
+	payloadBytes, err := json.Marshal(verificationPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	// Create HTTP request
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", "https://mipg.atipay.net/v1/verify-payment", bytes.NewReader(payloadBytes))
+	if err != nil {
+		return nil, err
+	}
+
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Make HTTP request
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// Check HTTP status code
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("atipay verification API returned non-OK status: %d", resp.StatusCode)
+	}
+
+	// Parse response body
+	var atipayVerificationResponse AtipayVerificationResponse
+	if err := json.NewDecoder(resp.Body).Decode(&atipayVerificationResponse); err != nil {
+		return nil, err
+	}
+
+	return &atipayVerificationResponse, nil
 }
 
 // createAuditLog creates an audit log entry
@@ -664,278 +921,24 @@ func (p *PaymentFlowImpl) createAuditLog(ctx context.Context, customer *models.C
 		}
 	}
 
-	return p.auditRepo.Save(ctx, auditLog)
-}
-
-// increaseUserBalance increases the user's wallet balance when a payment is successful
-// It splits the payment amount: 90% goes to user wallet, 10% goes to tax wallet
-func (p *PaymentFlowImpl) increaseUserBalance(ctx context.Context, paymentRequest *models.PaymentRequest, callbackRequest *dto.PaymentCallbackRequest) error {
-	// Calculate amounts after tax
-	totalAmount := paymentRequest.Amount
-	taxAmount := uint64(float64(totalAmount) * utils.TaxRate)
-	userAmount := totalAmount - taxAmount
-
-	// Get current balance snapshot for user wallet
-	currentBalance, err := p.walletRepo.GetCurrentBalance(ctx, paymentRequest.WalletID)
+	err := p.auditRepo.Save(ctx, auditLog)
 	if err != nil {
 		return err
 	}
-	if currentBalance == nil {
-		return ErrBalanceSnapshotNotFound
-	}
-
-	// Get tax wallet
-	taxWallet, err := p.walletRepo.ByUUID(ctx, utils.TaxWalletUUID)
-	if err != nil {
-		return err
-	}
-	if taxWallet == nil {
-		return ErrTaxWalletNotFound
-	}
-
-	// Get current tax wallet balance
-	taxWalletBalance, err := p.walletRepo.GetCurrentBalance(ctx, taxWallet.ID)
-	if err != nil {
-		return err
-	}
-	if taxWalletBalance == nil {
-		return ErrTaxWalletBalanceSnapshotNotFound
-	}
-
-	// Update user wallet balance
-	newUserFreeBalance := currentBalance.FreeBalance + userAmount
-	newUserBalanceSnapshot := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: paymentRequest.CorrelationID,
-		WalletID:      paymentRequest.WalletID,
-		CustomerID:    paymentRequest.CustomerID,
-		FreeBalance:   newUserFreeBalance,
-		FrozenBalance: currentBalance.FrozenBalance,
-		LockedBalance: currentBalance.LockedBalance,
-		TotalBalance:  newUserFreeBalance + currentBalance.FrozenBalance + currentBalance.LockedBalance,
-		Reason:        "wallet_recharge",
-		Description:   fmt.Sprintf("Wallet recharged with %d Tomans via Atipay (after %d Tomans tax)", userAmount, taxAmount),
-		Metadata: map[string]any{
-			"source":             "payment_callback",
-			"payment_request_id": paymentRequest.ID,
-			"payment_reference":  callbackRequest.ReferenceNumber,
-			"payment_trace":      callbackRequest.TraceNumber,
-			"previous_balance":   currentBalance.FreeBalance,
-			"recharge_amount":    userAmount,
-			"tax_amount":         taxAmount,
-			"new_balance":        newUserFreeBalance,
-		},
-	}
-
-	// Save new user balance snapshot
-	if err := p.balanceSnapshotRepo.Save(ctx, newUserBalanceSnapshot); err != nil {
-		return err
-	}
-
-	// Update tax wallet balance
-	newTaxFreeBalance := taxWalletBalance.FreeBalance + taxAmount
-	newTaxBalanceSnapshot := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: paymentRequest.CorrelationID,
-		WalletID:      taxWallet.ID,
-		CustomerID:    0, // System wallet, no customer
-		FreeBalance:   newTaxFreeBalance,
-		FrozenBalance: taxWalletBalance.FrozenBalance,
-		LockedBalance: taxWalletBalance.LockedBalance,
-		TotalBalance:  newTaxFreeBalance + taxWalletBalance.FrozenBalance + taxWalletBalance.LockedBalance,
-		Reason:        "tax_collection",
-		Description:   fmt.Sprintf("Tax collected: %d Tomans from payment request %s", taxAmount, paymentRequest.UUID),
-		Metadata: map[string]any{
-			"source":             "payment_callback",
-			"payment_request_id": paymentRequest.ID,
-			"payment_reference":  callbackRequest.ReferenceNumber,
-			"payment_trace":      callbackRequest.TraceNumber,
-			"previous_balance":   taxWalletBalance.FreeBalance,
-			"tax_amount":         taxAmount,
-			"new_balance":        newTaxFreeBalance,
-			"wallet_type":        "tax_wallet",
-		},
-	}
-
-	// Save new tax balance snapshot
-	if err := p.balanceSnapshotRepo.Save(ctx, newTaxBalanceSnapshot); err != nil {
-		return err
-	}
-
-	// Create transaction record for user wallet
-	userTransaction := &models.Transaction{
-		UUID:              uuid.New(),
-		CorrelationID:     paymentRequest.CorrelationID,
-		Type:              models.TransactionTypeDeposit,
-		Status:            models.TransactionStatusCompleted,
-		Amount:            userAmount,
-		Currency:          "TMN",
-		WalletID:          paymentRequest.WalletID,
-		CustomerID:        paymentRequest.CustomerID,
-		BalanceBefore:     currentBalance.GetBalanceMap(),
-		BalanceAfter:      newUserBalanceSnapshot.GetBalanceMap(),
-		ExternalReference: callbackRequest.ReferenceNumber,
-		ExternalTrace:     callbackRequest.TraceNumber,
-		ExternalRRN:       callbackRequest.RRN,
-		ExternalMaskedPAN: callbackRequest.MaskedPAN,
-		Description:       fmt.Sprintf("Wallet recharge: %d Tomans (after %d Tomans tax)", userAmount, taxAmount),
-		Metadata: map[string]any{
-			"source":             "payment_callback",
-			"payment_request_id": paymentRequest.ID,
-			"amount_tomans":      userAmount,
-			"tax_amount":         taxAmount,
-			"total_payment":      totalAmount,
-		},
-	}
-
-	// Create transaction record for tax wallet
-	taxTransaction := &models.Transaction{
-		UUID:              uuid.New(),
-		CorrelationID:     paymentRequest.CorrelationID,
-		Type:              models.TransactionTypeDeposit,
-		Status:            models.TransactionStatusCompleted,
-		Amount:            taxAmount,
-		Currency:          "TMN",
-		WalletID:          taxWallet.ID,
-		CustomerID:        0, // System wallet, no customer
-		BalanceBefore:     taxWalletBalance.GetBalanceMap(),
-		BalanceAfter:      newTaxBalanceSnapshot.GetBalanceMap(),
-		ExternalReference: callbackRequest.ReferenceNumber,
-		ExternalTrace:     callbackRequest.TraceNumber,
-		ExternalRRN:       callbackRequest.RRN,
-		ExternalMaskedPAN: callbackRequest.MaskedPAN,
-		Description:       fmt.Sprintf("Tax collection: %d Tomans from payment request %s", taxAmount, paymentRequest.UUID),
-		Metadata: map[string]any{
-			"source":             "payment_callback",
-			"payment_request_id": paymentRequest.ID,
-			"amount_tomans":      taxAmount,
-			"total_payment":      totalAmount,
-			"wallet_type":        "tax_wallet",
-		},
-	}
-
-	// Save both transactions
-	if err := p.transactionRepo.Save(ctx, userTransaction); err != nil {
-		return err
-	}
-	if err := p.transactionRepo.Save(ctx, taxTransaction); err != nil {
-		return err
-	}
-
 	return nil
 }
 
-// generatePaymentResultHTML generates HTML response based on payment status
-func (p *PaymentFlowImpl) generatePaymentResultHTML(paymentRequest *models.PaymentRequest, callback *dto.PaymentCallbackRequest, mapping PaymentStatusMapping) (string, error) {
-	// Read template files
-	var templateContent string
-	var err error
-
-	if mapping.Success {
-		templateContent, err = p.readTemplate("templates/payment_success.html")
-	} else {
-		templateContent, err = p.readTemplate("templates/payment_failure.html")
-	}
-
-	if err != nil {
-		return "", fmt.Errorf("failed to read template: %w", err)
-	}
-
-	// Calculate tax amounts
-	totalAmount := paymentRequest.Amount
-	taxAmount := uint64(float64(totalAmount) * utils.TaxRate)
-	netAmount := totalAmount - taxAmount
-
-	// Prepare template data
-	data := map[string]any{
-		"Status":          mapping.Status,
-		"Message":         mapping.Message,
-		"Description":     mapping.Description,
-		"TotalAmount":     totalAmount,
-		"TaxAmount":       taxAmount,
-		"NetAmount":       netAmount,
-		"ReferenceNumber": callback.ReferenceNumber,
-		"TraceNumber":     callback.TraceNumber,
-		"RRN":             callback.RRN,
-		"MaskedPAN":       callback.MaskedPAN,
-		"ProcessedAt":     utils.UTCNow().Format("2006-01-02 15:04:05"),
-	}
-
-	// Simple template replacement (you could use a proper template engine like html/template)
-	html := templateContent
-	for key, value := range data {
-		if value != nil {
-			placeholder := "{{." + key + "}}"
-			html = strings.ReplaceAll(html, placeholder, fmt.Sprintf("%v", value))
+// GetTransactionHistory retrieves the transaction history for a customer with pagination and filtering
+func (p *PaymentFlowImpl) GetTransactionHistory(ctx context.Context, req *dto.GetTransactionHistoryRequest, metadata *ClientMetadata) (response *dto.TransactionHistoryResponse, err error) {
+	defer func() {
+		if err != nil {
+			err = NewBusinessError("GET_TRANSACTION_HISTORY_FAILED", "Get transaction history failed", err)
 		}
-	}
+	}()
 
-	return html, nil
-}
-
-// readTemplate reads a template file from the filesystem
-func (p *PaymentFlowImpl) readTemplate(filename string) (string, error) {
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return "", fmt.Errorf("failed to read template file %s: %w", filename, err)
-	}
-	return string(content), nil
-}
-
-// verifyPaymentWithAtipay calls Atipay's verify-payment API to finalize the transaction
-func (p *PaymentFlowImpl) verifyPaymentWithAtipay(ctx context.Context, referenceNumber string) (*AtipayVerificationResponse, error) {
-	// Prepare Atipay verification request payload
-	verificationPayload := map[string]any{
-		"referenceNumber": referenceNumber,
-		"apiKey":          p.atipayAPIKey,
-	}
-
-	// Convert to JSON
-	payloadBytes, err := json.Marshal(verificationPayload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal verification payload: %w", err)
-	}
-
-	// Create HTTP request
-	url := fmt.Sprintf("%s/v1/verify-payment", p.atipayBaseURL)
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create verification request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	// Create HTTP client with timeout
-	client := &http.Client{
-		Timeout: 10 * time.Second, // Longer timeout for verification
-	}
-
-	// Make HTTP request
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call Atipay verification API: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Check HTTP status code
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("atipay verification API returned non-OK status: %d", resp.StatusCode)
-	}
-
-	// Parse response body
-	var atipayResponse AtipayVerificationResponse
-	if err := json.NewDecoder(resp.Body).Decode(&atipayResponse); err != nil {
-		return nil, fmt.Errorf("failed to decode verification response: %w", err)
-	}
-
-	return &atipayResponse, nil
-}
-
-// GetPaymentHistory retrieves the payment history for a customer with pagination and filtering
-func (p *PaymentFlowImpl) GetPaymentHistory(ctx context.Context, req *dto.GetPaymentHistoryRequest, metadata *ClientMetadata) (*dto.PaymentHistoryResponse, error) {
 	// Validate business rules
-	if err := p.validateGetPaymentHistoryRequest(ctx, req); err != nil {
-		return nil, NewBusinessError("GET_PAYMENT_HISTORY_FAILED", "Get payment history failed", err)
+	if err := p.validateGetTransactionHistoryRequest(req); err != nil {
+		return nil, err
 	}
 
 	// Get customer to verify they exist and are active
@@ -962,90 +965,78 @@ func (p *PaymentFlowImpl) GetPaymentHistory(ctx context.Context, req *dto.GetPay
 	// Calculate offset for pagination
 	offset := (req.Page - 1) * req.PageSize
 
+	filter := models.TransactionFilter{
+		WalletID:      &wallet.ID,
+		CustomerID:    &customer.ID,
+		CreatedAfter:  req.StartDate,
+		CreatedBefore: req.EndDate,
+	}
+	if req.Type != nil {
+		filter.Type = utils.ToPtr(models.TransactionType(*req.Type))
+	}
+	if req.Status != nil {
+		filter.Status = utils.ToPtr(models.TransactionStatus(*req.Status))
+	}
+
 	// Get transactions with pagination using available methods
-	transactions, err := p.transactionRepo.ByWalletID(ctx, wallet.ID, int(req.PageSize), int(offset))
+	transactions, err := p.transactionRepo.ByFilter(ctx, filter, "created_at DESC", int(req.PageSize), int(offset))
 	if err != nil {
 		return nil, err
 	}
 
-	// Apply additional filters in memory (this is not ideal for large datasets)
-	// In production, you should implement proper database-level filtering
-	filteredTransactions := make([]*models.Transaction, 0)
-	for _, transaction := range transactions {
-		// Apply type filter
-		if req.Type != nil && string(transaction.Type) != *req.Type {
-			continue
-		}
-		// Apply status filter
-		if req.Status != nil && string(transaction.Status) != *req.Status {
-			continue
-		}
-		// Apply date filters
-		if req.StartDate != nil && transaction.CreatedAt.Before(*req.StartDate) {
-			continue
-		}
-		if req.EndDate != nil && transaction.CreatedAt.After(*req.EndDate) {
-			continue
-		}
-		filteredTransactions = append(filteredTransactions, transaction)
+	filter = models.TransactionFilter{
+		WalletID:   &wallet.ID,
+		CustomerID: &customer.ID,
+	}
+	totalCount, err := p.transactionRepo.Count(ctx, filter)
+	if err != nil {
+		return nil, err
 	}
 
-	transactions = filteredTransactions
-
-	// Get total count for pagination (we'll use a simple count for now)
-	// In production, you might want to implement a more efficient count method
-	totalCount := uint(len(transactions))
-
-	// Convert transactions to payment history items
-	items := make([]dto.PaymentHistoryItem, 0, len(transactions))
+	// Convert transactions to transaction history items
+	items := make([]dto.TransactionHistoryItem, 0)
 	for _, transaction := range transactions {
-		item := p.convertTransactionToPaymentHistoryItem(transaction)
+		item, err := p.convertTransactionToTransactionHistoryItem(transaction)
+		if err != nil {
+			return nil, err
+		}
 		items = append(items, item)
 	}
 
 	// Calculate pagination info
-	pagination := p.calculatePaginationInfo(req.Page, req.PageSize, totalCount)
-
-	// Calculate summary statistics
-	summary, err := p.calculatePaymentSummary(ctx, wallet.ID, req.StartDate, req.EndDate)
-	if err != nil {
-		// Log error but don't fail the request
-		// In production, you might want to log this to a proper logging system
-		errMsg := err.Error()
-		_ = p.createAuditLog(ctx, customer, "payment_history_summary_calculation_failed",
-			fmt.Sprintf("Failed to calculate payment summary: %v", err), false, &errMsg, metadata)
-	}
+	pagination := p.calculatePaginationInfo(req.Page, req.PageSize, uint(totalCount))
 
 	// Create audit log for successful retrieval
-	msg := fmt.Sprintf("Payment history retrieved: %d items for customer %d", len(items), req.CustomerID)
-	_ = p.createAuditLog(ctx, customer, "payment_history_retrieved", msg, true, nil, metadata)
+	msg := fmt.Sprintf("Transaction history retrieved: %d items for customer %d", len(items), req.CustomerID)
+	_ = p.createAuditLog(ctx, customer, models.AuditActionTransactionHistoryRetrieved, msg, true, nil, metadata)
 
-	return &dto.PaymentHistoryResponse{
+	response = &dto.TransactionHistoryResponse{
 		Items:      items,
 		Pagination: pagination,
-		Summary:    summary,
-	}, nil
+	}
+
+	return response, nil
 }
 
-// validateGetPaymentHistoryRequest validates the payment history request
-func (p *PaymentFlowImpl) validateGetPaymentHistoryRequest(ctx context.Context, req *dto.GetPaymentHistoryRequest) error {
+// validateGetTransactionHistoryRequest validates the transaction history request
+func (p *PaymentFlowImpl) validateGetTransactionHistoryRequest(req *dto.GetTransactionHistoryRequest) error {
 	if req.CustomerID == 0 {
-		return fmt.Errorf("customer ID is required")
+		return ErrCustomerNotFound
 	}
 	if req.Page < 1 {
-		return fmt.Errorf("page must be at least 1")
+		return ErrInvalidPage
 	}
 	if req.PageSize < 1 || req.PageSize > 100 {
-		return fmt.Errorf("page size must be between 1 and 100")
+		return ErrInvalidPageSize
 	}
 	if req.StartDate != nil && req.EndDate != nil && req.StartDate.After(*req.EndDate) {
-		return fmt.Errorf("start date cannot be after end date")
+		return ErrStartDateAfterEndDate
 	}
 	return nil
 }
 
-// convertTransactionToPaymentHistoryItem converts a transaction model to a payment history item DTO
-func (p *PaymentFlowImpl) convertTransactionToPaymentHistoryItem(transaction *models.Transaction) dto.PaymentHistoryItem {
+// convertTransactionToTransactionHistoryItem converts a transaction model to a transaction history item DTO
+func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction *models.Transaction) (dto.TransactionHistoryItem, error) {
 	// Get human-readable operation name
 	operation := dto.TransactionTypeDisplay[transaction.Type]
 	if operation == "" {
@@ -1064,27 +1055,37 @@ func (p *PaymentFlowImpl) convertTransactionToPaymentHistoryItem(transaction *mo
 		externalRef = &transaction.ExternalReference
 	}
 
-	return dto.PaymentHistoryItem{
+	var balanceBefore map[string]uint64
+	var balanceAfter map[string]uint64
+
+	err := json.Unmarshal(transaction.BalanceBefore, &balanceBefore)
+	if err != nil {
+		return dto.TransactionHistoryItem{}, err
+	}
+	err = json.Unmarshal(transaction.BalanceAfter, &balanceAfter)
+	if err != nil {
+		return dto.TransactionHistoryItem{}, err
+	}
+
+	return dto.TransactionHistoryItem{
 		UUID:          transaction.UUID.String(),
-		Type:          string(transaction.Type),
-		Status:        string(transaction.Status),
+		Status:        status,
 		Amount:        transaction.Amount,
 		Currency:      transaction.Currency,
-		Description:   transaction.Description,
 		Operation:     operation,
 		DateTime:      transaction.CreatedAt,
 		ExternalRef:   externalRef,
-		BalanceBefore: transaction.BalanceBefore,
-		BalanceAfter:  transaction.BalanceAfter,
-		Metadata:      transaction.Metadata,
-	}
+		BalanceBefore: balanceBefore,
+		BalanceAfter:  balanceAfter,
+		Metadata:      nil,
+	}, nil
 }
 
 // calculatePaginationInfo calculates pagination metadata
-func (p *PaymentFlowImpl) calculatePaginationInfo(page, pageSize, totalItems uint) dto.PaymentHistoryPaginationInfo {
+func (p *PaymentFlowImpl) calculatePaginationInfo(page, pageSize, totalItems uint) dto.TransactionHistoryPaginationInfo {
 	totalPages := (totalItems + pageSize - 1) / pageSize // Ceiling division
 
-	return dto.PaymentHistoryPaginationInfo{
+	return dto.TransactionHistoryPaginationInfo{
 		CurrentPage: page,
 		PageSize:    pageSize,
 		TotalItems:  totalItems,
@@ -1092,48 +1093,4 @@ func (p *PaymentFlowImpl) calculatePaginationInfo(page, pageSize, totalItems uin
 		HasNext:     page < totalPages,
 		HasPrevious: page > 1,
 	}
-}
-
-// calculatePaymentSummary calculates summary statistics for payment history
-func (p *PaymentFlowImpl) calculatePaymentSummary(ctx context.Context, walletID uint, startDate, endDate *time.Time) (dto.PaymentSummary, error) {
-	// Get all transactions for summary calculation (without pagination)
-	// We'll use a simple approach for now - in production, implement proper filtering
-	transactions, err := p.transactionRepo.ByWalletID(ctx, walletID, 1000, 0) // Get up to 1000 transactions
-	if err != nil {
-		return dto.PaymentSummary{}, err
-	}
-
-	var summary dto.PaymentSummary
-	summary.TransactionCount = uint(len(transactions))
-
-	for _, transaction := range transactions {
-		// Apply date filters if specified
-		if startDate != nil && transaction.CreatedAt.Before(*startDate) {
-			continue
-		}
-		if endDate != nil && transaction.CreatedAt.After(*endDate) {
-			continue
-		}
-
-		switch transaction.Type {
-		case models.TransactionTypeDeposit:
-			summary.TotalDeposits += transaction.Amount
-		case models.TransactionTypeWithdrawal:
-			summary.TotalWithdrawals += transaction.Amount
-		case models.TransactionTypeFee:
-			summary.TotalFees += transaction.Amount
-		case models.TransactionTypeRefund:
-			summary.TotalRefunds += transaction.Amount
-		}
-	}
-
-	// Calculate net amount
-	summary.NetAmount = int64(summary.TotalDeposits) - int64(summary.TotalWithdrawals) - int64(summary.TotalFees) + int64(summary.TotalRefunds)
-
-	return summary, nil
-}
-
-// AtipayVerificationResponse represents the response from Atipay's verify-payment API
-type AtipayVerificationResponse struct {
-	Amount uint64 `json:"amount"` // Amount in Rials
 }
