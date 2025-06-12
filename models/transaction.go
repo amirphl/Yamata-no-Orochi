@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -11,15 +12,16 @@ import (
 type TransactionType string
 
 const (
-	TransactionTypeDeposit    TransactionType = "deposit"    // Wallet recharge via Atipay
-	TransactionTypeWithdrawal TransactionType = "withdrawal" // Money spent on campaigns
-	TransactionTypeFreeze     TransactionType = "freeze"     // Reserve funds for pending transaction
-	TransactionTypeUnfreeze   TransactionType = "unfreeze"   // Release frozen funds
-	TransactionTypeLock       TransactionType = "lock"       // Lock funds (e.g., for disputes)
-	TransactionTypeUnlock     TransactionType = "unlock"     // Unlock funds
-	TransactionTypeRefund     TransactionType = "refund"     // Refund from failed/returned transaction
-	TransactionTypeFee        TransactionType = "fee"        // Service fees
-	TransactionTypeAdjustment TransactionType = "adjustment" // Manual balance adjustments
+	TransactionTypeDeposit        TransactionType = "deposit"         // Wallet recharge via Atipay
+	TransactionTypeWithdrawal     TransactionType = "withdrawal"      //
+	TransactionTypeLaunchCampaign TransactionType = "launch_campaign" // Money spent on campaigns
+	TransactionTypeFreeze         TransactionType = "freeze"          // Reserve funds for pending transaction
+	TransactionTypeUnfreeze       TransactionType = "unfreeze"        // Release frozen funds
+	TransactionTypeLock           TransactionType = "lock"            // Lock funds (e.g., for disputes)
+	TransactionTypeUnlock         TransactionType = "unlock"          // Unlock funds
+	TransactionTypeRefund         TransactionType = "refund"          // Refund from failed/returned transaction
+	TransactionTypeFee            TransactionType = "fee"             // Service fees
+	TransactionTypeAdjustment     TransactionType = "adjustment"      // Manual balance adjustments
 )
 
 // TransactionStatus represents the current status of a transaction
@@ -50,8 +52,8 @@ type Transaction struct {
 	CustomerID uint `gorm:"not null;index" json:"customer_id"`
 
 	// Balance snapshots before and after transaction (immutable)
-	BalanceBefore map[string]uint64 `gorm:"type:jsonb;not null" json:"balance_before"` // Free, Frozen, Locked before
-	BalanceAfter  map[string]uint64 `gorm:"type:jsonb;not null" json:"balance_after"`  // Free, Frozen, Locked after
+	BalanceBefore json.RawMessage `gorm:"type:jsonb;not null" json:"balance_before"` // Free, Frozen, Locked before
+	BalanceAfter  json.RawMessage `gorm:"type:jsonb;not null" json:"balance_after"`  // Free, Frozen, Locked after
 
 	// External payment information (for Atipay transactions)
 	ExternalReference string `gorm:"type:varchar(255);index" json:"external_reference"` // Atipay referenceNumber
@@ -60,8 +62,8 @@ type Transaction struct {
 	ExternalMaskedPAN string `gorm:"type:varchar(255)" json:"external_masked_pan"`      // Masked card number
 
 	// Transaction metadata
-	Description string         `gorm:"type:text" json:"description"`
-	Metadata    map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Description string          `gorm:"type:text" json:"description"`
+	Metadata    json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Audit fields
 	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`

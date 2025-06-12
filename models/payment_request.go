@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -61,10 +62,10 @@ type PaymentRequest struct {
 	StatusReason string               `gorm:"type:text" json:"status_reason"` // Reason for status change
 
 	// Metadata and audit
-	Metadata  map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
-	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
-	UpdatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
-	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
+	Metadata  json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	CreatedAt time.Time       `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
+	UpdatedAt time.Time       `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
+	DeletedAt gorm.DeletedAt  `gorm:"index" json:"deleted_at,omitempty"`
 
 	// Expiration tracking
 	ExpiresAt *time.Time `gorm:"index" json:"expires_at"` // When payment request expires

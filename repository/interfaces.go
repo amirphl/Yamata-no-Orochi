@@ -137,6 +137,7 @@ type BalanceSnapshotRepository interface {
 // PaymentRequestRepository defines the interface for payment request data access
 type PaymentRequestRepository interface {
 	Repository[models.PaymentRequest, models.PaymentRequestFilter]
+	Update(ctx context.Context, request *models.PaymentRequest) error
 	ByID(ctx context.Context, id uint) (*models.PaymentRequest, error)
 	ByUUID(ctx context.Context, uuid string) (*models.PaymentRequest, error)
 	ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.PaymentRequest, error)

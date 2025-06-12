@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,9 +26,9 @@ type BalanceSnapshot struct {
 	TotalBalance  uint64 `gorm:"not null" json:"total_balance"`  // Calculated field (free + frozen + locked)
 
 	// Snapshot metadata
-	Reason      string         `gorm:"type:varchar(100);not null" json:"reason"` // e.g., "transaction_created", "daily_snapshot"
-	Description string         `gorm:"type:text" json:"description"`
-	Metadata    map[string]any `gorm:"type:jsonb;default:'{}'" json:"metadata"`
+	Reason      string          `gorm:"type:varchar(100);not null" json:"reason"` // e.g., "transaction_created", "daily_snapshot"
+	Description string          `gorm:"type:text" json:"description"`
+	Metadata    json.RawMessage `gorm:"type:jsonb;default:'{}'" json:"metadata"`
 
 	// Audit fields
 	CreatedAt time.Time      `gorm:"not null;default:CURRENT_TIMESTAMP" json:"created_at"`
@@ -55,13 +56,18 @@ func (bs *BalanceSnapshot) BeforeCreate(tx *gorm.DB) error {
 }
 
 // GetBalanceMap returns a map representation of balances
-func (bs *BalanceSnapshot) GetBalanceMap() map[string]uint64 {
-	return map[string]uint64{
+func (bs *BalanceSnapshot) GetBalanceMap() (json.RawMessage, error) {
+	balanceMap := map[string]uint64{
 		"free":   bs.FreeBalance,
 		"frozen": bs.FrozenBalance,
 		"locked": bs.LockedBalance,
 		"total":  bs.TotalBalance,
 	}
+	jsonData, err := json.Marshal(balanceMap)
+	if err != nil {
+		return nil, err
+	}
+	return jsonData, nil
 }
 
 // GetAvailableBalance returns the balance available for new transactions

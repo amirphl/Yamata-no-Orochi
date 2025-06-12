@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -97,7 +98,7 @@ func (r *WalletRepositoryImpl) SaveWithInitialSnapshot(ctx context.Context, wall
 		TotalBalance:  0,
 		Reason:        "initial_snapshot",
 		Description:   "Initial balance snapshot",
-		Metadata:      map[string]any{},
+		Metadata:      json.RawMessage(`{}`),
 		CreatedAt:     time.Now(),
 		UpdatedAt:     time.Now(),
 	}

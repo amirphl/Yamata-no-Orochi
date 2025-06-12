@@ -274,6 +274,30 @@ func (r *PaymentRequestRepositoryImpl) SaveBatch(ctx context.Context, requests [
 	return nil
 }
 
+// Update updates a payment request
+func (r *PaymentRequestRepositoryImpl) Update(ctx context.Context, request *models.PaymentRequest) error {
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Save(request).Error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Count returns the number of payment requests matching the filter
 func (r *PaymentRequestRepositoryImpl) Count(ctx context.Context, filter models.PaymentRequestFilter) (int64, error) {
 	db := r.getDB(ctx)
