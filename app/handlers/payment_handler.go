@@ -17,7 +17,7 @@ import (
 type PaymentHandlerInterface interface {
 	ChargeWallet(c fiber.Ctx) error
 	PaymentCallback(c fiber.Ctx) error
-	GetPaymentHistory(c fiber.Ctx) error
+	GetTransactionHistory(c fiber.Ctx) error
 }
 
 // PaymentHandler handles payment-related HTTP requests
@@ -141,15 +141,26 @@ func (h *PaymentHandler) ChargeWallet(c fiber.Ctx) error {
 // @Tags Payments
 // @Accept json
 // @Produce html
-// @Param request body dto.PaymentCallbackRequest true "Callback data from Atipay"
+// @Param request body dto.AtipayRequest true "Callback data from Atipay"
 // @Success 200 {string} string "HTML payment result page"
-// @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 400 {object} dto.APIResponse "Invalid request or validation error"
+// @Failure 404 {object} dto.APIResponse "Payment request not found"
+// @Failure 409 {object} dto.APIResponse "Payment already processed or expired"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/payments/callback [post]
 func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
-	var callbackReq dto.PaymentCallbackRequest
+	var callbackReq dto.AtipayRequest
 	if err := c.Bind().JSON(&callbackReq); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Failed to parse callback data", "CALLBACK_DATA_PARSE_ERROR", err.Error())
+	}
+
+	// Validate request structure
+	if err := h.validator.Struct(&callbackReq); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 
 	// Get client information
@@ -160,18 +171,81 @@ func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
 	// Call business logic to process the callback and get HTML response
 	htmlResponse, err := h.paymentFlow.PaymentCallback(h.createRequestContext(c, "/api/v1/payments/callback"), &callbackReq, metadata)
 	if err != nil {
-		// Handle specific business errors
-		if businessflow.IsPaymentRequestNotFound(err) {
-			log.Println("Payment request not found", err)
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Payment request not found", "PAYMENT_REQUEST_NOT_FOUND", nil)
+		// Handle specific business errors with appropriate HTTP status codes
+
+		// Validation errors (400 Bad Request)
+		if businessflow.IsCallbackRequestNil(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Callback request is required", "CALLBACK_REQUEST_NIL", nil)
 		}
-		if businessflow.IsPaymentRequestAlreadyProcessed(err) {
-			log.Println("Payment already processed", err)
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Payment already processed", "PAYMENT_ALREADY_PROCESSED", nil)
+		if businessflow.IsReservationNumberRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Reservation number is required", "RESERVATION_NUMBER_REQUIRED", nil)
+		}
+		if businessflow.IsReferenceNumberRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Reference number is required", "REFERENCE_NUMBER_REQUIRED", nil)
+		}
+		if businessflow.IsStatusRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Status is required", "STATUS_REQUIRED", nil)
+		}
+		if businessflow.IsStateRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "State is required", "STATE_REQUIRED", nil)
 		}
 
-		log.Println("Payment callback processing failed", err)
-		// Handle generic business errors
+		// Not found errors (404 Not Found)
+		if businessflow.IsPaymentRequestNotFound(err) {
+			log.Printf("Payment request not found for reservation number: %s", callbackReq.ReservationNumber)
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Payment request not found", "PAYMENT_REQUEST_NOT_FOUND", nil)
+		}
+		if businessflow.IsCustomerNotFound(err) {
+			log.Printf("Customer not found for payment request: %s", callbackReq.ReservationNumber)
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+
+		// Conflict errors (409 Conflict)
+		if businessflow.IsPaymentRequestAlreadyProcessed(err) {
+			log.Printf("Payment already processed for reservation number: %s", callbackReq.ReservationNumber)
+			return h.ErrorResponse(c, fiber.StatusConflict, "Payment already processed", "PAYMENT_ALREADY_PROCESSED", nil)
+		}
+		if businessflow.IsPaymentRequestExpired(err) {
+			log.Printf("Payment request expired for reservation number: %s", callbackReq.ReservationNumber)
+			return h.ErrorResponse(c, fiber.StatusConflict, "Payment request has expired", "PAYMENT_REQUEST_EXPIRED", nil)
+		}
+
+		// Account status errors (403 Forbidden)
+		if businessflow.IsAccountInactive(err) {
+			log.Printf("Account inactive for payment request: %s", callbackReq.ReservationNumber)
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+
+		// Business logic errors (422 Unprocessable Entity)
+		// if businessflow.IsBalanceSnapshotNotFound(err) {
+		// 	log.Printf("Balance snapshot not found for payment request: %s", callbackReq.ReservationNumber)
+		// 	return h.ErrorResponse(c, fiber.StatusUnprocessableEntity, "Balance snapshot not found", "BALANCE_SNAPSHOT_NOT_FOUND", nil)
+		// }
+		// if businessflow.IsTaxWalletNotFound(err) {
+		// 	log.Printf("Tax wallet not found for payment request: %s", callbackReq.ReservationNumber)
+		// 	return h.ErrorResponse(c, fiber.StatusUnprocessableEntity, "Tax wallet not found", "TAX_WALLET_NOT_FOUND", nil)
+		// }
+		// if businessflow.IsTaxWalletBalanceSnapshotNotFound(err) {
+		// 	log.Printf("Tax wallet balance snapshot not found for payment request: %s", callbackReq.ReservationNumber)
+		// 	return h.ErrorResponse(c, fiber.StatusUnprocessableEntity, "Tax wallet balance snapshot not found", "TAX_WALLET_BALANCE_SNAPSHOT_NOT_FOUND", nil)
+		// }
+
+		// Check for specific business error codes
+		if businessErr, ok := err.(*businessflow.BusinessError); ok {
+			switch businessErr.Code {
+			case "PAYMENT_CALLBACK_VALIDATION_FAILED":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Payment callback validation failed", "PAYMENT_CALLBACK_VALIDATION_FAILED", businessErr.Error())
+			case "PAYMENT_CALLBACK_HTML_GENERATION_FAILED":
+				log.Printf("HTML generation failed for payment request: %s, error: %v", callbackReq.ReservationNumber, err)
+				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate payment result page", "HTML_GENERATION_FAILED", nil)
+			case "PAYMENT_CALLBACK_FAILED":
+				log.Printf("Payment callback processing failed for reservation number: %s, error: %v", callbackReq.ReservationNumber, err)
+				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Payment callback processing failed", "PAYMENT_CALLBACK_FAILED", nil)
+			}
+		}
+
+		// Generic internal server error for unhandled cases
+		log.Printf("Unexpected error in payment callback for reservation number: %s, error: %v", callbackReq.ReservationNumber, err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Payment callback processing failed", "PAYMENT_CALLBACK_FAILED", nil)
 	}
 
@@ -180,36 +254,9 @@ func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
 	return c.SendString(htmlResponse)
 }
 
-// createRequestContext creates a context with request-scoped values for observability and timeout
-func (h *PaymentHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-// createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
-func (h *PaymentHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
-	// Create context with custom timeout
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-
-	// Add request-scoped values for observability
-	ctx = context.WithValue(ctx, "request_id", c.Get("X-Request-ID"))
-	ctx = context.WithValue(ctx, "user_agent", c.Get("User-Agent"))
-	ctx = context.WithValue(ctx, "ip_address", c.IP())
-	ctx = context.WithValue(ctx, "endpoint", endpoint)
-	ctx = context.WithValue(ctx, "timeout", timeout)
-	ctx = context.WithValue(ctx, "cancel_func", cancel) // Store cancel function for cleanup
-
-	return ctx
-}
-
-// setupCustomValidations sets up custom validation rules
-func (h *PaymentHandler) setupCustomValidations() {
-	// Add custom validation rules if needed
-	// Example: h.validator.RegisterValidation("custom_rule", customValidationFunc)
-}
-
-// GetPaymentHistory handles the retrieval of payment history for a customer
-// @Summary Get Payment History
-// @Description Retrieve paginated payment history for the authenticated customer
+// GetTransactionHistory handles the retrieval of transaction history for a customer
+// @Summary Get Transaction History
+// @Description Retrieve paginated transaction history for the authenticated customer
 // @Tags Payments
 // @Accept json
 // @Produce json
@@ -219,12 +266,12 @@ func (h *PaymentHandler) setupCustomValidations() {
 // @Param end_date query string false "End date filter (ISO 8601 format)"
 // @Param type query string false "Transaction type filter"
 // @Param status query string false "Transaction status filter"
-// @Success 200 {object} dto.APIResponse{data=dto.PaymentHistoryResponse} "Payment history retrieved successfully"
+// @Success 200 {object} dto.APIResponse{data=dto.TransactionHistoryResponse} "Transaction history retrieved successfully"
 // @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
 // @Failure 401 {object} dto.APIResponse "Unauthorized - customer not found or inactive"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/payments/history [get]
-func (h *PaymentHandler) GetPaymentHistory(c fiber.Ctx) error {
+func (h *PaymentHandler) GetTransactionHistory(c fiber.Ctx) error {
 	// Get authenticated customer ID from context
 	customerID, ok := c.Locals("customer_id").(uint)
 	if !ok {
@@ -269,7 +316,7 @@ func (h *PaymentHandler) GetPaymentHistory(c fiber.Ctx) error {
 	}
 
 	// Build request
-	req := &dto.GetPaymentHistoryRequest{
+	req := &dto.GetTransactionHistoryRequest{
 		CustomerID: customerID,
 		Page:       page,
 		PageSize:   pageSize,
@@ -285,7 +332,7 @@ func (h *PaymentHandler) GetPaymentHistory(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	result, err := h.paymentFlow.GetPaymentHistory(h.createRequestContext(c, "/api/v1/payments/history"), req, metadata)
+	result, err := h.paymentFlow.GetTransactionHistory(h.createRequestContext(c, "/api/v1/payments/history"), req, metadata)
 	if err != nil {
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
@@ -298,10 +345,37 @@ func (h *PaymentHandler) GetPaymentHistory(c fiber.Ctx) error {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Wallet not found", "WALLET_NOT_FOUND", nil)
 		}
 
-		log.Println("Payment history retrieval failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to retrieve payment history", "PAYMENT_HISTORY_RETRIEVAL_FAILED", nil)
+		log.Println("Transaction history retrieval failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to retrieve transaction history", "TRANSACTION_HISTORY_RETRIEVAL_FAILED", nil)
 	}
 
 	// Return successful response
-	return h.SuccessResponse(c, fiber.StatusOK, "Payment history retrieved successfully", result)
+	return h.SuccessResponse(c, fiber.StatusOK, "Transaction history retrieved successfully", result)
+}
+
+// createRequestContext creates a context with request-scoped values for observability and timeout
+func (h *PaymentHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
+	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
+}
+
+// createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
+func (h *PaymentHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+	// Create context with custom timeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	// Add request-scoped values for observability
+	ctx = context.WithValue(ctx, "request_id", c.Get("X-Request-ID"))
+	ctx = context.WithValue(ctx, "user_agent", c.Get("User-Agent"))
+	ctx = context.WithValue(ctx, "ip_address", c.IP())
+	ctx = context.WithValue(ctx, "endpoint", endpoint)
+	ctx = context.WithValue(ctx, "timeout", timeout)
+	ctx = context.WithValue(ctx, "cancel_func", cancel) // Store cancel function for cleanup
+
+	return ctx
+}
+
+// setupCustomValidations sets up custom validation rules
+func (h *PaymentHandler) setupCustomValidations() {
+	// Add custom validation rules if needed
+	// Example: h.validator.RegisterValidation("custom_rule", customValidationFunc)
 }
