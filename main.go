@@ -210,10 +210,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		balanceSnapshotRepo,
 		transactionRepo,
 		db,
-		"https://mipg.atipay.net", // atipayBaseURL - should come from config
-		"",                        // atipayAPIKey - should come from config
-		"",                        // atipayTerminal - should come from config
-		cfg.Deployment.Domain,     // domain from config
+		cfg.Atipay.APIKey,
+		cfg.Atipay.Terminal,
+		cfg.Deployment.Domain, // domain from config
 	)
 
 	// Initialize handlers

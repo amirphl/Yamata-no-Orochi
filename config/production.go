@@ -22,6 +22,7 @@ type ProductionConfig struct {
 	Metrics    MetricsConfig    `json:"metrics"`
 	Cache      CacheConfig      `json:"cache"`
 	Deployment DeploymentConfig `json:"deployment"`
+	Atipay     AtipayConfig     `json:"atipay"`
 }
 
 type DatabaseConfig struct {
@@ -224,6 +225,11 @@ type DeploymentConfig struct {
 	BuildTime   string `json:"build_time"`
 }
 
+type AtipayConfig struct {
+	APIKey   string `json:"api_key"`
+	Terminal string `json:"terminal"`
+}
+
 // LoadProductionConfig loads and validates configuration from environment variables
 func LoadProductionConfig() (*ProductionConfig, error) {
 	// Load environment variables from .env file
@@ -410,6 +416,10 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Version:     getEnvString("VERSION", "1.0.0"),
 			CommitHash:  getEnvString("COMMIT_HASH", "unknown"),
 			BuildTime:   getEnvString("BUILD_TIME", "unknown"),
+		},
+		Atipay: AtipayConfig{
+			APIKey:   getEnvString("ATIPAY_API_KEY", ""),
+			Terminal: getEnvString("ATIPAY_TERMINAL", ""),
 		},
 	}
 
