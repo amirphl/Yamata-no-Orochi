@@ -7,7 +7,7 @@ WHERE wallet_id = (SELECT id FROM wallets WHERE uuid = '2672a1bf-b344-4d84-adee-
 
 -- Remove the tax wallet
 DELETE FROM wallets 
-WHERE uuid = '2672a1bf-b344-4d84-adee-5b92307a2e7c'::uuid;
+WHERE uuid = '2672a1bf-b344-4d84-adee-5b92307a2e7c'::uuid; 
 
 -- Remove the system tax user
 DELETE FROM customers 
