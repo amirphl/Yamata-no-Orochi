@@ -23,6 +23,7 @@ type BalanceSnapshot struct {
 	FreeBalance   uint64 `gorm:"not null" json:"free_balance"`   // Available for spending
 	FrozenBalance uint64 `gorm:"not null" json:"frozen_balance"` // Reserved for pending operations
 	LockedBalance uint64 `gorm:"not null" json:"locked_balance"` // Temporarily locked (e.g., for disputes)
+	CreditBalance uint64 `gorm:"not null" json:"credit_balance"` // Credit amount provisioned (not necessarily spendable)
 	TotalBalance  uint64 `gorm:"not null" json:"total_balance"`  // Calculated field (free + frozen + locked)
 
 	// Snapshot metadata
@@ -50,7 +51,7 @@ func (bs *BalanceSnapshot) BeforeCreate(tx *gorm.DB) error {
 	}
 
 	// Calculate total balance
-	bs.TotalBalance = bs.FreeBalance + bs.FrozenBalance + bs.LockedBalance
+	bs.TotalBalance = bs.FreeBalance + bs.FrozenBalance + bs.LockedBalance + bs.CreditBalance
 
 	return nil
 }
@@ -61,6 +62,7 @@ func (bs *BalanceSnapshot) GetBalanceMap() (json.RawMessage, error) {
 		"free":   bs.FreeBalance,
 		"frozen": bs.FrozenBalance,
 		"locked": bs.LockedBalance,
+		"credit": bs.CreditBalance,
 		"total":  bs.TotalBalance,
 	}
 	jsonData, err := json.Marshal(balanceMap)
