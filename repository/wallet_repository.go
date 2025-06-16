@@ -95,6 +95,7 @@ func (r *WalletRepositoryImpl) SaveWithInitialSnapshot(ctx context.Context, wall
 		FreeBalance:   0,
 		FrozenBalance: 0,
 		LockedBalance: 0,
+		CreditBalance: 0,
 		TotalBalance:  0,
 		Reason:        "initial_snapshot",
 		Description:   "Initial balance snapshot",
