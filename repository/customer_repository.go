@@ -94,7 +94,7 @@ func (r *CustomerRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*mode
 }
 
 // ByAgencyRefererCode retrieves a customer by agency referer code
-func (r *CustomerRepositoryImpl) ByAgencyRefererCode(ctx context.Context, agencyRefererCode int64) (*models.Customer, error) {
+func (r *CustomerRepositoryImpl) ByAgencyRefererCode(ctx context.Context, agencyRefererCode string) (*models.Customer, error) {
 	filter := models.CustomerFilter{AgencyRefererCode: &agencyRefererCode}
 	customers, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
@@ -305,11 +305,11 @@ func (r *CustomerRepositoryImpl) UpdatePassword(ctx context.Context, customerID 
 		}()
 	}
 
-	// TODO: update updated_at
 	// Use direct SQL update to change only the password hash
 	result := db.Model(&models.Customer{}).
 		Where("id = ?", customerID).
-		Update("password_hash", passwordHash)
+		Update("password_hash", passwordHash).
+		Update("updated_at", utils.UTCNow())
 
 	if result.Error != nil {
 		return result.Error
