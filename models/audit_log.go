@@ -69,6 +69,10 @@ const (
 	AuditActionPaymentCancelled            = "payment_cancelled"
 	AuditActionPaymentExpired              = "payment_expired"
 	AuditActionTransactionHistoryRetrieved = "transaction_history_retrieved"
+
+	// Agency discount actions
+	AuditActionCreateDiscountByAgencyFailed           = "create_discount_by_agency_failed"
+	AuditActionCreateDiscountByAgencyCompleted        = "create_discount_by_agency_completed"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries
