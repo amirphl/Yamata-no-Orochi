@@ -3,11 +3,30 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// AgencyCustomerTransactionSum is a report row for aggregated transaction amounts by customer under an agency
+type AgencyCustomerTransactionSum struct {
+	CustomerID              uint   `json:"customer_id"`
+	FirstName               string `json:"first_name"`
+	LastName                string `json:"last_name"`
+	CompanyName             string `json:"company_name"`
+	TotalAgencyShareWithTax uint64 `json:"total_agency_share_with_tax"`
+}
+
+// AgencyCustomerDiscountAggregate is a report row aggregating by discount for a given customer
+type AgencyCustomerDiscountAggregate struct {
+	AgencyDiscountID        uint64     `json:"agency_discount_id"`
+	TotalAgencyShareWithTax uint64     `json:"total_agency_share_with_tax"`
+	Rate                    float64    `json:"rate"`
+	ExpiresAt               *time.Time `json:"expires_at"`
+	CreatedAt               time.Time  `json:"created_at"`
+}
 
 // TransactionRepositoryImpl implements TransactionRepository interface
 type TransactionRepositoryImpl struct {
@@ -308,4 +327,73 @@ func (r *TransactionRepositoryImpl) applyFilter(query *gorm.DB, filter models.Tr
 		query = query.Where("created_at < ?", *filter.CreatedBefore)
 	}
 	return query
+}
+
+// AggregateAgencyTransactionsByCustomers aggregates transaction amounts per customer under an agency based on metadata
+func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, customerNameLike string, orderBy string) ([]*AgencyCustomerTransactionSum, error) {
+	db := r.getDB(ctx)
+	rows := make([]*AgencyCustomerTransactionSum, 0)
+
+	allowed := map[string]string{
+		"name_asc":   "first_name ASC, last_name ASC",
+		"name_desc":  "first_name DESC, last_name DESC",
+		"share_desc": "total_agency_share_with_tax DESC",
+		"share_asc":  "total_agency_share_with_tax ASC",
+	}
+
+	order := allowed[orderBy]
+	if order == "" {
+		order = "agency_share_with_tax DESC"
+	}
+
+	query := db.
+		Table("transactions t").
+		Select("u.id as customer_id, u.representative_first_name as first_name, u.representative_last_name as last_name, u.company_name as company_name, COALESCE(SUM(t.amount),0) as total_agency_share_with_tax").
+		Joins("JOIN customers u ON u.id = (t.metadata->>'customer_id')::bigint").
+		Where("t.customer_id = ?", agencyID).
+		Where("t.metadata->>'source' = ?", "payment_callback").
+		Group("u.id, u.representative_first_name, u.representative_last_name, u.company_name").
+		Order(order)
+
+	if customerNameLike != "" {
+		pattern := "%" + customerNameLike + "%"
+		query = query.Where("u.representative_first_name like ? OR u.representative_last_name like ? OR u.company_name like ?", pattern, pattern, pattern)
+	}
+
+	if err := query.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// AggregateAgencyTransactionsByDiscounts aggregates transactions by agency_discount_id for a given agency and customer
+func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByDiscounts(ctx context.Context, agencyID uint, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error) {
+	db := r.getDB(ctx)
+	rows := make([]*AgencyCustomerDiscountAggregate, 0)
+
+	allowed := map[string]string{
+		"share_desc": "total_agency_share_with_tax DESC",
+		"share_asc":  "total_agency_share_with_tax ASC",
+		"id_desc":    "agency_discount_id DESC",
+		"id_asc":     "agency_discount_id ASC",
+	}
+	order := allowed[orderBy]
+	if order == "" {
+		order = "total_agency_share_with_tax DESC"
+	}
+
+	query := db.
+		Table("transactions t").
+		Select("COALESCE((t.metadata->>'agency_discount_id')::bigint, 0) as agency_discount_id, COALESCE(SUM(t.amount),0) as total_agency_share_with_tax, r.rate as rate, r.expires_at as expires_at, r.created_at as created_at").
+		Joins("JOIN agency_discounts r ON r.id = (t.metadata->>'agency_discount_id')::bigint").
+		Where("t.customer_id = ?", agencyID).
+		Where("(t.metadata->>'customer_id')::bigint = ?", customerID).
+		Where("t.metadata->>'source' = ?", "payment_callback").
+		Group("(t.metadata->>'agency_discount_id')::bigint").
+		Order(order)
+
+	if err := query.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
