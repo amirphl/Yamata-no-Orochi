@@ -22,7 +22,7 @@ INSERT INTO customers (
     updated_at
 ) VALUES (
     gen_random_uuid(),
-    (SELECT id FROM account_types WHERE type_name = 'independent_company'),
+    (SELECT id FROM account_types WHERE type_name = 'marketing_agency'),
     'System',
     'Account',
     '+989000000001',
