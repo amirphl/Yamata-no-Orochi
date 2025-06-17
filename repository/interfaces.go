@@ -36,7 +36,7 @@ type CustomerRepository interface {
 	ByEmail(ctx context.Context, email string) (*models.Customer, error)
 	ByMobile(ctx context.Context, mobile string) (*models.Customer, error)
 	ByUUID(ctx context.Context, uuid string) (*models.Customer, error)
-	ByAgencyRefererCode(ctx context.Context, agencyRefererCode int64) (*models.Customer, error)
+	ByAgencyRefererCode(ctx context.Context, agencyRefererCode string) (*models.Customer, error)
 	ByNationalID(ctx context.Context, nationalID string) (*models.Customer, error)
 	ListByAgency(ctx context.Context, agencyID uint) ([]*models.Customer, error)
 	ListActiveCustomers(ctx context.Context, limit, offset int) ([]*models.Customer, error)
@@ -120,6 +120,9 @@ type TransactionRepository interface {
 	ByExternalReference(ctx context.Context, externalReference string) (*models.Transaction, error)
 	GetPendingTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
 	GetCompletedTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
+	// Reports
+	AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, customerNameLike string, orderBy string) ([]*AgencyCustomerTransactionSum, error)
+	AggregateAgencyTransactionsByDiscounts(ctx context.Context, agencyID uint, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error)
 }
 
 // BalanceSnapshotRepository defines the interface for balance snapshot data access
@@ -179,4 +182,15 @@ type AgencyCommissionRepository interface {
 	GetPendingCommissions(ctx context.Context, limit, offset int) ([]*models.AgencyCommission, error)
 	GetPaidCommissions(ctx context.Context, limit, offset int) ([]*models.AgencyCommission, error)
 	GetCommissionsByDateRange(ctx context.Context, from, to time.Time, limit, offset int) ([]*models.AgencyCommission, error)
+}
+
+// AgencyDiscountRepository defines the interface for agency discount data access
+type AgencyDiscountRepository interface {
+	Repository[models.AgencyDiscount, models.AgencyDiscountFilter]
+	ByID(ctx context.Context, id uint) (*models.AgencyDiscount, error)
+	ByUUID(ctx context.Context, uuid string) (*models.AgencyDiscount, error)
+	ByAgencyAndCustomer(ctx context.Context, agencyID, customerID uint) ([]*models.AgencyDiscount, error)
+	GetActiveDiscount(ctx context.Context, agencyID, customerID uint) (*models.AgencyDiscount, error)
+	ListActiveDiscountsWithCustomer(ctx context.Context, agencyID uint, nameLike, orderBy string) ([]*AgencyDiscountWithCustomer, error)
+	ExpireActiveByAgencyAndCustomer(ctx context.Context, agencyID, customerID uint, expiredAt time.Time) error
 }
