@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// ProductionConfig holds production-ready configuration
+// ProductionConfig holds all configuration for production environment
 type ProductionConfig struct {
 	Database   DatabaseConfig   `json:"database"`
 	Server     ServerConfig     `json:"server"`
@@ -23,6 +23,7 @@ type ProductionConfig struct {
 	Cache      CacheConfig      `json:"cache"`
 	Deployment DeploymentConfig `json:"deployment"`
 	Atipay     AtipayConfig     `json:"atipay"`
+	Admin      AdminConfig      `json:"admin"`
 }
 
 type DatabaseConfig struct {
@@ -230,6 +231,10 @@ type AtipayConfig struct {
 	Terminal string `json:"terminal"`
 }
 
+type AdminConfig struct {
+	Mobile string `json:"mobile"`
+}
+
 // LoadProductionConfig loads and validates configuration from environment variables
 func LoadProductionConfig() (*ProductionConfig, error) {
 	// Load environment variables from .env file
@@ -268,50 +273,38 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			CompressionLevel:  getEnvInt("SERVER_COMPRESSION_LEVEL", 6),
 		},
 		Security: SecurityConfig{
-			TLSEnabled:         getEnvBool("TLS_ENABLED", true),
-			TLSCertFile:        getEnvString("TLS_CERT_FILE", "/etc/ssl/certs/yamata.crt"),
-			TLSKeyFile:         getEnvString("TLS_KEY_FILE", "/etc/ssl/private/yamata.key"),
-			TLSMinVersion:      getEnvString("TLS_MIN_VERSION", "1.3"),
-			HSTSMaxAge:         getEnvInt("HSTS_MAX_AGE", 31536000), // 1 year
-			HSTSIncludeSubDoms: getEnvBool("HSTS_INCLUDE_SUBDOMAINS", true),
-			HSTSPreload:        getEnvBool("HSTS_PRELOAD", true),
-
-			AllowedOrigins: getEnvStringSlice("CORS_ALLOWED_ORIGINS", []string{
-				"https://yamata-no-orochi.com",
-				"https://api.yamata-no-orochi.com",
-				"https://wwww.yamata-no-orochi.com",
-				"https://monitoring.yamata-no-orochi.com",
-				"https://admin.yamata-no-orochi.com",
-			}),
-			AllowedMethods:   getEnvStringSlice("CORS_ALLOWED_METHODS", []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
-			AllowedHeaders:   getEnvStringSlice("CORS_ALLOWED_HEADERS", []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-API-Key"}),
-			AllowCredentials: getEnvBool("CORS_ALLOW_CREDENTIALS", true),
-			CORSMaxAge:       getEnvInt("CORS_MAX_AGE", 86400),
-
-			AuthRateLimit:   getEnvInt("AUTH_RATE_LIMIT", 20),     // 20 auth requests per minute
-			GlobalRateLimit: getEnvInt("GLOBAL_RATE_LIMIT", 2000), // 2000 requests per minute
-			RateLimitWindow: getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
-			RateLimitMemory: getEnvInt("RATE_LIMIT_MEMORY", 64), // 64MB
-
-			CSPPolicy:           getEnvString("CSP_POLICY", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"),
-			XFrameOptions:       getEnvString("X_FRAME_OPTIONS", "DENY"),
-			XContentTypeOptions: getEnvString("X_CONTENT_TYPE_OPTIONS", "nosniff"),
-			XSSProtection:       getEnvString("XSS_PROTECTION", "1; mode=block"),
-			ReferrerPolicy:      getEnvString("REFERRER_POLICY", "strict-origin-when-cross-origin"),
-
-			RequireAPIKey:  getEnvBool("REQUIRE_API_KEY", false),
-			APIKeyHeader:   getEnvString("API_KEY_HEADER", "X-API-Key"),
-			AllowedAPIKeys: getEnvStringSlice("ALLOWED_API_KEYS", []string{}),
-			IPWhitelist:    getEnvStringSlice("IP_WHITELIST", []string{}),
-			IPBlacklist:    getEnvStringSlice("IP_BLACKLIST", []string{}),
-
-			PasswordMinLength:     getEnvInt("PASSWORD_MIN_LENGTH", 8),
-			PasswordRequireUpper:  getEnvBool("PASSWORD_REQUIRE_UPPER", true),
-			PasswordRequireLower:  getEnvBool("PASSWORD_REQUIRE_LOWER", true),
-			PasswordRequireNum:    getEnvBool("PASSWORD_REQUIRE_NUMBER", true),
-			PasswordRequireSymbol: getEnvBool("PASSWORD_REQUIRE_SYMBOL", true),
-			BcryptCost:            getEnvInt("BCRYPT_COST", 12),
-
+			TLSEnabled:             getEnvBool("TLS_ENABLED", true),
+			TLSCertFile:            getEnvString("TLS_CERT_FILE", "/etc/ssl/certs/yamata.crt"),
+			TLSKeyFile:             getEnvString("TLS_KEY_FILE", "/etc/ssl/private/yamata.key"),
+			TLSMinVersion:          getEnvString("TLS_MIN_VERSION", "1.3"),
+			HSTSMaxAge:             getEnvInt("HSTS_MAX_AGE", 31536000), // 1 year
+			HSTSIncludeSubDoms:     getEnvBool("HSTS_INCLUDE_SUBDOMAINS", true),
+			HSTSPreload:            getEnvBool("HSTS_PRELOAD", true),
+			AllowedOrigins:         getEnvStringSlice("CORS_ALLOWED_ORIGINS", []string{"https://yamata-no-orochi.com", "https://api.yamata-no-orochi.com", "https://wwww.yamata-no-orochi.com", "https://monitoring.yamata-no-orochi.com", "https://admin.yamata-no-orochi.com"}),
+			AllowedMethods:         getEnvStringSlice("CORS_ALLOWED_METHODS", []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}),
+			AllowedHeaders:         getEnvStringSlice("CORS_ALLOWED_HEADERS", []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Requested-With", "X-API-Key"}),
+			AllowCredentials:       getEnvBool("CORS_ALLOW_CREDENTIALS", true),
+			CORSMaxAge:             getEnvInt("CORS_MAX_AGE", 86400),
+			AuthRateLimit:          getEnvInt("AUTH_RATE_LIMIT", 20),
+			GlobalRateLimit:        getEnvInt("GLOBAL_RATE_LIMIT", 2000),
+			RateLimitWindow:        getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
+			RateLimitMemory:        getEnvInt("RATE_LIMIT_MEMORY", 64), // MB
+			CSPPolicy:              getEnvString("CSP_POLICY", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"),
+			XFrameOptions:          getEnvString("X_FRAME_OPTIONS", "DENY"),
+			XContentTypeOptions:    getEnvString("X_CONTENT_TYPE_OPTIONS", "nosniff"),
+			XSSProtection:          getEnvString("XSS_PROTECTION", "1; mode=block"),
+			ReferrerPolicy:         getEnvString("REFERRER_POLICY", "strict-origin-when-cross-origin"),
+			RequireAPIKey:          getEnvBool("REQUIRE_API_KEY", false),
+			APIKeyHeader:           getEnvString("API_KEY_HEADER", "X-API-Key"),
+			AllowedAPIKeys:         getEnvStringSlice("ALLOWED_API_KEYS", []string{}),
+			IPWhitelist:            getEnvStringSlice("IP_WHITELIST", []string{}),
+			IPBlacklist:            getEnvStringSlice("IP_BLACKLIST", []string{}),
+			PasswordMinLength:      getEnvInt("PASSWORD_MIN_LENGTH", 8),
+			PasswordRequireUpper:   getEnvBool("PASSWORD_REQUIRE_UPPER", true),
+			PasswordRequireLower:   getEnvBool("PASSWORD_REQUIRE_LOWER", true),
+			PasswordRequireNum:     getEnvBool("PASSWORD_REQUIRE_NUMBER", true),
+			PasswordRequireSymbol:  getEnvBool("PASSWORD_REQUIRE_SYMBOL", true),
+			BcryptCost:             getEnvInt("BCRYPT_COST", 12),
 			SessionCookieSecure:    getEnvBool("SESSION_COOKIE_SECURE", true),
 			SessionCookieHTTPOnly:  getEnvBool("SESSION_COOKIE_HTTPONLY", true),
 			SessionCookieSameSite:  getEnvString("SESSION_COOKIE_SAMESITE", "Strict"),
@@ -392,34 +385,26 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			CleanupInterval: getEnvDuration("CACHE_CLEANUP_INTERVAL", 10*time.Minute),
 		},
 		Deployment: DeploymentConfig{
-			// Domain Configuration
-			Domain:           getEnvString("DOMAIN", "your-domain.com"),
-			APIDomain:        getEnvString("API_DOMAIN", "api.your-domain.com"),
-			MonitoringDomain: getEnvString("MONITORING_DOMAIN", "monitoring.your-domain.com"),
-
-			// SSL/TLS Configuration
-			CertbotEmail: getEnvString("CERTBOT_EMAIL", "admin@your-domain.com"),
-
-			// Monitoring Configuration
+			Domain:               getEnvString("DOMAIN", "your-domain.com"),
+			APIDomain:            getEnvString("API_DOMAIN", "api.your-domain.com"),
+			MonitoringDomain:     getEnvString("MONITORING_DOMAIN", "monitoring.your-domain.com"),
+			CertbotEmail:         getEnvString("CERTBOT_EMAIL", "admin@your-domain.com"),
 			GrafanaAdminPassword: getEnvString("GRAFANA_ADMIN_PASSWORD", ""),
-
-			// Additional Security
-			RedisPassword: getEnvString("REDIS_PASSWORD", ""),
-
-			// Backup Configuration
-			BackupS3Bucket:    getEnvString("BACKUP_S3_BUCKET", ""),
-			BackupS3AccessKey: getEnvString("BACKUP_S3_ACCESS_KEY", ""),
-			BackupS3SecretKey: getEnvString("BACKUP_S3_SECRET_KEY", ""),
-
-			// Build Information
-			Environment: getEnvString("APP_ENV", "production"),
-			Version:     getEnvString("VERSION", "1.0.0"),
-			CommitHash:  getEnvString("COMMIT_HASH", "unknown"),
-			BuildTime:   getEnvString("BUILD_TIME", "unknown"),
+			RedisPassword:        getEnvString("REDIS_PASSWORD", ""),
+			BackupS3Bucket:       getEnvString("BACKUP_S3_BUCKET", ""),
+			BackupS3AccessKey:    getEnvString("BACKUP_S3_ACCESS_KEY", ""),
+			BackupS3SecretKey:    getEnvString("BACKUP_S3_SECRET_KEY", ""),
+			Environment:          getEnvString("APP_ENV", "production"),
+			Version:              getEnvString("VERSION", "1.0.0"),
+			CommitHash:           getEnvString("COMMIT_HASH", "unknown"),
+			BuildTime:            getEnvString("BUILD_TIME", "unknown"),
 		},
 		Atipay: AtipayConfig{
 			APIKey:   getEnvString("ATIPAY_API_KEY", ""),
 			Terminal: getEnvString("ATIPAY_TERMINAL", ""),
+		},
+		Admin: AdminConfig{
+			Mobile: getEnvString("ADMIN_MOBILE", ""),
 		},
 	}
 
