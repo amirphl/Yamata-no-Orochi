@@ -20,9 +20,6 @@ const (
 
 	// OTPExpiry is the time-to-live for OTP codes (5 minutes)
 	OTPExpiry = 5 * time.Minute
-
-	// OTPExpirySeconds is the time-to-live for OTP codes in seconds (300 seconds = 5 minutes)
-	OTPExpirySeconds = 300
 )
 
 // CORS and security constants
@@ -45,4 +42,8 @@ const (
 
 	// SystemWalletUUID is the UUID of the system wallet
 	SystemWalletUUID = "b5b35e36-c873-40cd-8025-f7ea22b50bb2"
+)
+
+const (
+	DefaultReferrerAgencyCode = "jaazebeh.ir"
 )
