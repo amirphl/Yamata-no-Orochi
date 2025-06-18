@@ -470,14 +470,18 @@ func (s *SignupFlowImpl) createSession(ctx context.Context, customerID uint, acc
 		SessionToken:  accessToken,
 		RefreshToken:  &refreshToken,
 		// DeviceInfo:    json.RawMessage, // TODO: Add device info
-		IPAddress: &ipAddress,
-		UserAgent: &userAgent,
-		IsActive:  utils.ToPtr(true),
-		ExpiresAt: utils.UTCNowAdd(utils.SessionTimeout),
-		// LastAccessedAt: utils.UTCNow(), // TODO: Add last accessed at
+		IPAddress:      &ipAddress,
+		UserAgent:      &userAgent,
+		IsActive:       utils.ToPtr(true),
+		ExpiresAt:      utils.UTCNowAdd(utils.SessionTimeout),
+		LastAccessedAt: utils.UTCNow(),
 	}
 
-	return s.sessionRepo.Save(ctx, session)
+	if err := s.sessionRepo.Save(ctx, session); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *SignupFlowImpl) createDefaultDiscount(ctx context.Context, customer *models.Customer) error {
