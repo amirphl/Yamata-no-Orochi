@@ -480,12 +480,12 @@ func (h *AuthHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint stri
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
 	// Add request-scoped values for observability
-	ctx = context.WithValue(ctx, RequestIDKey, c.Get("X-Request-ID"))
-	ctx = context.WithValue(ctx, UserAgentKey, c.Get("User-Agent"))
-	ctx = context.WithValue(ctx, IPAddressKey, c.IP())
-	ctx = context.WithValue(ctx, EndpointKey, endpoint)
-	ctx = context.WithValue(ctx, TimeoutKey, timeout)
-	ctx = context.WithValue(ctx, CancelFuncKey, cancel) // Store cancel function for cleanup
+	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
+	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
+	ctx = context.WithValue(ctx, utils.IPAddressKey, c.IP())
+	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
+	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
+	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel) // Store cancel function for cleanup
 
 	return ctx
 }

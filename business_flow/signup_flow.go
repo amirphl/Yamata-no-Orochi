@@ -529,7 +529,7 @@ func (s *SignupFlowImpl) createAuditLog(ctx context.Context, customer *models.Cu
 	}
 
 	// Extract request ID from context if available
-	requestID := ctx.Value(RequestIDKey)
+	requestID := ctx.Value(utils.RequestIDKey)
 	if requestID != nil {
 		requestIDStr, ok := requestID.(string)
 		if ok {

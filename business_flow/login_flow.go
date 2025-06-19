@@ -452,7 +452,7 @@ func (lf *LoginFlowImpl) createAuditLog(ctx context.Context, customer *models.Cu
 		ErrorMessage: errMsg,
 	}
 
-	requestID := ctx.Value(RequestIDKey)
+	requestID := ctx.Value(utils.RequestIDKey)
 	if requestID != nil {
 		requestIDStr, ok := requestID.(string)
 		if ok {

@@ -4,6 +4,17 @@ import (
 	"time"
 )
 
+type ContextKey string
+
+const (
+	RequestIDKey  ContextKey = "X-Request-ID"
+	UserAgentKey  ContextKey = "User-Agent"
+	IPAddressKey  ContextKey = "IP-Address"
+	EndpointKey   ContextKey = "Endpoint"
+	TimeoutKey    ContextKey = "Timeout"
+	CancelFuncKey ContextKey = "Cancel-Func"
+)
+
 // Token and session time constants
 const (
 	// AccessTokenTTL is the time-to-live for access tokens (24 hours)
