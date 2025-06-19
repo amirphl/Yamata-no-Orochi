@@ -31,7 +31,7 @@ type ForgetPasswordResponse struct {
 
 // ResetPasswordRequest represents the request to reset password with OTP
 type ResetPasswordRequest struct {
-	CustomerID      uint   `json:"customer_id" validate:"required" example:"123"`
+	CustomerID      uint   `json:"customer_id" validate:"required" example:"1"`
 	OTPCode         string `json:"otp_code" validate:"required,len=6,numeric" example:"123456"`
 	NewPassword     string `json:"new_password" validate:"required,min=8,max=100,password_strength" example:"NewSecurePass123!"`
 	ConfirmPassword string `json:"confirm_password" validate:"required,eqfield=NewPassword" example:"NewSecurePass123!"`
@@ -63,8 +63,7 @@ func MaskPhoneNumber(phone string) string {
 
 // AuthCustomerDTO represents minimal customer data for authentication responses
 type AuthCustomerDTO struct {
-	ID                      uint    `json:"id" example:"123"`
-	UUID                    string  `json:"uuid" example:"550e8400-e29b-41d4-a716-446655440000"`
+	ID                      uint    `json:"id" example:"1"`
 	Email                   string  `json:"email" example:"user@example.com"`
 	RepresentativeFirstName string  `json:"representative_first_name" example:"John"`
 	RepresentativeLastName  string  `json:"representative_last_name" example:"Doe"`
