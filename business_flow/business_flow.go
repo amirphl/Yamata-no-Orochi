@@ -2,13 +2,17 @@
 package businessflow
 
 import (
+	"context"
+	"encoding/json"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/repository"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 )
-
-const RequestIDKey = "X-Request-ID"
 
 // ClientMetadata holds all client-related information for audit logging and session tracking
 type ClientMetadata struct {
@@ -75,7 +79,6 @@ func (cm *ClientMetadata) SetSessionID(sessionID string) {
 func ToAuthCustomerDTO(customer models.Customer) dto.AuthCustomerDTO {
 	dto := dto.AuthCustomerDTO{
 		ID:                      customer.ID,
-		UUID:                    customer.UUID.String(),
 		Email:                   customer.Email,
 		RepresentativeFirstName: customer.RepresentativeFirstName,
 		RepresentativeLastName:  customer.RepresentativeLastName,
@@ -96,8 +99,194 @@ func ToCustomerSessionDTO(session models.CustomerSession) dto.CustomerSessionDTO
 	return dto.CustomerSessionDTO{
 		SessionToken: session.SessionToken,
 		RefreshToken: session.RefreshToken,
-		ExpiresIn:    int(time.Until(session.ExpiresAt).Seconds()), // TODO: UTC?
+		ExpiresIn:    int(time.Until(session.ExpiresAt).Seconds()),
 		TokenType:    "Bearer",
 		CreatedAt:    session.CreatedAt.Format(time.RFC3339),
 	}
+}
+
+func createAuditLog(
+	ctx context.Context,
+	auditRepo repository.AuditLogRepository,
+	customer *models.Customer,
+	action string,
+	description string,
+	success bool,
+	errorDetails *string,
+	metadata *ClientMetadata,
+) error {
+	var customerID *uint
+	if customer != nil {
+		customerID = &customer.ID
+	}
+
+	ipAddress := ""
+	userAgent := ""
+	if metadata != nil {
+		ipAddress = metadata.IPAddress
+		userAgent = metadata.UserAgent
+	}
+
+	auditLog := &models.AuditLog{
+		CustomerID:   customerID,
+		Action:       action,
+		Description:  &description,
+		Success:      &success,
+		IPAddress:    &ipAddress,
+		UserAgent:    &userAgent,
+		Metadata:     json.RawMessage(`{}`),
+		ErrorMessage: errorDetails,
+	}
+
+	if errorDetails != nil {
+		// Create metadata with error details
+		metadataMap := map[string]any{
+			"error_details": *errorDetails,
+		}
+		metadataBytes, _ := json.Marshal(metadataMap)
+		auditLog.Metadata = metadataBytes
+	}
+
+	// Extract request ID from context if available
+	requestID := ctx.Value(utils.RequestIDKey)
+	if requestID != nil {
+		requestIDStr, ok := requestID.(string)
+		if ok {
+			auditLog.RequestID = &requestIDStr
+		}
+	}
+
+	err := auditRepo.Save(ctx, auditLog)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func getCustomer(ctx context.Context, customerRepo repository.CustomerRepository, customerID uint) (models.Customer, error) {
+	// Verify customer exists and is active
+	customer, err := customerRepo.ByID(ctx, customerID)
+	if err != nil {
+		return models.Customer{}, err
+	}
+	if customer == nil {
+		return models.Customer{}, ErrCustomerNotFound
+	}
+	if !utils.IsTrue(customer.IsActive) {
+		return models.Customer{}, ErrAccountInactive
+	}
+
+	return *customer, nil
+}
+
+func getAgency(ctx context.Context, customerRepo repository.CustomerRepository, agencyID uint) (models.Customer, error) {
+	agency, err := customerRepo.ByID(ctx, agencyID)
+	if err != nil {
+		return models.Customer{}, err
+	}
+	if agency == nil {
+		return models.Customer{}, ErrAgencyNotFound
+	}
+	if agency.IsActive != nil && !*agency.IsActive {
+		return models.Customer{}, ErrAgencyInactive
+	}
+
+	return *agency, nil
+}
+
+func getCampaign(ctx context.Context, campaignRepo repository.SMSCampaignRepository, campaignUUID string, customerID uint) (models.SMSCampaign, error) {
+	// Get existing campaign
+	campaign, err := campaignRepo.ByUUID(ctx, campaignUUID)
+	if err != nil {
+		return models.SMSCampaign{}, err
+	}
+	if campaign == nil {
+		return models.SMSCampaign{}, ErrCampaignNotFound
+	}
+
+	// Verify ownership
+	if campaign.CustomerID != customerID {
+		return models.SMSCampaign{}, ErrCampaignAccessDenied
+	}
+
+	return *campaign, nil
+}
+
+// canUpdateCampaign checks if a campaign can be updated based on its current status
+func canUpdateCampaign(status models.SMSCampaignStatus) bool {
+	// Only campaigns with 'initiated' or 'in-progress' status can be updated
+	// Campaigns with 'waiting-for-approval', 'approved', or 'rejected' status cannot be updated
+	return status == models.SMSCampaignStatusInitiated || status == models.SMSCampaignStatusInProgress
+}
+
+func getWallet(ctx context.Context, walletRepo repository.WalletRepository, customerID uint) (models.Wallet, error) {
+	wallet, err := walletRepo.ByCustomerID(ctx, customerID)
+	if err != nil {
+		return models.Wallet{}, err
+	}
+	if wallet == nil {
+		return models.Wallet{}, ErrWalletNotFound
+	}
+
+	return *wallet, nil
+}
+
+func getLatestBalanceSnapshot(ctx context.Context, walletRepo repository.WalletRepository, walletID uint) (models.BalanceSnapshot, error) {
+	latestBalance, err := walletRepo.GetCurrentBalance(ctx, walletID)
+	if err != nil {
+		return models.BalanceSnapshot{}, err
+	}
+	if latestBalance == nil {
+		return models.BalanceSnapshot{}, ErrBalanceSnapshotNotFound
+	}
+
+	return *latestBalance, nil
+}
+
+func getLatestTaxWalletBalanceSnapshot(ctx context.Context, walletRepo repository.WalletRepository, walletID uint) (models.BalanceSnapshot, error) {
+	taxBalance, err := walletRepo.GetCurrentBalance(ctx, walletID)
+	if err != nil {
+		return models.BalanceSnapshot{}, err
+	}
+	if taxBalance == nil {
+		return models.BalanceSnapshot{}, ErrTaxWalletBalanceSnapshotNotFound
+	}
+
+	return *taxBalance, nil
+}
+
+func getLatestSystemWalletBalanceSnapshot(ctx context.Context, walletRepo repository.WalletRepository, walletID uint) (models.BalanceSnapshot, error) {
+	systemBalance, err := walletRepo.GetCurrentBalance(ctx, walletID)
+	if err != nil {
+		return models.BalanceSnapshot{}, err
+	}
+	if systemBalance == nil {
+		return models.BalanceSnapshot{}, ErrSystemWalletBalanceSnapshotNotFound
+	}
+
+	return *systemBalance, nil
+}
+
+func validateShebaNumber(shebaNumber *string) (string, error) {
+	if shebaNumber == nil || len(*shebaNumber) == 0 {
+		return "", ErrShebaNumberRequired
+	}
+	shebaNumberStr := strings.TrimSpace(*shebaNumber)
+	// validate prefix IR
+	if !strings.HasPrefix(shebaNumberStr, "IR") {
+		return "", ErrShebaNumberInvalid
+	}
+	// validate length exactly 26
+	if len(shebaNumberStr) != 26 {
+		return "", ErrShebaNumberInvalid
+	}
+	// validate digits are numbers
+	for _, s := range shebaNumberStr[2:] {
+		if !unicode.IsDigit(s) {
+			return "", ErrShebaNumberInvalid
+		}
+	}
+
+	return shebaNumberStr, nil
 }
