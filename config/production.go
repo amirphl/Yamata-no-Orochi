@@ -232,7 +232,7 @@ type AtipayConfig struct {
 }
 
 type AdminConfig struct {
-	Mobile string `json:"mobile"`
+	Mobile string `json:"admin_mobile"`
 }
 
 // LoadProductionConfig loads and validates configuration from environment variables

@@ -11,20 +11,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// SMSCampaignRepositoryImpl implements the SMSCampaignRepository interface
-type SMSCampaignRepositoryImpl struct {
-	*BaseRepository[models.SMSCampaign, models.SMSCampaignFilter]
+// CampaignRepositoryImpl implements the CampaignRepository interface
+type CampaignRepositoryImpl struct {
+	*BaseRepository[models.Campaign, models.CampaignFilter]
 }
 
-// NewSMSCampaignRepository creates a new SMS campaign repository
-func NewSMSCampaignRepository(db *gorm.DB) SMSCampaignRepository {
-	return &SMSCampaignRepositoryImpl{
-		BaseRepository: NewBaseRepository[models.SMSCampaign, models.SMSCampaignFilter](db),
+// NewCampaignRepository creates a new campaign repository
+func NewCampaignRepository(db *gorm.DB) CampaignRepository {
+	return &CampaignRepositoryImpl{
+		BaseRepository: NewBaseRepository[models.Campaign, models.CampaignFilter](db),
 	}
 }
 
-// Save creates a new SMS campaign
-func (r *SMSCampaignRepositoryImpl) Save(ctx context.Context, campaign *models.SMSCampaign) error {
+// Save creates a new campaign
+func (r *CampaignRepositoryImpl) Save(ctx context.Context, campaign *models.Campaign) error {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -48,11 +48,11 @@ func (r *SMSCampaignRepositoryImpl) Save(ctx context.Context, campaign *models.S
 	return nil
 }
 
-// ByID retrieves an SMS campaign by ID
-func (r *SMSCampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.SMSCampaign, error) {
+// ByID retrieves an campaign by ID
+func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Campaign, error) {
 	db := r.getDB(ctx)
 
-	var campaign models.SMSCampaign
+	var campaign models.Campaign
 	err := db.Preload("Customer").
 		Preload("Customer.AccountType").
 		Last(&campaign, id).Error
@@ -66,14 +66,14 @@ func (r *SMSCampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.
 	return &campaign, nil
 }
 
-// ByUUID retrieves an SMS campaign by UUID
-func (r *SMSCampaignRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.SMSCampaign, error) {
+// ByUUID retrieves an campaign by UUID
+func (r *CampaignRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*models.Campaign, error) {
 	parsedUUID, err := utils.ParseUUID(uuid)
 	if err != nil {
 		return nil, err
 	}
 
-	filter := models.SMSCampaignFilter{UUID: &parsedUUID}
+	filter := models.CampaignFilter{UUID: &parsedUUID}
 	campaigns, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
 		return nil, err
@@ -86,20 +86,20 @@ func (r *SMSCampaignRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*m
 	return campaigns[0], nil
 }
 
-// ByCustomerID retrieves SMS campaigns by customer ID with pagination
-func (r *SMSCampaignRepositoryImpl) ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.SMSCampaign, error) {
-	filter := models.SMSCampaignFilter{CustomerID: &customerID}
+// ByCustomerID retrieves campaigns by customer ID with pagination
+func (r *CampaignRepositoryImpl) ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Campaign, error) {
+	filter := models.CampaignFilter{CustomerID: &customerID}
 	return r.ByFilter(ctx, filter, "created_at DESC", limit, offset)
 }
 
-// ByStatus retrieves SMS campaigns by status with pagination
-func (r *SMSCampaignRepositoryImpl) ByStatus(ctx context.Context, status models.SMSCampaignStatus, limit, offset int) ([]*models.SMSCampaign, error) {
-	filter := models.SMSCampaignFilter{Status: &status}
+// ByStatus retrieves campaigns by status with pagination
+func (r *CampaignRepositoryImpl) ByStatus(ctx context.Context, status models.CampaignStatus, limit, offset int) ([]*models.Campaign, error) {
+	filter := models.CampaignFilter{Status: &status}
 	return r.ByFilter(ctx, filter, "created_at DESC", limit, offset)
 }
 
-// Update updates an SMS campaign
-func (r *SMSCampaignRepositoryImpl) Update(ctx context.Context, campaign models.SMSCampaign) error {
+// Update updates an campaign
+func (r *CampaignRepositoryImpl) Update(ctx context.Context, campaign models.Campaign) error {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -127,8 +127,8 @@ func (r *SMSCampaignRepositoryImpl) Update(ctx context.Context, campaign models.
 	return nil
 }
 
-// UpdateStatus updates only the status of an SMS campaign
-func (r *SMSCampaignRepositoryImpl) UpdateStatus(ctx context.Context, id uint, status models.SMSCampaignStatus) error {
+// UpdateStatus updates only the status of an campaign
+func (r *CampaignRepositoryImpl) UpdateStatus(ctx context.Context, id uint, status models.CampaignStatus) error {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -145,7 +145,7 @@ func (r *SMSCampaignRepositoryImpl) UpdateStatus(ctx context.Context, id uint, s
 	}
 
 	now := utils.UTCNow()
-	err = db.Model(&models.SMSCampaign{}).
+	err = db.Model(&models.Campaign{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
 			"status":     status,
@@ -159,9 +159,9 @@ func (r *SMSCampaignRepositoryImpl) UpdateStatus(ctx context.Context, id uint, s
 	return nil
 }
 
-// CountByCustomerID counts SMS campaigns by customer ID
-func (r *SMSCampaignRepositoryImpl) CountByCustomerID(ctx context.Context, customerID uint) (int, error) {
-	filter := models.SMSCampaignFilter{CustomerID: &customerID}
+// CountByCustomerID counts campaigns by customer ID
+func (r *CampaignRepositoryImpl) CountByCustomerID(ctx context.Context, customerID uint) (int, error) {
+	filter := models.CampaignFilter{CustomerID: &customerID}
 	count, err := r.Count(ctx, filter)
 	if err != nil {
 		return 0, err
@@ -169,9 +169,9 @@ func (r *SMSCampaignRepositoryImpl) CountByCustomerID(ctx context.Context, custo
 	return int(count), nil
 }
 
-// CountByStatus counts SMS campaigns by status
-func (r *SMSCampaignRepositoryImpl) CountByStatus(ctx context.Context, status models.SMSCampaignStatus) (int, error) {
-	filter := models.SMSCampaignFilter{Status: &status}
+// CountByStatus counts campaigns by status
+func (r *CampaignRepositoryImpl) CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error) {
+	filter := models.CampaignFilter{Status: &status}
 	count, err := r.Count(ctx, filter)
 	if err != nil {
 		return 0, err
@@ -180,26 +180,26 @@ func (r *SMSCampaignRepositoryImpl) CountByStatus(ctx context.Context, status mo
 }
 
 // GetPendingApproval retrieves campaigns waiting for approval
-func (r *SMSCampaignRepositoryImpl) GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.SMSCampaign, error) {
-	status := models.SMSCampaignStatusWaitingForApproval
-	filter := models.SMSCampaignFilter{Status: &status}
+func (r *CampaignRepositoryImpl) GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.Campaign, error) {
+	status := models.CampaignStatusWaitingForApproval
+	filter := models.CampaignFilter{Status: &status}
 	return r.ByFilter(ctx, filter, "created_at ASC", limit, offset)
 }
 
 // GetScheduledCampaigns retrieves campaigns scheduled between the given times
-func (r *SMSCampaignRepositoryImpl) GetScheduledCampaigns(ctx context.Context, from, to time.Time) ([]*models.SMSCampaign, error) {
-	filter := models.SMSCampaignFilter{
+func (r *CampaignRepositoryImpl) GetScheduledCampaigns(ctx context.Context, from, to time.Time) ([]*models.Campaign, error) {
+	filter := models.CampaignFilter{
 		ScheduleAfter:  &from,
 		ScheduleBefore: &to,
 	}
 	return r.ByFilter(ctx, filter, "schedule_at ASC", 0, 0)
 }
 
-// ByFilter retrieves SMS campaigns based on filter criteria
-func (r *SMSCampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.SMSCampaignFilter, orderBy string, limit, offset int) ([]*models.SMSCampaign, error) {
+// ByFilter retrieves campaigns based on filter criteria
+func (r *CampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.CampaignFilter, orderBy string, limit, offset int) ([]*models.Campaign, error) {
 	db := r.getDB(ctx)
 
-	var campaigns []*models.SMSCampaign
+	var campaigns []*models.Campaign
 	query := r.applyFilter(db, filter)
 
 	// Apply ordering
@@ -227,12 +227,12 @@ func (r *SMSCampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.
 	return campaigns, nil
 }
 
-// Count returns the number of SMS campaigns matching the filter
-func (r *SMSCampaignRepositoryImpl) Count(ctx context.Context, filter models.SMSCampaignFilter) (int64, error) {
+// Count returns the number of campaigns matching the filter
+func (r *CampaignRepositoryImpl) Count(ctx context.Context, filter models.CampaignFilter) (int64, error) {
 	db := r.getDB(ctx)
 
 	var count int64
-	var campaign models.SMSCampaign
+	var campaign models.Campaign
 	query := r.applyFilter(db.Model(&campaign), filter)
 
 	err := query.Count(&count).Error
@@ -243,8 +243,8 @@ func (r *SMSCampaignRepositoryImpl) Count(ctx context.Context, filter models.SMS
 	return count, nil
 }
 
-// Exists checks if any SMS campaign matching the filter exists
-func (r *SMSCampaignRepositoryImpl) Exists(ctx context.Context, filter models.SMSCampaignFilter) (bool, error) {
+// Exists checks if any campaign matching the filter exists
+func (r *CampaignRepositoryImpl) Exists(ctx context.Context, filter models.CampaignFilter) (bool, error) {
 	count, err := r.Count(ctx, filter)
 	if err != nil {
 		return false, err
@@ -254,7 +254,7 @@ func (r *SMSCampaignRepositoryImpl) Exists(ctx context.Context, filter models.SM
 }
 
 // applyFilter applies filter conditions to the GORM query
-func (r *SMSCampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.SMSCampaignFilter) *gorm.DB {
+func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.CampaignFilter) *gorm.DB {
 	if filter.ID != nil {
 		db = db.Where("id = ?", *filter.ID)
 	}

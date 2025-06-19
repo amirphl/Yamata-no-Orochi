@@ -80,19 +80,19 @@ type AuditLogRepository interface {
 	ListSecurityEvents(ctx context.Context, limit, offset int) ([]*models.AuditLog, error)
 }
 
-// SMSCampaignRepository defines the interface for SMS campaign data access
-type SMSCampaignRepository interface {
-	Repository[models.SMSCampaign, models.SMSCampaignFilter]
-	ByID(ctx context.Context, id uint) (*models.SMSCampaign, error)
-	ByUUID(ctx context.Context, uuid string) (*models.SMSCampaign, error)
-	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.SMSCampaign, error)
-	ByStatus(ctx context.Context, status models.SMSCampaignStatus, limit, offset int) ([]*models.SMSCampaign, error)
-	Update(ctx context.Context, campaign models.SMSCampaign) error
-	UpdateStatus(ctx context.Context, id uint, status models.SMSCampaignStatus) error
+// CampaignRepository defines the interface for campaign data access
+type CampaignRepository interface {
+	Repository[models.Campaign, models.CampaignFilter]
+	ByID(ctx context.Context, id uint) (*models.Campaign, error)
+	ByUUID(ctx context.Context, uuid string) (*models.Campaign, error)
+	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Campaign, error)
+	ByStatus(ctx context.Context, status models.CampaignStatus, limit, offset int) ([]*models.Campaign, error)
+	Update(ctx context.Context, campaign models.Campaign) error
+	UpdateStatus(ctx context.Context, id uint, status models.CampaignStatus) error
 	CountByCustomerID(ctx context.Context, customerID uint) (int, error)
-	CountByStatus(ctx context.Context, status models.SMSCampaignStatus) (int, error)
-	GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.SMSCampaign, error)
-	GetScheduledCampaigns(ctx context.Context, from, to time.Time) ([]*models.SMSCampaign, error)
+	CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error)
+	GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.Campaign, error)
+	GetScheduledCampaigns(ctx context.Context, from, to time.Time) ([]*models.Campaign, error)
 }
 
 // WalletRepository defines the interface for wallet data access

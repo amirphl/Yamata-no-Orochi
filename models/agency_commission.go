@@ -21,7 +21,7 @@ const (
 type CommissionType string
 
 const (
-	CommissionTypeCampaignCreation  CommissionType = "campaign_creation"  // Commission from SMS campaign creation
+	CommissionTypeCampaignCreation  CommissionType = "campaign_creation"  // Commission from campaign creation
 	CommissionTypeCampaignRejection CommissionType = "campaign_rejection" // Commission adjustment from rejected campaigns
 	CommissionTypeReferral          CommissionType = "referral"           // Commission from user referrals
 	CommissionTypeService           CommissionType = "service"            // Commission from other services
@@ -47,7 +47,7 @@ type AgencyCommission struct {
 
 	// Source transaction information
 	SourceTransactionID uint  `gorm:"index" json:"source_transaction_id"` // Transaction that generated commission
-	SourceCampaignID    *uint `gorm:"index" json:"source_campaign_id"`    // SMS campaign if applicable
+	SourceCampaignID    *uint `gorm:"index" json:"source_campaign_id"`    // Campaign if applicable
 
 	// Commission metadata
 	Description string         `gorm:"type:text" json:"description"`
@@ -67,7 +67,7 @@ type AgencyCommission struct {
 	Customer           Customer     `gorm:"foreignKey:CustomerID;constraint:OnDelete:CASCADE" json:"customer,omitempty"`
 	Wallet             Wallet       `gorm:"foreignKey:WalletID;constraint:OnDelete:CASCADE" json:"wallet,omitempty"`
 	SourceTransaction  Transaction  `gorm:"foreignKey:SourceTransactionID;constraint:OnDelete:SET NULL" json:"source_transaction,omitempty"`
-	SourceCampaign     SMSCampaign  `gorm:"foreignKey:SourceCampaignID;constraint:OnDelete:SET NULL" json:"source_campaign,omitempty"`
+	SourceCampaign     Campaign     `gorm:"foreignKey:SourceCampaignID;constraint:OnDelete:SET NULL" json:"source_campaign,omitempty"`
 	PaymentTransaction *Transaction `gorm:"foreignKey:PaymentTransactionID;constraint:OnDelete:SET NULL" json:"payment_transaction,omitempty"`
 }
 

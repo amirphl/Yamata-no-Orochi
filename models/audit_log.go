@@ -52,7 +52,7 @@ const (
 	AuditActionOTPExpired             = "otp_expired"
 	AuditActionOTPResent              = "otp_resent"
 
-	// SMS Campaign actions
+	// Campaign actions
 	AuditActionCampaignCreated        = "campaign_created"
 	AuditActionCampaignCreationFailed = "campaign_creation_failed"
 	AuditActionCampaignUpdated        = "campaign_updated"
@@ -71,8 +71,8 @@ const (
 	AuditActionTransactionHistoryRetrieved = "transaction_history_retrieved"
 
 	// Agency discount actions
-	AuditActionCreateDiscountByAgencyFailed           = "create_discount_by_agency_failed"
-	AuditActionCreateDiscountByAgencyCompleted        = "create_discount_by_agency_completed"
+	AuditActionCreateDiscountByAgencyFailed    = "create_discount_by_agency_failed"
+	AuditActionCreateDiscountByAgencyCompleted = "create_discount_by_agency_completed"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries

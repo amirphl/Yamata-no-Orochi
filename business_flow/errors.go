@@ -39,7 +39,7 @@ var (
 
 	ErrAlreadyVerified = errors.New("already verified")
 
-	// SMS Campaign-related errors
+	// Campaign-related errors
 	ErrCampaignNotFound             = errors.New("campaign not found")
 	ErrCampaignAccessDenied         = errors.New("campaign access denied")
 	ErrCampaignUpdateNotAllowed     = errors.New("campaign update not allowed")

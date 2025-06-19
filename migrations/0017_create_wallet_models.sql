@@ -22,7 +22,6 @@ CREATE INDEX IF NOT EXISTS idx_wallets_deleted_at ON wallets(deleted_at);
 CREATE TYPE transaction_type_enum AS ENUM (
     'deposit',
     'withdrawal',
-    'launch_campaign',
     'freeze',
     'unfreeze',
     'lock',
