@@ -136,12 +136,12 @@ func (s *TokenServiceImpl) GenerateTokens(customerID uint) (accessToken, refresh
 	// Generate unique token IDs
 	accessTokenID, err := generateTokenID()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate access token ID: %w", err)
+		return "", "", err
 	}
 
 	refreshTokenID, err := generateTokenID()
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate refresh token ID: %w", err)
+		return "", "", err
 	}
 
 	// Generate access token
@@ -157,7 +157,7 @@ func (s *TokenServiceImpl) GenerateTokens(customerID uint) (accessToken, refresh
 
 	accessToken, err = s.generateToken(accessClaims)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate access token: %w", err)
+		return "", "", err
 	}
 
 	// Generate refresh token
@@ -173,7 +173,7 @@ func (s *TokenServiceImpl) GenerateTokens(customerID uint) (accessToken, refresh
 
 	refreshToken, err = s.generateToken(refreshClaims)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to generate refresh token: %w", err)
+		return "", "", err
 	}
 
 	return accessToken, refreshToken, nil
@@ -348,7 +348,7 @@ func (s *TokenServiceImpl) generateToken(claims jwt.MapClaims) (string, error) {
 	}
 
 	if err != nil {
-		return "", fmt.Errorf("failed to sign token: %w", err)
+		return "", err
 	}
 
 	return signedString, nil
