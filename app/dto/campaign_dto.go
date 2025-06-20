@@ -4,8 +4,8 @@ import (
 	"time"
 )
 
-// CreateSMSCampaignRequest represents the request to create a new SMS campaign
-type CreateSMSCampaignRequest struct {
+// CreateCampaignRequest represents the request to create a new campaign
+type CreateCampaignRequest struct {
 	CustomerID uint       `json:"-"`
 	Title      *string    `json:"title,omitempty"`
 	Segment    *string    `json:"segment,omitempty"`
@@ -19,16 +19,17 @@ type CreateSMSCampaignRequest struct {
 	Budget     *uint64    `json:"budget,omitempty"`
 }
 
-// CreateSMSCampaignResponse represents the response to create a new SMS campaign
-type CreateSMSCampaignResponse struct {
+// CreateCampaignResponse represents the response to create a new campaign
+type CreateCampaignResponse struct {
 	Message   string `json:"message"`
 	UUID      string `json:"uuid"`
 	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
 }
 
-// UpdateSMSCampaignRequest represents the request to update an existing SMS campaign
-type UpdateSMSCampaignRequest struct {
+// UpdateCampaignRequest represents the request to update an existing campaign
+// TODO: validate length
+type UpdateCampaignRequest struct {
 	UUID       string     `json:"-"`
 	CustomerID uint       `json:"-"`
 	Title      *string    `json:"title,omitempty"`
@@ -41,21 +42,22 @@ type UpdateSMSCampaignRequest struct {
 	ScheduleAt *time.Time `json:"scheduleat,omitempty"`
 	LineNumber *string    `json:"line_number,omitempty"`
 	Budget     *uint64    `json:"budget,omitempty"`
+	Finalize   *bool      `json:"finalize,omitempty"`
 }
 
-// UpdateSMSCampaignResponse represents the response to update an existing SMS campaign
-type UpdateSMSCampaignResponse struct {
+// UpdateCampaignResponse represents the response to update an existing campaign
+type UpdateCampaignResponse struct {
 	Message string `json:"message"`
 }
 
-// GetSMSCampaignRequest represents the request to get an existing SMS campaign
-type GetSMSCampaignRequest struct {
+// GetCampaignRequest represents the request to get an existing campaign
+type GetCampaignRequest struct {
 	UUID       string `json:"-"`
 	CustomerID uint   `json:"-"`
 }
 
-// GetSMSCampaignResponse represents the SMS campaign specification in responses
-type GetSMSCampaignResponse struct {
+// GetCampaignResponse represents the campaign specification in responses
+type GetCampaignResponse struct {
 	UUID       string     `json:"uuid"`
 	Status     string     `json:"status"`
 	CreatedAt  time.Time  `json:"created_at"`
@@ -73,7 +75,7 @@ type GetSMSCampaignResponse struct {
 	Comment    *string    `json:"comment,omitempty"`
 }
 
-// CalculateCampaignCapacityRequest represents the request to calculate the capacity of an SMS campaign
+// CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
 type CalculateCampaignCapacityRequest struct {
 	Title      *string    `json:"title,omitempty"`
 	Segment    *string    `json:"segment,omitempty"`
@@ -87,13 +89,13 @@ type CalculateCampaignCapacityRequest struct {
 	Budget     *uint64    `json:"budget,omitempty"`
 }
 
-// CalculateCampaignCapacityResponse represents the response to calculate the capacity of an SMS campaign
+// CalculateCampaignCapacityResponse represents the response to calculate the capacity of an campaign
 type CalculateCampaignCapacityResponse struct {
 	Message  string `json:"message"`
 	Capacity uint64 `json:"capacity"`
 }
 
-// CalculateCampaignCostRequest represents the request to calculate the cost of an SMS campaign
+// CalculateCampaignCostRequest represents the request to calculate the cost of an campaign
 type CalculateCampaignCostRequest struct {
 	Title      *string    `json:"title,omitempty"`
 	Segment    *string    `json:"segment,omitempty"`
@@ -107,49 +109,27 @@ type CalculateCampaignCostRequest struct {
 	Budget     *uint64    `json:"budget,omitempty"`
 }
 
-// CalculateCampaignCostResponse represents the response to calculate the cost of an SMS campaign
+// CalculateCampaignCostResponse represents the response to calculate the cost of an campaign
 type CalculateCampaignCostResponse struct {
 	Message      string `json:"message"`
-	SubTotal     uint64 `json:"sub_total"`
-	Tax          uint64 `json:"tax"`
 	Total        uint64 `json:"total"`
 	MsgTarget    uint64 `json:"msg_target"`
 	MaxMsgTarget uint64 `json:"max_msg_target"`
 }
 
-// GetWalletBalanceRequest represents the request to get user wallet balance
-type GetWalletBalanceRequest struct {
-	CustomerID uint `json:"-"`
-}
-
-// GetWalletBalanceResponse represents the response with user wallet balance information
-type GetWalletBalanceResponse struct {
-	Message             string `json:"message"`
-	Free                uint64 `json:"free"`
-	Locked              uint64 `json:"locked"`
-	Frozen              uint64 `json:"frozen"`
-	Total               uint64 `json:"total"`
-	Currency            string `json:"currency"`
-	LastUpdated         string `json:"last_updated"`
-	PendingTransactions uint64 `json:"pending_transactions"`
-	MinimumBalance      uint64 `json:"minimum_balance"`
-	CreditLimit         uint64 `json:"credit_limit"`
-	BalanceStatus       string `json:"balance_status"`
-}
-
-// ListSMSCampaignsFilter represents filter criteria for listing campaigns in request layer
-type ListSMSCampaignsFilter struct {
+// ListCampaignsFilter represents filter criteria for listing campaigns in request layer
+type ListCampaignsFilter struct {
 	Title  *string `json:"title,omitempty"`
 	Status *string `json:"status,omitempty"`
 }
 
-// ListSMSCampaignsRequest represents a paginated list request for user's campaigns
-type ListSMSCampaignsRequest struct {
-	CustomerID uint                    `json:"-"`
-	Page       int                     `json:"page"`
-	Limit      int                     `json:"limit"`
-	OrderBy    string                  `json:"orderby"` // newest, oldest
-	Filter     *ListSMSCampaignsFilter `json:"filter,omitempty"`
+// ListCampaignsRequest represents a paginated list request for user's campaigns
+type ListCampaignsRequest struct {
+	CustomerID uint                 `json:"-"`
+	Page       int                  `json:"page"`
+	Limit      int                  `json:"limit"`
+	OrderBy    string               `json:"orderby"` // newest, oldest
+	Filter     *ListCampaignsFilter `json:"filter,omitempty"`
 }
 
 // PaginationInfo contains pagination metadata
@@ -160,9 +140,9 @@ type PaginationInfo struct {
 	TotalPages int   `json:"total_pages"`
 }
 
-// ListSMSCampaignsResponse represents a paginated list of campaigns
-type ListSMSCampaignsResponse struct {
-	Message    string                   `json:"message"`
-	Items      []GetSMSCampaignResponse `json:"items"`
-	Pagination PaginationInfo           `json:"pagination"`
+// ListCampaignsResponse represents a paginated list of campaigns
+type ListCampaignsResponse struct {
+	Message    string                `json:"message"`
+	Items      []GetCampaignResponse `json:"items"`
+	Pagination PaginationInfo        `json:"pagination"`
 }
