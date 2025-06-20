@@ -12,6 +12,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 )
 
 // ClientMetadata holds all client-related information for audit logging and session tracking
@@ -195,29 +196,29 @@ func getAgency(ctx context.Context, customerRepo repository.CustomerRepository, 
 	return *agency, nil
 }
 
-func getCampaign(ctx context.Context, campaignRepo repository.SMSCampaignRepository, campaignUUID string, customerID uint) (models.SMSCampaign, error) {
+func getCampaign(ctx context.Context, campaignRepo repository.CampaignRepository, campaignUUID string, customerID uint) (models.Campaign, error) {
 	// Get existing campaign
 	campaign, err := campaignRepo.ByUUID(ctx, campaignUUID)
 	if err != nil {
-		return models.SMSCampaign{}, err
+		return models.Campaign{}, err
 	}
 	if campaign == nil {
-		return models.SMSCampaign{}, ErrCampaignNotFound
+		return models.Campaign{}, ErrCampaignNotFound
 	}
 
 	// Verify ownership
 	if campaign.CustomerID != customerID {
-		return models.SMSCampaign{}, ErrCampaignAccessDenied
+		return models.Campaign{}, ErrCampaignAccessDenied
 	}
 
 	return *campaign, nil
 }
 
 // canUpdateCampaign checks if a campaign can be updated based on its current status
-func canUpdateCampaign(status models.SMSCampaignStatus) bool {
+func canUpdateCampaign(status models.CampaignStatus) bool {
 	// Only campaigns with 'initiated' or 'in-progress' status can be updated
 	// Campaigns with 'waiting-for-approval', 'approved', or 'rejected' status cannot be updated
-	return status == models.SMSCampaignStatusInitiated || status == models.SMSCampaignStatusInProgress
+	return status == models.CampaignStatusInitiated || status == models.CampaignStatusInProgress
 }
 
 func getWallet(ctx context.Context, walletRepo repository.WalletRepository, customerID uint) (models.Wallet, error) {
@@ -289,4 +290,33 @@ func validateShebaNumber(shebaNumber *string) (string, error) {
 	}
 
 	return shebaNumberStr, nil
+}
+
+func createWalletWithInitialSnapshot(
+	ctx context.Context,
+	walletRepo repository.WalletRepository,
+	customerID uint,
+	source string,
+) (models.Wallet, error) {
+	meta := map[string]any{
+		"created_via": source,
+		"created_at":  utils.UTCNow(),
+	}
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return models.Wallet{}, err
+	}
+
+	// Create new wallet for customer
+	wallet := models.Wallet{
+		UUID:       uuid.New(),
+		CustomerID: customerID,
+		Metadata:   json.RawMessage(b),
+	}
+
+	if err := walletRepo.SaveWithInitialSnapshot(ctx, &wallet); err != nil {
+		return models.Wallet{}, err
+	}
+
+	return wallet, nil
 }
