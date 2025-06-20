@@ -472,30 +472,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/health": {
-            "get": {
-                "description": "Check the health status of the API",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Health"
-                ],
-                "summary": "Health Check",
-                "responses": {
-                    "200": {
-                        "description": "Service is healthy",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/sms-campaigns": {
+        "/api/v1/campaigns": {
             "get": {
                 "description": "Retrieve the authenticated user's campaigns with pagination, ordering, and filters",
                 "consumes": [
@@ -505,9 +482,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "SMS Campaigns"
+                    "Campaigns"
                 ],
-                "summary": "List SMS Campaigns",
+                "summary": "List Campaigns",
                 "parameters": [
                     {
                         "type": "integer",
@@ -555,7 +532,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.ListSMSCampaignsResponse"
+                                            "$ref": "#/definitions/dto.ListCampaignsResponse"
                                         }
                                     }
                                 }
@@ -583,7 +560,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Create a new SMS campaign with the specified parameters",
+                "description": "Create a new campaign with the specified parameters",
                 "consumes": [
                     "application/json"
                 ],
@@ -591,17 +568,17 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "SMS Campaigns"
+                    "Campaigns"
                 ],
-                "summary": "Create SMS Campaign",
+                "summary": "Create Campaign",
                 "parameters": [
                     {
-                        "description": "SMS campaign creation data",
+                        "description": "Campaign creation data",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/dto.CreateSMSCampaignRequest"
+                            "$ref": "#/definitions/dto.CreateCampaignRequest"
                         }
                     }
                 ],
@@ -617,7 +594,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.CreateSMSCampaignResponse"
+                                            "$ref": "#/definitions/dto.CreateCampaignResponse"
                                         }
                                     }
                                 }
@@ -645,9 +622,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/sms-campaigns/calculate-capacity": {
+        "/api/v1/campaigns/calculate-capacity": {
             "post": {
-                "description": "Calculate the potential reach and capacity of an SMS campaign based on parameters",
+                "description": "Calculate the potential reach and capacity of an campaign based on parameters",
                 "consumes": [
                     "application/json"
                 ],
@@ -655,9 +632,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "SMS Campaigns"
+                    "Campaigns"
                 ],
-                "summary": "Calculate SMS Campaign Capacity",
+                "summary": "Calculate Campaign Capacity",
                 "parameters": [
                     {
                         "description": "Campaign parameters for capacity calculation",
@@ -703,9 +680,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/sms-campaigns/calculate-cost": {
+        "/api/v1/campaigns/calculate-cost": {
             "post": {
-                "description": "Calculate the total cost of an SMS campaign based on content, target audience, and pricing factors",
+                "description": "Calculate the total cost of an campaign based on content, target audience, and pricing factors",
                 "consumes": [
                     "application/json"
                 ],
@@ -713,9 +690,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "SMS Campaigns"
+                    "Campaigns"
                 ],
-                "summary": "Calculate SMS Campaign Cost",
+                "summary": "Calculate Campaign Cost",
                 "parameters": [
                     {
                         "description": "Campaign parameters for cost calculation",
@@ -761,9 +738,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/sms-campaigns/{uuid}": {
+        "/api/v1/campaigns/{uuid}": {
             "put": {
-                "description": "Update an existing SMS campaign with the specified parameters",
+                "description": "Update an existing campaign with the specified parameters",
                 "consumes": [
                     "application/json"
                 ],
@@ -771,9 +748,9 @@ const docTemplate = `{
                     "application/json"
                 ],
                 "tags": [
-                    "SMS Campaigns"
+                    "Campaigns"
                 ],
-                "summary": "Update SMS Campaign",
+                "summary": "Update Campaign",
                 "parameters": [
                     {
                         "type": "string",
@@ -783,12 +760,12 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "SMS campaign update data",
+                        "description": "Campaign update data",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/dto.UpdateSMSCampaignRequest"
+                            "$ref": "#/definitions/dto.UpdateCampaignRequest"
                         }
                     }
                 ],
@@ -804,7 +781,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.UpdateSMSCampaignResponse"
+                                            "$ref": "#/definitions/dto.UpdateCampaignResponse"
                                         }
                                     }
                                 }
@@ -837,6 +814,496 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/health": {
+            "get": {
+                "description": "Check the health status of the API",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Health Check",
+                "responses": {
+                    "200": {
+                        "description": "Service is healthy",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/payments/callback": {
+            "post": {
+                "description": "Handles the callback from the payment gateway (Atipay)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/html"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Payment Callback",
+                "parameters": [
+                    {
+                        "description": "Callback data from Atipay",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AtipayRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "HTML payment result page",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Payment request not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Payment already processed or expired",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/payments/charge-wallet": {
+            "post": {
+                "description": "Charge a customer's wallet with the specified amount using Atipay payment gateway",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Charge Wallet",
+                "parameters": [
+                    {
+                        "description": "Wallet charging data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.ChargeWalletRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Wallet charged successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ChargeWalletResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/payments/history": {
+            "get": {
+                "description": "Retrieve paginated transaction history for the authenticated customer",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Get Transaction History",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Number of items per page (default: 20, max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date filter (ISO 8601 format)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date filter (ISO 8601 format)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Transaction type filter",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Transaction status filter",
+                        "name": "status",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Transaction history retrieved successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.TransactionHistoryResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/agency/customers": {
+            "get": {
+                "description": "Retrieve per-customer aggregated stats of campaigns for an agency with pagination and filters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Get Agency Customer Report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Sorting (name_asc|name_desc|sent_desc|share_desc)",
+                        "name": "orderby",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (RFC3339)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (RFC3339)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by customer name (first+last)",
+                        "name": "name",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AgencyCustomerReportResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/agency/customers/{customer_id}/discounts": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "List Customer Discounts Under Agency",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Customer ID",
+                        "name": "customer_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListAgencyCustomerDiscountsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/agency/discounts": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "Create Agency Discount",
+                "parameters": [
+                    {
+                        "description": "Create discount payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreateAgencyDiscountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CreateAgencyDiscountResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reports/agency/discounts/active": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "List Active Discounts of Agency",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by user name (first+last)",
+                        "name": "name",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListAgencyActiveDiscountsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -882,6 +1349,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.APIResponse"
                         }
                     },
+                    "404": {
+                        "description": "Wallet or snapshot not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -906,6 +1379,126 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AgencyActiveDiscountItem": {
+            "type": "object",
+            "properties": {
+                "company_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "customer_uuid": {
+                    "type": "string"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "rate": {
+                    "type": "number"
+                }
+            }
+        },
+        "dto.AgencyCustomerDiscountItem": {
+            "type": "object",
+            "properties": {
+                "agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "rate": {
+                    "type": "number"
+                },
+                "total_sent": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AgencyCustomerReportItem": {
+            "type": "object",
+            "properties": {
+                "company_name": {
+                    "type": "string"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "total_agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "total_sent": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AgencyCustomerReportResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AgencyCustomerReportItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "sum_total_agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "sum_total_sent": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AtipayRequest": {
+            "type": "object",
+            "properties": {
+                "maskedPan": {
+                    "description": "Masked card number used for payment",
+                    "type": "string"
+                },
+                "referenceNumber": {
+                    "description": "Unique digital receipt (alphanumeric)",
+                    "type": "string"
+                },
+                "reservationNumber": {
+                    "description": "The unique ID originally sent by merchant (our invoice number)",
+                    "type": "string"
+                },
+                "rrn": {
+                    "description": "Transaction reference number",
+                    "type": "string"
+                },
+                "state": {
+                    "description": "Transaction status (1=CanceledByUser, 2=OK, 3=Failed, etc.)",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Payment status code",
+                    "type": "string"
+                },
+                "terminalId": {
+                    "description": "Terminal number used for payment",
+                    "type": "string"
+                },
+                "traceNumber": {
+                    "description": "Tracking number generated by payment gateway",
+                    "type": "string"
+                }
+            }
+        },
         "dto.AuthCustomerDTO": {
             "type": "object",
             "properties": {
@@ -927,7 +1520,7 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "integer",
-                    "example": 123
+                    "example": 1
                 },
                 "is_active": {
                     "type": "boolean",
@@ -956,10 +1549,6 @@ const docTemplate = `{
                 "representative_mobile": {
                     "type": "string",
                     "example": "+989123456789"
-                },
-                "uuid": {
-                    "type": "string",
-                    "example": "550e8400-e29b-41d4-a716-446655440000"
                 }
             }
         },
@@ -1068,18 +1657,68 @@ const docTemplate = `{
                 "msg_target": {
                     "type": "integer"
                 },
-                "sub_total": {
-                    "type": "integer"
-                },
-                "tax": {
-                    "type": "integer"
-                },
                 "total": {
                     "type": "integer"
                 }
             }
         },
-        "dto.CreateSMSCampaignRequest": {
+        "dto.ChargeWalletRequest": {
+            "type": "object",
+            "required": [
+                "amount"
+            ],
+            "properties": {
+                "amount": {
+                    "description": "Amount in Tomans (minimum 10000, maximum 1000000000)",
+                    "type": "integer",
+                    "maximum": 1000000000,
+                    "minimum": 100000
+                }
+            }
+        },
+        "dto.ChargeWalletResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CreateAgencyDiscountRequest": {
+            "type": "object",
+            "required": [
+                "customer_id",
+                "rate"
+            ],
+            "properties": {
+                "customer_id": {
+                    "type": "integer"
+                },
+                "rate": {
+                    "type": "number",
+                    "maximum": 0.5,
+                    "minimum": 0
+                }
+            }
+        },
+        "dto.CreateAgencyDiscountResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "rate": {
+                    "type": "number"
+                }
+            }
+        },
+        "dto.CreateCampaignRequest": {
             "type": "object",
             "properties": {
                 "adlink": {
@@ -1120,7 +1759,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.CreateSMSCampaignResponse": {
+        "dto.CreateCampaignResponse": {
             "type": "object",
             "properties": {
                 "created_at": {
@@ -1151,7 +1790,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.GetSMSCampaignResponse": {
+        "dto.GetCampaignResponse": {
             "type": "object",
             "properties": {
                 "adlink": {
@@ -1213,7 +1852,7 @@ const docTemplate = `{
                 "balance_status": {
                     "type": "string"
                 },
-                "credit_limit": {
+                "credit": {
                     "type": "integer"
                 },
                 "currency": {
@@ -1245,13 +1884,41 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.ListSMSCampaignsResponse": {
+        "dto.ListAgencyActiveDiscountsResponse": {
             "type": "object",
             "properties": {
                 "items": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/dto.GetSMSCampaignResponse"
+                        "$ref": "#/definitions/dto.AgencyActiveDiscountItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ListAgencyCustomerDiscountsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AgencyCustomerDiscountItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ListCampaignsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.GetCampaignResponse"
                     }
                 },
                 "message": {
@@ -1357,7 +2024,7 @@ const docTemplate = `{
                 },
                 "customer_id": {
                     "type": "integer",
-                    "example": 123
+                    "example": 1
                 },
                 "new_password": {
                     "type": "string",
@@ -1429,7 +2096,8 @@ const docTemplate = `{
                 },
                 "referrer_agency_code": {
                     "description": "Optional agency referral",
-                    "type": "integer"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "representative_first_name": {
                     "description": "Representative/Individual fields (required for all types)",
@@ -1442,6 +2110,10 @@ const docTemplate = `{
                 },
                 "representative_mobile": {
                     "type": "string"
+                },
+                "sheba_number": {
+                    "type": "string",
+                    "maxLength": 255
                 }
             }
         },
@@ -1463,7 +2135,110 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.UpdateSMSCampaignRequest": {
+        "dto.TransactionHistoryItem": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "description": "Amount in Tomans",
+                    "type": "integer"
+                },
+                "balance_after": {
+                    "description": "Balance after transaction",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "balance_before": {
+                    "description": "Balance before transaction",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "currency": {
+                    "description": "Currency (usually TMN)",
+                    "type": "string"
+                },
+                "datetime": {
+                    "description": "When the transaction occurred",
+                    "type": "string"
+                },
+                "external_ref": {
+                    "description": "External reference (e.g., Atipay reference)",
+                    "type": "string"
+                },
+                "metadata": {
+                    "description": "Additional transaction metadata",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "operation": {
+                    "description": "Operation name for display",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "Transaction status",
+                    "type": "string"
+                },
+                "uuid": {
+                    "description": "Transaction UUID",
+                    "type": "string"
+                }
+            }
+        },
+        "dto.TransactionHistoryPaginationInfo": {
+            "type": "object",
+            "properties": {
+                "current_page": {
+                    "description": "Current page number",
+                    "type": "integer"
+                },
+                "has_next": {
+                    "description": "Whether there's a next page",
+                    "type": "boolean"
+                },
+                "has_previous": {
+                    "description": "Whether there's a previous page",
+                    "type": "boolean"
+                },
+                "page_size": {
+                    "description": "Number of items per page",
+                    "type": "integer"
+                },
+                "total_items": {
+                    "description": "Total number of items",
+                    "type": "integer"
+                },
+                "total_pages": {
+                    "description": "Total number of pages",
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.TransactionHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "description": "List of transaction history items",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.TransactionHistoryItem"
+                    }
+                },
+                "pagination": {
+                    "description": "Pagination information",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/dto.TransactionHistoryPaginationInfo"
+                        }
+                    ]
+                }
+            }
+        },
+        "dto.UpdateCampaignRequest": {
             "type": "object",
             "properties": {
                 "adlink": {
@@ -1480,6 +2255,9 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string"
+                },
+                "finalize": {
+                    "type": "boolean"
                 },
                 "line_number": {
                     "type": "string"
@@ -1504,7 +2282,7 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.UpdateSMSCampaignResponse": {
+        "dto.UpdateCampaignResponse": {
             "type": "object",
             "properties": {
                 "message": {
