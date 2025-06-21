@@ -80,6 +80,10 @@ var (
 	// Balance snapshot errors
 	ErrBalanceSnapshotNotFound = errors.New("balance snapshot not found")
 
+	// Tax and system user errors
+	ErrSystemUserNotFound = errors.New("system user not found")
+	ErrSystemUserShebaNumberNotFound = errors.New("system user sheba number not found")
+
 	// Tax and System wallet errors
 	ErrTaxWalletNotFound                   = errors.New("tax wallet not found")
 	ErrTaxWalletBalanceSnapshotNotFound    = errors.New("tax wallet balance snapshot not found")
@@ -346,6 +350,14 @@ func IsPaymentRequestExpired(err error) bool {
 
 func IsBalanceSnapshotNotFound(err error) bool {
 	return errors.Is(err, ErrBalanceSnapshotNotFound)
+}
+
+func IsSystemUserNotFound(err error) bool {
+	return errors.Is(err, ErrSystemUserNotFound)
+}
+
+func IsSystemUserShebaNumberNotFound(err error) bool {
+	return errors.Is(err, ErrSystemUserShebaNumberNotFound)
 }
 
 func IsTaxWalletNotFound(err error) bool {
