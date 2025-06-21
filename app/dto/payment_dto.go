@@ -9,8 +9,8 @@ import (
 
 // ChargeWalletRequest represents the request to charge a wallet
 type ChargeWalletRequest struct {
-	Amount     uint64 `json:"amount" validate:"required,min=10000,max=1000000000"` // Amount in Tomans (minimum 10000, maximum 1000000000)
-	CustomerID uint   `json:"-"`
+	AmountWithTax uint64 `json:"amount" validate:"required,min=100000,max=1000000000"` // Amount in Tomans (minimum 10000, maximum 1000000000)
+	CustomerID    uint   `json:"-"`
 }
 
 // ChargeWalletResponse represents the response after successfully charging a wallet
@@ -34,13 +34,13 @@ type AtipayRequest struct {
 
 // GetTransactionHistoryRequest represents the request to retrieve transaction history
 type GetTransactionHistoryRequest struct {
-	CustomerID uint       `json:"customer_id" validate:"required"`    // Customer ID (from authenticated context)
+	CustomerID uint       `json:"-"`                                  // Customer ID (from authenticated context)
 	Page       uint       `json:"page" validate:"min=1"`              // Page number (1-based)
 	PageSize   uint       `json:"page_size" validate:"min=1,max=100"` // Number of items per page
 	StartDate  *time.Time `json:"start_date,omitempty"`               // Optional start date filter
 	EndDate    *time.Time `json:"end_date,omitempty"`                 // Optional end date filter
-	Type       *string    `json:"type,omitempty"`                     // Optional transaction type filter
-	Status     *string    `json:"status,omitempty"`                   // Optional transaction status filter
+	Type       *string    `json:"type,omitempty"`                     // Optional transaction type filter // TODO: one of
+	Status     *string    `json:"status,omitempty"`                   // Optional transaction status filter // TODO: one of
 }
 
 // TransactionHistoryItem represents a single transaction history item
@@ -94,4 +94,24 @@ var TransactionStatusDisplay = map[models.TransactionStatus]string{
 	models.TransactionStatusFailed:    "Failed",
 	models.TransactionStatusCancelled: "Cancelled",
 	models.TransactionStatusReversed:  "Reversed",
+}
+
+// GetWalletBalanceRequest represents the request to get user wallet balance
+type GetWalletBalanceRequest struct {
+	CustomerID uint `json:"-"`
+}
+
+// GetWalletBalanceResponse represents the response with user wallet balance information
+type GetWalletBalanceResponse struct {
+	Message             string `json:"message"`
+	Free                uint64 `json:"free"`
+	Locked              uint64 `json:"locked"`
+	Frozen              uint64 `json:"frozen"`
+	Credit              uint64 `json:"credit"`
+	Total               uint64 `json:"total"`
+	Currency            string `json:"currency"`
+	LastUpdated         string `json:"last_updated"`
+	PendingTransactions uint64 `json:"pending_transactions"`
+	MinimumBalance      uint64 `json:"minimum_balance"`
+	BalanceStatus       string `json:"balance_status"`
 }
