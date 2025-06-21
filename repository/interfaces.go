@@ -121,7 +121,7 @@ type TransactionRepository interface {
 	GetPendingTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
 	GetCompletedTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
 	// Reports
-	AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, customerNameLike string, orderBy string) ([]*AgencyCustomerTransactionSum, error)
+	AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, nameLike string, startDate, endDate *time.Time, orderBy string) ([]*AgencyCustomerTransactionSum, error)
 	AggregateAgencyTransactionsByDiscounts(ctx context.Context, agencyID uint, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error)
 }
 

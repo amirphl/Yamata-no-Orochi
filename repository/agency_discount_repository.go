@@ -118,8 +118,8 @@ func (r *AgencyDiscountRepositoryImpl) ListActiveDiscountsWithCustomer(ctx conte
 	allowed := map[string]string{
 		"created_desc": "ad.created_at DESC",
 		"created_asc":  "ad.created_at ASC",
-		"name_asc":     "c.representative_first_name ASC, c.representative_last_name ASC",
-		"name_desc":    "c.representative_first_name DESC, c.representative_last_name DESC",
+		"name_asc":     "c.representative_first_name ASC, c.representative_last_name ASC, c.company_name ASC",
+		"name_desc":    "c.representative_first_name DESC, c.representative_last_name DESC, c.company_name DESC",
 		"rate_desc":    "ad.discount_rate DESC",
 		"rate_asc":     "ad.discount_rate ASC",
 	}
@@ -145,7 +145,11 @@ func (r *AgencyDiscountRepositoryImpl) ListActiveDiscountsWithCustomer(ctx conte
 
 	if trimmed := strings.TrimSpace(nameLike); trimmed != "" {
 		pattern := "%" + strings.ToLower(trimmed) + "%"
-		q = q.Where("LOWER(c.representative_first_name || ' ' || c.representative_last_name || ' ' || c.company_name) LIKE ?", pattern)
+		q = q.Where(`
+				LOWER(COALESCE(c.representative_first_name, '')) LIKE ? OR
+				LOWER(COALESCE(c.representative_last_name, '')) LIKE ? OR
+				LOWER(COALESCE(c.company_name, '')) LIKE ?
+			`, pattern, pattern, pattern)
 	}
 
 	q = q.Order(order)

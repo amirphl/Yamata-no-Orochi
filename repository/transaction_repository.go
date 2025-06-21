@@ -23,7 +23,7 @@ type AgencyCustomerTransactionSum struct {
 type AgencyCustomerDiscountAggregate struct {
 	AgencyDiscountID        uint64     `json:"agency_discount_id"`
 	TotalAgencyShareWithTax uint64     `json:"total_agency_share_with_tax"`
-	Rate                    float64    `json:"rate"`
+	DiscountRate            float64    `json:"discount_rate"`
 	ExpiresAt               *time.Time `json:"expires_at"`
 	CreatedAt               time.Time  `json:"created_at"`
 }
@@ -330,7 +330,7 @@ func (r *TransactionRepositoryImpl) applyFilter(query *gorm.DB, filter models.Tr
 }
 
 // AggregateAgencyTransactionsByCustomers aggregates transaction amounts per customer under an agency based on metadata
-func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, customerNameLike string, orderBy string) ([]*AgencyCustomerTransactionSum, error) {
+func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, nameLike string, startDate, endDate *time.Time, orderBy string) ([]*AgencyCustomerTransactionSum, error) {
 	db := r.getDB(ctx)
 	rows := make([]*AgencyCustomerTransactionSum, 0)
 
@@ -351,13 +351,20 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx c
 		Select("u.id as customer_id, u.representative_first_name as first_name, u.representative_last_name as last_name, u.company_name as company_name, COALESCE(SUM(t.amount),0) as total_agency_share_with_tax").
 		Joins("JOIN customers u ON u.id = (t.metadata->>'customer_id')::bigint").
 		Where("t.customer_id = ?", agencyID).
-		Where("t.metadata->>'source' = ?", "payment_callback").
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
 		Group("u.id, u.representative_first_name, u.representative_last_name, u.company_name").
 		Order(order)
 
-	if customerNameLike != "" {
-		pattern := "%" + customerNameLike + "%"
+	if nameLike != "" {
+		pattern := "%" + nameLike + "%"
 		query = query.Where("u.representative_first_name like ? OR u.representative_last_name like ? OR u.company_name like ?", pattern, pattern, pattern)
+	}
+
+	if startDate != nil {
+		query = query.Where("t.created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		query = query.Where("t.created_at <= ?", *endDate)
 	}
 
 	if err := query.Scan(&rows).Error; err != nil {
@@ -384,12 +391,12 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByDiscounts(ctx c
 
 	query := db.
 		Table("transactions t").
-		Select("COALESCE((t.metadata->>'agency_discount_id')::bigint, 0) as agency_discount_id, COALESCE(SUM(t.amount),0) as total_agency_share_with_tax, r.rate as rate, r.expires_at as expires_at, r.created_at as created_at").
+		Select("r.id as agency_discount_id, COALESCE(SUM(t.amount),0) as total_agency_share_with_tax, r.discount_rate as discount_rate, r.expires_at as expires_at, r.created_at as created_at").
 		Joins("JOIN agency_discounts r ON r.id = (t.metadata->>'agency_discount_id')::bigint").
 		Where("t.customer_id = ?", agencyID).
 		Where("(t.metadata->>'customer_id')::bigint = ?", customerID).
-		Where("t.metadata->>'source' = ?", "payment_callback").
-		Group("(t.metadata->>'agency_discount_id')::bigint").
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
+		Group("r.id, r.discount_rate, r.expires_at, r.created_at").
 		Order(order)
 
 	if err := query.Scan(&rows).Error; err != nil {
