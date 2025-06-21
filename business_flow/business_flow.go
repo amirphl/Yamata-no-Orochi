@@ -181,6 +181,26 @@ func getCustomer(ctx context.Context, customerRepo repository.CustomerRepository
 	return *customer, nil
 }
 
+func getSystemUser(ctx context.Context, customerRepo repository.CustomerRepository, walletRepo repository.WalletRepository) (models.Customer, error) {
+	wallet, err := getSystemWallet(ctx, walletRepo)
+	if err != nil {
+		return models.Customer{}, err
+	}
+
+	customer, err := customerRepo.ByID(ctx, wallet.CustomerID)
+	if err != nil {
+		return models.Customer{}, err
+	}
+	if customer == nil {
+		return models.Customer{}, ErrSystemUserNotFound
+	}
+	if !utils.IsTrue(customer.IsActive) {
+		return models.Customer{}, ErrAccountInactive
+	}
+
+	return *customer, nil
+}
+
 func getAgency(ctx context.Context, customerRepo repository.CustomerRepository, agencyID uint) (models.Customer, error) {
 	agency, err := customerRepo.ByID(ctx, agencyID)
 	if err != nil {
@@ -228,6 +248,30 @@ func getWallet(ctx context.Context, walletRepo repository.WalletRepository, cust
 	}
 	if wallet == nil {
 		return models.Wallet{}, ErrWalletNotFound
+	}
+
+	return *wallet, nil
+}
+
+func getSystemWallet(ctx context.Context, walletRepo repository.WalletRepository) (models.Wallet, error) {
+	wallet, err := walletRepo.ByUUID(ctx, utils.SystemWalletUUID)
+	if err != nil {
+		return models.Wallet{}, err
+	}
+	if wallet == nil {
+		return models.Wallet{}, ErrSystemWalletNotFound
+	}
+
+	return *wallet, nil
+}
+
+func getTaxWallet(ctx context.Context, walletRepo repository.WalletRepository) (models.Wallet, error) {
+	wallet, err := walletRepo.ByUUID(ctx, utils.TaxWalletUUID)
+	if err != nil {
+		return models.Wallet{}, err
+	}
+	if wallet == nil {
+		return models.Wallet{}, ErrTaxWalletNotFound
 	}
 
 	return *wallet, nil
