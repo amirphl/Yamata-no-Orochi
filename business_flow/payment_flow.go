@@ -765,7 +765,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	taxAgencyShare := agencyShareWithTax - realAgencyShare
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
-	metadata, err := json.Marshal(map[string]any{
+	metadata := map[string]any{
 		"customer_id":           paymentRequest.CustomerID,
 		"agency_id":             agencyID,
 		"agency_discount_id":    agencyDiscountID,
@@ -782,14 +782,16 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		"agency_share_tax":      taxAgencyShare,
 		"customer_credit":       customerCredit,
 		"atipay_response":       atipayRequest,
-	})
-	if err != nil {
-		return err
 	}
 
 	// Update customer wallet balance
 	newCustomerFreeBalance := customerBalance.FreeBalance + real
 	newCustomerCreditBalance := customerBalance.CreditBalance + customerCredit
+	metadata["source"] = "payment_callback_increase_customer_free_plus_credit"
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
 	newCustomerBalanceSnapshot := &models.BalanceSnapshot{
 		UUID:          uuid.New(),
 		CorrelationID: paymentRequest.CorrelationID,
@@ -802,7 +804,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		TotalBalance:  newCustomerFreeBalance + newCustomerCreditBalance + customerBalance.FrozenBalance + customerBalance.LockedBalance,
 		Reason:        "wallet_recharge",
 		Description:   fmt.Sprintf("Wallet recharged via Atipay (payment request %d)", paymentRequest.ID),
-		Metadata:      metadata,
+		Metadata:      metadataJSON,
 	}
 	if err := p.balanceSnapshotRepo.Save(ctx, newCustomerBalanceSnapshot); err != nil {
 		return err
@@ -833,26 +835,31 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		ExternalRRN:       atipayRequest.RRN,
 		ExternalMaskedPAN: atipayRequest.MaskedPAN,
 		Description:       fmt.Sprintf("Wallet recharge (payment request %d)", paymentRequest.ID),
-		Metadata:          metadata,
+		Metadata:          metadataJSON,
 	}
 	if err := p.transactionRepo.Save(ctx, customerTransaction); err != nil {
 		return err
 	}
 
-	newAgencyFreeBalance := agencyBalance.FreeBalance + agencyShareWithTax
+	newAgencyLockedBalance := agencyBalance.LockedBalance + agencyShareWithTax
+	metadata["source"] = "payment_callback_increase_agency_locked_(agency_share_with_tax)"
+	metadataJSON, err = json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
 	newAgencyBalanceSnapshot := &models.BalanceSnapshot{
 		UUID:          uuid.New(),
 		CorrelationID: paymentRequest.CorrelationID,
 		WalletID:      agencyWallet.ID,
 		CustomerID:    agencyWallet.CustomerID,
-		FreeBalance:   newAgencyFreeBalance,
+		FreeBalance:   agencyBalance.FreeBalance,
 		FrozenBalance: agencyBalance.FrozenBalance,
-		LockedBalance: agencyBalance.LockedBalance,
+		LockedBalance: newAgencyLockedBalance,
 		CreditBalance: agencyBalance.CreditBalance,
-		TotalBalance:  newAgencyFreeBalance + agencyBalance.FrozenBalance + agencyBalance.LockedBalance + agencyBalance.CreditBalance,
+		TotalBalance:  agencyBalance.FreeBalance + agencyBalance.FrozenBalance + newAgencyLockedBalance + agencyBalance.CreditBalance,
 		Reason:        "agency_share_with_tax",
 		Description:   fmt.Sprintf("Agency share for payment request %d", paymentRequest.ID),
-		Metadata:      metadata,
+		Metadata:      metadataJSON,
 	}
 	if err := p.balanceSnapshotRepo.Save(ctx, newAgencyBalanceSnapshot); err != nil {
 		return err
@@ -883,7 +890,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		ExternalRRN:       atipayRequest.RRN,
 		ExternalMaskedPAN: atipayRequest.MaskedPAN,
 		Description:       fmt.Sprintf("Agency share for payment request %d", paymentRequest.ID),
-		Metadata:          metadata,
+		Metadata:          metadataJSON,
 	}
 	if err := p.transactionRepo.Save(ctx, agencyTransaction); err != nil {
 		return err
@@ -891,6 +898,11 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 
 	// Update tax wallet balance
 	newTaxLockedBalance := taxBalance.LockedBalance + taxSystemShare
+	metadata["source"] = "payment_callback_increase_tax_locked_(tax_system_share)"
+	metadataJSON, err = json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
 	newTaxBalanceSnapshot := &models.BalanceSnapshot{
 		UUID:          uuid.New(),
 		CorrelationID: paymentRequest.CorrelationID,
@@ -903,7 +915,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		TotalBalance:  taxBalance.FreeBalance + taxBalance.FrozenBalance + newTaxLockedBalance + taxBalance.CreditBalance,
 		Reason:        "tax_collection",
 		Description:   fmt.Sprintf("Tax collection for payment request %d", paymentRequest.ID),
-		Metadata:      metadata,
+		Metadata:      metadataJSON,
 	}
 	if err := p.balanceSnapshotRepo.Save(ctx, newTaxBalanceSnapshot); err != nil {
 		return err
@@ -934,7 +946,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		ExternalRRN:       atipayRequest.RRN,
 		ExternalMaskedPAN: atipayRequest.MaskedPAN,
 		Description:       fmt.Sprintf("Tax collection for payment request %d", paymentRequest.ID),
-		Metadata:          metadata,
+		Metadata:          metadataJSON,
 	}
 	if err := p.transactionRepo.Save(ctx, taxTransaction); err != nil {
 		return err
@@ -942,6 +954,11 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 
 	// Update system wallet balance
 	newSystemLockedBalance := systemBalance.LockedBalance + realSystemShare
+	metadata["source"] = "payment_callback_increase_system_locked_(real_system_share)"
+	metadataJSON, err = json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
 	newSystemBalanceSnapshot := &models.BalanceSnapshot{
 		UUID:          uuid.New(),
 		CorrelationID: paymentRequest.CorrelationID,
@@ -952,9 +969,9 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		LockedBalance: newSystemLockedBalance,
 		CreditBalance: systemBalance.CreditBalance,
 		TotalBalance:  systemBalance.FreeBalance + systemBalance.FrozenBalance + newSystemLockedBalance + systemBalance.CreditBalance,
-		Reason:        "system_share",
+		Reason:        "real_system_share",
 		Description:   fmt.Sprintf("System share for payment request %d", paymentRequest.ID),
-		Metadata:      metadata,
+		Metadata:      metadataJSON,
 	}
 	if err := p.balanceSnapshotRepo.Save(ctx, newSystemBalanceSnapshot); err != nil {
 		return err
@@ -984,8 +1001,8 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		ExternalTrace:     atipayRequest.TraceNumber,
 		ExternalRRN:       atipayRequest.RRN,
 		ExternalMaskedPAN: atipayRequest.MaskedPAN,
-		Description:       fmt.Sprintf("System share for payment request %d", paymentRequest.ID),
-		Metadata:          metadata,
+		Description:       fmt.Sprintf("Real system share for payment request %d", paymentRequest.ID),
+		Metadata:          metadataJSON,
 	}
 	if err := p.transactionRepo.Save(ctx, systemTransaction); err != nil {
 		return err

@@ -81,7 +81,7 @@ var (
 	ErrBalanceSnapshotNotFound = errors.New("balance snapshot not found")
 
 	// Tax and system user errors
-	ErrSystemUserNotFound = errors.New("system user not found")
+	ErrSystemUserNotFound            = errors.New("system user not found")
 	ErrSystemUserShebaNumberNotFound = errors.New("system user sheba number not found")
 
 	// Tax and System wallet errors
@@ -96,7 +96,10 @@ var (
 	ErrStartDateAfterEndDate = errors.New("start date cannot be after end date")
 
 	// Agency discount errors
-	ErrDiscountRateOutOfRange = errors.New("discount rate must be between 0 and 0.5")
+	ErrDiscountRateOutOfRange              = errors.New("discount rate must be between 0 and 0.5")
+	ErrAgencyCannotCreateDiscountForItself = errors.New("agency cannot create discount for itself")
+	ErrCustomerNotUnderAgency              = errors.New("customer is not under this agency")
+	ErrAgencyCannotListDiscountsForItself = errors.New("agency cannot list discounts for itself")
 )
 
 type BusinessError struct {
@@ -390,4 +393,16 @@ func IsStartDateAfterEndDate(err error) bool {
 
 func IsDiscountRateOutOfRange(err error) bool {
 	return errors.Is(err, ErrDiscountRateOutOfRange)
+}
+
+func IsAgencyCannotCreateDiscountForItself(err error) bool {
+	return errors.Is(err, ErrAgencyCannotCreateDiscountForItself)
+}
+
+func IsCustomerNotUnderAgency(err error) bool {
+	return errors.Is(err, ErrCustomerNotUnderAgency)
+}
+
+func IsAgencyCannotListDiscountsForItself(err error) bool {
+	return errors.Is(err, ErrAgencyCannotListDiscountsForItself)
 }

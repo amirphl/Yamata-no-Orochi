@@ -209,6 +209,9 @@ func getAgency(ctx context.Context, customerRepo repository.CustomerRepository, 
 	if agency == nil {
 		return models.Customer{}, ErrAgencyNotFound
 	}
+	if agency.AccountType.TypeName != models.AccountTypeMarketingAgency {
+		return models.Customer{}, ErrAgencyNotFound
+	}
 	if agency.IsActive != nil && !*agency.IsActive {
 		return models.Customer{}, ErrAgencyInactive
 	}
