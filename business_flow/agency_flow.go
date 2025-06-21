@@ -153,7 +153,7 @@ func (a *AgencyReportFlowImpl) GetAgencyCustomerReport(ctx context.Context, req 
 	if req.Filter.StartDate != nil && *req.Filter.StartDate != "" {
 		t, err := time.Parse(time.RFC3339, *req.Filter.StartDate)
 		if err != nil {
-			return nil, NewBusinessError("GET_AGENCY_CUSTOMER_REPORT_VALIDATION_FAILED", "Invalid start date", err)
+			return nil, err
 		}
 		startDate = &t
 	}
@@ -162,7 +162,7 @@ func (a *AgencyReportFlowImpl) GetAgencyCustomerReport(ctx context.Context, req 
 	if req.Filter.EndDate != nil && *req.Filter.EndDate != "" {
 		t, err := time.Parse(time.RFC3339, *req.Filter.EndDate)
 		if err != nil {
-			return nil, NewBusinessError("GET_AGENCY_CUSTOMER_REPORT_VALIDATION_FAILED", "Invalid end date", err)
+			return nil, err
 		}
 		endDate = &t
 	}
@@ -260,15 +260,15 @@ func (a *AgencyReportFlowImpl) ListAgencyCustomerDiscounts(ctx context.Context, 
 	}
 
 	if customer.ID == req.AgencyID {
-		return nil, NewBusinessError("LIST_AGENCY_CUSTOMER_DISCOUNTS_VALIDATION_FAILED", "Agency cannot list discounts for itself", ErrAgencyCannotListDiscountsForItself)
+		return nil, ErrAgencyCannotListDiscountsForItself
 	}
 
 	if customer.ReferrerAgencyID == nil {
-		return nil, NewBusinessError("LIST_AGENCY_CUSTOMER_DISCOUNTS_VALIDATION_FAILED", "Customer is not under any agency", ErrCustomerNotUnderAgency)
+		return nil, ErrCustomerNotUnderAgency
 	}
 
 	if *customer.ReferrerAgencyID != req.AgencyID {
-		return nil, NewBusinessError("LIST_AGENCY_CUSTOMER_DISCOUNTS_VALIDATION_FAILED", "Customer is not under this agency", ErrCustomerNotUnderAgency)
+		return nil, ErrCustomerNotUnderAgency
 	}
 
 	agencyID := req.AgencyID
