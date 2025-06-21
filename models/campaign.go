@@ -8,6 +8,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // CampaignStatus represents the status of an campaign
@@ -135,7 +136,7 @@ func (Campaign) TableName() string {
 }
 
 // BeforeCreate is called before creating a new record
-func (c *Campaign) BeforeCreate() error {
+func (c *Campaign) BeforeCreate(tx *gorm.DB) error {
 	if c.UUID == uuid.Nil {
 		c.UUID = uuid.New()
 	}
@@ -149,7 +150,7 @@ func (c *Campaign) BeforeCreate() error {
 }
 
 // BeforeUpdate is called before updating a record
-func (c *Campaign) BeforeUpdate() error {
+func (c *Campaign) BeforeUpdate(tx *gorm.DB) error {
 	now := utils.UTCNow()
 	c.UpdatedAt = &now
 	return nil
