@@ -64,7 +64,7 @@ func (a *AgencyFlowImpl) CreateAgencyDiscount(ctx context.Context, req *dto.Crea
 		return nil, err
 	}
 
-	if req.Rate < 0 || req.Rate > 0.5 {
+	if req.DiscountRate < 0 || req.DiscountRate > 0.5 {
 		return nil, NewBusinessError("CREATE_AGENCY_DISCOUNT_VALIDATION_FAILED", "Rate must be between 0 and 0.5", ErrDiscountRateOutOfRange)
 	}
 
@@ -97,7 +97,7 @@ func (a *AgencyFlowImpl) CreateAgencyDiscount(ctx context.Context, req *dto.Crea
 			UUID:         uuid.New(),
 			AgencyID:     req.AgencyID,
 			CustomerID:   customer.ID,
-			DiscountRate: req.Rate,
+			DiscountRate: req.DiscountRate,
 			ExpiresAt:    nil,
 			Reason:       utils.ToPtr("Created by agency"),
 			Metadata:     metaJSON,
@@ -109,8 +109,8 @@ func (a *AgencyFlowImpl) CreateAgencyDiscount(ctx context.Context, req *dto.Crea
 		}
 
 		resp = &dto.CreateAgencyDiscountResponse{
-			Message: "Discount created successfully",
-			Rate:    row.DiscountRate,
+			Message:      "Discount created successfully",
+			DiscountRate: row.DiscountRate,
 		}
 		return nil
 	})
@@ -175,7 +175,7 @@ func (a *AgencyFlowImpl) GetAgencyCustomerReport(ctx context.Context, req *dto.A
 	totalShare := uint64(0)
 	totalSent := uint64(0)
 	for _, item := range rows {
-		totalShare += item.TotalAgencyShareWithTax
+		totalShare += item.AgencyShareWithTax
 		totalSent += 0 // TODO: implement sent count
 	}
 
@@ -186,7 +186,7 @@ func (a *AgencyFlowImpl) GetAgencyCustomerReport(ctx context.Context, req *dto.A
 			LastName:                item.LastName,
 			CompanyName:             item.CompanyName,
 			TotalSent:               totalSent,
-			TotalAgencyShareWithTax: item.TotalAgencyShareWithTax,
+			TotalAgencyShareWithTax: item.AgencyShareWithTax,
 		})
 	}
 
@@ -225,11 +225,11 @@ func (a *AgencyFlowImpl) ListAgencyActiveDiscounts(ctx context.Context, req *dto
 	items := make([]dto.AgencyActiveDiscountItem, 0, len(rows))
 	for _, v := range rows {
 		items = append(items, dto.AgencyActiveDiscountItem{
-			CustomerUUID: v.CustomerUUID,
+			CustomerID:   v.CustomerID,
 			FirstName:    v.FirstName,
 			LastName:     v.LastName,
 			CompanyName:  v.CompanyName,
-			Rate:         v.DiscountRate,
+			DiscountRate: v.DiscountRate,
 			CreatedAt:    v.CreatedAt,
 		})
 	}
@@ -285,7 +285,7 @@ func (a *AgencyFlowImpl) ListAgencyCustomerDiscounts(ctx context.Context, req *d
 			CreatedAt:          v.CreatedAt,
 			ExpiresAt:          v.ExpiresAt,
 			TotalSent:          0, // TODO: placeholder as requested
-			AgencyShareWithTax: v.TotalAgencyShareWithTax,
+			AgencyShareWithTax: v.AgencyShareWithTax,
 		})
 	}
 
