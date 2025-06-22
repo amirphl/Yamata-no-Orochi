@@ -414,17 +414,13 @@ func (lf *LoginFlowImpl) invalidateAllSessions(ctx context.Context, customerID u
 
 	// Mark all as inactive (create new inactive records)
 	for _, session := range sessions {
-		inactiveSession := *session
-		inactiveSession.ID = 0
-		inactiveSession.IsActive = utils.ToPtr(false)
-		inactiveSession.CreatedAt = utils.UTCNow()
+		session.IsActive = utils.ToPtr(false)
+		session.ExpiresAt = utils.UTCNow()
 
-		if err := lf.sessionRepo.Save(ctx, &inactiveSession); err != nil {
+		if err := lf.sessionRepo.Save(ctx, session); err != nil {
 			return err
 		}
 	}
-
-	// TODO: This has a problem.
 
 	return nil
 }

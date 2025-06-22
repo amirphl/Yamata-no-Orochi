@@ -311,7 +311,7 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 
 		log.Println("Login failed", err)
 		// Handle generic business errors
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Login failed", "LOGIN_FAILED", nil)
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Login failed", "LOGIN_FAILED", nil)
 	}
 
 	// Successful login - return tokens and user info
