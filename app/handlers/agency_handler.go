@@ -13,23 +13,23 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-type AgencyReportHandlerInterface interface {
+type AgencyHandlerInterface interface {
 	CreateAgencyDiscount(c fiber.Ctx) error
 	GetAgencyCustomerReport(c fiber.Ctx) error
 	ListAgencyActiveDiscounts(c fiber.Ctx) error
 	ListAgencyCustomerDiscounts(c fiber.Ctx) error
 }
 
-type AgencyReportHandler struct {
-	flow      businessflow.AgencyReportFlow
+type AgencyHandler struct {
+	flow      businessflow.AgencyFlow
 	validator *validator.Validate
 }
 
-func NewAgencyReportHandler(flow businessflow.AgencyReportFlow) *AgencyReportHandler {
-	return &AgencyReportHandler{flow: flow, validator: validator.New()}
+func NewAgencyHandler(flow businessflow.AgencyFlow) *AgencyHandler {
+	return &AgencyHandler{flow: flow, validator: validator.New()}
 }
 
-func (h *AgencyReportHandler) ErrorResponse(c fiber.Ctx, statusCode int, message, errorCode string, details any) error {
+func (h *AgencyHandler) ErrorResponse(c fiber.Ctx, statusCode int, message, errorCode string, details any) error {
 	return c.Status(statusCode).JSON(dto.APIResponse{
 		Success: false,
 		Message: message,
@@ -37,7 +37,7 @@ func (h *AgencyReportHandler) ErrorResponse(c fiber.Ctx, statusCode int, message
 	})
 }
 
-func (h *AgencyReportHandler) SuccessResponse(c fiber.Ctx, statusCode int, message string, data any) error {
+func (h *AgencyHandler) SuccessResponse(c fiber.Ctx, statusCode int, message string, data any) error {
 	return c.Status(statusCode).JSON(dto.APIResponse{Success: true, Message: message, Data: data})
 }
 
@@ -52,7 +52,7 @@ func (h *AgencyReportHandler) SuccessResponse(c fiber.Ctx, statusCode int, messa
 // @Failure 401 {object} dto.APIResponse
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/reports/agency/discounts [post]
-func (h *AgencyReportHandler) CreateAgencyDiscount(c fiber.Ctx) error {
+func (h *AgencyHandler) CreateAgencyDiscount(c fiber.Ctx) error {
 	agencyID, ok := c.Locals("customer_id").(uint)
 	if !ok || agencyID == 0 {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
@@ -117,7 +117,7 @@ func (h *AgencyReportHandler) CreateAgencyDiscount(c fiber.Ctx) error {
 // @Failure 401 {object} dto.APIResponse "Unauthorized"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/reports/agency/customers [get]
-func (h *AgencyReportHandler) GetAgencyCustomerReport(c fiber.Ctx) error {
+func (h *AgencyHandler) GetAgencyCustomerReport(c fiber.Ctx) error {
 	// Authorization: require authenticated customer id and that customer is agency
 	agencyID, ok := c.Locals("customer_id").(uint)
 	if !ok || agencyID == 0 {
@@ -175,7 +175,7 @@ func (h *AgencyReportHandler) GetAgencyCustomerReport(c fiber.Ctx) error {
 // @Failure 401 {object} dto.APIResponse
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/reports/agency/discounts/active [get]
-func (h *AgencyReportHandler) ListAgencyActiveDiscounts(c fiber.Ctx) error {
+func (h *AgencyHandler) ListAgencyActiveDiscounts(c fiber.Ctx) error {
 	agencyID, ok := c.Locals("customer_id").(uint)
 	if !ok || agencyID == 0 {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
@@ -215,7 +215,7 @@ func (h *AgencyReportHandler) ListAgencyActiveDiscounts(c fiber.Ctx) error {
 // @Failure 401 {object} dto.APIResponse
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/reports/agency/customers/{customer_id}/discounts [get]
-func (h *AgencyReportHandler) ListAgencyCustomerDiscounts(c fiber.Ctx) error {
+func (h *AgencyHandler) ListAgencyCustomerDiscounts(c fiber.Ctx) error {
 	agencyID, ok := c.Locals("customer_id").(uint)
 	if !ok || agencyID == 0 {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
@@ -256,11 +256,11 @@ func (h *AgencyReportHandler) ListAgencyCustomerDiscounts(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Customer discounts retrieved successfully", res)
 }
 
-func (h *AgencyReportHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
+func (h *AgencyHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
 	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
 }
 
-func (h *AgencyReportHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *AgencyHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))

@@ -1,4 +1,4 @@
-// Package businessflow contains the core business logic and use cases for agency reports
+// Package businessflow contains the core business logic and use cases for agency
 package businessflow
 
 import (
@@ -15,16 +15,16 @@ import (
 	"gorm.io/gorm"
 )
 
-// AgencyReportFlow defines operations for agency-level reporting
-type AgencyReportFlow interface {
+// AgencyFlow defines operations for agency-level reporting
+type AgencyFlow interface {
 	CreateAgencyDiscount(ctx context.Context, req *dto.CreateAgencyDiscountRequest, metadata *ClientMetadata) (*dto.CreateAgencyDiscountResponse, error)
 	GetAgencyCustomerReport(ctx context.Context, req *dto.AgencyCustomerReportRequest, metadata *ClientMetadata) (*dto.AgencyCustomerReportResponse, error)
 	ListAgencyActiveDiscounts(ctx context.Context, req *dto.ListAgencyActiveDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyActiveDiscountsResponse, error)
 	ListAgencyCustomerDiscounts(ctx context.Context, req *dto.ListAgencyCustomerDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyCustomerDiscountsResponse, error)
 }
 
-// AgencyReportFlowImpl implements AgencyReportFlow
-type AgencyReportFlowImpl struct {
+// AgencyFlowImpl implements AgencyFlow
+type AgencyFlowImpl struct {
 	customerRepo       repository.CustomerRepository
 	campaignRepo       repository.CampaignRepository
 	agencyDiscountRepo repository.AgencyDiscountRepository
@@ -33,16 +33,16 @@ type AgencyReportFlowImpl struct {
 	db                 *gorm.DB
 }
 
-// NewAgencyReportFlow constructs an AgencyReportFlow
-func NewAgencyReportFlow(
+// NewAgencyFlow constructs an AgencyFlow
+func NewAgencyFlow(
 	customerRepo repository.CustomerRepository,
 	campaignRepo repository.CampaignRepository,
 	agencyDiscountRepo repository.AgencyDiscountRepository,
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
 	db *gorm.DB,
-) AgencyReportFlow {
-	return &AgencyReportFlowImpl{
+) AgencyFlow {
+	return &AgencyFlowImpl{
 		customerRepo:       customerRepo,
 		campaignRepo:       campaignRepo,
 		agencyDiscountRepo: agencyDiscountRepo,
@@ -53,7 +53,7 @@ func NewAgencyReportFlow(
 }
 
 // CreateAgencyDiscount creates a new discount for a customer by an agency and expires old active ones
-func (a *AgencyReportFlowImpl) CreateAgencyDiscount(ctx context.Context, req *dto.CreateAgencyDiscountRequest, metadata *ClientMetadata) (*dto.CreateAgencyDiscountResponse, error) {
+func (a *AgencyFlowImpl) CreateAgencyDiscount(ctx context.Context, req *dto.CreateAgencyDiscountRequest, metadata *ClientMetadata) (*dto.CreateAgencyDiscountResponse, error) {
 	_, err := getAgency(ctx, a.customerRepo, req.AgencyID)
 	if err != nil {
 		return nil, err
@@ -131,7 +131,7 @@ func (a *AgencyReportFlowImpl) CreateAgencyDiscount(ctx context.Context, req *dt
 
 // GetAgencyCustomerReport retrieves aggregated stats of campaigns created by customers of an agency per customer
 // Supports pagination, sorting, and filtering by start/end date, name, and company name
-func (a *AgencyReportFlowImpl) GetAgencyCustomerReport(ctx context.Context, req *dto.AgencyCustomerReportRequest, metadata *ClientMetadata) (*dto.AgencyCustomerReportResponse, error) {
+func (a *AgencyFlowImpl) GetAgencyCustomerReport(ctx context.Context, req *dto.AgencyCustomerReportRequest, metadata *ClientMetadata) (*dto.AgencyCustomerReportResponse, error) {
 	var err error
 	defer func() {
 		if err != nil {
@@ -199,7 +199,7 @@ func (a *AgencyReportFlowImpl) GetAgencyCustomerReport(ctx context.Context, req 
 }
 
 // ListAgencyActiveDiscounts returns the last non-expired active discount per customer for an agency
-func (a *AgencyReportFlowImpl) ListAgencyActiveDiscounts(ctx context.Context, req *dto.ListAgencyActiveDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyActiveDiscountsResponse, error) {
+func (a *AgencyFlowImpl) ListAgencyActiveDiscounts(ctx context.Context, req *dto.ListAgencyActiveDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyActiveDiscountsResponse, error) {
 	var err error
 	defer func() {
 		if err != nil {
@@ -241,7 +241,7 @@ func (a *AgencyReportFlowImpl) ListAgencyActiveDiscounts(ctx context.Context, re
 }
 
 // ListAgencyCustomerDiscounts returns the discounts of a specific customer under an agency
-func (a *AgencyReportFlowImpl) ListAgencyCustomerDiscounts(ctx context.Context, req *dto.ListAgencyCustomerDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyCustomerDiscountsResponse, error) {
+func (a *AgencyFlowImpl) ListAgencyCustomerDiscounts(ctx context.Context, req *dto.ListAgencyCustomerDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyCustomerDiscountsResponse, error) {
 	var err error
 	defer func() {
 		if err != nil {
