@@ -10,22 +10,22 @@ import (
 	"gorm.io/gorm"
 )
 
-// AgencyCustomerTransactionSum is a report row for aggregated transaction amounts by customer under an agency
-type AgencyCustomerTransactionSum struct {
-	CustomerID              uint   `json:"customer_id"`
-	FirstName               string `json:"first_name"`
-	LastName                string `json:"last_name"`
-	CompanyName             string `json:"company_name"`
-	TotalAgencyShareWithTax uint64 `json:"total_agency_share_with_tax"`
+// AgencyCustomerTransactionAggregate is a report row for aggregated transaction amounts by customer under an agency
+type AgencyCustomerTransactionAggregate struct {
+	CustomerID         uint   `json:"customer_id"`
+	FirstName          string `json:"first_name"`
+	LastName           string `json:"last_name"`
+	CompanyName        string `json:"company_name"`
+	AgencyShareWithTax uint64 `json:"agency_share_with_tax"`
 }
 
 // AgencyCustomerDiscountAggregate is a report row aggregating by discount for a given customer
 type AgencyCustomerDiscountAggregate struct {
-	AgencyDiscountID        uint64     `json:"agency_discount_id"`
-	TotalAgencyShareWithTax uint64     `json:"total_agency_share_with_tax"`
-	DiscountRate            float64    `json:"discount_rate"`
-	ExpiresAt               *time.Time `json:"expires_at"`
-	CreatedAt               time.Time  `json:"created_at"`
+	AgencyDiscountID   uint64     `json:"agency_discount_id"`
+	AgencyShareWithTax uint64     `json:"agency_share_with_tax"`
+	DiscountRate       float64    `json:"discount_rate"`
+	ExpiresAt          *time.Time `json:"expires_at"`
+	CreatedAt          time.Time  `json:"created_at"`
 }
 
 // TransactionRepositoryImpl implements TransactionRepository interface
@@ -330,15 +330,15 @@ func (r *TransactionRepositoryImpl) applyFilter(query *gorm.DB, filter models.Tr
 }
 
 // AggregateAgencyTransactionsByCustomers aggregates transaction amounts per customer under an agency based on metadata
-func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, nameLike string, startDate, endDate *time.Time, orderBy string) ([]*AgencyCustomerTransactionSum, error) {
+func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, nameLike string, startDate, endDate *time.Time, orderBy string) ([]*AgencyCustomerTransactionAggregate, error) {
 	db := r.getDB(ctx)
-	rows := make([]*AgencyCustomerTransactionSum, 0)
+	rows := make([]*AgencyCustomerTransactionAggregate, 0)
 
 	allowed := map[string]string{
 		"name_asc":   "first_name ASC, last_name ASC",
 		"name_desc":  "first_name DESC, last_name DESC",
-		"share_desc": "total_agency_share_with_tax DESC",
-		"share_asc":  "total_agency_share_with_tax ASC",
+		"share_desc": "agency_share_with_tax DESC",
+		"share_asc":  "agency_share_with_tax ASC",
 	}
 
 	order := allowed[orderBy]
@@ -348,7 +348,7 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx c
 
 	query := db.
 		Table("transactions t").
-		Select("u.id as customer_id, u.representative_first_name as first_name, u.representative_last_name as last_name, u.company_name as company_name, COALESCE(SUM(t.amount),0) as total_agency_share_with_tax").
+		Select("u.id as customer_id, u.representative_first_name as first_name, u.representative_last_name as last_name, u.company_name as company_name, COALESCE(SUM(t.amount),0) as agency_share_with_tax").
 		Joins("JOIN customers u ON u.id = (t.metadata->>'customer_id')::bigint").
 		Where("t.customer_id = ?", agencyID).
 		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
@@ -379,19 +379,19 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByDiscounts(ctx c
 	rows := make([]*AgencyCustomerDiscountAggregate, 0)
 
 	allowed := map[string]string{
-		"share_desc": "total_agency_share_with_tax DESC",
-		"share_asc":  "total_agency_share_with_tax ASC",
+		"share_desc": "agency_share_with_tax DESC",
+		"share_asc":  "agency_share_with_tax ASC",
 		"id_desc":    "agency_discount_id DESC",
 		"id_asc":     "agency_discount_id ASC",
 	}
 	order := allowed[orderBy]
 	if order == "" {
-		order = "total_agency_share_with_tax DESC"
+		order = "agency_share_with_tax DESC"
 	}
 
 	query := db.
 		Table("transactions t").
-		Select("r.id as agency_discount_id, COALESCE(SUM(t.amount),0) as total_agency_share_with_tax, r.discount_rate as discount_rate, r.expires_at as expires_at, r.created_at as created_at").
+		Select("r.id as agency_discount_id, COALESCE(SUM(t.amount),0) as agency_share_with_tax, r.discount_rate as discount_rate, r.expires_at as expires_at, r.created_at as created_at").
 		Joins("JOIN agency_discounts r ON r.id = (t.metadata->>'agency_discount_id')::bigint").
 		Where("t.customer_id = ?", agencyID).
 		Where("(t.metadata->>'customer_id')::bigint = ?", customerID).
