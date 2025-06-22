@@ -69,17 +69,17 @@ type AuthCustomerDTO struct {
 	RepresentativeLastName  string  `json:"representative_last_name" example:"Doe"`
 	RepresentativeMobile    string  `json:"representative_mobile" example:"+989123456789"`
 	AccountType             string  `json:"account_type" example:"individual"`
-	CompanyName             *string `json:"company_name,omitempty" example:"Tech Company Ltd"`
+	CompanyName             *string `json:"company_name,omitempty" validate:"omitempty" example:"Tech Company Ltd"`
 	IsActive                *bool   `json:"is_active" example:"true"`
 	IsEmailVerified         *bool   `json:"is_email_verified" example:"true"`
 	IsMobileVerified        *bool   `json:"is_mobile_verified" example:"true"`
 	CreatedAt               string  `json:"created_at" example:"2024-01-15T10:30:00Z"`
-	ReferrerAgencyID        *uint   `json:"referrer_agency_id,omitempty" example:"123"`
+	ReferrerAgencyID        *uint   `json:"referrer_agency_id,omitempty" validate:"omitempty" example:"123"`
 }
 
 type CustomerSessionDTO struct {
 	SessionToken string  `json:"session_token" example:"1234567890"`
-	RefreshToken *string `json:"refresh_token,omitempty" example:"1234567890"`
+	RefreshToken *string `json:"refresh_token,omitempty" validate:"omitempty" example:"1234567890"`
 	ExpiresIn    int     `json:"expires_in" example:"3600"`
 	TokenType    string  `json:"token_type" example:"Bearer"`
 	CreatedAt    string  `json:"created_at" example:"2024-01-15T10:30:00Z"`

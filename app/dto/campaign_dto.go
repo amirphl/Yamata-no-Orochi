@@ -7,16 +7,16 @@ import (
 // CreateCampaignRequest represents the request to create a new campaign
 type CreateCampaignRequest struct {
 	CustomerID uint       `json:"-"`
-	Title      *string    `json:"title,omitempty" validate:"max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"max=255,oneof=male female all"`
-	City       []string   `json:"city,omitempty" validate:"max=255,dive,max=255"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"max=10000"`
-	Content    *string    `json:"content,omitempty" validate:"max=512,min=1"`
+	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
+	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
 	ScheduleAt *time.Time `json:"schedule_at,omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"max=255"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"min=100000"`
+	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
 }
 
 // CreateCampaignResponse represents the response to create a new campaign
@@ -31,17 +31,17 @@ type CreateCampaignResponse struct {
 type UpdateCampaignRequest struct {
 	UUID       string     `json:"-"`
 	CustomerID uint       `json:"-"`
-	Title      *string    `json:"title,omitempty" validate:"max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"max=255,oneof=male female all"`
-	City       []string   `json:"city,omitempty" validate:"max=255,dive,max=255"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"max=10000"`
-	Content    *string    `json:"content,omitempty" validate:"max=512,min=1"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"max=255"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"min=100000"`
-	Finalize   *bool      `json:"finalize,omitempty"`
+	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
+	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	Finalize   *bool      `json:"finalize,omitempty" validate:"omitempty"`
 }
 
 // UpdateCampaignResponse represents the response to update an existing campaign
@@ -61,31 +61,31 @@ type GetCampaignResponse struct {
 	Status     string     `json:"status"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
-	Title      *string    `json:"title,omitempty"`
-	Segment    *string    `json:"segment,omitempty"`
-	Subsegment []string   `json:"subsegment,omitempty"`
-	Sex        *string    `json:"sex,omitempty"`
-	City       []string   `json:"city,omitempty"`
-	AdLink     *string    `json:"adlink,omitempty"`
-	Content    *string    `json:"content,omitempty"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty"`
-	LineNumber *string    `json:"line_number,omitempty"`
-	Budget     *uint64    `json:"budget,omitempty"`
-	Comment    *string    `json:"comment,omitempty"`
+	Title      *string    `json:"title,omitempty" validate:"omitempty"`
+	Segment    *string    `json:"segment,omitempty" validate:"omitempty"`
+	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty"`
+	City       []string   `json:"city,omitempty" validate:"omitempty"`
+	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty"`
+	Content    *string    `json:"content,omitempty" validate:"omitempty"`
+	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty"`
+	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	Comment    *string    `json:"comment,omitempty" validate:"omitempty"`
 }
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
 type CalculateCampaignCapacityRequest struct {
-	Title      *string    `json:"title,omitempty" validate:"max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"max=255,oneof=male female all"`
-	City       []string   `json:"city,omitempty" validate:"max=255,dive,max=255"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"max=10000"`
-	Content    *string    `json:"content,omitempty" validate:"max=512,min=1"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"max=255"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"min=100000"`
+	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
+	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
 }
 
 // CalculateCampaignCapacityResponse represents the response to calculate the capacity of an campaign
@@ -96,16 +96,16 @@ type CalculateCampaignCapacityResponse struct {
 
 // CalculateCampaignCostRequest represents the request to calculate the cost of an campaign
 type CalculateCampaignCostRequest struct {
-	Title      *string    `json:"title,omitempty" validate:"max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"max=255,oneof=male female all"`
-	City       []string   `json:"city,omitempty" validate:"max=255,dive,max=255"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"max=10000"`
-	Content    *string    `json:"content,omitempty" validate:"max=512,min=1"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"max=255"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"min=100000"`
+	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
+	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
 }
 
 // CalculateCampaignCostResponse represents the response to calculate the cost of an campaign
@@ -118,17 +118,17 @@ type CalculateCampaignCostResponse struct {
 
 // ListCampaignsFilter represents filter criteria for listing campaigns in request layer
 type ListCampaignsFilter struct {
-	Title  *string `json:"title,omitempty" validate:"max=255"`
-	Status *string `json:"status,omitempty" validate:"max=255,oneof=initiated in_progress waiting_for_approval approved rejected"`
+	Title  *string `json:"title,omitempty" validate:"omitempty,max=255"`
+	Status *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected"`
 }
 
 // ListCampaignsRequest represents a paginated list request for user's campaigns
 type ListCampaignsRequest struct {
 	CustomerID uint                 `json:"-"`
-	Page       int                  `json:"page" validate:"min=1,max=100"`
-	Limit      int                  `json:"limit" validate:"min=1,max=100"`
+	Page       int                  `json:"page" validate:"omitempty,min=1,max=100"`
+	Limit      int                  `json:"limit" validate:"omitempty,min=1,max=100"`
 	OrderBy    string               `json:"orderby" validate:"oneof=newest oldest"` // newest, oldest
-	Filter     *ListCampaignsFilter `json:"filter,omitempty"`
+	Filter     *ListCampaignsFilter `json:"filter,omitempty" validate:"omitempty"`
 }
 
 // PaginationInfo contains pagination metadata

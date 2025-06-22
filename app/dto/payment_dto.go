@@ -34,27 +34,27 @@ type AtipayRequest struct {
 
 // GetTransactionHistoryRequest represents the request to retrieve transaction history
 type GetTransactionHistoryRequest struct {
-	CustomerID uint       `json:"-"`                                  // Customer ID (from authenticated context)
-	Page       uint       `json:"page" validate:"min=1"`              // Page number (1-based)
-	PageSize   uint       `json:"page_size" validate:"min=1,max=100"` // Number of items per page
-	StartDate  *time.Time `json:"start_date,omitempty"`               // Optional start date filter
-	EndDate    *time.Time `json:"end_date,omitempty"`                 // Optional end date filter
-	Type       *string    `json:"type,omitempty"`                     // Optional transaction type filter // TODO: one of
-	Status     *string    `json:"status,omitempty"`                   // Optional transaction status filter // TODO: one of
+	CustomerID uint       `json:"-"`                                         // Customer ID (from authenticated context)
+	Page       uint       `json:"page" validate:"min=1"`                     // Page number (1-based)
+	PageSize   uint       `json:"page_size" validate:"min=1,max=100"`        // Number of items per page
+	StartDate  *time.Time `json:"start_date,omitempty" validate:"omitempty"` // Optional start date filter
+	EndDate    *time.Time `json:"end_date,omitempty" validate:"omitempty"`   // Optional end date filter
+	Type       *string    `json:"type,omitempty" validate:"omitempty"`       // Optional transaction type filter // TODO: one of
+	Status     *string    `json:"status,omitempty" validate:"omitempty"`     // Optional transaction status filter // TODO: one of
 }
 
 // TransactionHistoryItem represents a single transaction history item
 type TransactionHistoryItem struct {
-	UUID          string            `json:"uuid"`                   // Transaction UUID
-	Status        string            `json:"status"`                 // Transaction status
-	Amount        uint64            `json:"amount"`                 // Amount in Tomans
-	Currency      string            `json:"currency"`               // Currency (usually TMN)
-	Operation     string            `json:"operation"`              // Operation name for display
-	DateTime      time.Time         `json:"datetime"`               // When the transaction occurred
-	ExternalRef   *string           `json:"external_ref,omitempty"` // External reference (e.g., Atipay reference)
-	BalanceBefore map[string]uint64 `json:"balance_before"`         // Balance before transaction
-	BalanceAfter  map[string]uint64 `json:"balance_after"`          // Balance after transaction
-	Metadata      map[string]any    `json:"metadata,omitempty"`     // Additional transaction metadata
+	UUID          string            `json:"uuid"`                                        // Transaction UUID
+	Status        string            `json:"status"`                                      // Transaction status
+	Amount        uint64            `json:"amount"`                                      // Amount in Tomans
+	Currency      string            `json:"currency"`                                    // Currency (usually TMN)
+	Operation     string            `json:"operation"`                                   // Operation name for display
+	DateTime      time.Time         `json:"datetime"`                                    // When the transaction occurred
+	ExternalRef   *string           `json:"external_ref,omitempty" validate:"omitempty"` // External reference (e.g., Atipay reference)
+	BalanceBefore map[string]uint64 `json:"balance_before"`                              // Balance before transaction
+	BalanceAfter  map[string]uint64 `json:"balance_after"`                               // Balance after transaction
+	Metadata      map[string]any    `json:"metadata,omitempty" validate:"omitempty"`     // Additional transaction metadata
 }
 
 // TransactionHistoryResponse represents the response for transaction history
