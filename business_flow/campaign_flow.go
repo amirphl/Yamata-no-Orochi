@@ -520,16 +520,16 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		return nil, err
 	}
 
-	// Fetch items
-	items, err := s.campaignRepo.ByFilter(ctx, filter, orderBy, limit, offset)
+	// Fetch rows
+	rows, err := s.campaignRepo.ByFilter(ctx, filter, orderBy, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 
 	// Map to response items
-	respItems := make([]dto.GetCampaignResponse, 0, len(items))
-	for _, c := range items {
-		respItems = append(respItems, dto.GetCampaignResponse{
+	items := make([]dto.GetCampaignResponse, 0, len(rows))
+	for _, c := range rows {
+		items = append(items, dto.GetCampaignResponse{
 			UUID:       c.UUID.String(),
 			Status:     c.Status.String(),
 			CreatedAt:  c.CreatedAt,
@@ -553,7 +553,7 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 
 	return &dto.ListCampaignsResponse{
 		Message: "Campaigns retrieved successfully",
-		Items:   respItems,
+		Items:   items,
 		Pagination: dto.PaginationInfo{
 			Total:      total64,
 			Page:       page,
