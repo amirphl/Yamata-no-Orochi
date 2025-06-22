@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
 	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
@@ -18,15 +19,17 @@ import (
 	_ "github.com/amirphl/Yamata-no-Orochi/docs"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/gofiber/fiber/v3"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 // Application represents the main application structure
 type Application struct {
-	router *router.FiberRouter
-	config *config.ProductionConfig
-	server *fiber.App
+	router    *router.FiberRouter
+	config    *config.ProductionConfig
+	server    *fiber.App
+	stopFuncs []func()
 }
 
 func main() {
@@ -69,7 +72,12 @@ func main() {
 	<-sigChan
 	log.Println("Shutting down gracefully...")
 
-	// Graceful shutdown
+	// Stop background workers
+	for _, fn := range app.stopFuncs {
+		fn()
+	}
+
+	// Graceful  shutdown
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer shutdownCancel()
 
@@ -113,6 +121,57 @@ func initializeDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	return db, nil
 }
 
+// initializeCache initializes the Cache client and verifies connectivity
+func initializeCache(cfg config.CacheConfig) (*redis.Client, error) {
+	if !cfg.Enabled || cfg.Provider != "redis" {
+		return nil, nil
+	}
+
+	opt, err := redis.ParseURL(cfg.RedisURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid redis url: %w", err)
+	}
+	// Override DB if provided in config
+	opt.DB = cfg.RedisDB
+
+	rc := redis.NewClient(opt)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := rc.Ping(ctx).Err(); err != nil {
+		_ = rc.Close()
+		return nil, fmt.Errorf("failed to connect to redis: %w", err)
+	}
+
+	log.Printf("Redis connection established to %s (db=%d)", cfg.RedisURL, cfg.RedisDB)
+	return rc, nil
+}
+
+// startCacheHealthMonitor starts a background goroutine that periodically pings Redis
+// to detect connectivity issues. The returned cancel function stops the monitor.
+func startCacheHealthMonitor(parent context.Context, client *redis.Client, interval time.Duration) func() {
+	monitorCtx, cancel := context.WithCancel(parent)
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-monitorCtx.Done():
+				return
+			case <-ticker.C:
+				ctx, c := context.WithTimeout(context.Background(), 3*time.Second)
+				if err := client.Ping(ctx).Err(); err != nil {
+					log.Printf("Redis healthcheck failed: %v", err)
+				}
+				c()
+			}
+		}
+	}()
+	return cancel
+}
+
 // initializeNotificationService initializes the notification service
 func initializeNotificationService(cfg *config.ProductionConfig) services.NotificationService {
 	// Create SMS service based on configuration
@@ -126,29 +185,46 @@ func initializeNotificationService(cfg *config.ProductionConfig) services.Notifi
 		smsService = services.NewSMSService(&cfg.SMS)
 	}
 
-	// Initialize email provider with mock for now
+	// Create email provider (mock for now)
 	emailProvider = services.NewMockEmailProvider()
 
 	return services.NewNotificationService(smsService, emailProvider)
 }
 
-// initializeApplication initializes the application components
+// initializeApplication initializes the main application components
 func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
+	var stopFuncs []func()
+
 	// Initialize database
 	db, err := initializeDatabase(cfg.Database)
 	if err != nil {
-		return nil, fmt.Errorf("failed to initialize database: %w", err)
+		return nil, err
 	}
 
+	rc, err := initializeCache(cfg.Cache)
+	if err != nil {
+		return nil, err
+	}
+
+	cancel := startCacheHealthMonitor(context.Background(), rc, cfg.Cache.CleanupInterval)
+	stopFuncs = append(stopFuncs, cancel)
+
 	// Initialize repositories
-	customerRepo := repository.NewCustomerRepository(db)
 	accountTypeRepo := repository.NewAccountTypeRepository(db)
-	otpRepo := repository.NewOTPVerificationRepository(db)
+	customerRepo := repository.NewCustomerRepository(db)
 	sessionRepo := repository.NewCustomerSessionRepository(db)
 	auditRepo := repository.NewAuditLogRepository(db)
-	smsCampaignRepo := repository.NewSMSCampaignRepository(db)
+	campaignRepo := repository.NewCampaignRepository(db)
+	walletRepo := repository.NewWalletRepository(db)
+	paymentRequestRepo := repository.NewPaymentRequestRepository(db)
+	balanceSnapshotRepo := repository.NewBalanceSnapshotRepository(db)
+	transactionRepo := repository.NewTransactionRepository(db)
+	agencyDiscountRepo := repository.NewAgencyDiscountRepository(db)
 
 	// Initialize services
+	notificationService := initializeNotificationService(cfg)
+
+	// Initialize token service
 	tokenService, err := services.NewTokenService(
 		cfg.JWT.AccessTokenTTL,
 		cfg.JWT.RefreshTokenTTL,
@@ -163,43 +239,42 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		return nil, fmt.Errorf("failed to initialize token service: %w", err)
 	}
 
-	notificationService := initializeNotificationService(cfg)
-
-	// Initialize business flows
+	// Initialize flows
 	signupFlow := businessflow.NewSignupFlow(
 		customerRepo,
 		accountTypeRepo,
-		otpRepo,
 		sessionRepo,
 		auditRepo,
+		agencyDiscountRepo,
 		tokenService,
 		notificationService,
+		cfg.Admin,
 		db,
+		rc,
 	)
 
 	loginFlow := businessflow.NewLoginFlow(
 		customerRepo,
 		sessionRepo,
-		otpRepo,
 		auditRepo,
 		accountTypeRepo,
 		tokenService,
 		notificationService,
 		db,
+		rc,
 	)
 
-	smsCampaignFlow := businessflow.NewSMSCampaignFlow(
-		smsCampaignRepo,
+	campaignFlow := businessflow.NewCampaignFlow(
+		campaignRepo,
 		customerRepo,
+		walletRepo,
+		balanceSnapshotRepo,
+		transactionRepo,
 		auditRepo,
 		db,
+		notificationService,
+		cfg.Admin,
 	)
-
-	// Initialize additional repositories needed for PaymentFlow
-	walletRepo := repository.NewWalletRepository(db)
-	paymentRequestRepo := repository.NewPaymentRequestRepository(db)
-	balanceSnapshotRepo := repository.NewBalanceSnapshotRepository(db)
-	transactionRepo := repository.NewTransactionRepository(db)
 
 	// Initialize PaymentFlow
 	paymentFlow := businessflow.NewPaymentFlow(
@@ -209,36 +284,45 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		auditRepo,
 		balanceSnapshotRepo,
 		transactionRepo,
+		agencyDiscountRepo,
 		db,
-		cfg.Atipay.APIKey,
-		cfg.Atipay.Terminal,
-		cfg.Deployment.Domain, // domain from config
+		cfg.Atipay,
+		cfg.Deployment,
+	)
+
+	// Initialize AgencyFlow
+	agencyFlow := businessflow.NewAgencyFlow(
+		customerRepo,
+		campaignRepo,
+		agencyDiscountRepo,
+		transactionRepo,
+		auditRepo,
+		db,
 	)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
-	smsCampaignHandler := handlers.NewSMSCampaignHandler(smsCampaignFlow)
+	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
+	agencyHandler := handlers.NewAgencyHandler(agencyFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
 
 	// Initialize router
-	appRouter := router.NewFiberRouter(authHandler, smsCampaignHandler, paymentHandler, authMiddleware)
+	appRouter := router.NewFiberRouter(authHandler, campaignHandler, paymentHandler, agencyHandler, authMiddleware)
 
 	// Log that services are initialized
 	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
-	log.Printf("Notification service initialized with SMS domain: %s", cfg.SMS.ProviderDomain)
-	log.Printf("Database initialized: %s:%d/%s", cfg.Database.Host, cfg.Database.Port, cfg.Database.Name)
 
-	log.Println("Application components initialized successfully")
-
-	// Type assertion to get the concrete FiberRouter
+	// Create application struct from FiberRouter
 	fiberRouter := appRouter.(*router.FiberRouter)
+	application := &Application{
+		router:    fiberRouter,
+		config:    cfg,
+		server:    fiberRouter.GetApp(),
+		stopFuncs: stopFuncs,
+	}
 
-	return &Application{
-		router: fiberRouter,
-		config: cfg,
-		server: fiberRouter.GetApp(),
-	}, nil
+	return application, nil
 }
