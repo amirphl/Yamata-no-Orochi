@@ -844,11 +844,12 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/payments/callback": {
+        "/api/v1/payments/callback/{invoice_number}": {
             "post": {
                 "description": "Handles the callback from the payment gateway (Atipay)",
                 "consumes": [
-                    "application/json"
+                    "application/json",
+                    "application/x-www-form-urlencoded"
                 ],
                 "produces": [
                     "text/html"
@@ -859,10 +860,16 @@ const docTemplate = `{
                 "summary": "Payment Callback",
                 "parameters": [
                     {
-                        "description": "Callback data from Atipay",
+                        "type": "string",
+                        "description": "Invoice (reservation) number",
+                        "name": "invoice_number",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Callback data from Atipay (form or JSON)",
                         "name": "request",
                         "in": "body",
-                        "required": true,
                         "schema": {
                             "$ref": "#/definitions/dto.AtipayRequest"
                         }
@@ -1139,6 +1146,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/reports/agency/customers/list": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Reports"
+                ],
+                "summary": "List Agency Customers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListAgencyCustomersResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/reports/agency/customers/{customer_id}/discounts": {
             "get": {
                 "produces": [
@@ -1388,17 +1438,17 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
-                "customer_uuid": {
-                    "type": "string"
+                "customer_id": {
+                    "type": "integer"
+                },
+                "discount_rate": {
+                    "type": "number"
                 },
                 "first_name": {
                     "type": "string"
                 },
                 "last_name": {
                     "type": "string"
-                },
-                "rate": {
-                    "type": "number"
                 }
             }
         },
@@ -1411,14 +1461,37 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "discount_rate": {
+                    "type": "number"
+                },
                 "expires_at": {
                     "type": "string"
                 },
-                "rate": {
-                    "type": "number"
-                },
                 "total_sent": {
                     "type": "integer"
+                }
+            }
+        },
+        "dto.AgencyCustomerItem": {
+            "type": "object",
+            "properties": {
+                "company_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "last_name": {
+                    "type": "string"
                 }
             }
         },
@@ -1556,40 +1629,49 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "adlink": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 10000
                 },
                 "budget": {
                     "type": "integer"
                 },
                 "city": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "content": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1
                 },
                 "line_number": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "scheduleat": {
                     "type": "string"
                 },
                 "segment": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "sex": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "subsegment": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "title": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 }
             }
         },
@@ -1608,40 +1690,49 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "adlink": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 10000
                 },
                 "budget": {
                     "type": "integer"
                 },
                 "city": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "content": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1
                 },
                 "line_number": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "scheduleat": {
                     "type": "string"
                 },
                 "segment": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "sex": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "subsegment": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "title": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 }
             }
         },
@@ -1694,27 +1785,34 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "customer_id",
-                "rate"
+                "discount_rate",
+                "name"
             ],
             "properties": {
                 "customer_id": {
-                    "type": "integer"
+                    "type": "integer",
+                    "minimum": 1
                 },
-                "rate": {
+                "discount_rate": {
                     "type": "number",
                     "maximum": 0.5,
                     "minimum": 0
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 1
                 }
             }
         },
         "dto.CreateAgencyDiscountResponse": {
             "type": "object",
             "properties": {
+                "discount_rate": {
+                    "type": "number"
+                },
                 "message": {
                     "type": "string"
-                },
-                "rate": {
-                    "type": "number"
                 }
             }
         },
@@ -1722,40 +1820,49 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "adlink": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 10000
                 },
                 "budget": {
                     "type": "integer"
                 },
                 "city": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "content": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1
                 },
                 "line_number": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "schedule_at": {
                     "type": "string"
                 },
                 "segment": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "sex": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "subsegment": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "title": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 }
             }
         },
@@ -1905,6 +2012,20 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/dto.AgencyCustomerDiscountItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ListAgencyCustomersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AgencyCustomerItem"
                     }
                 },
                 "message": {
@@ -2242,43 +2363,52 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "adlink": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 10000
                 },
                 "budget": {
                     "type": "integer"
                 },
                 "city": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "content": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1
                 },
                 "finalize": {
                     "type": "boolean"
                 },
                 "line_number": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "scheduleat": {
                     "type": "string"
                 },
                 "segment": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "sex": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "subsegment": {
                     "type": "array",
+                    "maxItems": 255,
                     "items": {
                         "type": "string"
                     }
                 },
                 "title": {
-                    "type": "string"
+                    "type": "string",
+                    "maxLength": 255
                 }
             }
         },

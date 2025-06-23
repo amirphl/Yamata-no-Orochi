@@ -14,14 +14,14 @@ definitions:
         type: string
       created_at:
         type: string
-      customer_uuid:
-        type: string
+      customer_id:
+        type: integer
+      discount_rate:
+        type: number
       first_name:
         type: string
       last_name:
         type: string
-      rate:
-        type: number
     type: object
   dto.AgencyCustomerDiscountItem:
     properties:
@@ -29,12 +29,27 @@ definitions:
         type: integer
       created_at:
         type: string
+      discount_rate:
+        type: number
       expires_at:
         type: string
-      rate:
-        type: number
       total_sent:
         type: integer
+    type: object
+  dto.AgencyCustomerItem:
+    properties:
+      company_name:
+        type: string
+      created_at:
+        type: string
+      customer_id:
+        type: integer
+      first_name:
+        type: string
+      is_active:
+        type: boolean
+      last_name:
+        type: string
     type: object
   dto.AgencyCustomerReportItem:
     properties:
@@ -131,28 +146,37 @@ definitions:
   dto.CalculateCampaignCapacityRequest:
     properties:
       adlink:
+        maxLength: 10000
         type: string
       budget:
         type: integer
       city:
         items:
           type: string
+        maxItems: 255
         type: array
       content:
+        maxLength: 512
+        minLength: 1
         type: string
       line_number:
+        maxLength: 255
         type: string
       scheduleat:
         type: string
       segment:
+        maxLength: 255
         type: string
       sex:
+        maxLength: 255
         type: string
       subsegment:
         items:
           type: string
+        maxItems: 255
         type: array
       title:
+        maxLength: 255
         type: string
     type: object
   dto.CalculateCampaignCapacityResponse:
@@ -165,28 +189,37 @@ definitions:
   dto.CalculateCampaignCostRequest:
     properties:
       adlink:
+        maxLength: 10000
         type: string
       budget:
         type: integer
       city:
         items:
           type: string
+        maxItems: 255
         type: array
       content:
+        maxLength: 512
+        minLength: 1
         type: string
       line_number:
+        maxLength: 255
         type: string
       scheduleat:
         type: string
       segment:
+        maxLength: 255
         type: string
       sex:
+        maxLength: 255
         type: string
       subsegment:
         items:
           type: string
+        maxItems: 255
         type: array
       title:
+        maxLength: 255
         type: string
     type: object
   dto.CalculateCampaignCostResponse:
@@ -222,47 +255,62 @@ definitions:
   dto.CreateAgencyDiscountRequest:
     properties:
       customer_id:
+        minimum: 1
         type: integer
-      rate:
+      discount_rate:
         maximum: 0.5
         minimum: 0
         type: number
+      name:
+        maxLength: 255
+        minLength: 1
+        type: string
     required:
     - customer_id
-    - rate
+    - discount_rate
+    - name
     type: object
   dto.CreateAgencyDiscountResponse:
     properties:
+      discount_rate:
+        type: number
       message:
         type: string
-      rate:
-        type: number
     type: object
   dto.CreateCampaignRequest:
     properties:
       adlink:
+        maxLength: 10000
         type: string
       budget:
         type: integer
       city:
         items:
           type: string
+        maxItems: 255
         type: array
       content:
+        maxLength: 512
+        minLength: 1
         type: string
       line_number:
+        maxLength: 255
         type: string
       schedule_at:
         type: string
       segment:
+        maxLength: 255
         type: string
       sex:
+        maxLength: 255
         type: string
       subsegment:
         items:
           type: string
+        maxItems: 255
         type: array
       title:
+        maxLength: 255
         type: string
     type: object
   dto.CreateCampaignResponse:
@@ -362,6 +410,15 @@ definitions:
       items:
         items:
           $ref: '#/definitions/dto.AgencyCustomerDiscountItem'
+        type: array
+      message:
+        type: string
+    type: object
+  dto.ListAgencyCustomersResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AgencyCustomerItem'
         type: array
       message:
         type: string
@@ -604,30 +661,39 @@ definitions:
   dto.UpdateCampaignRequest:
     properties:
       adlink:
+        maxLength: 10000
         type: string
       budget:
         type: integer
       city:
         items:
           type: string
+        maxItems: 255
         type: array
       content:
+        maxLength: 512
+        minLength: 1
         type: string
       finalize:
         type: boolean
       line_number:
+        maxLength: 255
         type: string
       scheduleat:
         type: string
       segment:
+        maxLength: 255
         type: string
       sex:
+        maxLength: 255
         type: string
       subsegment:
         items:
           type: string
+        maxItems: 255
         type: array
       title:
+        maxLength: 255
         type: string
     type: object
   dto.UpdateCampaignResponse:
@@ -1153,16 +1219,21 @@ paths:
       summary: Health Check
       tags:
       - Health
-  /api/v1/payments/callback:
+  /api/v1/payments/callback/{invoice_number}:
     post:
       consumes:
       - application/json
+      - application/x-www-form-urlencoded
       description: Handles the callback from the payment gateway (Atipay)
       parameters:
-      - description: Callback data from Atipay
+      - description: Invoice (reservation) number
+        in: path
+        name: invoice_number
+        required: true
+        type: string
+      - description: Callback data from Atipay (form or JSON)
         in: body
         name: request
-        required: true
         schema:
           $ref: '#/definitions/dto.AtipayRequest'
       produces:
@@ -1374,6 +1445,31 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: List Customer Discounts Under Agency
+      tags:
+      - Reports
+  /api/v1/reports/agency/customers/list:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListAgencyCustomersResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List Agency Customers
       tags:
       - Reports
   /api/v1/reports/agency/discounts:
