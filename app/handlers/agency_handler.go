@@ -18,6 +18,7 @@ type AgencyHandlerInterface interface {
 	GetAgencyCustomerReport(c fiber.Ctx) error
 	ListAgencyActiveDiscounts(c fiber.Ctx) error
 	ListAgencyCustomerDiscounts(c fiber.Ctx) error
+	ListAgencyCustomers(c fiber.Ctx) error
 }
 
 type AgencyHandler struct {
@@ -254,6 +255,38 @@ func (h *AgencyHandler) ListAgencyCustomerDiscounts(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, "Customer discounts retrieved successfully", res)
+}
+
+// ListAgencyCustomers returns active customers under the authenticated agency
+// @Summary List Agency Customers
+// @Tags Reports
+// @Produce json
+// @Success 200 {object} dto.APIResponse{data=dto.ListAgencyCustomersResponse}
+// @Failure 401 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/reports/agency/customers/list [get]
+func (h *AgencyHandler) ListAgencyCustomers(c fiber.Ctx) error {
+	agencyID, ok := c.Locals("customer_id").(uint)
+	if !ok || agencyID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	req := &dto.ListAgencyCustomersRequest{AgencyID: agencyID}
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+
+	res, err := h.flow.ListAgencyCustomers(h.createRequestContext(c, "/api/v1/reports/agency/customers/list"), req, metadata)
+	if err != nil {
+		if businessflow.IsAgencyNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency not found", "AGENCY_NOT_FOUND", nil)
+		}
+		if businessflow.IsAgencyInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Agency is inactive", "AGENCY_INACTIVE", nil)
+		}
+		log.Println("List agency customers failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list agency customers", "LIST_AGENCY_CUSTOMERS_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Agency customers retrieved successfully", res)
 }
 
 func (h *AgencyHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
