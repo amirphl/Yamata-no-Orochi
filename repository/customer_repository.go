@@ -192,6 +192,10 @@ func (r *CustomerRepositoryImpl) applyFilter(query *gorm.DB, filter models.Custo
 		query = query.Where("agency_referer_code = ?", *filter.AgencyRefererCode)
 	}
 
+	if filter.ReferrerAgencyID != nil {
+		query = query.Where("referrer_agency_id = ?", *filter.ReferrerAgencyID)
+	}
+
 	if filter.IsEmailVerified != nil {
 		query = query.Where("is_email_verified = ?", *filter.IsEmailVerified)
 	}
