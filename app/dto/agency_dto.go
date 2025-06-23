@@ -42,7 +42,7 @@ type AgencyActiveDiscountItem struct {
 	CustomerID   uint      `json:"customer_id"`
 	FirstName    string    `json:"first_name"`
 	LastName     string    `json:"last_name"`
-	CompanyName  *string   `json:"company_name,omitempty" validate:"omitempty"`
+	CompanyName  *string   `json:"company_name"`
 	DiscountRate float64   `json:"discount_rate"`
 	CreatedAt    time.Time `json:"created_at"`
 }
@@ -80,4 +80,22 @@ type CreateAgencyDiscountRequest struct {
 type CreateAgencyDiscountResponse struct {
 	Message      string  `json:"message"`
 	DiscountRate float64 `json:"discount_rate"`
+}
+
+type ListAgencyCustomersRequest struct {
+	AgencyID uint `json:"-"`
+}
+
+type AgencyCustomerItem struct {
+	CustomerID  uint      `json:"customer_id"`
+	FirstName   string    `json:"first_name"`
+	LastName    string    `json:"last_name"`
+	CompanyName *string   `json:"company_name,omitempty" validate:"omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	IsActive    *bool     `json:"is_active"`
+}
+
+type ListAgencyCustomersResponse struct {
+	Message string               `json:"message"`
+	Items   []AgencyCustomerItem `json:"items"`
 }

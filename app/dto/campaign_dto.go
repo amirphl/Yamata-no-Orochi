@@ -10,7 +10,7 @@ type CreateCampaignRequest struct {
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
 	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
 	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
 	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
@@ -34,7 +34,7 @@ type UpdateCampaignRequest struct {
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
 	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
 	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
 	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
@@ -79,7 +79,7 @@ type CalculateCampaignCapacityRequest struct {
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
 	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
 	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
 	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
@@ -99,7 +99,7 @@ type CalculateCampaignCostRequest struct {
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
 	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
 	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255,oneof=male female all"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
 	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
