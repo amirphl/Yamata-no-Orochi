@@ -181,6 +181,7 @@ func (r *FiberRouter) SetupRoutes() {
 	agency := api.Group("/reports")
 	agency.Use(r.authMiddleware.Authenticate())
 	agency.Get("/agency/customers", r.agencyHandler.GetAgencyCustomerReport)
+	agency.Get("/agency/customers/list", r.agencyHandler.ListAgencyCustomers)
 	agency.Get("/agency/discounts/active", r.agencyHandler.ListAgencyActiveDiscounts)
 	agency.Get("/agency/customers/:customer_id/discounts", r.agencyHandler.ListAgencyCustomerDiscounts)
 	agency.Post("/agency/discounts", r.agencyHandler.CreateAgencyDiscount)
