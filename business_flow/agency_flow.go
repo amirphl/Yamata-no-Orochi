@@ -21,6 +21,7 @@ type AgencyFlow interface {
 	GetAgencyCustomerReport(ctx context.Context, req *dto.AgencyCustomerReportRequest, metadata *ClientMetadata) (*dto.AgencyCustomerReportResponse, error)
 	ListAgencyActiveDiscounts(ctx context.Context, req *dto.ListAgencyActiveDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyActiveDiscountsResponse, error)
 	ListAgencyCustomerDiscounts(ctx context.Context, req *dto.ListAgencyCustomerDiscountsRequest, metadata *ClientMetadata) (*dto.ListAgencyCustomerDiscountsResponse, error)
+	ListAgencyCustomers(ctx context.Context, req *dto.ListAgencyCustomersRequest, metadata *ClientMetadata) (*dto.ListAgencyCustomersResponse, error)
 }
 
 // AgencyFlowImpl implements AgencyFlow
@@ -293,4 +294,38 @@ func (a *AgencyFlowImpl) ListAgencyCustomerDiscounts(ctx context.Context, req *d
 		Message: "Customer discounts retrieved successfully",
 		Items:   items,
 	}, nil
+}
+
+// ListAgencyCustomers returns all active customers referred by the agency
+func (a *AgencyFlowImpl) ListAgencyCustomers(ctx context.Context, req *dto.ListAgencyCustomersRequest, metadata *ClientMetadata) (*dto.ListAgencyCustomersResponse, error) {
+	var err error
+	defer func() {
+		if err != nil {
+			err = NewBusinessError("LIST_AGENCY_CUSTOMERS_FAILED", "List agency customers failed", err)
+		}
+	}()
+
+	_, err = getAgency(ctx, a.customerRepo, req.AgencyID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := a.customerRepo.ListByAgency(ctx, req.AgencyID)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]dto.AgencyCustomerItem, 0, len(rows))
+	for _, c := range rows {
+		items = append(items, dto.AgencyCustomerItem{
+			CustomerID:  c.ID,
+			FirstName:   c.RepresentativeFirstName,
+			LastName:    c.RepresentativeLastName,
+			CompanyName: c.CompanyName,
+			CreatedAt:   c.CreatedAt,
+			IsActive:    c.IsActive,
+		})
+	}
+
+	return &dto.ListAgencyCustomersResponse{Message: "Agency customers retrieved successfully", Items: items}, nil
 }
