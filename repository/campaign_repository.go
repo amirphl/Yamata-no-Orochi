@@ -23,31 +23,6 @@ func NewCampaignRepository(db *gorm.DB) CampaignRepository {
 	}
 }
 
-// Save creates a new campaign
-func (r *CampaignRepositoryImpl) Save(ctx context.Context, campaign *models.Campaign) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	err = db.Create(&campaign).Error
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // ByID retrieves an campaign by ID
 func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Campaign, error) {
 	db := r.getDB(ctx)
@@ -277,7 +252,7 @@ func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.Campaign
 		db = db.Where("spec->>'sex' = ?", *filter.Sex)
 	}
 	if filter.City != nil {
-		db = db.Where("spec->>'city' @> ?", fmt.Sprintf(`["%s"]`, *filter.City))
+		db.Where("spec->'city' @> ?::jsonb", fmt.Sprintf(`["%s"]`, *filter.City))
 	}
 	if filter.LineNumber != nil {
 		db = db.Where("spec->>'line_number' = ?", *filter.LineNumber)
@@ -295,10 +270,10 @@ func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.Campaign
 		db = db.Where("updated_at < ?", *filter.UpdatedBefore)
 	}
 	if filter.ScheduleAfter != nil {
-		db = db.Where("spec->>'schedule_at' > ?", filter.ScheduleAfter.Format(time.RFC3339))
+		db = db.Where("(spec->>'schedule_at')::timestamptz > ?", *filter.ScheduleAfter)
 	}
 	if filter.ScheduleBefore != nil {
-		db = db.Where("spec->>'schedule_at' < ?", filter.ScheduleBefore.Format(time.RFC3339))
+		db = db.Where("(spec->>'schedule_at')::timestamptz < ?", *filter.ScheduleBefore)
 	}
 	if filter.MinBudget != nil {
 		db = db.Where("CAST(spec->>'budget' AS BIGINT) >= ?", *filter.MinBudget)
