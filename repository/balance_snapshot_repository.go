@@ -160,30 +160,6 @@ func (r *BalanceSnapshotRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	return snapshots, nil
 }
 
-// Save inserts a new balance snapshot
-func (r *BalanceSnapshotRepositoryImpl) Save(ctx context.Context, snapshot *models.BalanceSnapshot) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	err = db.Create(snapshot).Error
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // SaveBatch inserts multiple balance snapshots in a single transaction
 func (r *BalanceSnapshotRepositoryImpl) SaveBatch(ctx context.Context, snapshots []*models.BalanceSnapshot) error {
 	if len(snapshots) == 0 {
