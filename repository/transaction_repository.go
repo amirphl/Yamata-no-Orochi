@@ -210,31 +210,6 @@ func (r *TransactionRepositoryImpl) ByFilter(ctx context.Context, filter models.
 	return transactions, nil
 }
 
-// Save inserts a new transaction
-func (r *TransactionRepositoryImpl) Save(ctx context.Context, transaction *models.Transaction) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	err = db.Create(transaction).Error
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // SaveBatch inserts multiple transactions in a single transaction
 func (r *TransactionRepositoryImpl) SaveBatch(ctx context.Context, transactions []*models.Transaction) error {
 	if len(transactions) == 0 {
@@ -326,6 +301,18 @@ func (r *TransactionRepositoryImpl) applyFilter(query *gorm.DB, filter models.Tr
 	if filter.CreatedBefore != nil {
 		query = query.Where("created_at < ?", *filter.CreatedBefore)
 	}
+
+	if filter.Source != nil {
+		query = query.Where("metadata->>'source' = ?", *filter.Source)
+	}
+	if filter.Operation != nil {
+		query = query.Where("metadata->>'operation' = ?", *filter.Operation)
+	}
+
+	if filter.CampaignID != nil {
+		query = query.Where("(metadata->>'campaign_id')::bigint = ?", *filter.CampaignID)
+	}
+
 	return query
 }
 
