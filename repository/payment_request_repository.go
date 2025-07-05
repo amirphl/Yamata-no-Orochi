@@ -220,31 +220,6 @@ func (r *PaymentRequestRepositoryImpl) ByFilter(ctx context.Context, filter mode
 	return requests, nil
 }
 
-// Save inserts a new payment request
-func (r *PaymentRequestRepositoryImpl) Save(ctx context.Context, request *models.PaymentRequest) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	err = db.Create(request).Error
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 // SaveBatch inserts multiple payment requests in a single transaction
 func (r *PaymentRequestRepositoryImpl) SaveBatch(ctx context.Context, requests []*models.PaymentRequest) error {
 	if len(requests) == 0 {
