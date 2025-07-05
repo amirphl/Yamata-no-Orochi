@@ -140,30 +140,6 @@ func (r *CommissionRateRepositoryImpl) ByFilter(ctx context.Context, filter mode
 	return rates, nil
 }
 
-// Save inserts a new commission rate
-func (r *CommissionRateRepositoryImpl) Save(ctx context.Context, rate *models.CommissionRate) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	err = db.Create(rate).Error
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
 // SaveBatch inserts multiple commission rates in a single transaction
 func (r *CommissionRateRepositoryImpl) SaveBatch(ctx context.Context, rates []*models.CommissionRate) error {
 	if len(rates) == 0 {
