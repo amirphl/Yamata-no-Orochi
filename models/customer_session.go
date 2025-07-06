@@ -21,6 +21,7 @@ type CustomerSession struct {
 	UserAgent      *string         `gorm:"type:text" json:"user_agent,omitempty"`
 	IsActive       *bool           `gorm:"default:true;index:idx_sessions_is_active" json:"is_active"`
 	CreatedAt      time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"created_at"`
+	UpdatedAt      time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"updated_at"`
 	LastAccessedAt time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sessions_last_accessed" json:"last_accessed_at"`
 	ExpiresAt      time.Time       `gorm:"not null;index:idx_sessions_expires_at" json:"expires_at"`
 }
