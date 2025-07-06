@@ -3,6 +3,7 @@ package models
 import (
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -100,8 +101,8 @@ func (ac *AgencyCommission) CanBePaid() bool {
 // MarkAsPaid marks the commission as paid and sets payment details
 func (ac *AgencyCommission) MarkAsPaid(paymentTransactionID uint) {
 	ac.Status = CommissionStatusPaid
-	ac.PaidAt = &time.Time{}
-	*ac.PaidAt = time.Now()
+	now := utils.UTCNow()
+	ac.PaidAt = &now
 	ac.PaymentTransactionID = &paymentTransactionID
 }
 
