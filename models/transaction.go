@@ -119,4 +119,11 @@ type TransactionFilter struct {
 	ExternalReference *string            `json:"external_reference,omitempty"`
 	CreatedAfter      *time.Time         `json:"created_after,omitempty"`
 	CreatedBefore     *time.Time         `json:"created_before,omitempty"`
+
+	// source and operation filter
+	Source    *string `json:"source,omitempty"`
+	Operation *string `json:"operation,omitempty"`
+
+	// campaign filter
+	CampaignID *uint `json:"campaign_id,omitempty"`
 }
