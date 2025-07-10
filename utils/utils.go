@@ -3,6 +3,9 @@ package utils
 
 import (
 	"crypto/rand"
+	"errors"
+	"strings"
+	"unicode"
 
 	"github.com/google/uuid"
 )
@@ -37,4 +40,27 @@ func GenerateRandomAgencyRefererCode() string {
 		}
 	}
 	return string(digits)
+}
+
+func ValidateShebaNumber(shebaNumber *string) (string, error) {
+	if shebaNumber == nil || len(*shebaNumber) == 0 {
+		return "", errors.New("sheba number is required")
+	}
+	shebaNumberStr := strings.TrimSpace(*shebaNumber)
+	// validate prefix IR
+	if !strings.HasPrefix(shebaNumberStr, "IR") {
+		return "", errors.New("sheba number must start with IR")
+	}
+	// validate length exactly 26
+	if len(shebaNumberStr) != 26 {
+		return "", errors.New("sheba number must be 26 digits")
+	}
+	// validate digits are numbers
+	for _, s := range shebaNumberStr[2:] {
+		if !unicode.IsDigit(s) {
+			return "", errors.New("sheba number must contain only digits")
+		}
+	}
+
+	return shebaNumberStr, nil
 }
