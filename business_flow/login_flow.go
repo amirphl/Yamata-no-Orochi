@@ -100,6 +100,11 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 			return ErrAccountTypeNotFound
 		}
 
+		// Check mobile number is verified
+		if !utils.IsTrue(customer.IsMobileVerified) {
+			return ErrMobileNumberNotVerified
+		}
+
 		// Create new session
 		session, err := lf.createSession(txCtx, customer.ID, metadata)
 		if err != nil {
@@ -417,7 +422,7 @@ func (lf *LoginFlowImpl) invalidateAllSessions(ctx context.Context, customerID u
 		session.IsActive = utils.ToPtr(false)
 		session.ExpiresAt = utils.UTCNow()
 
-		if err := lf.sessionRepo.Save(ctx, session); err != nil {
+		if err := lf.sessionRepo.Update(ctx, session); err != nil {
 			return err
 		}
 	}
