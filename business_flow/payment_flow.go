@@ -94,17 +94,8 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 		if err != nil {
 			return err
 		}
-
-		// The first time a customer charges their wallet, we create a new wallet for them
-		if wallet == nil {
-			wallet, err := createWalletWithInitialSnapshot(txCtx, p.walletRepo, customer.ID, "charge_wallet")
-			if err != nil {
-				return err
-			}
-
-			// Update customer with wallet reference
-			customer.Wallet = &wallet
-		}
+		// Update customer with wallet reference
+		customer.Wallet = wallet
 
 		// Create payment request
 		paymentRequest, err = p.createPaymentRequest(txCtx, customer, req.AmountWithTax)
@@ -291,7 +282,7 @@ func (p *PaymentFlowImpl) getAgencyDiscountAndIBAN(ctx context.Context, customer
 		return 0, "", err
 	}
 
-	shebaNumber, err = validateShebaNumber(agency.ShebaNumber)
+	shebaNumber, err = ValidateShebaNumber(agency.ShebaNumber)
 	if err != nil {
 		return 0, "", err
 	}
@@ -699,19 +690,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 
 	agencyWallet, err := getWallet(ctx, p.walletRepo, agencyID)
 	if err != nil {
-		if IsWalletNotFound(err) {
-			agencyWallet, err = createWalletWithInitialSnapshot(ctx, p.walletRepo, agencyID, "payment_callback")
-			if err != nil {
-				return err
-			}
-
-			agencyWallet, err = getWallet(ctx, p.walletRepo, agencyID)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
+		return err
 	}
 
 	// Get tax wallet
@@ -770,6 +749,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		"agency_id":             agencyID,
 		"agency_discount_id":    agencyDiscountID,
 		"source":                "payment_callback",
+		"operation":             "increase_balance",
 		"payment_request_id":    paymentRequest.ID,
 		"amount_with_tax":       realWithTax,
 		"amount":                real,
@@ -788,6 +768,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	newCustomerFreeBalance := customerBalance.FreeBalance + real
 	newCustomerCreditBalance := customerBalance.CreditBalance + customerCredit
 	metadata["source"] = "payment_callback_increase_customer_free_plus_credit"
+	metadata["operation"] = "increase_customer_free_plus_credit"
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return err
@@ -843,6 +824,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 
 	newAgencyLockedBalance := agencyBalance.LockedBalance + agencyShareWithTax
 	metadata["source"] = "payment_callback_increase_agency_locked_(agency_share_with_tax)"
+	metadata["operation"] = "increase_agency_locked"
 	metadataJSON, err = json.Marshal(metadata)
 	if err != nil {
 		return err
@@ -899,6 +881,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	// Update tax wallet balance
 	newTaxLockedBalance := taxBalance.LockedBalance + taxSystemShare
 	metadata["source"] = "payment_callback_increase_tax_locked_(tax_system_share)"
+	metadata["operation"] = "increase_tax_locked"
 	metadataJSON, err = json.Marshal(metadata)
 	if err != nil {
 		return err
@@ -955,6 +938,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	// Update system wallet balance
 	newSystemLockedBalance := systemBalance.LockedBalance + realSystemShare
 	metadata["source"] = "payment_callback_increase_system_locked_(real_system_share)"
+	metadata["operation"] = "increase_system_locked"
 	metadataJSON, err = json.Marshal(metadata)
 	if err != nil {
 		return err
@@ -1315,15 +1299,7 @@ func (p *PaymentFlowImpl) GetWalletBalance(ctx context.Context, req *dto.GetWall
 	// Find wallet
 	wallet, err := getWallet(ctx, p.walletRepo, req.CustomerID)
 	if err != nil {
-		if IsWalletNotFound(err) {
-			wallet, err = createWalletWithInitialSnapshot(ctx, p.walletRepo, req.CustomerID, "get_wallet_balance")
-			if err != nil {
-				return nil, err
-			}
-			// customer.Wallet = &wallet
-		} else {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	// Latest balance latestSnapshot
