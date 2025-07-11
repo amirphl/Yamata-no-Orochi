@@ -102,27 +102,12 @@ func (f *AdminLineNumberFlowImpl) UpdateBatch(ctx context.Context, req *dto.Admi
 		if item.ID == 0 {
 			return NewBusinessError("LINE_NUMBER_UPDATE_VALIDATION_FAILED", "Line number ID is required", ErrLineNumberValueRequired)
 		}
-		if item.PriceFactor <= 0 {
-			return NewBusinessError("PRICE_FACTOR_INVALID", "Price factor must be greater than zero", ErrPriceFactorInvalid)
-		}
-		var value string
-		if item.LineNumber != nil {
-			v := strings.TrimSpace(*item.LineNumber)
-			if v == "" {
-				return NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required", ErrLineNumberValueRequired)
-			}
-			if len(v) > 50 {
-				v = v[:50]
-			}
-			value = v
-		}
+
 		updates = append(updates, &models.LineNumber{
 			ID:          item.ID,
-			Name:        item.Name,
-			LineNumber:  value,
-			PriceFactor: item.PriceFactor,
 			Priority:    item.Priority,
 			IsActive:    item.IsActive,
+			UpdatedAt:   utils.UTCNow(),
 		})
 	}
 	// Persist
