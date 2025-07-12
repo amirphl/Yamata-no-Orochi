@@ -106,6 +106,40 @@ func ToCustomerSessionDTO(session models.CustomerSession) dto.CustomerSessionDTO
 	}
 }
 
+func ToAdminDTOModel(a models.Admin) dto.AdminDTO {
+	return dto.AdminDTO{
+		ID:        a.ID,
+		UUID:      a.UUID.String(),
+		Username:  a.Username,
+		IsActive:  a.IsActive,
+		CreatedAt: a.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func ToAdminSessionDTO(accessToken, refreshToken string) dto.AdminSessionDTO {
+	return dto.AdminSessionDTO{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    utils.AccessTokenTTLSeconds,
+		TokenType:    "Bearer",
+		CreatedAt:    utils.UTCNow().Format(time.RFC3339),
+	}
+}
+
+func ToLineNumberDTO(line models.LineNumber) dto.AdminLineNumberDTO {
+	return dto.AdminLineNumberDTO{
+		ID:          line.ID,
+		UUID:        line.UUID.String(),
+		Name:        line.Name,
+		LineNumber:  line.LineNumber,
+		PriceFactor: line.PriceFactor,
+		Priority:    line.Priority,
+		IsActive:    line.IsActive,
+		CreatedAt:   line.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:   line.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
 func createAuditLog(
 	ctx context.Context,
 	auditRepo repository.AuditLogRepository,
@@ -316,7 +350,36 @@ func getLatestSystemWalletBalanceSnapshot(ctx context.Context, walletRepo reposi
 	return *systemBalance, nil
 }
 
-func validateShebaNumber(shebaNumber *string) (string, error) {
+func createWalletWithInitialSnapshot(
+	ctx context.Context,
+	walletRepo repository.WalletRepository,
+	customerID uint,
+	source string,
+) (models.Wallet, error) {
+	meta := map[string]any{
+		"source":     source,
+		"created_at": utils.UTCNow(),
+	}
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return models.Wallet{}, err
+	}
+
+	// Create new wallet for customer
+	wallet := models.Wallet{
+		UUID:       uuid.New(),
+		CustomerID: customerID,
+		Metadata:   json.RawMessage(b),
+	}
+
+	if err := walletRepo.SaveWithInitialSnapshot(ctx, &wallet); err != nil {
+		return models.Wallet{}, err
+	}
+
+	return wallet, nil
+}
+
+func ValidateShebaNumber(shebaNumber *string) (string, error) {
 	if shebaNumber == nil || len(*shebaNumber) == 0 {
 		return "", ErrShebaNumberRequired
 	}
@@ -337,33 +400,4 @@ func validateShebaNumber(shebaNumber *string) (string, error) {
 	}
 
 	return shebaNumberStr, nil
-}
-
-func createWalletWithInitialSnapshot(
-	ctx context.Context,
-	walletRepo repository.WalletRepository,
-	customerID uint,
-	source string,
-) (models.Wallet, error) {
-	meta := map[string]any{
-		"created_via": source,
-		"created_at":  utils.UTCNow(),
-	}
-	b, err := json.Marshal(meta)
-	if err != nil {
-		return models.Wallet{}, err
-	}
-
-	// Create new wallet for customer
-	wallet := models.Wallet{
-		UUID:       uuid.New(),
-		CustomerID: customerID,
-		Metadata:   json.RawMessage(b),
-	}
-
-	if err := walletRepo.SaveWithInitialSnapshot(ctx, &wallet); err != nil {
-		return models.Wallet{}, err
-	}
-
-	return wallet, nil
 }
