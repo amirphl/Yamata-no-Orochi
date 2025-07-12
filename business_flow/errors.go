@@ -13,6 +13,7 @@ var (
 	ErrAccountInactive         = errors.New("account is inactive")
 	ErrAccountTypeNotFound     = errors.New("account type not found")
 	ErrIncorrectPassword       = errors.New("incorrect password")
+	ErrMobileNumberNotVerified = errors.New("mobile number not verified")
 	ErrEmailAlreadyExists      = errors.New("email already exists")
 	ErrMobileAlreadyExists     = errors.New("mobile number already exists")
 	ErrNationalIDAlreadyExists = errors.New("national ID already exists")
@@ -58,6 +59,10 @@ var (
 	ErrCampaignUpdateRequired       = errors.New("at least one field must be provided for update")
 	ErrCampaignUUIDRequired         = errors.New("campaign UUID is required")
 
+	ErrCampaignNotWaitingForApproval   = errors.New("campaign is not waiting for approval")
+	ErrFreezeTransactionNotFound       = errors.New("freeze transaction not found for campaign")
+	ErrMultipleFreezeTransactionsFound = errors.New("multiple freeze transactions found for campaign")
+
 	// Payment-related errors
 	ErrWalletNotFound           = errors.New("wallet not found")
 	ErrAmountTooLow             = errors.New("amount is too low")
@@ -99,7 +104,17 @@ var (
 	ErrDiscountRateOutOfRange              = errors.New("discount rate must be between 0 and 0.5")
 	ErrAgencyCannotCreateDiscountForItself = errors.New("agency cannot create discount for itself")
 	ErrCustomerNotUnderAgency              = errors.New("customer is not under this agency")
-	ErrAgencyCannotListDiscountsForItself = errors.New("agency cannot list discounts for itself")
+	ErrAgencyCannotListDiscountsForItself  = errors.New("agency cannot list discounts for itself")
+
+	// Admin and captcha related errors
+	ErrAdminNotFound  = errors.New("admin not found")
+	ErrAdminInactive  = errors.New("admin account is inactive")
+	ErrInvalidCaptcha = errors.New("invalid captcha")
+
+	// Line number related errors
+	ErrLineNumberValueRequired = errors.New("line number value is required")
+	ErrPriceFactorInvalid      = errors.New("price factor must be greater than zero")
+	ErrLineNumberAlreadyExists = errors.New("line number already exists")
 )
 
 type BusinessError struct {
@@ -149,6 +164,10 @@ func IsAccountTypeNotFound(err error) bool {
 
 func IsIncorrectPassword(err error) bool {
 	return errors.Is(err, ErrIncorrectPassword)
+}
+
+func IsMobileNumberNotVerified(err error) bool {
+	return errors.Is(err, ErrMobileNumberNotVerified)
 }
 
 func IsEmailAlreadyExists(err error) bool {
@@ -243,12 +262,24 @@ func IsCampaignSubsegmentRequired(err error) bool {
 	return errors.Is(err, ErrCampaignSubsegmentRequired)
 }
 
+func IsCampaignUpdateRequired(err error) bool {
+	return errors.Is(err, ErrCampaignUpdateRequired)
+}
+
 func IsCampaignUUIDRequired(err error) bool {
 	return errors.Is(err, ErrCampaignUUIDRequired)
 }
 
-func IsCampaignUpdateRequired(err error) bool {
-	return errors.Is(err, ErrCampaignUpdateRequired)
+func IsCampaignNotWaitingForApproval(err error) bool {
+	return errors.Is(err, ErrCampaignNotWaitingForApproval)
+}
+
+func IsFreezeTransactionNotFound(err error) bool {
+	return errors.Is(err, ErrFreezeTransactionNotFound)
+}
+
+func IsMultipleFreezeTransactionsFound(err error) bool {
+	return errors.Is(err, ErrMultipleFreezeTransactionsFound)
 }
 
 func IsReferrerAgencyNotFound(err error) bool {
@@ -405,4 +436,28 @@ func IsCustomerNotUnderAgency(err error) bool {
 
 func IsAgencyCannotListDiscountsForItself(err error) bool {
 	return errors.Is(err, ErrAgencyCannotListDiscountsForItself)
+}
+
+func IsAdminNotFound(err error) bool {
+	return errors.Is(err, ErrAdminNotFound)
+}
+
+func IsAdminInactive(err error) bool {
+	return errors.Is(err, ErrAdminInactive)
+}
+
+func IsInvalidCaptcha(err error) bool {
+	return errors.Is(err, ErrInvalidCaptcha)
+}
+
+func IsLineNumberValueRequired(err error) bool {
+	return errors.Is(err, ErrLineNumberValueRequired)
+}
+
+func IsPriceFactorInvalid(err error) bool {
+	return errors.Is(err, ErrPriceFactorInvalid)
+}
+
+func IsLineNumberAlreadyExists(err error) bool {
+	return errors.Is(err, ErrLineNumberAlreadyExists)
 }
