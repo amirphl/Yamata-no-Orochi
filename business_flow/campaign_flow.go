@@ -260,19 +260,12 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			}
 
 			// Fetch wallet free balance
-			wallet, err := s.walletRepo.ByCustomerID(txCtx, req.CustomerID)
+			wallet, err := getWallet(txCtx, s.walletRepo, req.CustomerID)
 			if err != nil {
 				return err
 			}
-			if wallet == nil {
-				wallet, err := createWalletWithInitialSnapshot(txCtx, s.walletRepo, req.CustomerID, "campaign_update")
-				if err != nil {
-					return err
-				}
-
-				// Update customer with wallet reference
-				customer.Wallet = &wallet
-			}
+			// Update customer with wallet reference
+			customer.Wallet = &wallet
 
 			latestBalance, err := getLatestBalanceSnapshot(txCtx, s.walletRepo, wallet.ID)
 			if err != nil {
