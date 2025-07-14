@@ -145,3 +145,58 @@ type ListCampaignsResponse struct {
 	Items      []GetCampaignResponse `json:"items"`
 	Pagination PaginationInfo        `json:"pagination"`
 }
+
+// AdminListCampaignsFilter holds filters for admin campaign listing
+type AdminListCampaignsFilter struct {
+	Title     *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Status    *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in_progress waiting_for_approval approved rejected"`
+	StartDate *time.Time `json:"start_date,omitempty" validate:"omitempty"`
+	EndDate   *time.Time `json:"end_date,omitempty" validate:"omitempty"`
+}
+
+// AdminGetCampaignResponse represents the campaign specification in responses
+type AdminGetCampaignResponse struct {
+	UUID       string     `json:"uuid"`
+	Status     string     `json:"status"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
+	Title      *string    `json:"title,omitempty" validate:"omitempty"`
+	Segment    *string    `json:"segment,omitempty" validate:"omitempty"`
+	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Sex        *string    `json:"sex,omitempty" validate:"omitempty"`
+	City       []string   `json:"city,omitempty" validate:"omitempty"`
+	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty"`
+	Content    *string    `json:"content,omitempty" validate:"omitempty"`
+	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty"`
+	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	Comment    *string    `json:"comment,omitempty" validate:"omitempty"`
+}
+
+// AdminListCampaignsResponse represents a paginated list of campaigns
+type AdminListCampaignsResponse struct {
+	Message    string                     `json:"message"`
+	Items      []AdminGetCampaignResponse `json:"items"`
+}
+
+// AdminApproveCampaignRequest represents admin approval input
+type AdminApproveCampaignRequest struct {
+	CampaignID uint    `json:"campaign_id" validate:"required"`
+	Comment    *string `json:"comment,omitempty" validate:"omitempty,max=1000"`
+}
+
+// AdminApproveCampaignResponse represents admin approval result
+type AdminApproveCampaignResponse struct {
+	Message string `json:"message"`
+}
+
+// AdminRejectCampaignRequest represents admin rejection input
+type AdminRejectCampaignRequest struct {
+	CampaignID uint   `json:"campaign_id" validate:"required"`
+	Comment    string `json:"comment" validate:"required,max=1000"`
+}
+
+// AdminRejectCampaignResponse represents admin rejection result
+type AdminRejectCampaignResponse struct {
+	Message string `json:"message"`
+}
