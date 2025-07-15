@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0032_add_updated_at_to_customer_sessions_down.sql...'
+\i migrations/0032_add_updated_at_to_customer_sessions_down.sql
+
 \echo 'Running 0031_remove_hardcoded_system_tax_data_down.sql...'
 \i migrations/0031_remove_hardcoded_system_tax_data_down.sql
 

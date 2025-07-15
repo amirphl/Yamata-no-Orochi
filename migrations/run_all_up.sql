@@ -99,5 +99,8 @@
 \echo 'Running 0031_remove_hardcoded_system_tax_data.sql...'
 \i migrations/0031_remove_hardcoded_system_tax_data.sql
 
+\echo 'Running 0032_add_updated_at_to_customer_sessions.sql...'
+\i migrations/0032_add_updated_at_to_customer_sessions.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
