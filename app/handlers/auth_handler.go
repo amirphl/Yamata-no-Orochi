@@ -308,6 +308,9 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		if businessflow.IsIncorrectPassword(err) {
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Incorrect password", "INCORRECT_PASSWORD", nil)
 		}
+		if businessflow.IsMobileNumberNotVerified(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Mobile number not verified", "MOBILE_NUMBER_NOT_VERIFIED", nil)
+		}
 
 		log.Println("Login failed", err)
 		// Handle generic business errors
