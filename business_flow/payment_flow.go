@@ -41,6 +41,7 @@ type PaymentFlowImpl struct {
 
 	// Atipay configuration
 	atipayCfg     config.AtipayConfig
+	sysCfg        config.SystemConfig
 	deploymentCfg config.DeploymentConfig
 }
 
@@ -55,6 +56,7 @@ func NewPaymentFlow(
 	agencyDiscountRepo repository.AgencyDiscountRepository,
 	db *gorm.DB,
 	atipayCfg config.AtipayConfig,
+	sysCfg config.SystemConfig,
 	deploymentCfg config.DeploymentConfig,
 ) PaymentFlow {
 	return &PaymentFlowImpl{
@@ -67,6 +69,7 @@ func NewPaymentFlow(
 		agencyDiscountRepo:  agencyDiscountRepo,
 		db:                  db,
 		atipayCfg:           atipayCfg,
+		sysCfg:              sysCfg,
 		deploymentCfg:       deploymentCfg,
 	}
 }
@@ -83,6 +86,9 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 	var atipayToken string
 
 	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		// TODO: FIX this
+		req.AmountWithTax = 5000
+
 		var err error
 		customer, err = getCustomer(txCtx, p.customerRepo, req.CustomerID)
 		if err != nil {
@@ -105,9 +111,7 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 
 		atipayToken, err = p.callAtipayGetToken(txCtx, customer, *paymentRequest)
 		if err != nil {
-			atipayToken = uuid.New().String()
-			// TODO: For now fake it!:))
-			// return err
+			return err
 		}
 
 		// Update payment request with Atipay token
@@ -252,7 +256,7 @@ func (p *PaymentFlowImpl) calculateScatteredSettlementItems(ctx context.Context,
 	// NOTE: ORDER MATTERS
 	// --------------------------------
 
-	systemUser, err := getSystemUser(ctx, p.customerRepo, p.walletRepo)
+	systemUser, err := getSystemUser(ctx, p.customerRepo, p.walletRepo, p.sysCfg)
 	if err != nil {
 		return nil, err
 	}
@@ -694,12 +698,12 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	}
 
 	// Get tax wallet
-	taxWallet, err := getTaxWallet(ctx, p.walletRepo)
+	taxWallet, err := getTaxWallet(ctx, p.walletRepo, p.sysCfg)
 	if err != nil {
 		return err
 	}
 
-	systemWallet, err := getSystemWallet(ctx, p.walletRepo)
+	systemWallet, err := getSystemWallet(ctx, p.walletRepo, p.sysCfg)
 	if err != nil {
 		return err
 	}
