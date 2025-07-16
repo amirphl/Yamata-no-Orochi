@@ -47,12 +47,6 @@ const (
 
 	// TaxRate is the tax rate applied to payments (10%)
 	TaxRate = 0.10
-
-	// TaxWalletUUID is the UUID of the system tax wallet
-	TaxWalletUUID = "2672a1bf-b344-4d84-adee-5b92307a2e7c"
-
-	// SystemWalletUUID is the UUID of the system wallet
-	SystemWalletUUID = "b5b35e36-c873-40cd-8025-f7ea22b50bb2"
 )
 
 const (

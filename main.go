@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -20,8 +21,13 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+
+	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 )
 
 // Application represents the main application structure
@@ -209,6 +215,11 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	cancel := startCacheHealthMonitor(context.Background(), rc, cfg.Cache.CleanupInterval)
 	stopFuncs = append(stopFuncs, cancel)
 
+	// Init system/tax entities dynamically using config
+	if err := ensureSystemAndTaxEntities(db, cfg); err != nil {
+		return nil, err
+	}
+
 	// Initialize repositories
 	accountTypeRepo := repository.NewAccountTypeRepository(db)
 	customerRepo := repository.NewCustomerRepository(db)
@@ -220,9 +231,17 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	balanceSnapshotRepo := repository.NewBalanceSnapshotRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
 	agencyDiscountRepo := repository.NewAgencyDiscountRepository(db)
+	adminRepo := repository.NewAdminRepository(db)
+	lineNumberRepo := repository.NewLineNumberRepository(db)
 
 	// Initialize services
 	notificationService := initializeNotificationService(cfg)
+
+	// Captcha service for admin
+	captchaSvc, err := services.NewCaptchaServiceRotate(2*time.Minute, 15, 300)
+	if err != nil {
+		return nil, err
+	}
 
 	// Initialize token service
 	tokenService, err := services.NewTokenService(
@@ -246,6 +265,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		sessionRepo,
 		auditRepo,
 		agencyDiscountRepo,
+		walletRepo,
 		tokenService,
 		notificationService,
 		cfg.Admin,
@@ -287,6 +307,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		agencyDiscountRepo,
 		db,
 		cfg.Atipay,
+		cfg.System,
 		cfg.Deployment,
 	)
 
@@ -300,17 +321,49 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		db,
 	)
 
+	adminFlow := businessflow.NewAdminFlow(
+		adminRepo,
+		tokenService,
+		captchaSvc,
+	)
+
+	adminCampaignFlow := businessflow.NewAdminCampaignFlow(
+		campaignRepo,
+		customerRepo,
+		walletRepo,
+		balanceSnapshotRepo,
+		transactionRepo,
+		auditRepo,
+		db,
+		notificationService,
+		cfg.Admin,
+	)
+
+	adminLineNumberFlow := businessflow.NewAdminLineNumberFlow(lineNumberRepo, db)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 	agencyHandler := handlers.NewAgencyHandler(agencyFlow)
+	adminHandler := handlers.NewAdminHandler(adminFlow)
+	campaignAdminHandler := handlers.NewCampaignAdminHandler(adminCampaignFlow)
+	lineNumberAdminHandler := handlers.NewLineNumberAdminHandler(adminLineNumberFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
 
 	// Initialize router
-	appRouter := router.NewFiberRouter(authHandler, campaignHandler, paymentHandler, agencyHandler, authMiddleware)
+	appRouter := router.NewFiberRouter(
+		authHandler,
+		campaignHandler,
+		paymentHandler,
+		agencyHandler,
+		authMiddleware,
+		adminHandler,
+		campaignAdminHandler,
+		lineNumberAdminHandler,
+	)
 
 	// Log that services are initialized
 	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
@@ -325,4 +378,195 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	}
 
 	return application, nil
+}
+
+func ensureSystemAndTaxEntities(db *gorm.DB, cfg *config.ProductionConfig) error {
+	customerRepo := repository.NewCustomerRepository(db)
+	accountTypeRepo := repository.NewAccountTypeRepository(db)
+	walletRepo := repository.NewWalletRepository(db)
+
+	// Ensure system user
+	if cfg.System.SystemUserUUID != "" {
+		if err := ensureCustomerByUUID(
+			customerRepo,
+			accountTypeRepo,
+			cfg.System.SystemUserUUID,
+			models.AccountTypeMarketingAgency,
+			"System",
+			"Account",
+			cfg.System.SystemUserEmail,
+			cfg.System.SystemUserMobile,
+			"jaazebeh.ir",
+			cfg.System.SystemShebaNumber,
+		); err != nil {
+			return err
+		}
+	}
+	// Ensure tax user
+	if cfg.System.TaxUserUUID != "" {
+		if err := ensureCustomerByUUID(
+			customerRepo,
+			accountTypeRepo,
+			cfg.System.TaxUserUUID,
+			models.AccountTypeIndividual,
+			"Tax",
+			"Collector",
+			cfg.System.TaxUserEmail,
+			cfg.System.TaxUserMobile,
+			"tax.jaazebeh.ir",
+			"",
+		); err != nil {
+			return err
+		}
+	}
+
+	// Ensure system wallet
+	if cfg.System.SystemWalletUUID != "" && cfg.System.SystemUserUUID != "" {
+		if err := ensureWalletByUUID(
+			customerRepo,
+			walletRepo,
+			cfg.System.SystemWalletUUID,
+			cfg.System.SystemUserUUID,
+			map[string]any{"type": "system_wallet", "owner": "system", "source": "ensure_system_wallet"},
+		); err != nil {
+			return err
+		}
+	}
+
+	// Ensure tax wallet
+	if cfg.System.TaxWalletUUID != "" && cfg.System.TaxUserUUID != "" {
+		if err := ensureWalletByUUID(
+			customerRepo,
+			walletRepo,
+			cfg.System.TaxWalletUUID,
+			cfg.System.TaxUserUUID,
+			map[string]any{"type": "tax_wallet", "owner": "system", "source": "ensure_tax_wallet"},
+		); err != nil {
+			return err
+		}
+	}
+
+	// Create admin user
+	// adminRepo := repository.NewAdminRepository(db)
+	// if err := ensureAdminByUUID(
+	// 	adminRepo,
+	// 	"admin2",
+	// 	"Admin123456",
+	// ); err != nil {
+	// 	return err
+	// }
+
+	return nil
+}
+
+func ensureCustomerByUUID(
+	customerRepo repository.CustomerRepository,
+	accountTypeRepo repository.AccountTypeRepository,
+	uuidStr, accountTypeName, firstName, lastName, email, mobile, agencyRefererCode, shebaNumber string,
+) error {
+	parsed, err := uuid.Parse(uuidStr)
+	if err != nil {
+		return err
+	}
+	customers, err := customerRepo.ByFilter(context.Background(), models.CustomerFilter{UUID: &parsed}, "", 1, 0)
+	if err != nil {
+		return err
+	}
+	if len(customers) > 0 {
+		return nil
+	}
+
+	accountType, err := accountTypeRepo.ByTypeName(context.Background(), accountTypeName)
+	if err != nil {
+		return err
+	}
+
+	// Create minimal customer
+	a := models.Customer{
+		UUID:                    parsed,
+		AgencyRefererCode:       agencyRefererCode,
+		ShebaNumber:             utils.ToPtr(shebaNumber),
+		AccountTypeID:           accountType.ID,
+		RepresentativeFirstName: firstName,
+		RepresentativeLastName:  lastName,
+		RepresentativeMobile:    mobile,
+		Email:                   email,
+		PasswordHash:            "", // not used
+		IsActive:                utils.ToPtr(true),
+		IsEmailVerified:         utils.ToPtr(false),
+		IsMobileVerified:        utils.ToPtr(false),
+		CreatedAt:               utils.UTCNow(),
+		UpdatedAt:               utils.UTCNow(),
+	}
+	err = customerRepo.Save(context.Background(), &a)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureWalletByUUID(
+	customerRepo repository.CustomerRepository,
+	walletRepo repository.WalletRepository,
+	walletUUID, ownerUUID string,
+	metadata map[string]any) error {
+	// Lookup owner by UUID
+	ownerParsed, err := uuid.Parse(ownerUUID)
+	if err != nil {
+		return err
+	}
+	customers, err := customerRepo.ByFilter(context.Background(), models.CustomerFilter{UUID: &ownerParsed}, "", 1, 0)
+	if err != nil {
+		return err
+	}
+	if len(customers) == 0 {
+		return fmt.Errorf("owner not found")
+	}
+	owner := customers[0]
+	// Check wallet exists
+	w, err := walletRepo.ByUUID(context.Background(), walletUUID)
+	if err != nil {
+		return err
+	}
+	if w != nil {
+		return nil
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	// Create wallet with initial snapshot
+	err = walletRepo.SaveWithInitialSnapshot(context.Background(), &models.Wallet{
+		UUID:       uuid.MustParse(walletUUID),
+		CustomerID: owner.ID,
+		Metadata:   metadataJSON,
+	})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func ensureAdminByUUID(
+	adminRepo repository.AdminRepository,
+	username, password string,
+) error {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	if err := adminRepo.Save(context.Background(), &models.Admin{
+		UUID:         uuid.New(),
+		Username:     username,
+		PasswordHash: string(hashedPassword),
+		IsActive:     utils.ToPtr(true),
+		CreatedAt:    utils.UTCNow(),
+		UpdatedAt:    utils.UTCNow(),
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }

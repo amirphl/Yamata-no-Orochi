@@ -35,12 +35,15 @@ type Router interface {
 
 // FiberRouter implements Router using Fiber v3
 type FiberRouter struct {
-	app             *fiber.App
-	authHandler     handlers.AuthHandlerInterface
-	campaignHandler handlers.CampaignHandlerInterface
-	paymentHandler  handlers.PaymentHandlerInterface
-	agencyHandler   handlers.AgencyHandlerInterface
-	authMiddleware  *middleware.AuthMiddleware
+	app                    *fiber.App
+	authHandler            handlers.AuthHandlerInterface
+	campaignHandler        handlers.CampaignHandlerInterface
+	paymentHandler         handlers.PaymentHandlerInterface
+	agencyHandler          handlers.AgencyHandlerInterface
+	authMiddleware         *middleware.AuthMiddleware
+	adminHandler           handlers.AdminHandlerInterface
+	campaignAdminHandler   handlers.CampaignAdminHandlerInterface
+	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -50,6 +53,9 @@ func NewFiberRouter(
 	paymentHandler handlers.PaymentHandlerInterface,
 	agencyHandler handlers.AgencyHandlerInterface,
 	authMiddleware *middleware.AuthMiddleware,
+	adminHandler handlers.AdminHandlerInterface,
+	campaignAdminHandler handlers.CampaignAdminHandlerInterface,
+	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -65,12 +71,15 @@ func NewFiberRouter(
 	})
 
 	return &FiberRouter{
-		app:             app,
-		authHandler:     authHandler,
-		campaignHandler: campaignHandler,
-		paymentHandler:  paymentHandler,
-		agencyHandler:   agencyHandler,
-		authMiddleware:  authMiddleware,
+		app:                    app,
+		authHandler:            authHandler,
+		campaignHandler:        campaignHandler,
+		paymentHandler:         paymentHandler,
+		agencyHandler:          agencyHandler,
+		authMiddleware:         authMiddleware,
+		adminHandler:           adminHandler,
+		campaignAdminHandler:   campaignAdminHandler,
+		lineNumberAdminHandler: lineNumberAdminHandler,
 	}
 }
 
@@ -153,6 +162,40 @@ func (r *FiberRouter) SetupRoutes() {
 	auth.Post("/login", r.authHandler.Login)
 	auth.Post("/forgot-password", r.authHandler.ForgotPassword)
 	auth.Post("/reset", r.authHandler.ResetPassword)
+
+	// Admin auth routes (separate group; can have separate rate limit if needed)
+	adminAuth := api.Group("/admin/auth")
+	adminAuth.Use(limiter.New(limiter.Config{
+		Max:          20,
+		Expiration:   1 * time.Minute,
+		KeyGenerator: func(c fiber.Ctx) string { return c.IP() },
+		LimitReached: func(c fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Too many requests. Please try again later.",
+				Error:   dto.ErrorDetail{Code: "RATE_LIMIT_EXCEEDED"},
+			})
+		},
+	}))
+	adminAuth.Get("/captcha/init", r.adminHandler.InitCaptcha)
+	adminAuth.Post("/login", r.adminHandler.VerifyLogin)
+
+	// Admin campaigns listing and actions
+	adminCampaigns := api.Group("/admin/campaigns")
+	adminCampaigns.Use(r.authMiddleware.AdminAuthenticate())
+	adminCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminCampaigns.Get("/", r.campaignAdminHandler.ListCampaigns)
+	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
+	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
+
+	// Admin line numbers protected routes
+	lineNumbers := api.Group("/admin/line-numbers")
+	lineNumbers.Use(r.authMiddleware.AdminAuthenticate())
+	lineNumbers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	lineNumbers.Get("/", r.lineNumberAdminHandler.ListLineNumbers)
+	lineNumbers.Post("/", r.lineNumberAdminHandler.CreateLineNumber)
+	lineNumbers.Put("/", r.lineNumberAdminHandler.UpdateLineNumbersBatch)
+	lineNumbers.Get("/report", r.lineNumberAdminHandler.GetLineNumbersReport)
 
 	// Campaign routes (protected with authentication)
 	campaigns := api.Group("/campaigns")

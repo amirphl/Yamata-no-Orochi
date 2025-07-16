@@ -277,5 +277,5 @@ func RequireAdminAuth(c fiber.Ctx) error {
 			Error:   dto.ErrorDetail{Code: "INVALID_ADMIN_ID"},
 		})
 	}
-	return nil
+	return c.Next()
 }
