@@ -9,6 +9,7 @@ import (
 	"unicode"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	"github.com/amirphl/Yamata-no-Orochi/config"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -215,8 +216,8 @@ func getCustomer(ctx context.Context, customerRepo repository.CustomerRepository
 	return *customer, nil
 }
 
-func getSystemUser(ctx context.Context, customerRepo repository.CustomerRepository, walletRepo repository.WalletRepository) (models.Customer, error) {
-	wallet, err := getSystemWallet(ctx, walletRepo)
+func getSystemUser(ctx context.Context, customerRepo repository.CustomerRepository, walletRepo repository.WalletRepository, sysCfg config.SystemConfig) (models.Customer, error) {
+	wallet, err := getSystemWallet(ctx, walletRepo, sysCfg)
 	if err != nil {
 		return models.Customer{}, err
 	}
@@ -290,8 +291,8 @@ func getWallet(ctx context.Context, walletRepo repository.WalletRepository, cust
 	return *wallet, nil
 }
 
-func getSystemWallet(ctx context.Context, walletRepo repository.WalletRepository) (models.Wallet, error) {
-	wallet, err := walletRepo.ByUUID(ctx, utils.SystemWalletUUID)
+func getSystemWallet(ctx context.Context, walletRepo repository.WalletRepository, sysCfg config.SystemConfig) (models.Wallet, error) {
+	wallet, err := walletRepo.ByUUID(ctx, sysCfg.SystemWalletUUID)
 	if err != nil {
 		return models.Wallet{}, err
 	}
@@ -302,8 +303,8 @@ func getSystemWallet(ctx context.Context, walletRepo repository.WalletRepository
 	return *wallet, nil
 }
 
-func getTaxWallet(ctx context.Context, walletRepo repository.WalletRepository) (models.Wallet, error) {
-	wallet, err := walletRepo.ByUUID(ctx, utils.TaxWalletUUID)
+func getTaxWallet(ctx context.Context, walletRepo repository.WalletRepository, sysCfg config.SystemConfig) (models.Wallet, error) {
+	wallet, err := walletRepo.ByUUID(ctx, sysCfg.TaxWalletUUID)
 	if err != nil {
 		return models.Wallet{}, err
 	}
