@@ -171,14 +171,16 @@ func (r *LineNumberRepositoryImpl) Update(ctx context.Context, line *models.Line
 	}
 
 	updates := map[string]any{
-		"updated_at":   utils.UTCNow(),
-		"price_factor": line.PriceFactor,
+		"updated_at": utils.UTCNow(),
 	}
 	if line.Name != nil {
 		updates["name"] = *line.Name
 	}
 	if line.LineNumber != "" {
 		updates["line_number"] = line.LineNumber
+	}
+	if line.PriceFactor != 0 {
+		updates["price_factor"] = line.PriceFactor
 	}
 	if line.Priority != nil {
 		updates["priority"] = *line.Priority
@@ -223,14 +225,16 @@ func (r *LineNumberRepositoryImpl) UpdateBatch(ctx context.Context, lines []*mod
 			return errors.New("invalid line payload in batch (nil or missing ID)")
 		}
 		updates := map[string]any{
-			"updated_at":   utils.UTCNow(),
-			"price_factor": line.PriceFactor,
+			"updated_at": utils.UTCNow(),
 		}
 		if line.Name != nil {
 			updates["name"] = *line.Name
 		}
 		if line.LineNumber != "" {
 			updates["line_number"] = line.LineNumber
+		}
+		if line.PriceFactor != 0 {
+			updates["price_factor"] = line.PriceFactor
 		}
 		if line.Priority != nil {
 			updates["priority"] = *line.Priority
