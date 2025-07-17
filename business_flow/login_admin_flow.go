@@ -11,28 +11,28 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// AdminFlow represents the admin authentication flow used by handlers
-type AdminFlow interface {
+// AdminAuthFlow represents the admin authentication flow used by handlers
+type AdminAuthFlow interface {
 	InitCaptcha(ctx context.Context) (*dto.AdminCaptchaInitResponse, error)
 	Verify(ctx context.Context, req *dto.AdminCaptchaVerifyRequest, metadata *ClientMetadata) (*dto.AdminLoginResponse, error)
 }
 
-// AdminFlowImpl provides captcha-init and admin credential verification
-type AdminFlowImpl struct {
+// AdminAuthFlowImpl provides captcha-init and admin credential verification
+type AdminAuthFlowImpl struct {
 	adminRepo    repository.AdminRepository
 	tokenService services.TokenService
 	captchaSvc   services.CaptchaService
 }
 
-func NewAdminFlow(adminRepo repository.AdminRepository, tokenService services.TokenService, captchaSvc services.CaptchaService) AdminFlow {
-	return &AdminFlowImpl{
+func NewAdminAuthFlow(adminRepo repository.AdminRepository, tokenService services.TokenService, captchaSvc services.CaptchaService) AdminAuthFlow {
+	return &AdminAuthFlowImpl{
 		adminRepo:    adminRepo,
 		tokenService: tokenService,
 		captchaSvc:   captchaSvc,
 	}
 }
 
-func (af *AdminFlowImpl) InitCaptcha(ctx context.Context) (*dto.AdminCaptchaInitResponse, error) {
+func (af *AdminAuthFlowImpl) InitCaptcha(ctx context.Context) (*dto.AdminCaptchaInitResponse, error) {
 	if af.captchaSvc == nil {
 		return nil, NewBusinessError("CAPTCHA_NOT_AVAILABLE", "Captcha service not available", ErrCacheNotAvailable)
 	}
@@ -47,7 +47,7 @@ func (af *AdminFlowImpl) InitCaptcha(ctx context.Context) (*dto.AdminCaptchaInit
 	}, nil
 }
 
-func (af *AdminFlowImpl) Verify(ctx context.Context, req *dto.AdminCaptchaVerifyRequest, metadata *ClientMetadata) (*dto.AdminLoginResponse, error) {
+func (af *AdminAuthFlowImpl) Verify(ctx context.Context, req *dto.AdminCaptchaVerifyRequest, metadata *ClientMetadata) (*dto.AdminLoginResponse, error) {
 	// Validate request
 	if req == nil {
 		return nil, NewBusinessError("ADMIN_LOGIN_VALIDATION_FAILED", "Admin login validation failed", ErrAdminNotFound)

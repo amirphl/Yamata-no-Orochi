@@ -13,20 +13,20 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-// AdminHandlerInterface defines the contract for admin auth handlers
-type AdminHandlerInterface interface {
+// AuthAdminHandlerInterface defines the contract for admin auth handlers
+type AuthAdminHandlerInterface interface {
 	InitCaptcha(cCtx fiber.Ctx) error
 	VerifyLogin(cCtx fiber.Ctx) error
 }
 
-// AdminHandler implements AdminHandlerInterface
-type AdminHandler struct {
-	flow      businessflow.AdminFlow
+// AuthAdminHandler implements AuthAdminHandlerInterface
+type AuthAdminHandler struct {
+	flow      businessflow.AdminAuthFlow
 	validator *validator.Validate
 }
 
 // ErrorResponse standard JSON error
-func (h *AdminHandler) ErrorResponse(c fiber.Ctx, statusCode int, message, errorCode string, details any) error {
+func (h *AuthAdminHandler) ErrorResponse(c fiber.Ctx, statusCode int, message, errorCode string, details any) error {
 	return c.Status(statusCode).JSON(dto.APIResponse{
 		Success: false,
 		Message: message,
@@ -38,7 +38,7 @@ func (h *AdminHandler) ErrorResponse(c fiber.Ctx, statusCode int, message, error
 }
 
 // SuccessResponse standard JSON success
-func (h *AdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, message string, data any) error {
+func (h *AuthAdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, message string, data any) error {
 	return c.Status(statusCode).JSON(dto.APIResponse{
 		Success: true,
 		Message: message,
@@ -46,8 +46,8 @@ func (h *AdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, message stri
 	})
 }
 
-func NewAdminHandler(flow businessflow.AdminFlow) AdminHandlerInterface {
-	return &AdminHandler{
+func NewAuthAdminHandler(flow businessflow.AdminAuthFlow) AuthAdminHandlerInterface {
+	return &AuthAdminHandler{
 		flow:      flow,
 		validator: validator.New(),
 	}
@@ -61,7 +61,7 @@ func NewAdminHandler(flow businessflow.AdminFlow) AdminHandlerInterface {
 // @Success 200 {object} dto.APIResponse{data=dto.AdminCaptchaInitResponse} "Captcha initialized"
 // @Failure 500 {object} dto.APIResponse "Failed to initialize captcha"
 // @Router /api/v1/admin/auth/captcha/init [get]
-func (h *AdminHandler) InitCaptcha(c fiber.Ctx) error {
+func (h *AuthAdminHandler) InitCaptcha(c fiber.Ctx) error {
 	resp, err := h.flow.InitCaptcha(h.createRequestContext(c, "/api/v1/admin/auth/captcha/init"))
 	if err != nil {
 		log.Println("Admin captcha init failed", err)
@@ -84,7 +84,7 @@ func (h *AdminHandler) InitCaptcha(c fiber.Ctx) error {
 // @Failure 403 {object} dto.APIResponse "Admin inactive"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/admin/auth/login [post]
-func (h *AdminHandler) VerifyLogin(c fiber.Ctx) error {
+func (h *AuthAdminHandler) VerifyLogin(c fiber.Ctx) error {
 	var req dto.AdminCaptchaVerifyRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
@@ -127,11 +127,11 @@ func (h *AdminHandler) VerifyLogin(c fiber.Ctx) error {
 }
 
 // createRequestContext mirrors other handlers for request-scoped values
-func (h *AdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
+func (h *AuthAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
 	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
 }
 
-func (h *AdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *AuthAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
