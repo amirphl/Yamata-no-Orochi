@@ -134,7 +134,7 @@ func (r *FiberRouter) SetupRoutes() {
 	// Auth endpoints
 	auth.Post("/signup", r.authHandler.Signup)
 	auth.Post("/verify", r.authHandler.VerifyOTP)
-	auth.Post("/resend-otp/:customer_id", r.authHandler.ResendOTP)
+	auth.Post("/resend-otp", r.authHandler.ResendOTP)
 	auth.Post("/login", r.authHandler.Login)
 	auth.Post("/forgot-password", r.authHandler.ForgotPassword)
 	auth.Post("/reset", r.authHandler.ResetPassword)

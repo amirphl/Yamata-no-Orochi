@@ -10,7 +10,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_ROOT/.env.local"
 SSL_DIR="$PROJECT_ROOT/docker/nginx/ssl"
 NGINX_CONF_DIR="$PROJECT_ROOT/docker/nginx/sites-available"
-NGINX_TEMPLATE="$NGINX_CONF_DIR/yamata.conf"
+NGINX_TEMPLATE="$NGINX_CONF_DIR/yamata-local.conf"
 
 # Colors for output
 RED='\033[0;31m'
@@ -145,10 +145,6 @@ generate_nginx_config() {
         sed -i "s|/etc/letsencrypt/live/monitoring.$domain/privkey.pem|/etc/nginx/ssl/$domain.key|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
         sed -i "s|/etc/letsencrypt/live/monitoring.$domain/chain.pem|/etc/nginx/ssl/$domain.crt|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
         
-        # Replace upstream server addresses for local development
-        sed -i "s|server app:8080 max_fails=3 fail_timeout=30s;|server app-local:8080 max_fails=3 fail_timeout=30s;|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
-        sed -i "s|server app:9090 max_fails=3 fail_timeout=30s;|server app-local:9090 max_fails=3 fail_timeout=30s;|g" "$NGINX_CONF_DIR/generated/local/yamata.conf"
-
         print_success "Nginx configuration generated from template"
     else
         print_error "Nginx template not found: $NGINX_TEMPLATE"

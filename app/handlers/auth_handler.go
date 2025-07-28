@@ -421,9 +421,9 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	result, err := h.loginFlow.Login(h.createRequestContext(c, "/api/v1/auth/login"), &req, metadata)
 	if err != nil {
 		// Handle specific business errors
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
+		// if businessflow.IsCustomerNotFound(err) {
+		// 	return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		// }
 		if businessflow.IsAccountInactive(err) {
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Account is inactive", "ACCOUNT_INACTIVE", nil)
 		}

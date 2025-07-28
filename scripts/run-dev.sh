@@ -167,7 +167,14 @@ set_environment() {
     export SMS_RETRY_COUNT="3"
     export SMS_VALIDITY_PERIOD="300"
     export SMS_TIMEOUT="30s"
-    
+    export EMAIL_HOST="smtp.gmail.com"
+    export EMAIL_PORT="587"
+    export EMAIL_USERNAME="mock_email@gmail.com"
+    export EMAIL_PASSWORD="mock_password"
+    export EMAIL_FROM_EMAIL="noreply@localhost"
+    export EMAIL_FROM_NAME="Yamata no Orochi (Dev)"
+    export EMAIL_USE_TLS="true"
+
     print_success "Environment variables set for development"
     print_status "APP_ENV: $APP_ENV"
     print_status "Database: $DB_HOST:$DB_PORT/$DB_NAME"

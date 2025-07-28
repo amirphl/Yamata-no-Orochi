@@ -162,6 +162,7 @@ func (m *MockSMSService) SendSMS(ctx context.Context, recipient, message string,
 		CustomerID: customerID,
 		SentAt:     time.Now().UTC(),
 	}
+	fmt.Println("Mock SMS message sent:", mockMessage)
 	m.SentMessages = append(m.SentMessages, mockMessage)
 	return nil
 }

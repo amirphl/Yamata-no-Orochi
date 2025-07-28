@@ -1,25 +1,25 @@
 networks:
-  yamata-network-local:
+  yamata-network-beta:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/24
+        - subnet: 172.30.0.0/24
 
 volumes:
-  postgres_data_local:
+  postgres_data_beta:
     driver: local
-  redi_data_local:
+  redi_data_beta:
     driver: local
-  nginx_logs_local:
+  nginx_logs_beta:
     driver: local
-  app_logs_local:
+  app_logs_beta:
     driver: local
 
 services:
   # PostgreSQL Database
-  postgres-local:
+  postgres-beta:
     image: postgres:15-alpine
-    container_name: yamata-postgres-local
+    container_name: yamata-postgres-beta
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${DB_NAME}
@@ -27,13 +27,13 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
     volumes:
-      - postgres_data_local:/var/lib/postgresql/data
+      - postgres_data_beta:/var/lib/postgresql/data
       - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./migrations:/migrations:ro
     networks:
-      yamata-network-local:
-        ipv4_address: 172.20.0.10
+      yamata-network-beta:
+        ipv4_address: 172.30.0.10
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
@@ -49,18 +49,18 @@ services:
       - /var/run/postgresql
 
   # Redis Cache
-  redis-local:
+  redis-beta:
     image: redis:8.0.3-alpine
-    container_name: yamata-redis-local
+    container_name: yamata-redis-beta
     restart: unless-stopped
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-}
     volumes:
-      - redi_data_local:/data
+      - redi_data_beta:/data
       # - ./docker/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
     networks:
-      yamata-network-local:
-        ipv4_address: 172.20.0.11
+      yamata-network-beta:
+        ipv4_address: 172.30.0.11
     # command: redis-server /usr/local/etc/redis/redis.conf
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -76,18 +76,18 @@ services:
       - /tmp
 
   # Application
-  app-local:
+  app-beta:
     image: yamata-no-orochi
-    container_name: yamata-app-local
+    container_name: yamata-app-beta
     restart: unless-stopped
     depends_on:
-      postgres-local:
+      postgres-beta:
         condition: service_healthy
-      redis-local:
+      redis-beta:
         condition: service_healthy
     environment:
       # Database Configuration
-      DB_HOST: postgres-local
+      DB_HOST: postgres-beta
       DB_PORT: ${DB_PORT}
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
@@ -232,7 +232,7 @@ services:
       # Cache Configuration
       CACHE_ENABLED: ${CACHE_ENABLED}
       CACHE_PROVIDER: ${CACHE_PROVIDER}
-      CACHE_REDIS_URL: redis://redis-local:6379
+      CACHE_REDIS_URL: redis://redis-beta:6379
       CACHE_REDIS_DB: ${CACHE_REDIS_DB}
       CACHE_REDIS_PREFIX: ${CACHE_REDIS_PREFIX}
       CACHE_DEFAULT_TTL: ${CACHE_DEFAULT_TTL}
@@ -255,13 +255,13 @@ services:
       BUILD_TIME: ${BUILD_TIME:-unknown}
 
     volumes:
-      - app_logs_local:/var/log/yamata
+      - app_logs_beta:/var/log/yamata
     # ports:
     #   - "127.0.0.1:8080:8080"  # Only accessible from localhost
     #   - "127.0.0.1:9090:9090"  # Metrics port
     networks:
-      yamata-network-local:
-        ipv4_address: 172.20.0.20
+      yamata-network-beta:
+        ipv4_address: 172.30.0.20
     healthcheck:
       test: ["CMD", "curl", "-f", "--noproxy", "localhost", "http://localhost:8080/api/v1/health"]
       interval: 30s
@@ -277,30 +277,30 @@ services:
     user: "appuser"
 
   # Nginx Reverse Proxy
-  nginx-local:
+  nginx-beta:
     image: nginx:1.29-alpine
-    container_name: yamata-nginx-local
+    container_name: yamata-nginx-beta
     restart: unless-stopped
     depends_on:
-      app-local:
+      app-beta:
         condition: service_healthy
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./docker/nginx/sites-available/generated/local:/etc/nginx/sites-available:ro
+      - ./docker/nginx/sites-available/generated/beta:/etc/nginx/sites-available:ro
       - ./docker/nginx/ssl:/etc/nginx/ssl:ro
       - ./docker/nginx/security.conf:/etc/nginx/security.conf:ro
       - ./docker/nginx/gzip.conf:/etc/nginx/gzip.conf:ro
       - ./docker/nginx/proxy.conf:/etc/nginx/proxy.conf:ro
-      - nginx_logs_local:/var/log/nginx
+      - nginx_logs_beta:/var/log/nginx
       - /etc/letsencrypt:/etc/letsencrypt:ro  # Let's Encrypt certificates
     # ports:
     #   - "80:80"
     #   - "443:443"
     networks:
-      yamata-network-local:
-        ipv4_address: 172.20.0.30
+      yamata-network-beta:
+        ipv4_address: 172.30.0.30
     healthcheck:
-      test: ["CMD", "curl", "-f", "--noproxy", "app-local", "http://app-local:8080/api/v1/health"]
+      test: ["CMD", "curl", "-f", "--noproxy", "app-beta", "http://app-beta:8080/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -314,9 +314,9 @@ services:
       - /tmp
 
   # Prometheus (Optional - for monitoring)
-  prometheus-local:
+  prometheus-beta:
     image: prom/prometheus:v3.5.0
-    container_name: yamata-prometheus-local
+    container_name: yamata-prometheus-beta
     restart: unless-stopped
     # volumes:
     #   - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
@@ -324,8 +324,8 @@ services:
     # ports:
     #   - "127.0.0.1:9091:9090"  # Only accessible from localhost
     networks:
-      yamata-network-local:
-        ipv4_address: 172.20.0.40
+      yamata-network-beta:
+        ipv4_address: 172.30.0.40
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -338,9 +338,9 @@ services:
     user: "65534:65534"  # nobody user
 
   # Grafana (Optional - for monitoring dashboards)
-  grafana-local:
+  grafana-beta:
     image: grafana/grafana:12.1.0-ubuntu
-    container_name: yamata-grafana-local
+    container_name: yamata-grafana-beta
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
@@ -354,10 +354,10 @@ services:
     # ports:
     #   - "127.0.0.1:3000:3000"  # Only accessible from localhost
     networks:
-      yamata-network-local:
-        ipv4_address: 172.20.0.50
+      yamata-network-beta:
+        ipv4_address: 172.30.0.50
     depends_on:
-      - prometheus-local
+      - prometheus-beta
     security_opt:
       - no-new-privileges:true
     user: "472:472"  # grafana user 
