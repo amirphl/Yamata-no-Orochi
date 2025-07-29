@@ -35,17 +35,8 @@ type SMSRequest struct {
 	ValidityPeriod int    `json:"validityPeriod"`       // Validity in seconds
 }
 
-// SMSResponse represents the response from SMS API
+// SMSResponse represents individual message result from SMS API
 type SMSResponse struct {
-	StatusCode  int                `json:"statusCode"`
-	Timestamp   string             `json:"timestamp"`
-	Message     string             `json:"message"`
-	Description string             `json:"description"`
-	Payload     []SMSMessageResult `json:"payload"`
-}
-
-// SMSMessageResult represents individual message result
-type SMSMessageResult struct {
 	MessageID  int64  `json:"messageId"`
 	SrcNum     string `json:"srcNum"`
 	Recipient  string `json:"recipient"`
@@ -106,20 +97,15 @@ func (s *SMSServiceImpl) SendSMS(ctx context.Context, recipient, message string,
 	}
 	defer resp.Body.Close()
 
-	// Parse response
-	var smsResponse SMSResponse
-	if err := json.NewDecoder(resp.Body).Decode(&smsResponse); err != nil {
+	// Parse response - the API returns an array of message results directly
+	var messageResults []SMSResponse
+	if err := json.NewDecoder(resp.Body).Decode(&messageResults); err != nil {
 		return fmt.Errorf("failed to decode SMS response: %w", err)
 	}
 
-	// Check for API errors
-	if smsResponse.StatusCode != 200 {
-		return fmt.Errorf("SMS API error: %s (status: %d)", smsResponse.Message, smsResponse.StatusCode)
-	}
-
 	// Check if any messages failed
-	if len(smsResponse.Payload) > 0 {
-		for _, result := range smsResponse.Payload {
+	if len(messageResults) > 0 {
+		for _, result := range messageResults {
 			if result.StatusCode != 200 || result.Status != "ACCEPTED" {
 				return fmt.Errorf("SMS delivery failed: %s (status: %d)", result.Status, result.StatusCode)
 			}

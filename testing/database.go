@@ -245,6 +245,7 @@ func runTestMigrations(databaseURL, dbName string) error {
 		"0010_add_customer_uuid_and_agency_id.sql",
 		"0011_add_new_audit_actions.sql",
 		"0012_update_timestamp_defaults_to_utc.sql",
+		"0013_relax_name_validation.sql",
 	}
 
 	// Execute each migration file

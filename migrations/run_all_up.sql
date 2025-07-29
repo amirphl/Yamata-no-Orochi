@@ -39,5 +39,8 @@
 \echo 'Running 0012_update_timestamp_defaults_to_utc.sql...'
 \i migrations/0012_update_timestamp_defaults_to_utc.sql
 
+\echo 'Running 0013_relax_name_validation.sql...'
+\i migrations/0013_relax_name_validation.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi signup system.' 

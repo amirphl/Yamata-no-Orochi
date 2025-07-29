@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0013_relax_name_validation_down.sql...'
+\i migrations/0013_relax_name_validation_down.sql
+
 \echo 'Running 0012_update_timestamp_defaults_to_utc_down.sql...'
 \i migrations/0012_update_timestamp_defaults_to_utc_down.sql
 

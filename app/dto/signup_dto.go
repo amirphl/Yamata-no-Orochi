@@ -14,8 +14,8 @@ type SignupRequest struct {
 	PostalCode     *string `json:"postal_code,omitempty" validate:"omitempty,min=10,max=20,numeric"`
 
 	// Representative/Individual fields (required for all types)
-	RepresentativeFirstName string `json:"representative_first_name" validate:"required,max=255,alpha_space"`
-	RepresentativeLastName  string `json:"representative_last_name" validate:"required,max=255,alpha_space"`
+	RepresentativeFirstName string `json:"representative_first_name" validate:"required,max=255"`
+	RepresentativeLastName  string `json:"representative_last_name" validate:"required,max=255"`
 	RepresentativeMobile    string `json:"representative_mobile" validate:"required,mobile_format"`
 
 	// Common fields (required for all types)

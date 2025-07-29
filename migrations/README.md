@@ -17,6 +17,13 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 4. **0004_create_customer_sessions** - Creates session management for authentication
 5. **0005_create_audit_log** - Creates audit logging for security tracking
 6. **0006_update_customer_fields** - Updates customer field sizes and mobile format
+7. **0007_add_missing_audit_actions** - Adds missing audit action enum values
+8. **0008_update_audit_log_success_field** - Updates audit log success field type
+9. **0009_add_correlation_ids** - Adds correlation ID fields for request tracking
+10. **0010_add_customer_uuid_and_agency_id** - Adds UUID and agency ID fields
+11. **0011_add_new_audit_actions** - Adds new audit action enum values
+12. **0012_update_timestamp_defaults_to_utc** - Updates timestamp defaults to UTC
+13. **0013_relax_name_validation** - Removes name format constraints to allow any characters
 
 ## Database Schema Overview
 
@@ -55,8 +62,8 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 ## Field Validation Rules
 
 ### Common Fields (All Account Types)
-- Representative First Name: Letters only, ≤ 255 characters
-- Representative Last Name: Letters only, ≤ 255 characters  
+- Representative First Name: Any characters, ≤ 255 characters
+- Representative Last Name: Any characters, ≤ 255 characters  
 - Representative Mobile: Format `+989xxxxxxxxx`, unique
 - Email: RFC-compliant format, unique
 - Password: ≥ 8 characters, 1 uppercase + 1 number
@@ -84,11 +91,25 @@ Each migration is numbered sequentially starting with `0001` and includes both u
 \i migrations/0004_create_customer_sessions.sql
 \i migrations/0005_create_audit_log.sql
 \i migrations/0006_update_customer_fields.sql
+\i migrations/0007_add_missing_audit_actions.sql
+\i migrations/0008_update_audit_log_success_field.sql
+\i migrations/0009_add_correlation_ids.sql
+\i migrations/0010_add_customer_uuid_and_agency_id.sql
+\i migrations/0011_add_new_audit_actions.sql
+\i migrations/0012_update_timestamp_defaults_to_utc.sql
+\i migrations/0013_relax_name_validation.sql
 ```
 
 ### Rollback All Migrations (Down)
 ```sql
 -- Run in reverse order:
+\i migrations/0013_relax_name_validation_down.sql
+\i migrations/0012_update_timestamp_defaults_to_utc_down.sql
+\i migrations/0011_add_new_audit_actions_down.sql
+\i migrations/0010_add_customer_uuid_and_agency_id_down.sql
+\i migrations/0009_add_correlation_ids_down.sql
+\i migrations/0008_update_audit_log_success_field_down.sql
+\i migrations/0007_add_missing_audit_actions_down.sql
 \i migrations/0006_update_customer_fields_down.sql
 \i migrations/0005_create_audit_log_down.sql
 \i migrations/0004_create_customer_sessions_down.sql
