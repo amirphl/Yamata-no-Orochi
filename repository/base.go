@@ -77,7 +77,7 @@ func (r *BaseRepository[T, F]) Save(ctx context.Context, entity *T) error {
 
 	err = db.Create(entity).Error
 	if err != nil {
-		return fmt.Errorf("failed to save entity: %w", err)
+		return err
 	}
 
 	return nil
@@ -106,7 +106,7 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 
 	err = db.CreateInBatches(entities, 100).Error // Batch size of 100
 	if err != nil {
-		return fmt.Errorf("failed to save batch entities: %w", err)
+		return err
 	}
 
 	return nil

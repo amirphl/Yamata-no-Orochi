@@ -12,6 +12,7 @@ type SignupRequest struct {
 	CompanyPhone   *string `json:"company_phone,omitempty" validate:"omitempty,min=10"`
 	CompanyAddress *string `json:"company_address,omitempty" validate:"omitempty,max=255"`
 	PostalCode     *string `json:"postal_code,omitempty" validate:"omitempty,min=10,max=20,numeric"`
+	ShebaNumber    *string `json:"sheba_number,omitempty" validate:"omitempty,max=255"`
 
 	// Representative/Individual fields (required for all types)
 	RepresentativeFirstName string `json:"representative_first_name" validate:"required,max=255"`
@@ -24,7 +25,7 @@ type SignupRequest struct {
 	ConfirmPassword string `json:"confirm_password" validate:"required,eqfield=Password"`
 
 	// Optional agency referral
-	ReferrerAgencyCode *int64 `json:"referrer_agency_code,omitempty" validate:"omitempty"`
+	ReferrerAgencyCode *string `json:"referrer_agency_code,omitempty" validate:"omitempty,max=255"`
 }
 
 // SignupResponse represents the response after successful signup initiation

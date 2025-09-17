@@ -1,0 +1,179 @@
+Introduction:
+In September 2019, Shabake Hamrah Atipay company successfully obtained the “Payment Service Provider” license from Shaparak. Based on this license, the company is authorized to provide various payment services.
+This document describes the corresponding web services.
+
+Audience of the Document:
+This document is intended for the merchants (acceptors) working with Shabake Hamrah Atipay.
+
+Definitions:
+Term	Definition
+Company	Shabake Hamrah Atipay
+Buyer	The entity requesting to purchase a service or product
+Card	The instrument through which the purchase is made
+Merchant / Seller	The entity that provides the service, product, or goods to the buyer
+Terminal	The merchant code assigned to the merchant by the company
+Transaction	A financial operation during which the buyer pays an amount via card in order to receive a service or product from the merchant
+Payment Site	A site where the buyer views the payment information (such as the merchant's name and the amount) and, by entering their card information, confirms the transfer of funds to the merchant
+
+
+Merchant Requirements:
+To use the company's web services, merchants are required to:
+Obtain a terminal from the company
+Provide the merchant domain
+Provide the IP address of the merchant's server
+All requests must be sent to the web services from this declared IP address
+Obtain an API_KEY from the company
+Implement the web services described in this document
+
+
+How to Connect to the Web Service:
+In order to connect to the web services, the following address must be used.
+This address is secured with a valid SSL certificate.
+URL: https://mipg.atipay.net/v1/<uri>
+
+The <uri> part will be specified separately for each web service.
+All requests must include the header:
+Content-Type: application/json
+
+Web Services Description
+
+– Method: Get Token
+This method is used to obtain a token, which must then be used in the subsequent calls.
+
+URI: /get-token
+Request Parameters (JSON):
+{
+  "amount": long,
+  "cellNumber": "String",
+  "description": "String",
+  "invoiceNumber": "String",
+  "redirectUrl": "String",
+  "apiKey": "String",
+  "scatteredSettlementItems": [
+    {
+      "iban": "String",
+      "amount": Long
+    }
+  ]
+}
+
+Explanation of Request Parameters
+
+Parameter	Description	Required	Notes
+amount	Transaction amount	Mandatory	The amount must be specified in Rials
+cellNumber	Buyer's mobile number	Optional	If this is provided, the gateway will show the list of cards previously used by the customer
+description	Transaction description	Optional	—
+invoiceNumber	Merchant-side purchase ID	Mandatory	This value must be unique; responsibility for uniqueness rests with the merchant
+redirectUrl	URL to which the buyer is redirected after payment	Mandatory	The domain of this URL must match the domain submitted during registration
+apiKey	API key (obtained from the company)	Mandatory	—
+scatteredSettlementItems	List of IBANs and corresponding amounts for split settlement	Optional	Should only be sent if the dynamic split settlement service is being used
+
+scatteredSettlementItems Object:
+This parameter contains a list of IBAN/amount pairs to split the transaction amount during settlement.
+Parameter	Description	Required	Notes
+amount	Amount	Mandatory	The amount must be in Rials
+iban	IBAN number	Mandatory	The IBAN to which the specified amount will be settled
+
+Notes Regarding Dynamic Split Settlement
+If the dynamic split settlement feature is enabled for the merchant, the scatteredSettlementItems parameter must be included in the request.
+If the list contains duplicate IBANs, the request will result in an error.
+The sum of the amounts in the scatteredSettlementItems list must be equal to the main amount value used in the get-token method.
+To use this feature:
+Dynamic split settlement must be activated for the merchant.
+All IBANs used in this parameter must have been previously registered with the company.
+
+Output Parameters:
+{
+  "status": "string",
+  "token": "string",
+  "errorCode": "string",
+  "errorDescription": "string"
+}
+
+Note: This response format may change in future versions.
+Explanation of Output Parameters
+Parameter	Description
+status	Service status
+token	The token that will be used in the next API calls
+errorCode	Error code (if an error occurs)
+errorDescription	Description of the error
+
+Method: Redirect to Payment Gateway
+After obtaining the token, the buyer must be redirected to the payment site.
+To send the request, an HTML form should be used.
+URI: /redirect-to-gateway
+
+In this method, the token obtained from the get-token call is submitted via an HTML POST form.
+This form can be submitted automatically (auto-submit), without any user interaction.
+
+Example:
+<form action="<url/uri>" method="POST">
+  <input type="hidden" value="<token>" name="token">
+</form>
+
+Once the form is submitted and the user is redirected to the payment page, the buyer completes the purchase by entering card information.
+After the transaction is completed, the buyer is redirected—using a POST request—to the redirectUrl defined in the original get-token call.
+
+Parameters Sent to the redirectUrl
+
+Parameter	Description
+state	Transaction status (see Table 1 – Appendix for possible values)
+status	Payment status code (see Table 1 – Appendix)
+referenceNumber	Unique digital receipt (alphanumeric)
+reservationNumber	The unique ID originally sent by the merchant in the get-token call
+terminalId	Terminal number used for the payment
+traceNumber	Tracking number generated by the payment gateway
+maskedPan	Masked card number used for the payment
+rrn	Transaction reference number
+
+Important:
+The digital referenceNumber must be stored by the merchant to prevent double spending (i.e., reusing the same digital receipt).
+Since this value is unique, ensuring its proper storage and validation is the responsibility of the merchant.
+
+Verify Payment Method
+
+Once the buyer is redirected back to the merchant’s site, the merchant must send a verification request in order to finalize the purchase.
+If this call is not sent, the transaction amount will be refunded to the buyer.
+
+If the verification succeeds, the amount specified in the original get-token request is returned.
+If the returned amount matches the original transaction amount, the verification is successful; otherwise, the payment will be refunded and considered unsuccessful.
+
+The merchant must implement this logic and display the appropriate success/failure message to the buyer.
+
+URI:
+/verify-payment
+
+Request Parameters:
+{
+  "referenceNumber": "string",
+  "apiKey": "string"
+}
+
+Explanation of Request Parameters
+
+Parameter	Required	Description
+referenceNumber	Yes	Value received in the response of redirect-to-gateway
+apiKey	Yes	Provided by the company
+
+explanation of Request Parameters
+Parameter	Required	Description
+referenceNumber	Yes	Value received in the response of redirect-to-gateway
+apiKey	Yes	Provided by the company
+
+Response Parameter:
+Parameter	Description
+amount	The amount of the transaction (in Rials)
+
+Appendix
+Table (1) – Status / State Values
+
+Code	Status / State	Description
+1	CanceledByUser	The user canceled the payment.
+2	OK	Payment was completed successfully.
+3	Failed	Payment failed.
+4	SessionIsNull	The user did not respond within the specified time window.
+5	InvalidParameters	The parameters sent in the request are invalid.
+8	MerchantIpAddressIsInvalid	The merchant’s server IP address is invalid.
+10	TokenNotFound	The token submitted was not found.
+11	TokenRequired	Only token-based transactions are allowed for this terminal.
+12	TerminalNotFound	The terminal number provided was not found.

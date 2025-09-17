@@ -259,6 +259,10 @@ services:
       COMMIT_HASH: ${COMMIT_HASH:-unknown}
       BUILD_TIME: ${BUILD_TIME:-unknown}
 
+      # Atipay Configuration
+      ATIPAY_API_KEY: ${ATIPAY_API_KEY}
+      ATIPAY_TERMINAL: ${ATIPAY_TERMINAL}
+
     volumes:
       - app_logs_local:/var/log/yamata
     # ports:

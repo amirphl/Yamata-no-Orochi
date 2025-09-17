@@ -52,11 +52,27 @@ const (
 	AuditActionOTPExpired             = "otp_expired"
 	AuditActionOTPResent              = "otp_resent"
 
-	// SMS Campaign actions
+	// Campaign actions
 	AuditActionCampaignCreated        = "campaign_created"
 	AuditActionCampaignCreationFailed = "campaign_creation_failed"
 	AuditActionCampaignUpdated        = "campaign_updated"
 	AuditActionCampaignUpdateFailed   = "campaign_update_failed"
+
+	// Payment actions
+	AuditActionWalletChargeInitiated       = "wallet_charge_initiated"
+	AuditActionWalletChargeCompleted       = "wallet_charge_completed"
+	AuditActionWalletChargeFailed          = "wallet_charge_failed"
+	AuditActionWalletCreated               = "wallet_created"
+	AuditActionPaymentCallbackProcessed    = "payment_callback_processed"
+	AuditActionPaymentCompleted            = "payment_completed"
+	AuditActionPaymentFailed               = "payment_failed"
+	AuditActionPaymentCancelled            = "payment_cancelled"
+	AuditActionPaymentExpired              = "payment_expired"
+	AuditActionTransactionHistoryRetrieved = "transaction_history_retrieved"
+
+	// Agency discount actions
+	AuditActionCreateDiscountByAgencyFailed    = "create_discount_by_agency_failed"
+	AuditActionCreateDiscountByAgencyCompleted = "create_discount_by_agency_completed"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries

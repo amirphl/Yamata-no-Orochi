@@ -320,6 +320,8 @@ REDIS_PASSWORD="$redis_password"
 BACKUP_S3_BUCKET="yamata-backups"
 BACKUP_S3_ACCESS_KEY=""
 BACKUP_S3_SECRET_KEY=""
+ATIPAY_API_KEY=""
+ATIPAY_TERMINAL=""
 EOF
     
     # Set proper permissions

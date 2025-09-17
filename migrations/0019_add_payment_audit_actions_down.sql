@@ -1,0 +1,18 @@
+-- Migration: Add payment audit actions
+-- Down: Remove new audit action enum values for payment and wallet operations
+ 
+-- Note: PostgreSQL doesn't support removing enum values directly
+-- The enum values for payment and wallet operations will remain in the type
+-- but won't be used. If you need to completely remove them, you would need to recreate the enum type.
+-- 
+-- The following values would need to be removed:
+-- - 'wallet_charge_initiated'
+-- - 'wallet_charge_completed'
+-- - 'wallet_charge_failed'
+-- - 'wallet_created'
+-- - 'payment_callback_processed'
+-- - 'payment_completed'
+-- - 'payment_failed'
+-- - 'payment_cancelled'
+-- - 'payment_expired'
+-- - 'transaction_history_retrieved'

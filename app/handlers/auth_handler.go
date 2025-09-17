@@ -91,9 +91,7 @@ func (h *AuthHandler) Signup(c fiber.Ctx) error {
 	}
 
 	// Get client information
-	ipAddress := c.IP()
-	userAgent := c.Get("User-Agent")
-	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Call business logic with proper context
 	result, err := h.signupFlow.Signup(h.createRequestContext(c, "/api/v1/auth/signup"), &req, metadata)
@@ -122,6 +120,15 @@ func (h *AuthHandler) Signup(c fiber.Ctx) error {
 		}
 		if businessflow.IsReferrerAgencyInactive(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Referrer agency is inactive", "REFERRER_AGENCY_INACTIVE", nil)
+		}
+		if businessflow.IsShebaNumberRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Sheba number is required", "SHEBA_NUMBER_REQUIRED", nil)
+		}
+		if businessflow.IsShebaNumberInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Sheba number is invalid", "SHEBA_NUMBER_INVALID", nil)
+		}
+		if businessflow.IsCacheNotAvailable(err) {
+			return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Cache not available", "CACHE_NOT_AVAILABLE", nil)
 		}
 
 		log.Println("Signup failed", err)
@@ -162,9 +169,7 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 	}
 
 	// Get client information
-	ipAddress := c.IP()
-	userAgent := c.Get("User-Agent")
-	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Call business logic with proper context
 	result, err := h.signupFlow.VerifyOTP(h.createRequestContext(c, "/api/v1/auth/verify"), &req, metadata)
@@ -190,6 +195,12 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 		}
 		if businessflow.IsOTPExpired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "OTP expired", "OTP_EXPIRED", nil)
+		}
+		if businessflow.IsAlreadyVerified(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account is already verified", "ACCOUNT_ALREADY_VERIFIED", nil)
+		}
+		if businessflow.IsCacheNotAvailable(err) {
+			return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Cache not available", "CACHE_NOT_AVAILABLE", nil)
 		}
 
 		log.Println("OTP verification failed", err)
@@ -225,9 +236,7 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	}
 
 	// Get client information
-	ipAddress := c.IP()
-	userAgent := c.Get("User-Agent")
-	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Call business logic with proper context
 	result, err := h.signupFlow.ResendOTP(h.createRequestContext(c, "/api/v1/auth/resend-otp"), &req, metadata)
@@ -242,6 +251,9 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 		if businessflow.IsAccountTypeNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
 		}
+		if businessflow.IsCacheNotAvailable(err) {
+			return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Cache not available", "CACHE_NOT_AVAILABLE", nil)
+		}
 		if businessflow.IsAlreadyVerified(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account is already verified", "ACCOUNT_ALREADY_VERIFIED", nil)
 		}
@@ -254,6 +266,190 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, result.Message, fiber.Map{
 		"otp_sent":   result.OTPSent,
 		"otp_target": result.MaskedOTPTarget,
+	})
+}
+
+// Login handles user authentication
+// @Summary User Login
+// @Description Authenticate user with email/mobile and password
+// @Tags Authentication
+// @Accept json
+// @Produce json
+// @Param request body dto.LoginRequest true "Login credentials"
+// @Success 200 {object} dto.APIResponse{data=object{access_token=string,refresh_token=string,token_type=string,expires_in=int,customer=dto.AuthCustomerDTO}} "Login successful with tokens"
+// @Failure 400 {object} dto.APIResponse "Invalid credentials"
+// @Failure 401 {object} dto.APIResponse "Authentication failed"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/auth/login [post]
+func (h *AuthHandler) Login(c fiber.Ctx) error {
+	var req dto.LoginRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+
+	// Validate request
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	// Get client information
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+
+	// Call business logic with proper context
+	result, err := h.loginFlow.Login(h.createRequestContext(c, "/api/v1/auth/login"), &req, metadata)
+	if err != nil {
+		if businessflow.IsAccountTypeNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
+		}
+		if businessflow.IsIncorrectPassword(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Incorrect password", "INCORRECT_PASSWORD", nil)
+		}
+
+		log.Println("Login failed", err)
+		// Handle generic business errors
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Login failed", "LOGIN_FAILED", nil)
+	}
+
+	// Successful login - return tokens and user info
+	return h.SuccessResponse(c, fiber.StatusOK, "Login successful", fiber.Map{
+		"access_token":  result.Session.SessionToken,
+		"refresh_token": result.Session.RefreshToken,
+		"token_type":    "Bearer",
+		"expires_in":    utils.AccessTokenTTLSeconds,
+		"customer":      result.Customer,
+	})
+}
+
+// ForgotPassword handles password reset initiation
+// @Summary Forgot Password
+// @Description Initiate password reset by sending OTP to registered mobile
+// @Tags Authentication
+// @Accept json
+// @Produce json
+// @Param request body dto.ForgotPasswordRequest true "Password reset request"
+// @Success 200 {object} dto.APIResponse{data=object{customer_id=uint,masked_phone=string,expires_in=int}} "OTP sent successfully"
+// @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 404 {object} dto.APIResponse "User not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/auth/forgot-password [post]
+func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
+	var req dto.ForgotPasswordRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+
+	// Validate request
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	// Get client information
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+
+	// Call business logic with proper context
+	result, err := h.loginFlow.ForgotPassword(h.createRequestContext(c, "/api/v1/auth/forgot-password"), &req, metadata)
+	if err != nil {
+		// Handle specific business errors
+		if businessflow.IsCustomerNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+		if businessflow.IsAccountTypeNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
+		}
+
+		log.Println("Forgot password failed", err)
+		// Handle generic business errors
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Password reset failed", "PASSWORD_RESET_FAILED", nil)
+	}
+
+	// Successful response
+	return h.SuccessResponse(c, fiber.StatusOK, "Password reset OTP sent to your mobile number", fiber.Map{
+		"customer_id":  result.CustomerID,
+		"masked_phone": result.MaskedPhone,
+		"expires_in":   utils.OTPExpiry.Seconds(),
+	})
+}
+
+// ResetPassword handles password reset completion
+// @Summary Reset Password
+// @Description Complete password reset with OTP verification
+// @Tags Authentication
+// @Accept json
+// @Produce json
+// @Param request body dto.ResetPasswordRequest true "Password reset data"
+// @Success 200 {object} dto.APIResponse{data=object{access_token=string,refresh_token=string,token_type=string,expires_in=int,customer=dto.AuthCustomerDTO,password_changed_at=string}} "Password reset successful with tokens"
+// @Failure 400 {object} dto.APIResponse "Invalid request or OTP"
+// @Failure 404 {object} dto.APIResponse "User not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/auth/reset [post]
+func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
+	var req dto.ResetPasswordRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+
+	// Validate request
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	// Get client information
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+
+	// Call business logic with proper context
+	result, err := h.loginFlow.ResetPassword(h.createRequestContext(c, "/api/v1/auth/reset"), &req, metadata)
+	if err != nil {
+		// Handle specific business errors
+		if businessflow.IsCustomerNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+		if businessflow.IsAccountTypeNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
+		}
+		if businessflow.IsNoValidOTPFound(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "No valid OTP found", "NO_VALID_OTP", nil)
+		}
+		if businessflow.IsInvalidOTPCode(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid OTP code", "INVALID_OTP_CODE", nil)
+		}
+		if businessflow.IsInvalidOTPType(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid OTP type", "INVALID_OTP_TYPE", nil)
+		}
+		if businessflow.IsOTPExpired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "OTP expired", "OTP_EXPIRED", nil)
+		}
+
+		log.Println("Reset password failed", err)
+		// Handle generic business errors
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Password reset failed", "PASSWORD_RESET_FAILED", nil)
+	}
+
+	// Successful password reset - return tokens and user info
+	return h.SuccessResponse(c, fiber.StatusOK, "Password reset successful", fiber.Map{
+		"access_token":        result.Session.SessionToken,
+		"refresh_token":       result.Session.RefreshToken,
+		"token_type":          "Bearer",
+		"expires_in":          utils.AccessTokenTTLSeconds,
+		"customer":            result.Customer,
+		"password_changed_at": utils.UTCNow().Format(time.RFC3339),
 	})
 }
 
@@ -284,12 +480,12 @@ func (h *AuthHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint stri
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
 	// Add request-scoped values for observability
-	ctx = context.WithValue(ctx, "request_id", c.Get("X-Request-ID"))
-	ctx = context.WithValue(ctx, "user_agent", c.Get("User-Agent"))
-	ctx = context.WithValue(ctx, "ip_address", c.IP())
-	ctx = context.WithValue(ctx, "endpoint", endpoint)
-	ctx = context.WithValue(ctx, "timeout", timeout)
-	ctx = context.WithValue(ctx, "cancel_func", cancel) // Store cancel function for cleanup
+	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
+	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
+	ctx = context.WithValue(ctx, utils.IPAddressKey, c.IP())
+	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
+	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
+	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel) // Store cancel function for cleanup
 
 	return ctx
 }
@@ -353,203 +549,5 @@ func (h *AuthHandler) setupCustomValidations() {
 			}
 		}
 		return true
-	})
-}
-
-// Login handles user authentication
-// @Summary User Login
-// @Description Authenticate user with email/mobile and password
-// @Tags Authentication
-// @Accept json
-// @Produce json
-// @Param request body dto.LoginRequest true "Login credentials"
-// @Success 200 {object} dto.APIResponse{data=object{access_token=string,refresh_token=string,token_type=string,expires_in=int,customer=dto.AuthCustomerDTO}} "Login successful with tokens"
-// @Failure 400 {object} dto.APIResponse "Invalid credentials"
-// @Failure 401 {object} dto.APIResponse "Authentication failed"
-// @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /api/v1/auth/login [post]
-func (h *AuthHandler) Login(c fiber.Ctx) error {
-	var req dto.LoginRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
-	}
-
-	// Validate request
-	if err := h.validator.Struct(&req); err != nil {
-		var validationErrors []string
-		for _, err := range err.(validator.ValidationErrors) {
-			validationErrors = append(validationErrors, getValidationErrorMessage(err))
-		}
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
-	}
-
-	// Get client information
-	ipAddress := c.IP()
-	userAgent := c.Get("User-Agent")
-	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
-
-	// Call business logic with proper context
-	result, err := h.loginFlow.Login(h.createRequestContext(c, "/api/v1/auth/login"), &req, metadata)
-	if err != nil {
-		// Handle specific business errors
-		// if businessflow.IsCustomerNotFound(err) {
-		// 	return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		// }
-		if businessflow.IsAccountInactive(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Account is inactive", "ACCOUNT_INACTIVE", nil)
-		}
-		if businessflow.IsAccountTypeNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
-		}
-		if businessflow.IsIncorrectPassword(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Incorrect password", "INCORRECT_PASSWORD", nil)
-		}
-
-		log.Println("Login failed", err)
-		// Handle generic business errors
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Login failed", "LOGIN_FAILED", nil)
-	}
-
-	// Successful login - return tokens and user info
-	return h.SuccessResponse(c, fiber.StatusOK, "Login successful", fiber.Map{
-		"access_token":  result.Session.SessionToken,
-		"refresh_token": result.Session.RefreshToken,
-		"token_type":    "Bearer",
-		"expires_in":    utils.AccessTokenTTLSeconds,
-		"customer":      result.Customer,
-	})
-}
-
-// ForgotPassword handles password reset initiation
-// @Summary Forgot Password
-// @Description Initiate password reset by sending OTP to registered mobile
-// @Tags Authentication
-// @Accept json
-// @Produce json
-// @Param request body dto.ForgotPasswordRequest true "Password reset request"
-// @Success 200 {object} dto.APIResponse{data=object{customer_id=uint,masked_phone=string,expires_in=int}} "OTP sent successfully"
-// @Failure 400 {object} dto.APIResponse "Invalid request"
-// @Failure 404 {object} dto.APIResponse "User not found"
-// @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /api/v1/auth/forgot-password [post]
-func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
-	var req dto.ForgotPasswordRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
-	}
-
-	// Validate request
-	if err := h.validator.Struct(&req); err != nil {
-		var validationErrors []string
-		for _, err := range err.(validator.ValidationErrors) {
-			validationErrors = append(validationErrors, getValidationErrorMessage(err))
-		}
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
-	}
-
-	// Get client information
-	ipAddress := c.IP()
-	userAgent := c.Get("User-Agent")
-	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
-
-	// Call business logic with proper context
-	result, err := h.loginFlow.ForgotPassword(h.createRequestContext(c, "/api/v1/auth/forgot-password"), &req, metadata)
-	if err != nil {
-		// Handle specific business errors
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
-		if businessflow.IsAccountInactive(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account is inactive", "ACCOUNT_INACTIVE", nil)
-		}
-		if businessflow.IsAccountTypeNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
-		}
-
-		log.Println("Forgot password failed", err)
-		// Handle generic business errors
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Password reset failed", "PASSWORD_RESET_FAILED", nil)
-	}
-
-	// Successful response
-	return h.SuccessResponse(c, fiber.StatusOK, "Password reset OTP sent to your mobile number", fiber.Map{
-		"customer_id":  result.CustomerID,
-		"masked_phone": result.MaskedPhone,
-		"expires_in":   utils.OTPExpirySeconds,
-	})
-}
-
-// ResetPassword handles password reset completion
-// @Summary Reset Password
-// @Description Complete password reset with OTP verification
-// @Tags Authentication
-// @Accept json
-// @Produce json
-// @Param request body dto.ResetPasswordRequest true "Password reset data"
-// @Success 200 {object} dto.APIResponse{data=object{access_token=string,refresh_token=string,token_type=string,expires_in=int,customer=dto.AuthCustomerDTO,password_changed_at=string}} "Password reset successful with tokens"
-// @Failure 400 {object} dto.APIResponse "Invalid request or OTP"
-// @Failure 404 {object} dto.APIResponse "User not found"
-// @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /api/v1/auth/reset [post]
-func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
-	var req dto.ResetPasswordRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
-	}
-
-	// Validate request
-	if err := h.validator.Struct(&req); err != nil {
-		var validationErrors []string
-		for _, err := range err.(validator.ValidationErrors) {
-			validationErrors = append(validationErrors, getValidationErrorMessage(err))
-		}
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
-	}
-
-	// Get client information
-	ipAddress := c.IP()
-	userAgent := c.Get("User-Agent")
-	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
-
-	// Call business logic with proper context
-	result, err := h.loginFlow.ResetPassword(h.createRequestContext(c, "/api/v1/auth/reset"), &req, metadata)
-	if err != nil {
-		// Handle specific business errors
-
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
-		if businessflow.IsAccountInactive(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account is inactive", "ACCOUNT_INACTIVE", nil)
-		}
-		if businessflow.IsAccountTypeNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
-		}
-		if businessflow.IsNoValidOTPFound(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "No valid OTP found", "NO_VALID_OTP", nil)
-		}
-		if businessflow.IsInvalidOTPCode(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid OTP code", "INVALID_OTP_CODE", nil)
-		}
-		if businessflow.IsInvalidOTPType(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid OTP type", "INVALID_OTP_TYPE", nil)
-		}
-		if businessflow.IsOTPExpired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "OTP expired", "OTP_EXPIRED", nil)
-		}
-
-		log.Println("Reset password failed", err)
-		// Handle generic business errors
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Password reset failed", "PASSWORD_RESET_FAILED", nil)
-	}
-
-	// Successful password reset - return tokens and user info
-	return h.SuccessResponse(c, fiber.StatusOK, "Password reset successful", fiber.Map{
-		"access_token":        result.Session.SessionToken,
-		"refresh_token":       result.Session.RefreshToken,
-		"token_type":          "Bearer",
-		"expires_in":          utils.AccessTokenTTLSeconds,
-		"customer":            result.Customer,
-		"password_changed_at": utils.UTCNow().Format(time.RFC3339),
 	})
 }

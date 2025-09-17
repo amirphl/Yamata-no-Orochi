@@ -3,6 +3,18 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0020_create_tax_wallet_down.sql...'
+\i migrations/0020_create_tax_wallet_down.sql
+
+\echo 'Running 0019_add_payment_audit_actions_down.sql...'
+\i migrations/0019_add_payment_audit_actions_down.sql
+
+\echo 'Running 0018_create_agency_commission_models_down.sql...'
+\i migrations/0018_create_agency_commission_models_down.sql
+
+\echo 'Running 0017_create_wallet_models_down.sql...'
+\i migrations/0017_create_wallet_models_down.sql
+
 \echo 'Running 0016_add_comment_to_sms_campaigns_down.sql...'
 \i migrations/0016_add_comment_to_sms_campaigns_down.sql
 

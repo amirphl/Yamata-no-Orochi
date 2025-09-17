@@ -10,7 +10,7 @@ import (
 type Customer struct {
 	ID                uint        `gorm:"primaryKey" json:"id"`
 	UUID              uuid.UUID   `gorm:"type:uuid;not null;uniqueIndex:uk_customers_uuid;index:idx_customers_uuid" json:"uuid"`
-	AgencyRefererCode int64       `gorm:"not null;uniqueIndex:uk_customers_agency_referer_code;index:idx_customers_agency_referer_code" json:"agency_referer_code"`
+	AgencyRefererCode string      `gorm:"size:255;not null;uniqueIndex:uk_customers_agency_referer_code;index:idx_customers_agency_referer_code" json:"agency_referer_code"`
 	AccountTypeID     uint        `gorm:"not null;index:idx_customers_account_type_id" json:"account_type_id"`
 	AccountType       AccountType `gorm:"foreignKey:AccountTypeID;references:ID" json:"account_type,omitempty"`
 
@@ -27,8 +27,9 @@ type Customer struct {
 	RepresentativeMobile    string `gorm:"size:15;not null;uniqueIndex:idx_customers_representative_mobile" json:"representative_mobile"`
 
 	// Common fields (required for all types)
-	Email        string `gorm:"size:255;not null;uniqueIndex:idx_customers_email" json:"email"`
-	PasswordHash string `gorm:"size:255;not null" json:"-"` // Never serialize password hash
+	Email        string  `gorm:"size:255;not null;uniqueIndex:idx_customers_email" json:"email"`
+	PasswordHash string  `gorm:"size:255;not null" json:"-"` // Never serialize password hash
+	ShebaNumber  *string `gorm:"size:255" json:"sheba_number,omitempty"`
 
 	// Agency relationship (optional for individuals and independent companies)
 	ReferrerAgencyID *uint     `gorm:"index:idx_customers_referrer_agency_id" json:"referrer_agency_id,omitempty"`
@@ -47,9 +48,12 @@ type Customer struct {
 	LastLoginAt      *time.Time `gorm:"index:idx_customers_last_login_at" json:"last_login_at,omitempty"`
 
 	// Relations
-	OTPVerifications []OTPVerification `gorm:"foreignKey:CustomerID" json:"-"`
-	Sessions         []CustomerSession `gorm:"foreignKey:CustomerID" json:"-"`
-	AuditLogs        []AuditLog        `gorm:"foreignKey:CustomerID" json:"-"`
+	OTPVerifications  []OTPVerification `gorm:"foreignKey:CustomerID" json:"-"`
+	Sessions          []CustomerSession `gorm:"foreignKey:CustomerID" json:"-"`
+	AuditLogs         []AuditLog        `gorm:"foreignKey:CustomerID" json:"-"`
+	Wallet            *Wallet           `gorm:"foreignKey:CustomerID" json:"wallet,omitempty"`
+	ReferredCustomers []Customer        `gorm:"foreignKey:ReferrerAgencyID" json:"referred_customers,omitempty"`
+	CommissionRates   []CommissionRate  `gorm:"foreignKey:AgencyID" json:"commission_rates,omitempty"`
 }
 
 func (Customer) TableName() string {
@@ -60,7 +64,7 @@ func (Customer) TableName() string {
 type CustomerFilter struct {
 	ID                   *uint
 	UUID                 *uuid.UUID
-	AgencyRefererCode    *int64
+	AgencyRefererCode    *string
 	AccountTypeID        *uint
 	AccountTypeName      *string
 	Email                *string

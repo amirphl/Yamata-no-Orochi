@@ -51,6 +51,7 @@ COPY models/ ./models/
 COPY repository/ ./repository/
 COPY utils/ ./utils/
 COPY main.go ./
+COPY templates/ ./templates/
 
 # Generate Swagger documentation
 RUN if command -v swag >/dev/null 2>&1; then \

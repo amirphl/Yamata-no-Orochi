@@ -3,7 +3,7 @@ package repository
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -31,10 +31,10 @@ func (r *CustomerSessionRepositoryImpl) ByID(ctx context.Context, id uint) (*mod
 	err := db.Preload("Customer").
 		Last(&session, id).Error
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find customer session by ID %d: %w", id, err)
+		return nil, err
 	}
 
 	return &session, nil
@@ -51,10 +51,10 @@ func (r *CustomerSessionRepositoryImpl) BySessionToken(ctx context.Context, toke
 		Last(&session).Error
 
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find session by token: %w", err)
+		return nil, err
 	}
 
 	return &session, nil
@@ -71,10 +71,10 @@ func (r *CustomerSessionRepositoryImpl) ByRefreshToken(ctx context.Context, toke
 		Last(&session).Error
 
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find session by refresh token: %w", err)
+		return nil, err
 	}
 
 	return &session, nil
@@ -84,12 +84,12 @@ func (r *CustomerSessionRepositoryImpl) ByRefreshToken(ctx context.Context, toke
 func (r *CustomerSessionRepositoryImpl) ListActiveSessionsByCustomer(ctx context.Context, customerID uint) ([]*models.CustomerSession, error) {
 	filter := models.CustomerSessionFilter{
 		CustomerID: &customerID,
-		IsActive:   &[]bool{true}[0],
+		IsActive:   utils.ToPtr(true),
 	}
 
 	sessions, err := r.ByFilter(ctx, filter, "", 0, 0)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list active sessions by customer: %w", err)
+		return nil, err
 	}
 
 	// Filter out expired sessions
@@ -125,7 +125,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireSession(ctx context.Context, sessi
 	var session models.CustomerSession
 	err = db.Last(&session, sessionID).Error
 	if err != nil {
-		return fmt.Errorf("failed to find session to expire: %w", err)
+		return err
 	}
 
 	// Create new expired session record
@@ -145,7 +145,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireSession(ctx context.Context, sessi
 
 	err = db.Create(&expiredSession).Error
 	if err != nil {
-		return fmt.Errorf("failed to create expired session record: %w", err)
+		return err
 	}
 
 	return nil
@@ -174,7 +174,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireAllCustomerSessions(ctx context.Co
 		Find(&sessions).Error
 
 	if err != nil {
-		return fmt.Errorf("failed to find customer sessions: %w", err)
+		return err
 	}
 
 	// Create expired records for each session
@@ -196,7 +196,7 @@ func (r *CustomerSessionRepositoryImpl) ExpireAllCustomerSessions(ctx context.Co
 
 		err = db.Create(&expiredSession).Error
 		if err != nil {
-			return fmt.Errorf("failed to create expired session record: %w", err)
+			return err
 		}
 	}
 
@@ -227,7 +227,7 @@ func (r *CustomerSessionRepositoryImpl) CleanupExpiredSessions(ctx context.Conte
 		Find(&expiredSessions).Error
 
 	if err != nil {
-		return fmt.Errorf("failed to find expired sessions: %w", err)
+		return err
 	}
 
 	// Create cleanup records for each expired session
@@ -247,18 +247,15 @@ func (r *CustomerSessionRepositoryImpl) CleanupExpiredSessions(ctx context.Conte
 
 		err = db.Create(&cleanupSession).Error
 		if err != nil {
-			return fmt.Errorf("failed to create cleanup session record: %w", err)
+			return err
 		}
 	}
 
 	return nil
 }
 
-// ByFilter retrieves customer sessions based on filter criteria
-func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerSessionFilter, orderBy string, limit, offset int) ([]*models.CustomerSession, error) {
-	db := r.getDB(ctx)
-	query := db.Model(&models.CustomerSession{})
-
+// applyFilter applies filter criteria to a GORM query
+func (r *CustomerSessionRepositoryImpl) applyFilter(query *gorm.DB, filter models.CustomerSessionFilter) *gorm.DB {
 	// Apply filters based on provided values
 	if filter.ID != nil {
 		query = query.Where("id = ?", *filter.ID)
@@ -308,6 +305,17 @@ func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	if filter.IsExpired != nil && *filter.IsExpired {
 		query = query.Where("expires_at <= ?", utils.UTCNow())
 	}
+
+	return query
+}
+
+// ByFilter retrieves customer sessions based on filter criteria
+func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter models.CustomerSessionFilter, orderBy string, limit, offset int) ([]*models.CustomerSession, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.CustomerSession{})
+
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	// Apply ordering (default to id DESC)
 	if orderBy == "" {
@@ -326,7 +334,7 @@ func (r *CustomerSessionRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	var sessions []*models.CustomerSession
 	err := query.Find(&sessions).Error
 	if err != nil {
-		return nil, fmt.Errorf("failed to find customer sessions by filter: %w", err)
+		return nil, err
 	}
 
 	return sessions, nil
@@ -337,60 +345,13 @@ func (r *CustomerSessionRepositoryImpl) Count(ctx context.Context, filter models
 	db := r.getDB(ctx)
 	query := db.Model(&models.CustomerSession{})
 
-	// Apply filters based on provided values
-	if filter.ID != nil {
-		query = query.Where("id = ?", *filter.ID)
-	}
-
-	if filter.CorrelationID != nil {
-		query = query.Where("correlation_id = ?", *filter.CorrelationID)
-	}
-
-	if filter.CustomerID != nil {
-		query = query.Where("customer_id = ?", *filter.CustomerID)
-	}
-
-	if filter.IsActive != nil {
-		query = query.Where("is_active = ?", *filter.IsActive)
-	}
-
-	if filter.IPAddress != nil {
-		query = query.Where("ip_address = ?", *filter.IPAddress)
-	}
-
-	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
-	}
-
-	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
-	}
-
-	if filter.ExpiresAfter != nil {
-		query = query.Where("expires_at >= ?", *filter.ExpiresAfter)
-	}
-
-	if filter.ExpiresBefore != nil {
-		query = query.Where("expires_at <= ?", *filter.ExpiresBefore)
-	}
-
-	if filter.AccessedAfter != nil {
-		query = query.Where("last_accessed_at >= ?", *filter.AccessedAfter)
-	}
-
-	if filter.AccessedBefore != nil {
-		query = query.Where("last_accessed_at <= ?", *filter.AccessedBefore)
-	}
-
-	// Special handling for IsExpired - filter expired sessions
-	if filter.IsExpired != nil && *filter.IsExpired {
-		query = query.Where("expires_at <= ?", utils.UTCNow())
-	}
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	var count int64
 	err := query.Count(&count).Error
 	if err != nil {
-		return 0, fmt.Errorf("failed to count customer sessions: %w", err)
+		return 0, err
 	}
 
 	return count, nil
@@ -416,10 +377,10 @@ func (r *CustomerSessionRepositoryImpl) GetLatestByCorrelationID(ctx context.Con
 		First(&session).Error
 
 	if err != nil {
-		if err.Error() == "record not found" {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find latest session by correlation ID: %w", err)
+		return nil, err
 	}
 
 	return &session, nil
@@ -435,7 +396,7 @@ func (r *CustomerSessionRepositoryImpl) GetHistoryByCorrelationID(ctx context.Co
 		Find(&sessions).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to find session history by correlation ID: %w", err)
+		return nil, err
 	}
 
 	return sessions, nil
