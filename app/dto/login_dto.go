@@ -31,7 +31,7 @@ type ForgetPasswordResponse struct {
 
 // ResetPasswordRequest represents the request to reset password with OTP
 type ResetPasswordRequest struct {
-	CustomerID      uint   `json:"customer_id" validate:"required" example:"123"`
+	CustomerID      uint   `json:"customer_id" validate:"required" example:"1"`
 	OTPCode         string `json:"otp_code" validate:"required,len=6,numeric" example:"123456"`
 	NewPassword     string `json:"new_password" validate:"required,min=8,max=100,password_strength" example:"NewSecurePass123!"`
 	ConfirmPassword string `json:"confirm_password" validate:"required,eqfield=NewPassword" example:"NewSecurePass123!"`
@@ -63,24 +63,23 @@ func MaskPhoneNumber(phone string) string {
 
 // AuthCustomerDTO represents minimal customer data for authentication responses
 type AuthCustomerDTO struct {
-	ID                      uint    `json:"id" example:"123"`
-	UUID                    string  `json:"uuid" example:"550e8400-e29b-41d4-a716-446655440000"`
+	ID                      uint    `json:"id" example:"1"`
 	Email                   string  `json:"email" example:"user@example.com"`
 	RepresentativeFirstName string  `json:"representative_first_name" example:"John"`
 	RepresentativeLastName  string  `json:"representative_last_name" example:"Doe"`
 	RepresentativeMobile    string  `json:"representative_mobile" example:"+989123456789"`
 	AccountType             string  `json:"account_type" example:"individual"`
-	CompanyName             *string `json:"company_name,omitempty" example:"Tech Company Ltd"`
+	CompanyName             *string `json:"company_name,omitempty" validate:"omitempty" example:"Tech Company Ltd"`
 	IsActive                *bool   `json:"is_active" example:"true"`
 	IsEmailVerified         *bool   `json:"is_email_verified" example:"true"`
 	IsMobileVerified        *bool   `json:"is_mobile_verified" example:"true"`
 	CreatedAt               string  `json:"created_at" example:"2024-01-15T10:30:00Z"`
-	ReferrerAgencyID        *uint   `json:"referrer_agency_id,omitempty" example:"123"`
+	ReferrerAgencyID        *uint   `json:"referrer_agency_id,omitempty" validate:"omitempty" example:"123"`
 }
 
 type CustomerSessionDTO struct {
 	SessionToken string  `json:"session_token" example:"1234567890"`
-	RefreshToken *string `json:"refresh_token,omitempty" example:"1234567890"`
+	RefreshToken *string `json:"refresh_token,omitempty" validate:"omitempty" example:"1234567890"`
 	ExpiresIn    int     `json:"expires_in" example:"3600"`
 	TokenType    string  `json:"token_type" example:"Bearer"`
 	CreatedAt    string  `json:"created_at" example:"2024-01-15T10:30:00Z"`

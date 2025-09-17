@@ -3,7 +3,7 @@ package repository
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"gorm.io/gorm"
@@ -29,10 +29,10 @@ func (r *AuditLogRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Aud
 	err := db.Preload("Customer").
 		Last(&auditLog, id).Error
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("failed to find audit log by ID %d: %w", id, err)
+		return nil, err
 	}
 
 	return &auditLog, nil
@@ -51,7 +51,7 @@ func (r *AuditLogRepositoryImpl) ListByCustomer(ctx context.Context, customerID 
 		Find(&logs).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to list audit logs by customer: %w", err)
+		return nil, err
 	}
 
 	return logs, nil
@@ -70,7 +70,7 @@ func (r *AuditLogRepositoryImpl) ListByAction(ctx context.Context, action string
 		Find(&logs).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to list audit logs by action: %w", err)
+		return nil, err
 	}
 
 	return logs, nil
@@ -89,7 +89,7 @@ func (r *AuditLogRepositoryImpl) ListFailedActions(ctx context.Context, limit, o
 		Find(&logs).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to list failed audit logs: %w", err)
+		return nil, err
 	}
 
 	return logs, nil
@@ -108,17 +108,14 @@ func (r *AuditLogRepositoryImpl) ListSecurityEvents(ctx context.Context, limit, 
 		Find(&logs).Error
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to list security audit logs: %w", err)
+		return nil, err
 	}
 
 	return logs, nil
 }
 
-// ByFilter retrieves audit logs based on filter criteria
-func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.AuditLogFilter, orderBy string, limit, offset int) ([]*models.AuditLog, error) {
-	db := r.getDB(ctx)
-	query := db.Model(&models.AuditLog{})
-
+// applyFilter applies filter criteria to a GORM query
+func (r *AuditLogRepositoryImpl) applyFilter(query *gorm.DB, filter models.AuditLogFilter) *gorm.DB {
 	// Apply filters based on provided values
 	if filter.ID != nil {
 		query = query.Where("id = ?", *filter.ID)
@@ -145,12 +142,23 @@ func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.Aud
 	}
 
 	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+		query = query.Where("created_at > ?", *filter.CreatedAfter)
 	}
 
 	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+		query = query.Where("created_at < ?", *filter.CreatedBefore)
 	}
+
+	return query
+}
+
+// ByFilter retrieves audit logs based on filter criteria
+func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.AuditLogFilter, orderBy string, limit, offset int) ([]*models.AuditLog, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.AuditLog{})
+
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	// Apply ordering (default to id DESC)
 	if orderBy == "" {
@@ -169,7 +177,7 @@ func (r *AuditLogRepositoryImpl) ByFilter(ctx context.Context, filter models.Aud
 	var logs []*models.AuditLog
 	err := query.Find(&logs).Error
 	if err != nil {
-		return nil, fmt.Errorf("failed to find audit logs by filter: %w", err)
+		return nil, err
 	}
 
 	return logs, nil
@@ -180,43 +188,13 @@ func (r *AuditLogRepositoryImpl) Count(ctx context.Context, filter models.AuditL
 	db := r.getDB(ctx)
 	query := db.Model(&models.AuditLog{})
 
-	// Apply filters based on provided values
-	if filter.ID != nil {
-		query = query.Where("id = ?", *filter.ID)
-	}
-
-	if filter.CustomerID != nil {
-		query = query.Where("customer_id = ?", *filter.CustomerID)
-	}
-
-	if filter.Action != nil {
-		query = query.Where("action = ?", *filter.Action)
-	}
-
-	if filter.Success != nil {
-		query = query.Where("success = ?", *filter.Success)
-	}
-
-	if filter.IPAddress != nil {
-		query = query.Where("ip_address = ?", *filter.IPAddress)
-	}
-
-	if filter.RequestID != nil {
-		query = query.Where("request_id = ?", *filter.RequestID)
-	}
-
-	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
-	}
-
-	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
-	}
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	var count int64
 	err := query.Count(&count).Error
 	if err != nil {
-		return 0, fmt.Errorf("failed to count audit logs: %w", err)
+		return 0, err
 	}
 
 	return count, nil

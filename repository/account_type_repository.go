@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -28,7 +29,7 @@ func (r *AccountTypeRepositoryImpl) ByID(ctx context.Context, id uint) (*models.
 	var accountType models.AccountType
 	err := db.Last(&accountType, id).Error
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to find account type by ID %d: %w", id, err)
@@ -46,7 +47,7 @@ func (r *AccountTypeRepositoryImpl) ByTypeName(ctx context.Context, typeName str
 		Last(&accountType).Error
 
 	if err != nil {
-		if err.Error() == "record not found" { // GORM error check
+		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to find account type by name: %w", err)
@@ -55,11 +56,8 @@ func (r *AccountTypeRepositoryImpl) ByTypeName(ctx context.Context, typeName str
 	return &accountType, nil
 }
 
-// ByFilter retrieves account types based on filter criteria
-func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.AccountTypeFilter, orderBy string, limit, offset int) ([]*models.AccountType, error) {
-	db := r.getDB(ctx)
-	query := db.Model(&models.AccountType{})
-
+// applyFilter applies filter criteria to a GORM query
+func (r *AccountTypeRepositoryImpl) applyFilter(query *gorm.DB, filter models.AccountTypeFilter) *gorm.DB {
 	// Apply filters based on provided values
 	if filter.ID != nil {
 		query = query.Where("id = ?", *filter.ID)
@@ -78,12 +76,23 @@ func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.
 	}
 
 	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
+		query = query.Where("created_at > ?", *filter.CreatedAfter)
 	}
 
 	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
+		query = query.Where("created_at < ?", *filter.CreatedBefore)
 	}
+
+	return query
+}
+
+// ByFilter retrieves account types based on filter criteria
+func (r *AccountTypeRepositoryImpl) ByFilter(ctx context.Context, filter models.AccountTypeFilter, orderBy string, limit, offset int) ([]*models.AccountType, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.AccountType{})
+
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	// Apply ordering (default to id DESC)
 	if orderBy == "" {
@@ -113,30 +122,8 @@ func (r *AccountTypeRepositoryImpl) Count(ctx context.Context, filter models.Acc
 	db := r.getDB(ctx)
 	query := db.Model(&models.AccountType{})
 
-	// Apply filters based on provided values
-	if filter.ID != nil {
-		query = query.Where("id = ?", *filter.ID)
-	}
-
-	if filter.TypeName != nil {
-		query = query.Where("type_name = ?", *filter.TypeName)
-	}
-
-	if filter.DisplayName != nil {
-		query = query.Where("display_name = ?", *filter.DisplayName)
-	}
-
-	if filter.Description != nil {
-		query = query.Where("description = ?", *filter.Description)
-	}
-
-	if filter.CreatedAfter != nil {
-		query = query.Where("created_at >= ?", *filter.CreatedAfter)
-	}
-
-	if filter.CreatedBefore != nil {
-		query = query.Where("created_at <= ?", *filter.CreatedBefore)
-	}
+	// Apply filters
+	query = r.applyFilter(query, filter)
 
 	var count int64
 	err := query.Count(&count).Error

@@ -37,12 +37,20 @@ type Router interface {
 type FiberRouter struct {
 	app             *fiber.App
 	authHandler     handlers.AuthHandlerInterface
-	campaignHandler handlers.SMSCampaignHandlerInterface
+	campaignHandler handlers.CampaignHandlerInterface
+	paymentHandler  handlers.PaymentHandlerInterface
+	agencyHandler   handlers.AgencyHandlerInterface
 	authMiddleware  *middleware.AuthMiddleware
 }
 
 // NewFiberRouter creates a new Fiber router
-func NewFiberRouter(authHandler handlers.AuthHandlerInterface, campaignHandler handlers.SMSCampaignHandlerInterface, authMiddleware *middleware.AuthMiddleware) Router {
+func NewFiberRouter(
+	authHandler handlers.AuthHandlerInterface,
+	campaignHandler handlers.CampaignHandlerInterface,
+	paymentHandler handlers.PaymentHandlerInterface,
+	agencyHandler handlers.AgencyHandlerInterface,
+	authMiddleware *middleware.AuthMiddleware,
+) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "Yamata no Orochi API",
@@ -60,6 +68,8 @@ func NewFiberRouter(authHandler handlers.AuthHandlerInterface, campaignHandler h
 		app:             app,
 		authHandler:     authHandler,
 		campaignHandler: campaignHandler,
+		paymentHandler:  paymentHandler,
+		agencyHandler:   agencyHandler,
 		authMiddleware:  authMiddleware,
 	}
 }
@@ -144,8 +154,8 @@ func (r *FiberRouter) SetupRoutes() {
 	auth.Post("/forgot-password", r.authHandler.ForgotPassword)
 	auth.Post("/reset", r.authHandler.ResetPassword)
 
-	// SMS Campaign routes (protected with authentication)
-	campaigns := api.Group("/sms-campaigns")
+	// Campaign routes (protected with authentication)
+	campaigns := api.Group("/campaigns")
 	campaigns.Use(r.authMiddleware.Authenticate()) // Require authentication
 	campaigns.Post("/", r.campaignHandler.CreateCampaign)
 	campaigns.Put("/:uuid", r.campaignHandler.UpdateCampaign)
@@ -156,7 +166,25 @@ func (r *FiberRouter) SetupRoutes() {
 	// Wallet routes (protected with authentication)
 	wallet := api.Group("/wallet")
 	wallet.Use(r.authMiddleware.Authenticate()) // Require authentication
-	wallet.Get("/balance", r.campaignHandler.GetWalletBalance)
+	wallet.Get("/balance", r.paymentHandler.GetWalletBalance)
+
+	// Payment routes
+	payments := api.Group("/payments")
+	// Charge wallet endpoint (protected with authentication)
+	payments.Post("/charge-wallet", r.authMiddleware.Authenticate(), r.paymentHandler.ChargeWallet)
+	// Payment callback endpoint (unprotected - called by Atipay)
+	payments.Post("/callback/:invoice_number", r.paymentHandler.PaymentCallback)
+	// Transaction history endpoint (protected with authentication)
+	payments.Get("/history", r.authMiddleware.Authenticate(), r.paymentHandler.GetTransactionHistory)
+
+	// Agency routes (protected)
+	agency := api.Group("/reports")
+	agency.Use(r.authMiddleware.Authenticate())
+	agency.Get("/agency/customers", r.agencyHandler.GetAgencyCustomerReport)
+	agency.Get("/agency/customers/list", r.agencyHandler.ListAgencyCustomers)
+	agency.Get("/agency/discounts/active", r.agencyHandler.ListAgencyActiveDiscounts)
+	agency.Get("/agency/customers/:customer_id/discounts", r.agencyHandler.ListAgencyCustomerDiscounts)
+	agency.Post("/agency/discounts", r.agencyHandler.CreateAgencyDiscount)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
@@ -267,7 +295,7 @@ func (r *FiberRouter) setupMiddleware() {
 	// Recovery middleware with custom error handling
 	r.app.Use(recover.New(recover.Config{
 		EnableStackTrace: true,
-		StackTraceHandler: func(c fiber.Ctx, e interface{}) {
+		StackTraceHandler: func(c fiber.Ctx, e any) {
 			// Log panic with request context
 			log.Printf(`{"time":"%s","level":"error","request_id":"%s","event":"panic","error":"%v","path":"%s","method":"%s","ip":"%s"}`,
 				utils.UTCNow().Format(time.RFC3339),
@@ -556,79 +584,5 @@ func contains(str, substr string) bool {
 
 // GetRouteDocumentation returns API documentation
 func GetRouteDocumentation() []map[string]any {
-	return []map[string]any{
-		{
-			"method":      "POST",
-			"path":        "/api/v1/auth/signup",
-			"description": "Initiate customer signup process",
-			"parameters": map[string]any{
-				"account_type":              "string (required) - individual|independent_company|marketing_agency",
-				"representative_first_name": "string (required) - Representative first name",
-				"representative_last_name":  "string (required) - Representative last name",
-				"representative_mobile":     "string (required) - Mobile number in +989xxxxxxxxx format",
-				"email":                     "string (required) - Email address",
-				"password":                  "string (required) - Password",
-				"confirm_password":          "string (required) - Password confirmation",
-				"company_name":              "string (optional) - Required for business accounts",
-				"national_id":               "string (optional) - Required for business accounts",
-				"company_phone":             "string (optional) - Required for business accounts",
-				"company_address":           "string (optional) - Required for business accounts",
-				"postal_code":               "string (optional) - Required for business accounts",
-				"referrer_agency_code":      "string (optional) - Agency referral code",
-			},
-		},
-		{
-			"method":      "POST",
-			"path":        "/api/v1/auth/verify",
-			"description": "Verify OTP and complete signup",
-			"parameters": map[string]any{
-				"customer_id": "number (required) - Customer ID from signup response",
-				"otp_code":    "string (required) - 6-digit OTP code",
-				"otp_type":    "string (required) - mobile|email",
-			},
-		},
-		{
-			"method":      "POST",
-			"path":        "/api/v1/auth/resend-otp/:customer_id",
-			"description": "Resend OTP to customer",
-			"parameters": map[string]any{
-				"customer_id": "number (required) - Customer ID in URL path",
-				"type":        "string (optional) - Query parameter: mobile|email (default: mobile)",
-			},
-		},
-		{
-			"method":      "POST",
-			"path":        "/api/v1/auth/login",
-			"description": "Authenticate user with email/mobile and password",
-			"parameters": map[string]any{
-				"identifier": "string (required) - Email address or mobile number (+989xxxxxxxxx)",
-				"password":   "string (required) - User password",
-			},
-		},
-		{
-			"method":      "POST",
-			"path":        "/api/v1/auth/forgot-password",
-			"description": "Initiate password reset process by sending OTP",
-			"parameters": map[string]any{
-				"identifier": "string (required) - Email address or mobile number (+989xxxxxxxxx)",
-			},
-		},
-		{
-			"method":      "POST",
-			"path":        "/api/v1/auth/reset",
-			"description": "Complete password reset with OTP verification",
-			"parameters": map[string]any{
-				"customer_id":      "number (required) - Customer ID from forgot-password response",
-				"otp_code":         "string (required) - 6-digit OTP code from SMS",
-				"new_password":     "string (required) - New password (min 8 chars, uppercase + number)",
-				"confirm_password": "string (required) - Must match new_password",
-			},
-		},
-		{
-			"method":      "GET",
-			"path":        "/api/v1/health",
-			"description": "Health check endpoint",
-			"parameters":  map[string]any{},
-		},
-	}
+	return []map[string]any{}
 }

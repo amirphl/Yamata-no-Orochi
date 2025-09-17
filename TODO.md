@@ -25,3 +25,11 @@ echo "vm.overcommit_memory = 1" | sudo tee -a /etc/sysctl.conf
 sudo sysctl -p
 
 10-listen-on-ipv6-by-default.sh: info: can not modify /etc/nginx/conf.d/default.conf (read-only file system?
+yamata-local.conf is behind yamata-beta.conf
+
+2025/08/17 20:49:56 /app/repository/sms_campaign_repository.go:50
+[warn] Model github.com/amirphl/Yamata-no-Orochi/models.SMSCampaign don't match BeforeCreateInterface, should be `BeforeCreate(*gorm.DB) error`. Please see https://gorm.io/docs/hooks.html
+
+2025/08/17 20:49:56 /app/repository/sms_campaign_repository.go:50
+[warn] Model github.com/amirphl/Yamata-no-Orochi/models.SMSCampaign don't match BeforeUpdateInterface, should be `BeforeUpdate(*gorm.DB) error`. Please see https://gorm.io/docs/hooks.html
+
