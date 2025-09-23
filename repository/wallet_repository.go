@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -100,8 +101,8 @@ func (r *WalletRepositoryImpl) SaveWithInitialSnapshot(ctx context.Context, wall
 		Reason:        "initial_snapshot",
 		Description:   "Initial balance snapshot",
 		Metadata:      json.RawMessage(`{}`),
-		CreatedAt:     time.Now(),
-		UpdatedAt:     time.Now(),
+		CreatedAt:     utils.UTCNow(),
+		UpdatedAt:     utils.UTCNow(),
 	}
 
 	// Create initial balance snapshot
@@ -183,31 +184,6 @@ func (r *WalletRepositoryImpl) ByFilter(ctx context.Context, filter models.Walle
 		return nil, err
 	}
 	return wallets, nil
-}
-
-// Save inserts a new wallet
-func (r *WalletRepositoryImpl) Save(ctx context.Context, wallet *models.Wallet) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	err = db.Save(wallet).Error
-	if err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // SaveBatch inserts multiple wallets in a single transaction

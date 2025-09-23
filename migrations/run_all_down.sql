@@ -3,6 +3,45 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0032_add_updated_at_to_customer_sessions_down.sql...'
+\i migrations/0032_add_updated_at_to_customer_sessions_down.sql
+
+\echo 'Running 0031_remove_hardcoded_system_tax_data_down.sql...'
+\i migrations/0031_remove_hardcoded_system_tax_data_down.sql
+
+\echo 'Running 0030_create_line_numbers_down.sql...'
+\i migrations/0030_create_line_numbers_down.sql
+
+\echo 'Running 0029_create_admins_down.sql...'
+\i migrations/0029_create_admins_down.sql
+
+\echo 'Running 0028_add_launch_campaign_transaction_type_down.sql...'
+\i migrations/0028_add_launch_campaign_transaction_type_down.sql
+
+\echo 'Running 0027_add_discount_audit_actions_down.sql...'
+\i migrations/0027_add_discount_audit_actions_down.sql
+
+\echo 'Running 0026_add_index_on_transactions_metadata_agency_discount_id_down.sql...'
+\i migrations/0026_add_index_on_transactions_metadata_agency_discount_id_down.sql
+
+\echo 'Running 0025_add_indexes_on_transactions_metadata_down.sql...'
+\i migrations/0025_add_indexes_on_transactions_metadata_down.sql
+
+\echo 'Running 0024_create_system_company_and_wallet_down.sql...'
+\i migrations/0024_create_system_company_and_wallet_down.sql
+
+\echo 'Running 0024_create_sheba_number_on_customers_down.sql...'
+\i migrations/0024_create_sheba_number_on_customers_down.sql
+
+\echo 'Running 0023_add_credit_balance_to_balance_snapshots_down.sql...'
+\i migrations/0023_add_credit_balance_to_balance_snapshots_down.sql
+
+\echo 'Running 0022_create_agency_discounts_down.sql...'
+\i migrations/0022_create_agency_discounts_down.sql
+
+\echo 'Running 0021_change_agency_referer_code_to_varchar_down.sql...'
+\i migrations/0021_change_agency_referer_code_to_varchar_down.sql
+
 \echo 'Running 0020_create_tax_wallet_down.sql...'
 \i migrations/0020_create_tax_wallet_down.sql
 

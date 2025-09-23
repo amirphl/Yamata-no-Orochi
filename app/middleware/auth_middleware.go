@@ -105,6 +105,71 @@ func (m *AuthMiddleware) Authenticate() fiber.Handler {
 	}
 }
 
+// AdminAuthenticate validates JWT tokens and sets admin-specific context values
+func (m *AuthMiddleware) AdminAuthenticate() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		// Get the Authorization header
+		authHeader := c.Get("Authorization")
+		if authHeader == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Authorization header is required",
+				Error:   dto.ErrorDetail{Code: "MISSING_AUTHORIZATION_HEADER"},
+			})
+		}
+
+		// Check Bearer format
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Invalid authorization header format. Expected 'Bearer <token>'",
+				Error:   dto.ErrorDetail{Code: "INVALID_AUTHORIZATION_FORMAT"},
+			})
+		}
+
+		// Extract token
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Access token is required",
+				Error:   dto.ErrorDetail{Code: "MISSING_ACCESS_TOKEN"},
+			})
+		}
+
+		// Validate token (admin)
+		adminClaims, err := m.tokenService.ValidateAdminToken(token)
+		if err != nil {
+			var code, msg string
+			if errors.Is(err, services.ErrTokenExpired) {
+				code = "TOKEN_EXPIRED"
+				msg = "Access token has expired"
+			} else if errors.Is(err, services.ErrTokenInvalid) {
+				code = "TOKEN_INVALID"
+				msg = "Invalid access token"
+			} else if errors.Is(err, services.ErrTokenRevoked) {
+				code = "TOKEN_REVOKED"
+				msg = "Access token has been revoked"
+			} else {
+				code = "TOKEN_VALIDATION_FAILED"
+				msg = "Token validation failed"
+			}
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{Success: false, Message: msg, Error: dto.ErrorDetail{Code: code}})
+		}
+
+		// For admin tokens, use admin-specific claims
+		c.Locals("admin_id", adminClaims.AdminID)
+		c.Locals("token_id", adminClaims.TokenID)
+		c.Locals("token_claims", adminClaims)
+
+		if requestID := c.Get("X-Request-ID"); requestID != "" {
+			c.Locals("request_id", requestID)
+		}
+
+		return c.Next()
+	}
+}
+
 // OptionalAuth is a middleware that validates JWT tokens if present, but doesn't require them
 func (m *AuthMiddleware) OptionalAuth() fiber.Handler {
 	return func(c fiber.Ctx) error {
@@ -156,6 +221,12 @@ func GetCustomerIDFromContext(c fiber.Ctx) (uint, bool) {
 	return customerID, ok
 }
 
+// GetAdminIDFromContext extracts admin ID from the request context
+func GetAdminIDFromContext(c fiber.Ctx) (uint, bool) {
+	adminID, ok := c.Locals("admin_id").(uint)
+	return adminID, ok
+}
+
 // GetTokenClaimsFromContext extracts token claims from the request context
 func GetTokenClaimsFromContext(c fiber.Ctx) (*services.TokenClaims, bool) {
 	claims, ok := c.Locals("token_claims").(*services.TokenClaims)
@@ -187,4 +258,24 @@ func RequireAuth(c fiber.Ctx) error {
 	}
 
 	return nil
+}
+
+// RequireAdminAuth ensures admin authentication is present
+func RequireAdminAuth(c fiber.Ctx) error {
+	adminID, exists := GetAdminIDFromContext(c)
+	if !exists {
+		return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Admin authentication required",
+			Error:   dto.ErrorDetail{Code: "ADMIN_AUTHENTICATION_REQUIRED"},
+		})
+	}
+	if adminID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Invalid admin ID",
+			Error:   dto.ErrorDetail{Code: "INVALID_ADMIN_ID"},
+		})
+	}
+	return c.Next()
 }

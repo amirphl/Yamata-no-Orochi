@@ -63,5 +63,44 @@
 \echo 'Running 0020_create_tax_wallet.sql...'
 \i migrations/0020_create_tax_wallet.sql
 
+\echo 'Running 0021_change_agency_referer_code_to_varchar.sql...'
+\i migrations/0021_change_agency_referer_code_to_varchar.sql
+
+\echo 'Running 0022_create_agency_discounts.sql...'
+\i migrations/0022_create_agency_discounts.sql
+
+\echo 'Running 0023_add_credit_balance_to_balance_snapshots.sql...'
+\i migrations/0023_add_credit_balance_to_balance_snapshots.sql
+
+\echo 'Running 0024_create_sheba_number_on_customers.sql...'
+\i migrations/0024_create_sheba_number_on_customers.sql
+
+\echo 'Running 0024_create_system_company_and_wallet.sql...'
+\i migrations/0024_create_system_company_and_wallet.sql
+
+\echo 'Running 0025_add_indexes_on_transactions_metadata.sql...'
+\i migrations/0025_add_indexes_on_transactions_metadata.sql
+
+\echo 'Running 0026_add_index_on_transactions_metadata_agency_discount_id.sql...'
+\i migrations/0026_add_index_on_transactions_metadata_agency_discount_id.sql
+
+\echo 'Running 0027_add_discount_audit_actions.sql...'
+\i migrations/0027_add_discount_audit_actions.sql
+
+\echo 'Running 0028_add_launch_campaign_transaction_type.sql...'
+\i migrations/0028_add_launch_campaign_transaction_type.sql
+
+\echo 'Running 0029_create_admins.sql...'
+\i migrations/0029_create_admins.sql
+
+\echo 'Running 0030_create_line_numbers.sql...'
+\i migrations/0030_create_line_numbers.sql
+
+\echo 'Running 0031_remove_hardcoded_system_tax_data.sql...'
+\i migrations/0031_remove_hardcoded_system_tax_data.sql
+
+\echo 'Running 0032_add_updated_at_to_customer_sessions.sql...'
+\i migrations/0032_add_updated_at_to_customer_sessions.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 

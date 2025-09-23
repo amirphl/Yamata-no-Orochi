@@ -1,4 +1,4 @@
-// Package services provides business logic services for the application
+// Package services provides external service integrations and technical concerns like notifications and tokens
 package services
 
 import (

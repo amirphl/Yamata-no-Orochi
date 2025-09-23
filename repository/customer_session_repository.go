@@ -104,8 +104,8 @@ func (r *CustomerSessionRepositoryImpl) ListActiveSessionsByCustomer(ctx context
 	return activeSessions, nil
 }
 
-// ExpireSession creates a new expired session record (insert-only approach)
-func (r *CustomerSessionRepositoryImpl) ExpireSession(ctx context.Context, sessionID uint) error {
+// Update updates a customer session
+func (r *CustomerSessionRepositoryImpl) Update(ctx context.Context, session *models.CustomerSession) error {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -121,134 +121,13 @@ func (r *CustomerSessionRepositoryImpl) ExpireSession(ctx context.Context, sessi
 		}()
 	}
 
-	// Find the session to expire
-	var session models.CustomerSession
-	err = db.Last(&session, sessionID).Error
-	if err != nil {
-		return err
-	}
+	result := db.Model(&models.CustomerSession{}).
+		Where("id = ?", session.ID).
+		Updates(session).
+		Update("updated_at", utils.UTCNow())
 
-	// Create new expired session record
-	expiredSession := models.CustomerSession{
-		CorrelationID:  session.CorrelationID, // Use same correlation ID
-		CustomerID:     session.CustomerID,
-		SessionToken:   session.SessionToken + "_expired",
-		RefreshToken:   nil, // Clear refresh token on expiration
-		DeviceInfo:     session.DeviceInfo,
-		IPAddress:      session.IPAddress,
-		UserAgent:      session.UserAgent,
-		IsActive:       utils.ToPtr(false),
-		CreatedAt:      session.CreatedAt,
-		LastAccessedAt: utils.UTCNow(),
-		ExpiresAt:      utils.UTCNow(), // Mark as expired now
-	}
-
-	err = db.Create(&expiredSession).Error
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// ExpireAllCustomerSessions expires all sessions for a customer (insert-only approach)
-func (r *CustomerSessionRepositoryImpl) ExpireAllCustomerSessions(ctx context.Context, customerID uint) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	// Find all active sessions for the customer
-	var sessions []models.CustomerSession
-	err = db.Where("customer_id = ? AND is_active = ?", customerID, true).
-		Find(&sessions).Error
-
-	if err != nil {
-		return err
-	}
-
-	// Create expired records for each session
-	now := utils.UTCNow()
-	for _, session := range sessions {
-		expiredSession := models.CustomerSession{
-			CorrelationID:  session.CorrelationID, // Use same correlation ID
-			CustomerID:     session.CustomerID,
-			SessionToken:   session.SessionToken + "_expired",
-			RefreshToken:   nil, // Clear refresh token on expiration
-			DeviceInfo:     session.DeviceInfo,
-			IPAddress:      session.IPAddress,
-			UserAgent:      session.UserAgent,
-			IsActive:       utils.ToPtr(false),
-			CreatedAt:      session.CreatedAt,
-			LastAccessedAt: now,
-			ExpiresAt:      now, // Mark as expired now
-		}
-
-		err = db.Create(&expiredSession).Error
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// CleanupExpiredSessions creates cleanup records for naturally expired sessions
-func (r *CustomerSessionRepositoryImpl) CleanupExpiredSessions(ctx context.Context) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
-	}
-
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
-	}
-
-	// Find all sessions that are naturally expired but still marked as active
-	var expiredSessions []models.CustomerSession
-	now := utils.UTCNow()
-	err = db.Where("is_active = ? AND expires_at <= ?", true, now).
-		Find(&expiredSessions).Error
-
-	if err != nil {
-		return err
-	}
-
-	// Create cleanup records for each expired session
-	for _, session := range expiredSessions {
-		cleanupSession := models.CustomerSession{
-			CustomerID:     session.CustomerID,
-			SessionToken:   session.SessionToken + "_cleanup",
-			RefreshToken:   nil, // Clear refresh token
-			DeviceInfo:     session.DeviceInfo,
-			IPAddress:      session.IPAddress,
-			UserAgent:      session.UserAgent,
-			IsActive:       utils.ToPtr(false),
-			CreatedAt:      session.CreatedAt,
-			LastAccessedAt: session.LastAccessedAt,
-			ExpiresAt:      session.ExpiresAt,
-		}
-
-		err = db.Create(&cleanupSession).Error
-		if err != nil {
-			return err
-		}
+	if result.Error != nil {
+		return result.Error
 	}
 
 	return nil

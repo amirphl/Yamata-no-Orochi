@@ -34,6 +34,7 @@ type SignupFlowImpl struct {
 	sessionRepo        repository.CustomerSessionRepository
 	auditRepo          repository.AuditLogRepository
 	agencyDiscountRepo repository.AgencyDiscountRepository
+	walletRepo         repository.WalletRepository
 	tokenService       services.TokenService
 	notificationSvc    services.NotificationService
 	adminConfig        config.AdminConfig
@@ -48,6 +49,7 @@ func NewSignupFlow(
 	sessionRepo repository.CustomerSessionRepository,
 	auditRepo repository.AuditLogRepository,
 	agencyDiscountRepo repository.AgencyDiscountRepository,
+	walletRepo repository.WalletRepository,
 	tokenService services.TokenService,
 	notificationSvc services.NotificationService,
 	adminConfig config.AdminConfig,
@@ -60,6 +62,7 @@ func NewSignupFlow(
 		sessionRepo:        sessionRepo,
 		auditRepo:          auditRepo,
 		agencyDiscountRepo: agencyDiscountRepo,
+		walletRepo:         walletRepo,
 		tokenService:       tokenService,
 		notificationSvc:    notificationSvc,
 		adminConfig:        adminConfig,
@@ -96,6 +99,15 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 		// Generate and save OTP
 		otpCode, err = s.generateAndSaveOTP(txCtx, customer.ID, customer.RepresentativeMobile, models.OTPTypeMobile)
 		if err != nil {
+			return err
+		}
+
+		if err := s.createDefaultDiscount(txCtx, customer); err != nil {
+			return err
+		}
+
+		//create wallet
+		if _, err := createWalletWithInitialSnapshot(txCtx, s.walletRepo, customer.ID, "signup"); err != nil {
 			return err
 		}
 
@@ -175,10 +187,6 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 		// Get customer again to get the updated customer
 		customer, err = getCustomer(txCtx, s.customerRepo, customer.ID)
 		if err != nil {
-			return err
-		}
-
-		if err := s.createDefaultDiscount(txCtx, &customer); err != nil {
 			return err
 		}
 
@@ -307,7 +315,7 @@ func (s *SignupFlowImpl) validateSignupRequest(ctx context.Context, req *dto.Sig
 
 	// Sheba requirement for marketing_agency
 	if req.AccountType == models.AccountTypeMarketingAgency {
-		shebaNumber, err := validateShebaNumber(req.ShebaNumber)
+		shebaNumber, err := ValidateShebaNumber(req.ShebaNumber)
 		if err != nil {
 			return err
 		}
@@ -319,6 +327,7 @@ func (s *SignupFlowImpl) validateSignupRequest(ctx context.Context, req *dto.Sig
 		agencyFilter := models.CustomerFilter{
 			AgencyRefererCode: req.ReferrerAgencyCode,
 			IsActive:          utils.ToPtr(true),
+			IsMobileVerified:  utils.ToPtr(true),
 		}
 		agencies, err := s.customerRepo.ByFilter(ctx, agencyFilter, "", 0, 0)
 		if err != nil {
