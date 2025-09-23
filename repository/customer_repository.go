@@ -344,7 +344,9 @@ func (r *CustomerRepositoryImpl) UpdateVerificationStatus(ctx context.Context, c
 		}()
 	}
 
-	updates := make(map[string]any)
+	updates := map[string]any{
+		"updated_at": utils.UTCNow(),
+	}
 
 	if isMobileVerified != nil {
 		updates["is_mobile_verified"] = *isMobileVerified

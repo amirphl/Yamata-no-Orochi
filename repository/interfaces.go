@@ -29,6 +29,24 @@ type AccountTypeRepository interface {
 	ByTypeName(ctx context.Context, typeName string) (*models.AccountType, error)
 }
 
+// AdminRepository defines operations for platform admins
+type AdminRepository interface {
+	Repository[models.Admin, models.AdminFilter]
+	ByID(ctx context.Context, id uint) (*models.Admin, error)
+	ByUUID(ctx context.Context, uuid string) (*models.Admin, error)
+	ByUsername(ctx context.Context, username string) (*models.Admin, error)
+}
+
+// LineNumberRepository defines operations for line numbers
+type LineNumberRepository interface {
+	Repository[models.LineNumber, models.LineNumberFilter]
+	ByID(ctx context.Context, id uint) (*models.LineNumber, error)
+	ByUUID(ctx context.Context, uuid string) (*models.LineNumber, error)
+	ByValue(ctx context.Context, value string) (*models.LineNumber, error)
+	Update(ctx context.Context, line *models.LineNumber) error
+	UpdateBatch(ctx context.Context, lines []*models.LineNumber) error
+}
+
 // CustomerRepository defines operations for customers
 type CustomerRepository interface {
 	Repository[models.Customer, models.CustomerFilter]
@@ -63,11 +81,9 @@ type CustomerSessionRepository interface {
 	BySessionToken(ctx context.Context, token string) (*models.CustomerSession, error)
 	ByRefreshToken(ctx context.Context, token string) (*models.CustomerSession, error)
 	ListActiveSessionsByCustomer(ctx context.Context, customerID uint) ([]*models.CustomerSession, error)
-	ExpireSession(ctx context.Context, sessionID uint) error
-	ExpireAllCustomerSessions(ctx context.Context, customerID uint) error
-	CleanupExpiredSessions(ctx context.Context) error
 	GetLatestByCorrelationID(ctx context.Context, correlationID uuid.UUID) (*models.CustomerSession, error)
 	GetHistoryByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.CustomerSession, error)
+	Update(ctx context.Context, session *models.CustomerSession) error
 }
 
 // AuditLogRepository defines operations for audit logs

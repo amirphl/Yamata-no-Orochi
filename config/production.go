@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/google/uuid"
 )
 
 // ProductionConfig holds all configuration for production environment
@@ -24,6 +27,7 @@ type ProductionConfig struct {
 	Deployment DeploymentConfig `json:"deployment"`
 	Atipay     AtipayConfig     `json:"atipay"`
 	Admin      AdminConfig      `json:"admin"`
+	System     SystemConfig     `json:"system"`
 }
 
 type DatabaseConfig struct {
@@ -235,6 +239,19 @@ type AdminConfig struct {
 	Mobile string `json:"admin_mobile"`
 }
 
+// SystemConfig holds system/tax actors and wallets UUIDs configured by admin
+type SystemConfig struct {
+	SystemUserUUID    string `json:"system_user_uuid"`
+	TaxUserUUID       string `json:"tax_user_uuid"`
+	SystemUserMobile  string `json:"system_user_mobile"`
+	TaxUserMobile     string `json:"tax_user_mobile"`
+	SystemUserEmail   string `json:"system_user_email"`
+	TaxUserEmail      string `json:"tax_user_email"`
+	SystemWalletUUID  string `json:"system_wallet_uuid"`
+	TaxWalletUUID     string `json:"tax_wallet_uuid"`
+	SystemShebaNumber string `json:"system_sheba_number"`
+}
+
 // LoadProductionConfig loads and validates configuration from environment variables
 func LoadProductionConfig() (*ProductionConfig, error) {
 	// Load environment variables from .env file
@@ -405,6 +422,17 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		},
 		Admin: AdminConfig{
 			Mobile: getEnvString("ADMIN_MOBILE", ""),
+		},
+		System: SystemConfig{
+			SystemUserUUID:    getEnvString("SYSTEM_USER_UUID", ""),
+			TaxUserUUID:       getEnvString("TAX_USER_UUID", ""),
+			SystemUserMobile:  getEnvString("SYSTEM_USER_MOBILE", ""),
+			TaxUserMobile:     getEnvString("TAX_USER_MOBILE", ""),
+			SystemUserEmail:   getEnvString("SYSTEM_USER_EMAIL", ""),
+			TaxUserEmail:      getEnvString("TAX_USER_EMAIL", ""),
+			SystemWalletUUID:  getEnvString("SYSTEM_WALLET_UUID", ""),
+			TaxWalletUUID:     getEnvString("TAX_WALLET_UUID", ""),
+			SystemShebaNumber: getEnvString("SYSTEM_SHEBA_NUMBER", ""),
 		},
 	}
 
@@ -638,6 +666,55 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 		if cfg.Cache.Provider == "redis" && cfg.Cache.RedisURL == "" {
 			errors = append(errors, "CACHE_REDIS_URL is required when cache is enabled with redis provider")
 		}
+	}
+
+	// System config is not optional and all must be parsed
+	if cfg.System.SystemUserUUID == "" {
+		errors = append(errors, "SYSTEM_USER_UUID is required")
+	}
+	if cfg.System.TaxUserUUID == "" {
+		errors = append(errors, "TAX_USER_UUID is required")
+	}
+	if cfg.System.SystemUserMobile == "" {
+		errors = append(errors, "SYSTEM_USER_MOBILE is required")
+	}
+	if cfg.System.TaxUserMobile == "" {
+		errors = append(errors, "TAX_USER_MOBILE is required")
+	}
+	if cfg.System.SystemUserEmail == "" {
+		errors = append(errors, "SYSTEM_USER_EMAIL is required")
+	}
+	if cfg.System.TaxUserEmail == "" {
+		errors = append(errors, "TAX_USER_EMAIL is required")
+	}
+	if cfg.System.SystemWalletUUID == "" {
+		errors = append(errors, "SYSTEM_WALLET_UUID is required")
+	}
+	if cfg.System.TaxWalletUUID == "" {
+		errors = append(errors, "TAX_WALLET_UUID is required")
+	}
+	_, err := uuid.Parse(cfg.System.SystemUserUUID)
+	if err != nil {
+		errors = append(errors, "SYSTEM_USER_UUID is invalid")
+	}
+	_, err = uuid.Parse(cfg.System.TaxUserUUID)
+	if err != nil {
+		errors = append(errors, "TAX_USER_UUID is invalid")
+	}
+	_, err = uuid.Parse(cfg.System.SystemWalletUUID)
+	if err != nil {
+		errors = append(errors, "SYSTEM_WALLET_UUID is invalid")
+	}
+	_, err = uuid.Parse(cfg.System.TaxWalletUUID)
+	if err != nil {
+		errors = append(errors, "TAX_WALLET_UUID is invalid")
+	}
+	if cfg.System.SystemShebaNumber == "" {
+		errors = append(errors, "SYSTEM_SHEBA_NUMBER is required")
+	}
+	_, err = utils.ValidateShebaNumber(&cfg.System.SystemShebaNumber)
+	if err != nil {
+		errors = append(errors, "SYSTEM_SHEBA_NUMBER is invalid")
 	}
 
 	// Return validation errors if any

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type AgencyDiscount struct {
@@ -28,6 +29,14 @@ type AgencyDiscount struct {
 
 func (AgencyDiscount) TableName() string {
 	return "agency_discounts"
+}
+
+// BeforeCreate ensures UUID is set for AgencyDiscount
+func (a *AgencyDiscount) BeforeCreate(tx *gorm.DB) error {
+	if a.UUID == uuid.Nil {
+		a.UUID = uuid.New()
+	}
+	return nil
 }
 
 // AgencyDiscountFilter represents filter criteria for agency discount queries
