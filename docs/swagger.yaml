@@ -8,6 +8,162 @@ definitions:
       success:
         type: boolean
     type: object
+  dto.AdminApproveCampaignRequest:
+    properties:
+      campaign_id:
+        type: integer
+      comment:
+        maxLength: 1000
+        type: string
+    required:
+    - campaign_id
+    type: object
+  dto.AdminApproveCampaignResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  dto.AdminCaptchaInitResponse:
+    properties:
+      challenge_id:
+        type: string
+      master_image_base64:
+        type: string
+      thumb_image_base64:
+        type: string
+    type: object
+  dto.AdminCaptchaVerifyRequest:
+    properties:
+      challenge_id:
+        type: string
+      password:
+        maxLength: 100
+        minLength: 8
+        type: string
+      user_angle:
+        type: number
+      username:
+        maxLength: 255
+        minLength: 3
+        type: string
+    required:
+    - challenge_id
+    - password
+    - user_angle
+    - username
+    type: object
+  dto.AdminCreateLineNumberRequest:
+    properties:
+      is_active:
+        type: boolean
+      line_number:
+        maxLength: 50
+        minLength: 3
+        type: string
+      name:
+        maxLength: 255
+        type: string
+      price_factor:
+        type: number
+      priority:
+        type: integer
+    required:
+    - line_number
+    - price_factor
+    type: object
+  dto.AdminDTO:
+    properties:
+      created_at:
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      id:
+        example: 1
+        type: integer
+      is_active:
+        example: true
+        type: boolean
+      username:
+        example: admin
+        type: string
+      uuid:
+        example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+        type: string
+    type: object
+  dto.AdminLineNumberDTO:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      line_number:
+        type: string
+      name:
+        type: string
+      price_factor:
+        type: number
+      priority:
+        type: integer
+      updated_at:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.AdminLineNumberReportItem:
+    properties:
+      line_number:
+        type: string
+      total_arrived_parts_sent:
+        type: integer
+      total_cost:
+        type: integer
+      total_income:
+        type: integer
+      total_non_arrived_parts_sent:
+        type: integer
+      total_parts_sent:
+        type: integer
+      total_sent:
+        type: integer
+    type: object
+  dto.AdminRejectCampaignRequest:
+    properties:
+      campaign_id:
+        type: integer
+      comment:
+        maxLength: 1000
+        type: string
+    required:
+    - campaign_id
+    - comment
+    type: object
+  dto.AdminRejectCampaignResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  dto.AdminUpdateLineNumberItem:
+    properties:
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      priority:
+        type: integer
+    required:
+    - id
+    type: object
+  dto.AdminUpdateLineNumbersRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminUpdateLineNumberItem'
+        minItems: 1
+        type: array
+    required:
+    - items
+    type: object
   dto.AgencyActiveDiscountItem:
     properties:
       company_name:
@@ -704,6 +860,336 @@ definitions:
 info:
   contact: {}
 paths:
+  /api/v1/admin/auth/captcha/init:
+    get:
+      description: Initialize rotate captcha for admin login (returns base64 images
+        and challenge ID)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Captcha initialized
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCaptchaInitResponse'
+              type: object
+        "500":
+          description: Failed to initialize captcha
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin captcha init
+      tags:
+      - Admin Authentication
+  /api/v1/admin/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Verify captcha and authenticate admin with username/password
+      parameters:
+      - description: Admin login data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminCaptchaVerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    access_token:
+                      type: string
+                    admin:
+                      $ref: '#/definitions/dto.AdminDTO'
+                    expires_in:
+                      type: integer
+                    refresh_token:
+                      type: string
+                    token_type:
+                      type: string
+                  type: object
+              type: object
+        "400":
+          description: Invalid request or captcha
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Incorrect credentials or admin not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Admin inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin login
+      tags:
+      - Admin Authentication
+  /api/v1/admin/campaigns:
+    get:
+      description: Retrieve campaigns by title, status, start date, and end date
+      parameters:
+      - description: Filter by title (contains)
+        in: query
+        name: title
+        type: string
+      - description: Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected)
+        in: query
+        name: status
+        type: string
+      - description: Filter created_at >= start_date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: Filter created_at <= end_date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/dto.GetCampaignResponse'
+                  type: array
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin List Campaigns
+      tags:
+      - Admin Campaigns
+  /api/v1/admin/campaigns/approve:
+    post:
+      consumes:
+      - application/json
+      description: Approve a campaign waiting for approval; moves reserved funds from
+        frozen to locked
+      parameters:
+      - description: Approval payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminApproveCampaignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminApproveCampaignResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Invalid state
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Approve Campaign
+      tags:
+      - Admin Campaigns
+  /api/v1/admin/campaigns/reject:
+    post:
+      consumes:
+      - application/json
+      description: Reject a campaign waiting for approval; refunds reserved funds
+        to free balance
+      parameters:
+      - description: Rejection payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminRejectCampaignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminRejectCampaignResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Invalid state
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Reject Campaign
+      tags:
+      - Admin Campaigns
+  /api/v1/admin/line-numbers/:
+    get:
+      description: Retrieve all line numbers
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/dto.AdminLineNumberDTO'
+                  type: array
+              type: object
+        "500":
+          description: List failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List Line Numbers (Admin)
+      tags:
+      - Admin Line Numbers
+    post:
+      consumes:
+      - application/json
+      description: Create a line number with name (optional), unique value, price
+        factor, priority (optional), and is_active (optional)
+      parameters:
+      - description: Create line number payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminCreateLineNumberRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminLineNumberDTO'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Creation failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Create Line Number (Admin)
+      tags:
+      - Admin Line Numbers
+    put:
+      consumes:
+      - application/json
+      description: Update multiple line numbers; all IDs must exist
+      parameters:
+      - description: Batch update payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminUpdateLineNumbersRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    updated:
+                      type: boolean
+                  type: object
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Update failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Batch Update Line Numbers (Admin)
+      tags:
+      - Admin Line Numbers
+  /api/v1/admin/line-numbers/report:
+    get:
+      description: Retrieve report per line number (totals)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/dto.AdminLineNumberReportItem'
+                  type: array
+              type: object
+        "500":
+          description: Report generation failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Line Numbers Report (Admin)
+      tags:
+      - Admin Line Numbers
   /api/v1/auth/forgot-password:
     post:
       consumes:
