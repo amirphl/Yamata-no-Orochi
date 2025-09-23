@@ -127,7 +127,7 @@ obtain_letsencrypt_certificates() {
 	
 	# Obtain certificate using acme.sh with HTTP challenge
 	if "$ACME_SH_DIR/acme.sh" --issue -d "$domain" -d "www.$domain" -d "api.$domain" -d "monitoring.$domain" \
-		--webroot /var/www/html --server letsencrypt; then
+			--webroot /var/www/html --server letsencrypt; then
 		
 		print_success "Certificate obtained successfully for $domain"
 		
@@ -325,9 +325,9 @@ get_proxy_env() {
 	echo "$proxy_args"
 }
 
-# Function to start services
+# Function to start services (all except app-beta)
 start_services() {
-	print_status "Starting Docker Compose services..."
+	print_status "Starting Docker Compose services (excluding app-beta)..."
 	
 	# Resolve docker command (fallback to sudo if needed)
 	local docker_cmd
@@ -346,29 +346,11 @@ start_services() {
 		return 1
 	fi
 	
-	# Check for HTTP proxy configuration
-	if check_http_proxy; then
-		print_status "Using HTTP proxy for Docker build"
-		# Get proxy arguments
-		local proxy_args=$(get_proxy_env)
-		
-		# Build with proxy arguments
-		if [ -n "$proxy_args" ]; then
-			print_status "Building with proxy: $proxy_args"
-			$docker_cmd build $proxy_args --network host -f docker/Dockerfile.production -t yamata-no-orochi .
-		else
-			print_status "Building without proxy"
-			$docker_cmd build --network host -f docker/Dockerfile.production -t yamata-no-orochi .
-		fi
-	else
-		print_status "Building without proxy"
-		$docker_cmd build --network host -f docker/Dockerfile.production -t yamata-no-orochi .
-	fi
+	# Start all supporting services explicitly, excluding app-beta to allow safe DB migration
+	# Note: nginx-beta depends on app-beta, so we start it after app-beta to avoid pulling app-beta up implicitly
+	$docker_cmd compose -f docker-compose.beta.yml up -d postgres-beta redis-beta prometheus-beta grafana-beta frontend-beta
 	
-	# Start services
-	$docker_cmd compose -f docker-compose.beta.yml up -d
-	
-	print_success "Services started successfully"
+	print_success "Core services started successfully (app-beta not started)"
 }
 
 # Function to wait for services to be ready
@@ -395,6 +377,40 @@ wait_for_services() {
 	
 	print_error "Services failed to start within expected time"
 	return 1
+}
+
+# Wait for app-beta container to become healthy
+wait_for_app_health() {
+	print_status "Waiting for app-beta health..."
+	local docker_cmd
+	docker_cmd=$(get_docker_cmd)
+	local max_attempts=40
+	local attempt=1
+	local status="unknown"
+	while [ $attempt -le $max_attempts ]; do
+		status=$($docker_cmd inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' yamata-app-beta 2>/dev/null || echo "unknown")
+		if [ "$status" = "healthy" ]; then
+			print_success "app-beta is healthy"
+			return 0
+		fi
+		print_status "Attempt $attempt/$max_attempts - app-beta health status: $status"
+		sleep 5
+		attempt=$((attempt + 1))
+	done
+	print_warning "app-beta did not become healthy within expected time (last status: $status)"
+	return 0
+}
+
+# Function to start app-beta (and nginx-beta after)
+start_app_service() {
+	print_status "Starting app-beta and nginx-beta services..."
+	local docker_cmd
+	docker_cmd=$(get_docker_cmd)
+	$docker_cmd compose -f docker-compose.beta.yml up -d app-beta
+	print_success "app-beta started"
+	# Start nginx after app-beta to avoid implicit dependency startup
+	$docker_cmd compose -f docker-compose.beta.yml up -d nginx-beta
+	print_success "nginx-beta started"
 }
 
 # Function to display deployment information
@@ -534,11 +550,11 @@ main() {
 		set +a
 	fi
 
-	# Start services
+	# Start core services (excluding app-beta)
 	start_services
 	
 	# Initialize database and apply migrations
-	print_status "Initializing database and applying migrations..."	
+	print_status "Initializing database and applying migrations..."
 	
 	if ./scripts/init-beta-database.sh; then
 		print_success "Database initialization completed"
@@ -546,8 +562,11 @@ main() {
 		print_warning "Database initialization failed or was skipped"
 	fi
 	
-	# Wait for services to be ready
-	wait_for_services
+	# Start app service after successful migrations
+	start_app_service
+	
+	# Wait for app-beta to report healthy status
+	wait_for_app_health
 	
 	# Show deployment information
 	show_deployment_info "$domain"
