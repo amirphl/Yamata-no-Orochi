@@ -48,8 +48,8 @@ func (h *LineNumberAdminHandler) SuccessResponse(c fiber.Ctx, status int, messag
 // @Tags Admin Line Numbers
 // @Accept json
 // @Produce json
-// @Param request body dto.CreateLineNumberRequest true "Create line number payload"
-// @Success 200 {object} dto.APIResponse{data=dto.LineNumberDTO}
+// @Param request body dto.AdminCreateLineNumberRequest true "Create line number payload"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminLineNumberDTO}
 // @Failure 400 {object} dto.APIResponse "Validation error"
 // @Failure 500 {object} dto.APIResponse "Creation failed"
 // @Router /api/v1/admin/line-numbers/ [post]
@@ -88,7 +88,7 @@ func (h *LineNumberAdminHandler) CreateLineNumber(c fiber.Ctx) error {
 // @Description Retrieve all line numbers
 // @Tags Admin Line Numbers
 // @Produce json
-// @Success 200 {object} dto.APIResponse{data=[]dto.LineNumberDTO}
+// @Success 200 {object} dto.APIResponse{data=[]dto.AdminLineNumberDTO}
 // @Failure 500 {object} dto.APIResponse "List failed"
 // @Router /api/v1/admin/line-numbers/ [get]
 func (h *LineNumberAdminHandler) ListLineNumbers(c fiber.Ctx) error {
@@ -107,7 +107,7 @@ func (h *LineNumberAdminHandler) ListLineNumbers(c fiber.Ctx) error {
 // @Tags Admin Line Numbers
 // @Accept json
 // @Produce json
-// @Param request body dto.UpdateLineNumbersRequest true "Batch update payload"
+// @Param request body dto.AdminUpdateLineNumbersRequest true "Batch update payload"
 // @Success 200 {object} dto.APIResponse{data=object{updated=bool}}
 // @Failure 400 {object} dto.APIResponse "Validation error"
 // @Failure 500 {object} dto.APIResponse "Update failed"
@@ -146,7 +146,7 @@ func (h *LineNumberAdminHandler) UpdateLineNumbersBatch(c fiber.Ctx) error {
 // @Description Retrieve report per line number (totals)
 // @Tags Admin Line Numbers
 // @Produce json
-// @Success 200 {object} dto.APIResponse{data=[]dto.LineNumberReportItem}
+// @Success 200 {object} dto.APIResponse{data=[]dto.AdminLineNumberReportItem}
 // @Failure 500 {object} dto.APIResponse "Report generation failed"
 // @Router /api/v1/admin/line-numbers/report [get]
 func (h *LineNumberAdminHandler) GetLineNumbersReport(c fiber.Ctx) error {
