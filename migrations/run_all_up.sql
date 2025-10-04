@@ -102,5 +102,11 @@
 \echo 'Running 0032_add_updated_at_to_customer_sessions.sql...'
 \i migrations/0032_add_updated_at_to_customer_sessions.sql
 
+\echo 'Running 0033_create_bots.sql...'
+\i migrations/0033_create_bots.sql
+
+\echo 'Running 0034_create_audience_profiles.sql...'
+\i migrations/0034_create_audience_profiles.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
