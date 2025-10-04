@@ -56,6 +56,7 @@ var (
 	ErrScheduleTimeTooSoon          = errors.New("schedule time is too soon")
 	ErrCampaignCityRequired         = errors.New("campaign city is required")
 	ErrCampaignSubsegmentRequired   = errors.New("campaign subsegment is required")
+	ErrCampaignTagsRequired         = errors.New("campaign tags is required")
 	ErrCampaignUpdateRequired       = errors.New("at least one field must be provided for update")
 	ErrCampaignUUIDRequired         = errors.New("campaign UUID is required")
 
@@ -110,6 +111,10 @@ var (
 	ErrAdminNotFound  = errors.New("admin not found")
 	ErrAdminInactive  = errors.New("admin account is inactive")
 	ErrInvalidCaptcha = errors.New("invalid captcha")
+
+	// Bot related errors
+	ErrBotNotFound = errors.New("bot not found")
+	ErrBotInactive = errors.New("bot account is inactive")
 
 	// Line number related errors
 	ErrLineNumberValueRequired = errors.New("line number value is required")
@@ -260,6 +265,10 @@ func IsCampaignCityRequired(err error) bool {
 
 func IsCampaignSubsegmentRequired(err error) bool {
 	return errors.Is(err, ErrCampaignSubsegmentRequired)
+}
+
+func IsCampaignTagsRequired(err error) bool {
+	return errors.Is(err, ErrCampaignTagsRequired)
 }
 
 func IsCampaignUpdateRequired(err error) bool {
@@ -448,6 +457,14 @@ func IsAdminInactive(err error) bool {
 
 func IsInvalidCaptcha(err error) bool {
 	return errors.Is(err, ErrInvalidCaptcha)
+}
+
+func IsBotNotFound(err error) bool {
+	return errors.Is(err, ErrBotNotFound)
+}
+
+func IsBotInactive(err error) bool {
+	return errors.Is(err, ErrBotInactive)
 }
 
 func IsLineNumberValueRequired(err error) bool {
