@@ -3,6 +3,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0034_create_audience_profiles_down.sql...'
+\i migrations/0034_create_audience_profiles_down.sql
+
+\echo 'Running 0033_create_bots_down.sql...'
+\i migrations/0033_create_bots_down.sql
+
 \echo 'Running 0032_add_updated_at_to_customer_sessions_down.sql...'
 \i migrations/0032_add_updated_at_to_customer_sessions_down.sql
 
