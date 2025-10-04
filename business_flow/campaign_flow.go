@@ -153,6 +153,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		title      = req.Title
 		segment    = req.Segment
 		subsegment = req.Subsegment
+		tags       = req.Tags
 		sex        = req.Sex
 		city       = req.City
 		adLink     = req.AdLink
@@ -169,6 +170,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if req.Subsegment == nil {
 		subsegment = campaign.Spec.Subsegment
+	}
+	if req.Tags == nil {
+		tags = campaign.Spec.Tags
 	}
 	if req.Sex == nil {
 		sex = campaign.Spec.Sex
@@ -196,6 +200,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		Title:      title,
 		Segment:    segment,
 		Subsegment: subsegment,
+		Tags:       tags,
 		Sex:        sex,
 		City:       city,
 		AdLink:     adLink,
@@ -224,7 +229,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			// TODO: -------------------
 			// TODO: validate all required fields are present like line number, budget
 			// schedule time must be present and be in future
-			// title (len), sex (choice), segment (db, len), subsegment (db, len), city (db, len), adlink (len), content (len), line number (db, len), budget (min, max)
+			// title (len), sex (choice), segment (db, len), subsegment (db, len), tags (db, len), city (db, len), adlink (len), content (len), line number (db, len), budget (min, max)
 			// TODO: ------------------- Line number must be valid (db)
 
 			// retrieve campaign again (last state)
@@ -247,6 +252,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				Title:      title,
 				Segment:    segment,
 				Subsegment: subsegment,
+				Tags:       tags,
 				Sex:        sex,
 				City:       city,
 				AdLink:     adLink,
@@ -394,7 +400,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *dto.CalculateCampaignCapacityRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCapacityResponse, error) {
 	// For now, just return a fixed capacity of 11000
 	// In the future, this could be enhanced with:
-	// - Target audience analysis based on segment/subsegment
+	// - Target audience analysis based on segment/subsegment/tags
 	// - Geographic reach calculation based on cities
 	// - Budget-based capacity estimation
 	// - Historical campaign performance data
@@ -426,6 +432,7 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 		Title:      req.Title,
 		Segment:    req.Segment,
 		Subsegment: req.Subsegment,
+		Tags:       req.Tags,
 		Sex:        req.Sex,
 		City:       req.City,
 		AdLink:     req.AdLink,
@@ -530,6 +537,7 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 			Title:      c.Spec.Title,
 			Segment:    c.Spec.Segment,
 			Subsegment: c.Spec.Subsegment,
+			Tags:       c.Spec.Tags,
 			Sex:        c.Spec.Sex,
 			City:       c.Spec.City,
 			AdLink:     c.Spec.AdLink,
@@ -603,6 +611,12 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 		}
 	}
 
+	if len(req.Tags) > 0 {
+		if slices.Contains(req.Tags, "") {
+			return ErrCampaignTagsRequired
+		}
+	}
+
 	return nil
 }
 
@@ -619,6 +633,9 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	}
 	if len(req.Subsegment) > 0 {
 		spec.Subsegment = req.Subsegment
+	}
+	if len(req.Tags) > 0 {
+		spec.Tags = req.Tags
 	}
 	if req.Sex != nil && *req.Sex != "" {
 		spec.Sex = req.Sex
@@ -676,7 +693,7 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	}
 
 	// At least one field should be provided for update
-	hasUpdateFields := req.Title != nil || req.Segment != nil || len(req.Subsegment) > 0 ||
+	hasUpdateFields := req.Title != nil || req.Segment != nil || len(req.Subsegment) > 0 || len(req.Tags) > 0 ||
 		req.Sex != nil || len(req.City) > 0 || req.AdLink != nil || req.Content != nil ||
 		req.ScheduleAt != nil || req.LineNumber != nil || req.Budget != nil
 
@@ -696,6 +713,9 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(campaign models.Campaign) error {
 	}
 	if campaign.Spec.Subsegment == nil {
 		return ErrCampaignSubsegmentRequired
+	}
+	if campaign.Spec.Tags == nil {
+		return ErrCampaignTagsRequired
 	}
 	if campaign.Spec.Content == nil || *campaign.Spec.Content == "" {
 		return ErrCampaignContentRequired
@@ -729,6 +749,9 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if len(req.Subsegment) > 0 {
 		spec.Subsegment = req.Subsegment
+	}
+	if len(req.Tags) > 0 {
+		spec.Tags = req.Tags
 	}
 	if req.Sex != nil && *req.Sex != "" {
 		spec.Sex = req.Sex
