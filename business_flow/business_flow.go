@@ -4,6 +4,9 @@ package businessflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -421,4 +424,30 @@ func ValidateShebaNumber(shebaNumber *string) (string, error) {
 	}
 
 	return shebaNumberStr, nil
+}
+
+func redisKey(cacheConfig config.CacheConfig, suffix string) string {
+	prefix := cacheConfig.RedisPrefix
+	if prefix == "" {
+		prefix = "yamata"
+	}
+	return fmt.Sprintf("%s:%s", prefix, suffix)
+}
+
+func audienceSpecFilePath() string {
+	// Default to ./data; could be extended via config if needed
+	base := "data"
+	return filepath.Join(base, "audience_spec.json")
+}
+
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, fmt.Sprintf(".%s.tmp", filepath.Base(path)))
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
