@@ -17,6 +17,7 @@ import (
 type SMSService interface {
 	SendOTP(ctx context.Context, recipient, message string, customerID *int64) error
 	SendSMS(ctx context.Context, recipient, message string, customerID *int64) error
+	SendBulk(ctx context.Context, recipients []string, message string, customerID *int64) error
 }
 
 // SMSServiceImpl implements SMSService
@@ -63,56 +64,55 @@ func (s *SMSServiceImpl) SendOTP(ctx context.Context, recipient, message string,
 
 // SendSMS sends an SMS message
 func (s *SMSServiceImpl) SendSMS(ctx context.Context, recipient, message string, customerID *int64) error {
-	// Prepare the request payload
-	request := SMSRequest{
-		SrcNum:         s.config.SourceNumber,
-		Recipient:      recipient,
-		Body:           message,
-		CustomerID:     customerID,
-		RetryCount:     s.config.RetryCount,
-		Type:           1, // Always 1 as per specification
-		ValidityPeriod: s.config.ValidityPeriod,
+	return s.SendBulk(ctx, []string{recipient}, message, customerID)
+}
+
+// SendBulk sends an SMS message to multiple recipients in a single API call (batch)
+func (s *SMSServiceImpl) SendBulk(ctx context.Context, recipients []string, message string, customerID *int64) error {
+	if len(recipients) == 0 {
+		return nil
+	}
+	requests := make([]SMSRequest, 0, len(recipients))
+	for _, r := range recipients {
+		requests = append(requests, SMSRequest{
+			SrcNum:         s.config.SourceNumber,
+			Recipient:      r,
+			Body:           message,
+			CustomerID:     customerID,
+			RetryCount:     s.config.RetryCount,
+			Type:           1,
+			ValidityPeriod: s.config.ValidityPeriod,
+		})
 	}
 
-	// Convert request to JSON
-	requestBody, err := json.Marshal([]SMSRequest{request})
+	requestBody, err := json.Marshal(requests)
 	if err != nil {
-		return fmt.Errorf("failed to marshal SMS request: %w", err)
+		return fmt.Errorf("failed to marshal SMS bulk request: %w", err)
 	}
 
-	// Create HTTP request
 	url := fmt.Sprintf("https://%s/api/v3.0.1/send", s.config.ProviderDomain)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(requestBody))
 	if err != nil {
 		return fmt.Errorf("failed to create HTTP request: %w", err)
 	}
-
-	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", s.config.APIKey)
 
-	// Send request
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send SMS request: %w", err)
+		return fmt.Errorf("failed to send SMS bulk request: %w", err)
 	}
 	defer resp.Body.Close()
 
-	// Parse response - the API returns an array of message results directly
-	var messageResults []SMSResponse
-	if err := json.NewDecoder(resp.Body).Decode(&messageResults); err != nil {
-		return fmt.Errorf("failed to decode SMS response: %w", err)
+	var results []SMSResponse
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return fmt.Errorf("failed to decode SMS bulk response: %w", err)
 	}
-
-	// Check if any messages failed
-	if len(messageResults) > 0 {
-		for _, result := range messageResults {
-			if result.StatusCode != 200 || result.Status != "ACCEPTED" {
-				return fmt.Errorf("SMS delivery failed: %s (status: %d)", result.Status, result.StatusCode)
-			}
+	for _, r := range results {
+		if r.StatusCode != 200 || r.Status != "ACCEPTED" {
+			return fmt.Errorf("SMS delivery failed for %s: %s (%d)", r.Recipient, r.Status, r.StatusCode)
 		}
 	}
-
 	return nil
 }
 
@@ -143,14 +143,20 @@ func (m *MockSMSService) SendOTP(ctx context.Context, recipient, message string,
 
 // SendSMS sends a mock SMS message
 func (m *MockSMSService) SendSMS(ctx context.Context, recipient, message string, customerID *int64) error {
-	mockMessage := MockSMSMessage{
-		Recipient:  recipient,
-		Message:    message,
-		CustomerID: customerID,
-		SentAt:     utils.UTCNow(),
+	return m.SendBulk(ctx, []string{recipient}, message, customerID)
+}
+
+func (m *MockSMSService) SendBulk(ctx context.Context, recipients []string, message string, customerID *int64) error {
+	for _, r := range recipients {
+		mockMessage := MockSMSMessage{
+			Recipient:  r,
+			Message:    message,
+			CustomerID: customerID,
+			SentAt:     utils.UTCNow(),
+		}
+		fmt.Println("Mock SMS message sent:", mockMessage)
+		m.SentMessages = append(m.SentMessages, mockMessage)
 	}
-	fmt.Println("Mock SMS message sent:", mockMessage)
-	m.SentMessages = append(m.SentMessages, mockMessage)
 	return nil
 }
 
