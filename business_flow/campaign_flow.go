@@ -406,20 +406,69 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 // CalculateCampaignCapacity handles the campaign capacity calculation process
 func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *dto.CalculateCampaignCapacityRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCapacityResponse, error) {
-	// For now, just return a fixed capacity of 11000
-	// In the future, this could be enhanced with:
-	// - Target audience analysis based on segment/subsegment/tags
-	// - Geographic reach calculation based on cities
-	// - Budget-based capacity estimation
-	// - Historical campaign performance data
-	// - Seasonal factors and market conditions
-
-	response := &dto.CalculateCampaignCapacityResponse{
-		Message:  "Campaign capacity calculated successfully",
-		Capacity: 501,
+	if req.Segment == nil {
+		return nil, NewBusinessError("SEGMENT_REQUIRED", "Segment is required", ErrCampaignSegmentRequired)
+	}
+	if req.Subsegment == nil {
+		return nil, NewBusinessError("SUBSEGMENT_REQUIRED", "Subsegment is required", ErrCampaignSubsegmentRequired)
+	}
+	if req.Tags == nil {
+		return nil, NewBusinessError("TAGS_REQUIRED", "Tags is required", ErrCampaignTagsRequired)
 	}
 
-	return response, nil
+	// Fetch audience spec (from cache or file)
+	specResp, err := s.ListAudienceSpec(ctx)
+	if err != nil {
+		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_FAILED", "Failed to load audience spec", err)
+	}
+
+	var capacity uint64
+
+	// Determine subsegments to evaluate
+	subsegments := req.Subsegment
+	if len(subsegments) == 0 {
+		// If not provided, consider all subsegments under the selected segment
+		if segMap, ok := specResp.Spec[*req.Segment]; ok {
+			for ss := range segMap {
+				subsegments = append(subsegments, ss)
+			}
+		}
+	}
+
+	// Build a set of requested tags for quick lookup
+	tagSet := make(map[string]struct{}, len(req.Tags))
+	for _, t := range req.Tags {
+		if t != "" {
+			tagSet[t] = struct{}{}
+		}
+	}
+
+	// Sum available audience where at least one tag matches
+	if segMap, ok := specResp.Spec[*req.Segment]; ok {
+		for _, ss := range subsegments {
+			if item, ok := segMap[ss]; ok {
+				if len(tagSet) == 0 {
+					capacity += uint64(item.AvailableAudience)
+					continue
+				}
+				matched := false
+				for _, it := range item.Tags {
+					if _, ok := tagSet[it]; ok {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					capacity += uint64(item.AvailableAudience)
+				}
+			}
+		}
+	}
+
+	return &dto.CalculateCampaignCapacityResponse{
+		Message:  "Campaign capacity calculated successfully",
+		Capacity: capacity,
+	}, nil
 }
 
 // CalculateCampaignCost handles the campaign cost calculation process
@@ -428,9 +477,9 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	numPages := s.calculateSMSParts(req.Content)
 
 	// Pricing constants
-	basePrice := uint64(140)
+	basePrice := uint64(150)
 	lineFactor := uint64(20)
-	segmentFactor := float64(2.2)
+	segmentFactor := float64(1.5)
 
 	// Calculate price per message
 	pricePerMsg := uint64(200*numPages) + basePrice*uint64(float64(lineFactor)*segmentFactor)
@@ -833,19 +882,10 @@ func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context) (*dto.ListAudie
 	out := dto.AudienceSpec{}
 	for segment, subsegment := range current {
 		for subsegment, item := range subsegment {
-			availableAudience := 0
-			switch item.Color {
-			case "white":
-				availableAudience += item.AvailableAudience
-			case "pink":
-				availableAudience += item.AvailableAudience / 3
-			case "black":
-				availableAudience += 0
-			}
-			if availableAudience > 0 {
+			if item.AvailableAudience > 0 {
 				out[segment][subsegment] = dto.AudienceSpecItem{
 					Tags:              item.Tags,
-					AvailableAudience: availableAudience,
+					AvailableAudience: item.AvailableAudience,
 				}
 			}
 		}
