@@ -48,3 +48,15 @@ type AdminLineNumberReportItem struct {
 	TotalIncome           int64  `json:"total_income"`
 	TotalCost             int64  `json:"total_cost"`
 }
+
+// ActiveLineNumberItem is returned to customers
+// Only non-sensitive fields are exposed
+type ActiveLineNumberItem struct {
+	LineNumber string `json:"line_number"`
+}
+
+// ListActiveLineNumbersResponse wraps the active line numbers list for customers
+type ListActiveLineNumbersResponse struct {
+	Message string                 `json:"message"`
+	Items   []ActiveLineNumberItem `json:"items"`
+}
