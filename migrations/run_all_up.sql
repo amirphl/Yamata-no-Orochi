@@ -108,5 +108,8 @@
 \echo 'Running 0034_create_audience_profiles.sql...'
 \i migrations/0034_create_audience_profiles.sql
 
+\echo 'Running 0035_add_running_executed_to_sms_campaign_status.sql...'
+\i migrations/0035_add_running_executed_to_sms_campaign_status.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
