@@ -11,6 +11,7 @@ import (
 // NotificationService handles sending notifications via SMS and email
 type NotificationService interface {
 	SendSMS(ctx context.Context, mobile, message string, customerID *int64) error
+	SendSMSBulk(ctx context.Context, mobiles []string, message string, customerID *int64) error
 	SendEmail(email, subject, message string) error
 }
 
@@ -42,7 +43,7 @@ func (s *NotificationServiceImpl) SendSMS(ctx context.Context, mobile, message s
 	// Validate mobile format (convert from +989 format to 989 format)
 	recipient := mobile
 	if strings.HasPrefix(mobile, "+") {
-		recipient = mobile[1:] // Remove the + prefix
+		recipient = mobile[1:]
 	}
 
 	// Validate mobile format
@@ -51,6 +52,29 @@ func (s *NotificationServiceImpl) SendSMS(ctx context.Context, mobile, message s
 	}
 
 	return s.smsService.SendSMS(ctx, recipient, message, customerID)
+}
+
+// SendSMSBulk sends a single message to multiple recipients
+func (s *NotificationServiceImpl) SendSMSBulk(ctx context.Context, mobiles []string, message string, customerID *int64) error {
+	if s.smsService == nil {
+		return fmt.Errorf("SMS service not configured")
+	}
+	recipients := make([]string, 0, len(mobiles))
+	for _, m := range mobiles {
+		recipient := m
+		if strings.HasPrefix(recipient, "+") {
+			recipient = recipient[1:]
+		}
+		if len(recipient) == 12 && strings.HasPrefix(recipient, "989") {
+			recipients = append(recipients, recipient)
+		} else {
+			log.Printf("invalid mobile format skipped in bulk: %s", m)
+		}
+	}
+	if len(recipients) == 0 {
+		return nil
+	}
+	return s.smsService.SendBulk(ctx, recipients, message, customerID)
 }
 
 // SendEmail sends an email to the specified email address
