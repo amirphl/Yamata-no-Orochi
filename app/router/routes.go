@@ -42,9 +42,12 @@ type FiberRouter struct {
 	agencyHandler                  handlers.AgencyHandlerInterface
 	authMiddleware                 *middleware.AuthMiddleware
 	authAdminHandler               handlers.AuthAdminHandlerInterface
+	authBotHandler                 handlers.AuthBotHandlerInterface
 	campaignAdminHandler           handlers.CampaignAdminHandlerInterface
+	lineNumberHandler              handlers.LineNumberHandlerInterface
 	lineNumberAdminHandler         handlers.LineNumberAdminHandlerInterface
 	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
+	campaignBotHandler             handlers.CampaignBotHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -55,9 +58,12 @@ func NewFiberRouter(
 	agencyHandler handlers.AgencyHandlerInterface,
 	authMiddleware *middleware.AuthMiddleware,
 	authAdminHandler handlers.AuthAdminHandlerInterface,
+	authBotHandler handlers.AuthBotHandlerInterface,
 	campaignAdminHandler handlers.CampaignAdminHandlerInterface,
+	lineNumberHandler handlers.LineNumberHandlerInterface,
 	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
 	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
+	campaignBotHandler handlers.CampaignBotHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -73,16 +79,20 @@ func NewFiberRouter(
 	})
 
 	return &FiberRouter{
-		app:                            app,
-		authHandler:                    authHandler,
-		campaignHandler:                campaignHandler,
-		paymentHandler:                 paymentHandler,
-		agencyHandler:                  agencyHandler,
-		authMiddleware:                 authMiddleware,
-		authAdminHandler:               authAdminHandler,
-		campaignAdminHandler:           campaignAdminHandler,
-		lineNumberAdminHandler:         lineNumberAdminHandler,
+		app:                    app,
+		authHandler:            authHandler,
+		campaignHandler:        campaignHandler,
+		paymentHandler:         paymentHandler,
+		agencyHandler:          agencyHandler,
+		authMiddleware:         authMiddleware,
+		authAdminHandler:       authAdminHandler,
+		authBotHandler:         authBotHandler,
+		campaignAdminHandler:   campaignAdminHandler,
+		lineNumberHandler:      lineNumberHandler,
+		lineNumberAdminHandler: lineNumberAdminHandler,
+
 		adminCustomerManagementHandler: adminCustomerManagemetHandler,
+		campaignBotHandler:             campaignBotHandler,
 	}
 }
 
@@ -183,30 +193,9 @@ func (r *FiberRouter) SetupRoutes() {
 	adminAuth.Get("/captcha/init", r.authAdminHandler.InitCaptcha)
 	adminAuth.Post("/login", r.authAdminHandler.VerifyLogin)
 
-	// Admin campaigns listing and actions
-	adminCampaigns := api.Group("/admin/campaigns")
-	adminCampaigns.Use(r.authMiddleware.AdminAuthenticate())
-	adminCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
-	adminCampaigns.Get("/", r.campaignAdminHandler.ListCampaigns)
-	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
-	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
-	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
-
-	// Admin customer reports
-	adminCustomers := api.Group("/admin/customer-management")
-	adminCustomers.Use(r.authMiddleware.AdminAuthenticate())
-	adminCustomers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
-	adminCustomers.Get("/shares", r.adminCustomerManagementHandler.GetCustomersShares)
-	adminCustomers.Get("/:customer_id", r.adminCustomerManagementHandler.GetCustomerWithCampaigns)
-
-	// Admin line numbers protected routes
-	lineNumbers := api.Group("/admin/line-numbers")
-	lineNumbers.Use(r.authMiddleware.AdminAuthenticate())
-	lineNumbers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
-	lineNumbers.Get("/", r.lineNumberAdminHandler.ListLineNumbers)
-	lineNumbers.Post("/", r.lineNumberAdminHandler.CreateLineNumber)
-	lineNumbers.Put("/", r.lineNumberAdminHandler.UpdateLineNumbersBatch)
-	lineNumbers.Get("/report", r.lineNumberAdminHandler.GetLineNumbersReport)
+	// Bot auth
+	botAuth := api.Group("/bot/auth")
+	botAuth.Post("/login", r.authBotHandler.Login)
 
 	// Campaign routes (protected with authentication)
 	campaigns := api.Group("/campaigns")
@@ -216,6 +205,45 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/", r.campaignHandler.ListCampaigns)
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
 	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
+	campaigns.Get("/audience-spec", r.campaignHandler.ListAudienceSpec)
+
+	// Admin campaigns listing and actions
+	adminCampaigns := api.Group("/admin/campaigns")
+	adminCampaigns.Use(r.authMiddleware.AdminAuthenticate())
+	adminCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminCampaigns.Get("/", r.campaignAdminHandler.ListCampaigns)
+	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
+	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
+	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
+
+	// Bot campaigns routes (protected)
+	botCampaigns := api.Group("/bot/campaigns")
+	botCampaigns.Use(r.authMiddleware.BotAuthenticate())
+	botCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireBotAuth(c) })
+	botCampaigns.Get("/ready", r.campaignBotHandler.ListReadyCampaigns)
+	botCampaigns.Post("/audience-spec", r.campaignBotHandler.UpdateAudienceSpec)
+	botCampaigns.Post("/:id/executed", r.campaignBotHandler.MoveCampaignToExecuted)
+
+	// Admin customer reports
+	adminCustomers := api.Group("/admin/customer-management")
+	adminCustomers.Use(r.authMiddleware.AdminAuthenticate())
+	adminCustomers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminCustomers.Get("/shares", r.adminCustomerManagementHandler.GetCustomersShares)
+	adminCustomers.Get("/:customer_id", r.adminCustomerManagementHandler.GetCustomerWithCampaigns)
+
+	// Line numbers
+	lineNumbers := api.Group("/line-numbers")
+	lineNumbers.Use(r.authMiddleware.Authenticate()) // Require authentication
+	lineNumbers.Get("/active", r.lineNumberHandler.ListActive)
+
+	// Admin line numbers protected routes
+	adminLineNumbers := api.Group("/admin/line-numbers")
+	adminLineNumbers.Use(r.authMiddleware.AdminAuthenticate())
+	adminLineNumbers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminLineNumbers.Get("/", r.lineNumberAdminHandler.ListLineNumbers)
+	adminLineNumbers.Post("/", r.lineNumberAdminHandler.CreateLineNumber)
+	adminLineNumbers.Put("/", r.lineNumberAdminHandler.UpdateLineNumbersBatch)
+	adminLineNumbers.Get("/report", r.lineNumberAdminHandler.GetLineNumbersReport)
 
 	// Wallet routes (protected with authentication)
 	wallet := api.Group("/wallet")
