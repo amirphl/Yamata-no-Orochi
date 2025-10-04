@@ -21,6 +21,7 @@ type CampaignHandlerInterface interface {
 	CalculateCampaignCapacity(c fiber.Ctx) error
 	CalculateCampaignCost(c fiber.Ctx) error
 	ListCampaigns(c fiber.Ctx) error
+	ListAudienceSpec(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -209,6 +210,9 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 		if businessflow.IsCampaignSubsegmentRequired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign subsegment is required", "CAMPAIGN_SUBSEGMENT_REQUIRED", nil)
 		}
+		if businessflow.IsCampaignTagsRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign tags is required", "CAMPAIGN_TAGS_REQUIRED", nil)
+		}
 		if businessflow.IsCampaignContentRequired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign content is required", "CAMPAIGN_CONTENT_REQUIRED", nil)
 		}
@@ -336,7 +340,7 @@ func (h *CampaignHandler) CalculateCampaignCost(c fiber.Ctx) error {
 // @Param limit query int true "Items per page (max 100)"
 // @Param orderby query string false "Order by (newest|oldest)" default(newest)
 // @Param title query string false "Filter by title (contains)"
-// @Param status query string false "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected)"
+// @Param status query string false "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed)"
 // @Success 200 {object} dto.APIResponse{data=dto.ListCampaignsResponse}
 // @Failure 400 {object} dto.APIResponse "Validation error"
 // @Failure 401 {object} dto.APIResponse "Unauthorized"
@@ -407,6 +411,26 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 		"message":    result.Message,
 		"items":      result.Items,
 		"pagination": result.Pagination,
+	})
+}
+
+// ListAudienceSpec returns the current audience spec
+// @Summary List Audience Spec
+// @Tags Campaigns
+// @Produce json
+// @Success 200 {object} dto.APIResponse{data=map[string]map[string]any}
+// @Router /api/v1/campaigns/audience-spec [get]
+func (h *CampaignHandler) ListAudienceSpec(c fiber.Ctx) error {
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	_ = metadata
+	res, err := h.campaignFlow.ListAudienceSpec(h.createRequestContext(c, "/api/v1/campaigns/audience-spec"))
+	if err != nil {
+		log.Println("List audience spec failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list audience spec", "LIST_AUDIENCE_SPEC_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Audience spec retrieved successfully", fiber.Map{
+		"message": res.Message,
+		"spec":    res.Spec,
 	})
 }
 
