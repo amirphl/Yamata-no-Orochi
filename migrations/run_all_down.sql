@@ -6,6 +6,9 @@
 \echo 'Running 0034_create_audience_profiles_down.sql...'
 \i migrations/0034_create_audience_profiles_down.sql
 
+\echo 'Running 0035_add_running_executed_to_sms_campaign_status_down.sql...'
+\i migrations/0035_add_running_executed_to_sms_campaign_status_down.sql
+
 \echo 'Running 0033_create_bots_down.sql...'
 \i migrations/0033_create_bots_down.sql
 
