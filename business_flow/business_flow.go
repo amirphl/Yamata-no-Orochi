@@ -127,6 +127,26 @@ func ToAdminSessionDTO(accessToken, refreshToken string) dto.AdminSessionDTO {
 	}
 }
 
+func ToBotDTOModel(b models.Bot) dto.BotDTO {
+	return dto.BotDTO{
+		ID:        b.ID,
+		UUID:      b.UUID.String(),
+		Username:  b.Username,
+		IsActive:  b.IsActive,
+		CreatedAt: b.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func ToBotSessionDTO(accessToken, refreshToken string) dto.BotSessionDTO {
+	return dto.BotSessionDTO{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    utils.AccessTokenTTLSeconds,
+		TokenType:    "Bearer",
+		CreatedAt:    utils.UTCNow().Format(time.RFC3339),
+	}
+}
+
 func ToLineNumberDTO(line models.LineNumber) dto.AdminLineNumberDTO {
 	return dto.AdminLineNumberDTO{
 		ID:          line.ID,
@@ -275,7 +295,7 @@ func getCampaign(ctx context.Context, campaignRepo repository.CampaignRepository
 // canUpdateCampaign checks if a campaign can be updated based on its current status
 func canUpdateCampaign(status models.CampaignStatus) bool {
 	// Only campaigns with 'initiated' or 'in-progress' status can be updated
-	// Campaigns with 'waiting-for-approval', 'approved', or 'rejected' status cannot be updated
+	// Campaigns with 'waiting-for-approval', 'approved', 'rejected', 'running', or 'executed' status cannot be updated
 	return status == models.CampaignStatusInitiated || status == models.CampaignStatusInProgress
 }
 
