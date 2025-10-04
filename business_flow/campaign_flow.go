@@ -17,6 +17,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +28,7 @@ type CampaignFlow interface {
 	CalculateCampaignCapacity(ctx context.Context, req *dto.CalculateCampaignCapacityRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCapacityResponse, error)
 	CalculateCampaignCost(ctx context.Context, req *dto.CalculateCampaignCostRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error)
 	ListCampaigns(ctx context.Context, req *dto.ListCampaignsRequest, metadata *ClientMetadata) (*dto.ListCampaignsResponse, error)
+	ListAudienceSpec(ctx context.Context) (*dto.ListAudienceSpecResponse, error)
 }
 
 // CampaignFlowImpl implements the campaign business flow
@@ -39,6 +41,8 @@ type CampaignFlowImpl struct {
 	auditRepo           repository.AuditLogRepository
 	notifier            services.NotificationService
 	adminConfig         config.AdminConfig
+	cacheConfig         *config.CacheConfig
+	rc                  *redis.Client
 	db                  *gorm.DB
 }
 
@@ -51,8 +55,10 @@ func NewCampaignFlow(
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
 	db *gorm.DB,
+	rc *redis.Client,
 	notifier services.NotificationService,
 	adminConfig config.AdminConfig,
+	cacheConfig *config.CacheConfig,
 ) CampaignFlow {
 	return &CampaignFlowImpl{
 		campaignRepo:        campaignRepo,
@@ -63,6 +69,8 @@ func NewCampaignFlow(
 		auditRepo:           auditRepo,
 		notifier:            notifier,
 		adminConfig:         adminConfig,
+		cacheConfig:         cacheConfig,
+		rc:                  rc,
 		db:                  db,
 	}
 }
@@ -787,6 +795,66 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 
 	return nil
+}
+
+// ListAudienceSpec returns the current audience spec from cache or file
+func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context) (*dto.ListAudienceSpecResponse, error) {
+	// derive redis key and file path consistent with bot audience spec flow
+
+	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
+	filePath := audienceSpecFilePath()
+
+	// try redis first
+	if bs, err := s.rc.Get(ctx, cacheKey).Bytes(); err == nil && len(bs) > 0 {
+		var out dto.AudienceSpec
+		if err := json.Unmarshal(bs, &out); err == nil {
+			return &dto.ListAudienceSpecResponse{
+				Message: "Audience spec retrieved from cache",
+				Spec:    out,
+			}, nil
+		}
+	}
+
+	// Read existing JSON file (if any)
+	current, err := readAudienceSpecFile(filePath)
+	if err != nil {
+		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
+	}
+
+	// Marshal and write atomically (tmp + rename)
+	bytes, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal merged spec", err)
+	}
+
+	// Update Redis cache
+	_ = s.rc.Set(ctx, cacheKey, bytes, 0).Err()
+
+	out := dto.AudienceSpec{}
+	for segment, subsegment := range current {
+		for subsegment, item := range subsegment {
+			availableAudience := 0
+			switch item.Color {
+			case "white":
+				availableAudience += item.AvailableAudience
+			case "pink":
+				availableAudience += item.AvailableAudience / 3
+			case "black":
+				availableAudience += 0
+			}
+			if availableAudience > 0 {
+				out[segment][subsegment] = dto.AudienceSpecItem{
+					Tags:              item.Tags,
+					AvailableAudience: availableAudience,
+				}
+			}
+		}
+	}
+
+	return &dto.ListAudienceSpecResponse{
+		Message: "Audience spec retrieved",
+		Spec:    out,
+	}, nil
 }
 
 // calculateSMSParts calculates the number of SMS parts based on character count
