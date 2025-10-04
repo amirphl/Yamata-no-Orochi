@@ -104,6 +104,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			Title:      c.Spec.Title,
 			Segment:    c.Spec.Segment,
 			Subsegment: c.Spec.Subsegment,
+			Tags:       c.Spec.Tags,
 			Sex:        c.Spec.Sex,
 			City:       c.Spec.City,
 			AdLink:     c.Spec.AdLink,
