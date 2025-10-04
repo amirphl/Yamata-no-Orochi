@@ -19,6 +19,8 @@ const (
 	CampaignStatusInProgress         CampaignStatus = "in-progress"
 	CampaignStatusWaitingForApproval CampaignStatus = "waiting-for-approval"
 	CampaignStatusApproved           CampaignStatus = "approved"
+	CampaignStatusRunning            CampaignStatus = "running"
+	CampaignStatusExecuted           CampaignStatus = "executed"
 	CampaignStatusRejected           CampaignStatus = "rejected"
 )
 
@@ -74,6 +76,7 @@ type CampaignSpec struct {
 	// Target audience
 	Segment    *string  `json:"segment,omitempty"`
 	Subsegment []string `json:"subsegment,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
 	Sex        *string  `json:"sex,omitempty"`
 	City       []string `json:"city,omitempty"`
 
