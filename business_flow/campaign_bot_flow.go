@@ -128,7 +128,6 @@ func (s *BotCampaignFlowImpl) MoveCampaignToExecuted(ctx context.Context, campai
 
 type AudienceSpecLeaf struct {
 	Tags              []string `json:"tags"`
-	Color             string   `json:"color"`
 	AvailableAudience int      `json:"available_audience"`
 }
 
@@ -167,7 +166,6 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 	}
 	current[req.Segment][req.Subsegment] = AudienceSpecLeaf{
 		Tags:              req.Tags,
-		Color:             req.Color,
 		AvailableAudience: req.AvailableAudience,
 	}
 
