@@ -37,6 +37,21 @@ type AdminRepository interface {
 	ByUsername(ctx context.Context, username string) (*models.Admin, error)
 }
 
+// BotRepository defines operations for bots
+type BotRepository interface {
+	Repository[models.Bot, models.BotFilter]
+	ByID(ctx context.Context, id uint) (*models.Bot, error)
+	ByUUID(ctx context.Context, uuid string) (*models.Bot, error)
+	ByUsername(ctx context.Context, username string) (*models.Bot, error)
+}
+
+// AudienceProfileRepository defines operations for audience profiles
+type AudienceProfileRepository interface {
+	Repository[models.AudienceProfile, models.AudienceProfileFilter]
+	ByID(ctx context.Context, id uint) (*models.AudienceProfile, error)
+	ByUID(ctx context.Context, uid string) (*models.AudienceProfile, error)
+}
+
 // LineNumberRepository defines operations for line numbers
 type LineNumberRepository interface {
 	Repository[models.LineNumber, models.LineNumberFilter]
