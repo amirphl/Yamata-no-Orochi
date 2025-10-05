@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -16,6 +17,7 @@ import (
 // CampaignAdminHandlerInterface defines the contract for campaign admin handlers
 type CampaignAdminHandlerInterface interface {
 	ListCampaigns(c fiber.Ctx) error
+	GetCampaign(c fiber.Ctx) error
 	ApproveCampaign(c fiber.Ctx) error
 	RejectCampaign(c fiber.Ctx) error
 }
@@ -102,6 +104,32 @@ func (h *CampaignAdminHandler) ListCampaigns(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaigns retrieved successfully", resp)
+}
+
+// GetCampaign returns a single campaign by ID
+// @Summary Admin Get Campaign
+// @Tags Admin Campaigns
+// @Produce json
+// @Param id path string true "Campaign ID"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminGetCampaignResponse}
+// @Failure 404 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/admin/campaigns/{id} [get]
+func (h *CampaignAdminHandler) GetCampaign(c fiber.Ctx) error {
+	id := c.Params("id")
+	idUint, err := strconv.ParseUint(id, 10, 64)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign ID", "INVALID_CAMPAIGN_ID", nil)
+	}
+	resp, err := h.campaignFlow.GetCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/"+id), uint(idUint))
+	if err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		log.Println("Admin get campaign failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get campaign", "ADMIN_GET_CAMPAIGN_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaign retrieved successfully", resp)
 }
 
 // ApproveCampaign approves a campaign
