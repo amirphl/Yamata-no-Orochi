@@ -10,6 +10,7 @@ type AdminCustomersSharesRequest struct {
 
 // AdminCustomersSharesItem represents a single row in the report
 type AdminCustomersSharesItem struct {
+	CustomerID         uint    `json:"customer_id"`
 	FirstName          string  `json:"first_name"`
 	LastName           string  `json:"last_name"`
 	FullName           string  `json:"full_name"`
@@ -62,6 +63,7 @@ type AdminCustomerDetailDTO struct {
 
 // AdminCustomerCampaignItem summarizes a campaign for admin list
 type AdminCustomerCampaignItem struct {
+	CampaignID     uint       `json:"campaign_id"`
 	Title          *string    `json:"title"`
 	CreatedAt      time.Time  `json:"created_at"`
 	ScheduleAt     *time.Time `json:"schedule_at,omitempty"`
