@@ -156,27 +156,30 @@ type AdminListCampaignsFilter struct {
 
 // AdminGetCampaignResponse represents the campaign specification in responses
 type AdminGetCampaignResponse struct {
-	UUID       string     `json:"uuid"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
-	Title      *string    `json:"title,omitempty" validate:"omitempty"`
-	Segment    *string    `json:"segment,omitempty" validate:"omitempty"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty"`
-	City       []string   `json:"city,omitempty" validate:"omitempty"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty"`
-	Content    *string    `json:"content,omitempty" validate:"omitempty"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Comment    *string    `json:"comment,omitempty" validate:"omitempty"`
+	ID                    uint       `json:"id"`
+	UUID                  string     `json:"uuid"`
+	Status                string     `json:"status"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             *time.Time `json:"updated_at,omitempty"`
+	Title                 *string    `json:"title,omitempty" validate:"omitempty"`
+	Segment               *string    `json:"segment,omitempty" validate:"omitempty"`
+	Subsegment            []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Sex                   *string    `json:"sex,omitempty" validate:"omitempty"`
+	City                  []string   `json:"city,omitempty" validate:"omitempty"`
+	AdLink                *string    `json:"adlink,omitempty" validate:"omitempty"`
+	Content               *string    `json:"content,omitempty" validate:"omitempty"`
+	ScheduleAt            *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber            *string    `json:"line_number,omitempty" validate:"omitempty"`
+	Budget                *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	Comment               *string    `json:"comment,omitempty" validate:"omitempty"`
+	SegmentPriceFactor    float64    `json:"segment_price_factor,omitempty"`
+	LineNumberPriceFactor float64    `json:"line_number_price_factor,omitempty"`
 }
 
 // AdminListCampaignsResponse represents a paginated list of campaigns
 type AdminListCampaignsResponse struct {
-	Message    string                     `json:"message"`
-	Items      []AdminGetCampaignResponse `json:"items"`
+	Message string                     `json:"message"`
+	Items   []AdminGetCampaignResponse `json:"items"`
 }
 
 // AdminApproveCampaignRequest represents admin approval input
