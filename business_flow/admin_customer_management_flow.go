@@ -70,6 +70,7 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomersShares(ctx context.Context
 	var sumAgency, sumSystem, sumTax, sumTotalSent uint64
 	for _, r := range rows {
 		items = append(items, dto.AdminCustomersSharesItem{
+			CustomerID:         r.CustomerID,
 			FirstName:          r.FirstName,
 			LastName:           r.LastName,
 			FullName:           r.FullName,
@@ -119,6 +120,7 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 	}
 	for _, c := range campaigns {
 		resp.Campaigns = append(resp.Campaigns, dto.AdminCustomerCampaignItem{
+			CampaignID:     c.ID,
 			Title:          c.Spec.Title,
 			CreatedAt:      c.CreatedAt,
 			ScheduleAt:     c.Spec.ScheduleAt,
