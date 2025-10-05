@@ -28,6 +28,19 @@ type AgencyCustomerDiscountAggregate struct {
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
+// CustomerShareAggregate is a report row for aggregated shares (agency/system/tax) per customer
+type CustomerShareAggregate struct {
+	CustomerID         uint   `json:"customer_id"`
+	FirstName          string `json:"first_name"`
+	LastName           string `json:"last_name"`
+	FullName           string `json:"full_name"`
+	CompanyName        string `json:"company_name"`
+	ReferrerAgencyName string `json:"referrer_agency_name"`
+	AgencyShareWithTax uint64 `json:"agency_share_with_tax"`
+	SystemShare        uint64 `json:"system_share"`
+	TaxShare           uint64 `json:"tax_share"`
+}
+
 // TransactionRepositoryImpl implements TransactionRepository interface
 type TransactionRepositoryImpl struct {
 	*BaseRepository[models.Transaction, models.TransactionFilter]
@@ -385,6 +398,65 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByDiscounts(ctx c
 		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
 		Group("r.id, r.discount_rate, r.expires_at, r.created_at").
 		Order(order)
+
+	if err := query.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// AggregateCustomersShares aggregates agency/system/tax shares per customer across the platform
+func (r *TransactionRepositoryImpl) AggregateCustomersShares(ctx context.Context, startDate, endDate *time.Time) ([]*CustomerShareAggregate, error) {
+	db := r.getDB(ctx)
+	rows := make([]*CustomerShareAggregate, 0)
+
+	agSub := db.
+		Table("transactions t").
+		Select("(t.metadata->>'customer_id')::bigint AS customer_id, SUM(t.amount) AS agency_total_share_with_tax").
+		Where("t.status = ?", models.TransactionStatusCompleted).
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)")
+	if startDate != nil {
+		agSub = agSub.Where("t.created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		agSub = agSub.Where("t.created_at <= ?", *endDate)
+	}
+	agSub = agSub.Group("(t.metadata->>'customer_id')::bigint")
+
+	sysSub := db.
+		Table("transactions t").
+		Select("(t.metadata->>'customer_id')::bigint AS customer_id, SUM(t.amount) AS system_total_share").
+		Where("t.status = ?", models.TransactionStatusCompleted).
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_system_locked_(real_system_share)")
+	if startDate != nil {
+		sysSub = sysSub.Where("t.created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		sysSub = sysSub.Where("t.created_at <= ?", *endDate)
+	}
+	sysSub = sysSub.Group("(t.metadata->>'customer_id')::bigint")
+
+	taxSub := db.
+		Table("transactions t").
+		Select("(t.metadata->>'customer_id')::bigint AS customer_id, SUM(t.amount) AS tax_total_share").
+		Where("t.status = ?", models.TransactionStatusCompleted).
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_tax_locked_(tax_system_share)")
+	if startDate != nil {
+		taxSub = taxSub.Where("t.created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		taxSub = taxSub.Where("t.created_at <= ?", *endDate)
+	}
+	taxSub = taxSub.Group("(t.metadata->>'customer_id')::bigint")
+
+	query := db.
+		Table("customers c").
+		Select("c.id AS customer_id, c.representative_first_name AS first_name, c.representative_last_name AS last_name, (c.representative_first_name || ' ' || c.representative_last_name) AS full_name, COALESCE(c.company_name, '') AS company_name, COALESCE(COALESCE(a.company_name, a.representative_first_name || ' ' || a.representative_last_name), '') AS referrer_agency_name, COALESCE(ag.agency_total_share_with_tax, 0) AS agency_share_with_tax, COALESCE(sys.system_total_share, 0) AS system_share, COALESCE(tax.tax_total_share, 0) AS tax_share").
+		Joins("LEFT JOIN customers a ON a.id = c.referrer_agency_id").
+		Joins("LEFT JOIN (?) ag ON ag.customer_id = c.id", agSub).
+		Joins("LEFT JOIN (?) sys ON sys.customer_id = c.id", sysSub).
+		Joins("LEFT JOIN (?) tax ON tax.customer_id = c.id", taxSub).
+		Order("c.id ASC")
 
 	if err := query.Scan(&rows).Error; err != nil {
 		return nil, err
