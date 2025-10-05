@@ -414,6 +414,7 @@ func (r *TransactionRepositoryImpl) AggregateCustomersShares(ctx context.Context
 		Table("transactions t").
 		Select("(t.metadata->>'customer_id')::bigint AS customer_id, SUM(t.amount) AS agency_total_share_with_tax").
 		Where("t.status = ?", models.TransactionStatusCompleted).
+		Where("t.type = ?", models.TransactionTypeLock).
 		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)")
 	if startDate != nil {
 		agSub = agSub.Where("t.created_at >= ?", *startDate)
@@ -427,6 +428,7 @@ func (r *TransactionRepositoryImpl) AggregateCustomersShares(ctx context.Context
 		Table("transactions t").
 		Select("(t.metadata->>'customer_id')::bigint AS customer_id, SUM(t.amount) AS system_total_share").
 		Where("t.status = ?", models.TransactionStatusCompleted).
+		Where("t.type = ?", models.TransactionTypeLock).
 		Where("t.metadata->>'source' = ?", "payment_callback_increase_system_locked_(real_system_share)")
 	if startDate != nil {
 		sysSub = sysSub.Where("t.created_at >= ?", *startDate)
@@ -440,6 +442,7 @@ func (r *TransactionRepositoryImpl) AggregateCustomersShares(ctx context.Context
 		Table("transactions t").
 		Select("(t.metadata->>'customer_id')::bigint AS customer_id, SUM(t.amount) AS tax_total_share").
 		Where("t.status = ?", models.TransactionStatusCompleted).
+		Where("t.type = ?", models.TransactionTypeLock).
 		Where("t.metadata->>'source' = ?", "payment_callback_increase_tax_locked_(tax_system_share)")
 	if startDate != nil {
 		taxSub = taxSub.Where("t.created_at >= ?", *startDate)
