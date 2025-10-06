@@ -86,9 +86,6 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 	var atipayToken string
 
 	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
-		// TODO: FIX this
-		req.AmountWithTax = 5000
-
 		var err error
 		customer, err = getCustomer(txCtx, p.customerRepo, req.CustomerID)
 		if err != nil {
@@ -465,15 +462,8 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 				return nil
 			}
 
-			// --------------------------------------------
-			// --------------------------------------------
-			// --------------------------------------------
-			// TODO: Remove this after testing
-			// --------------------------------------------
-			// --------------------------------------------
-			// --------------------------------------------
 			// Check if verified amount matches the original amount
-			if false && verificationResult.AmountIRR != paymentRequest.Amount*10 { // Convert Tomans to Rials
+			if verificationResult.AmountIRR != paymentRequest.Amount*10 { // Convert Tomans to Rials
 				// Amount mismatch - mark payment as failed and refund will occur
 				mapping.Status = models.PaymentRequestStatusFailed
 				mapping.Success = false
@@ -521,14 +511,18 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 		return nil
 	})
 
+	paymentRequestID := uint(0)
+	if paymentRequest != nil {
+		paymentRequestID = paymentRequest.ID
+	}
 	if err != nil {
-		errMsg := fmt.Sprintf("Payment callback failed for payment request %d: %s", paymentRequest.ID, err.Error())
+		errMsg := fmt.Sprintf("Payment callback failed for payment request %d: %s", paymentRequestID, err.Error())
 		_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionPaymentCallbackProcessed, errMsg, false, &errMsg, metadata)
 
 		return "", NewBusinessError("PAYMENT_CALLBACK_FAILED", "Payment callback failed", err)
 	}
 
-	msg := fmt.Sprintf("Payment callback processed for payment request %d", paymentRequest.ID)
+	msg := fmt.Sprintf("Payment callback processed for payment request %d", paymentRequestID)
 	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionPaymentCallbackProcessed, msg, true, nil, metadata)
 
 	// Generate HTML response based on payment status

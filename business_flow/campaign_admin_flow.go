@@ -21,6 +21,7 @@ import (
 // AdminCampaignFlow handles the campaign business logic
 type AdminCampaignFlow interface {
 	ListCampaigns(ctx context.Context, filter dto.AdminListCampaignsFilter) (*dto.AdminListCampaignsResponse, error)
+	GetCampaign(ctx context.Context, id uint) (*dto.AdminGetCampaignResponse, error)
 	ApproveCampaign(ctx context.Context, req *dto.AdminApproveCampaignRequest) (*dto.AdminApproveCampaignResponse, error)
 	RejectCampaign(ctx context.Context, req *dto.AdminRejectCampaignRequest) (*dto.AdminRejectCampaignResponse, error)
 }
@@ -95,6 +96,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 	items := make([]dto.AdminGetCampaignResponse, 0, len(rows))
 	for _, c := range rows {
 		items = append(items, dto.AdminGetCampaignResponse{
+			ID:         c.ID,
 			UUID:       c.UUID.String(),
 			Status:     c.Status.String(),
 			CreatedAt:  c.CreatedAt,
@@ -117,6 +119,39 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		Message: "Campaigns retrieved successfully",
 		Items:   items,
 	}, nil
+}
+
+// GetCampaign retrieves a single campaign by ID for admin
+func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.AdminGetCampaignResponse, error) {
+	c, err := s.campaignRepo.ByID(ctx, id)
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_GET_CAMPAIGN_FAILED", "Failed to get campaign", err)
+	}
+	if c == nil {
+		return nil, ErrCampaignNotFound
+	}
+	resp := &dto.AdminGetCampaignResponse{
+		ID:         c.ID,
+		UUID:       c.UUID.String(),
+		Status:     c.Status.String(),
+		CreatedAt:  c.CreatedAt,
+		UpdatedAt:  c.UpdatedAt,
+		Title:      c.Spec.Title,
+		Segment:    c.Spec.Segment,
+		Subsegment: c.Spec.Subsegment,
+		Sex:        c.Spec.Sex,
+		City:       c.Spec.City,
+		AdLink:     c.Spec.AdLink,
+		Content:    c.Spec.Content,
+		ScheduleAt: c.Spec.ScheduleAt,
+		LineNumber: c.Spec.LineNumber,
+		Budget:     c.Spec.Budget,
+		Comment:    c.Comment,
+
+		SegmentPriceFactor:    -1, // TODO
+		LineNumberPriceFactor: -1, // TODO
+	}
+	return resp, nil
 }
 
 // ApproveCampaign approves a campaign: ensure schedule_at > now, change status to approved, and reduce frozen to locked spend

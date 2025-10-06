@@ -35,15 +35,16 @@ type Router interface {
 
 // FiberRouter implements Router using Fiber v3
 type FiberRouter struct {
-	app                    *fiber.App
-	authHandler            handlers.AuthHandlerInterface
-	campaignHandler        handlers.CampaignHandlerInterface
-	paymentHandler         handlers.PaymentHandlerInterface
-	agencyHandler          handlers.AgencyHandlerInterface
-	authMiddleware         *middleware.AuthMiddleware
-	authAdminHandler       handlers.AuthAdminHandlerInterface
-	campaignAdminHandler   handlers.CampaignAdminHandlerInterface
-	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface
+	app                            *fiber.App
+	authHandler                    handlers.AuthHandlerInterface
+	campaignHandler                handlers.CampaignHandlerInterface
+	paymentHandler                 handlers.PaymentHandlerInterface
+	agencyHandler                  handlers.AgencyHandlerInterface
+	authMiddleware                 *middleware.AuthMiddleware
+	authAdminHandler               handlers.AuthAdminHandlerInterface
+	campaignAdminHandler           handlers.CampaignAdminHandlerInterface
+	lineNumberAdminHandler         handlers.LineNumberAdminHandlerInterface
+	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -56,6 +57,7 @@ func NewFiberRouter(
 	authAdminHandler handlers.AuthAdminHandlerInterface,
 	campaignAdminHandler handlers.CampaignAdminHandlerInterface,
 	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
+	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -71,15 +73,16 @@ func NewFiberRouter(
 	})
 
 	return &FiberRouter{
-		app:                    app,
-		authHandler:            authHandler,
-		campaignHandler:        campaignHandler,
-		paymentHandler:         paymentHandler,
-		agencyHandler:          agencyHandler,
-		authMiddleware:         authMiddleware,
-		authAdminHandler:       authAdminHandler,
-		campaignAdminHandler:   campaignAdminHandler,
-		lineNumberAdminHandler: lineNumberAdminHandler,
+		app:                            app,
+		authHandler:                    authHandler,
+		campaignHandler:                campaignHandler,
+		paymentHandler:                 paymentHandler,
+		agencyHandler:                  agencyHandler,
+		authMiddleware:                 authMiddleware,
+		authAdminHandler:               authAdminHandler,
+		campaignAdminHandler:           campaignAdminHandler,
+		lineNumberAdminHandler:         lineNumberAdminHandler,
+		adminCustomerManagementHandler: adminCustomerManagemetHandler,
 	}
 }
 
@@ -185,8 +188,16 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCampaigns.Use(r.authMiddleware.AdminAuthenticate())
 	adminCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
 	adminCampaigns.Get("/", r.campaignAdminHandler.ListCampaigns)
+	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
 	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
 	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
+
+	// Admin customer reports
+	adminCustomers := api.Group("/admin/customer-management")
+	adminCustomers.Use(r.authMiddleware.AdminAuthenticate())
+	adminCustomers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminCustomers.Get("/shares", r.adminCustomerManagementHandler.GetCustomersShares)
+	adminCustomers.Get("/:customer_id", r.adminCustomerManagementHandler.GetCustomerWithCampaigns)
 
 	// Admin line numbers protected routes
 	lineNumbers := api.Group("/admin/line-numbers")
