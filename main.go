@@ -341,6 +341,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	adminLineNumberFlow := businessflow.NewAdminLineNumberFlow(lineNumberRepo, db)
 
+	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
@@ -349,6 +351,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	authAdminHandler := handlers.NewAuthAdminHandler(adminAuthFlow)
 	campaignAdminHandler := handlers.NewCampaignAdminHandler(adminCampaignFlow)
 	lineNumberAdminHandler := handlers.NewLineNumberAdminHandler(adminLineNumberFlow)
+	adminCustomerManagementHandler := handlers.NewAdminCustomerManagementHandler(adminCustomerManagementFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
@@ -363,6 +366,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		authAdminHandler,
 		campaignAdminHandler,
 		lineNumberAdminHandler,
+		adminCustomerManagementHandler,
 	)
 
 	// Log that services are initialized

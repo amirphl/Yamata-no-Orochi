@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	crand "crypto/rand"
+	"encoding/binary"
+
 	"github.com/google/uuid"
 	"github.com/wenlng/go-captcha/v2/rotate"
 )
@@ -60,7 +63,7 @@ func NewCaptchaServiceRotate(ttl time.Duration, padding int, imgSizePx int) (Cap
 		rotate.WithImageSquareSize(imgSizePx),
 	)
 	builder.SetResources(
-		rotate.WithImages(generateRotateBackgrounds(3, imgSizePx)),
+		rotate.WithImages(generateRotateBackgrounds(8, imgSizePx)),
 	)
 	rotator := builder.Make()
 
@@ -196,15 +199,18 @@ func generateRotateBackgrounds(n int, size int) []image.Image {
 		n = 1
 	}
 	imgs := make([]image.Image, 0, n)
+	// Create a crypto-seeded PRNG for visual variety
+	seed := cryptoSeed() ^ time.Now().UnixNano()
+	r := rand.New(rand.NewSource(seed))
 	for i := 0; i < n; i++ {
-		imgs = append(imgs, newNoiseGradientImage(size, size))
+		imgs = append(imgs, newNoiseGradientImageWithRand(size, size, r))
 	}
 	return imgs
 }
 
-func newNoiseGradientImage(w, h int) image.Image {
+func newNoiseGradientImageWithRand(w, h int, r *rand.Rand) image.Image {
 	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
-	// Gradient background
+	// Gradient background with per-pixel noise
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
 			// simple radial gradient + noise
@@ -216,17 +222,39 @@ func newNoiseGradientImage(w, h int) image.Image {
 				t = 1
 			}
 			base := uint8(200 - int(150*t))
-			noise := uint8(rand.Intn(30))
+			noise := uint8(r.Intn(30))
 			rgba.Set(x, y, color.RGBA{R: base + noise/3, G: base, B: 255 - base/2, A: 255})
 		}
 	}
-	// overlay a few rectangles
-	drawRect(rgba, 10, 10, w/3, h/12, color.RGBA{R: 255, G: 255, B: 255, A: 32})
-	drawRect(rgba, w/2, h/3, w/3, h/10, color.RGBA{R: 0, G: 0, B: 0, A: 24})
+	// Overlay a few random translucent rectangles for extra variability
+	rectCount := 2 + r.Intn(3) // 2-4 overlays
+	for i := 0; i < rectCount; i++ {
+		rw := w/6 + r.Intn(w/4)
+		rh := h/8 + r.Intn(h/5)
+		rx := r.Intn(max(1, w-rw))
+		ry := r.Intn(max(1, h-rh))
+		c := color.RGBA{R: uint8(r.Intn(256)), G: uint8(r.Intn(256)), B: uint8(r.Intn(256)), A: uint8(16 + r.Intn(40))}
+		drawRect(rgba, rx, ry, rw, rh, c)
+	}
 	return rgba
 }
 
 func drawRect(dst *image.RGBA, x, y, w, h int, c color.RGBA) {
 	rect := image.Rect(x, y, x+w, y+h)
 	draw.Draw(dst, rect, &image.Uniform{C: c}, image.Point{}, draw.Over)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func cryptoSeed() int64 {
+	var b [8]byte
+	if _, err := crand.Read(b[:]); err != nil {
+		return time.Now().UnixNano()
+	}
+	return int64(binary.LittleEndian.Uint64(b[:]))
 }
