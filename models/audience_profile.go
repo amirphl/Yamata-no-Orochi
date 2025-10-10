@@ -14,7 +14,7 @@ type AudienceProfile struct {
 	ID          int64         `gorm:"primaryKey;autoIncrement;type:bigserial" json:"id"`
 	UID         string        `gorm:"size:255;not null;uniqueIndex:uk_audience_profiles_uid;index:idx_audience_profiles_uid" json:"uid"`
 	PhoneNumber *string       `gorm:"size:20;uniqueIndex:uk_audience_profiles_phone_number;index:idx_audience_profiles_phone_number" json:"phone_number,omitempty"`
-	Tag         pq.Int32Array `gorm:"type:integer[];index:idx_audience_profiles_tag_gin,using:gin" json:"tag"`
+	Tags        pq.Int32Array `gorm:"type:integer[];index:idx_audience_profiles_tag_gin,using:gin" json:"tags"`
 	Color       string        `gorm:"size:20;not null;index:idx_audience_profiles_color" json:"color"`
 
 	CreatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_audience_profiles_created_at" json:"created_at"`
@@ -31,7 +31,7 @@ type AudienceProfileFilter struct {
 	ID            *uint
 	UID           *string
 	PhoneNumber   *string
-	Tag           *pq.Int32Array
+	Tags          *pq.Int32Array
 	Color         *string
 	CreatedAfter  *time.Time
 	CreatedBefore *time.Time
