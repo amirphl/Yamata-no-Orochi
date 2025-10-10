@@ -52,3 +52,8 @@ const (
 const (
 	DefaultReferrerAgencyCode = "jaazebeh.ir"
 )
+
+const (
+	AudienceSpecCacheKey = "audience_spec:cache"
+	AudienceSpecLockKey  = "audience_spec:lock"
+)
