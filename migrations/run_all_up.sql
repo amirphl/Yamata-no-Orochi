@@ -111,5 +111,17 @@
 \echo 'Running 0035_add_running_executed_to_sms_campaign_status.sql...'
 \i migrations/0035_add_running_executed_to_sms_campaign_status.sql
 
+\echo 'Running 0036_create_processed_campaigns.sql...'
+\i migrations/0036_create_processed_campaigns.sql
+
+\echo 'Running 0037_create_sent_sms.sql...'
+\i migrations/0037_create_sent_sms.sql
+
+\echo 'Running 0038_create_tags.sql...'
+\i migrations/0038_create_tags.sql
+
+\echo 'Running 0039_add_num_target_after_finalize_to_sms_campaigns.sql...'
+\i migrations/0039_add_num_target_after_finalize_to_sms_campaigns.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
