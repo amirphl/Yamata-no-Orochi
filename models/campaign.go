@@ -128,6 +128,9 @@ type Campaign struct {
 	Spec       CampaignSpec   `gorm:"type:jsonb;not null" json:"spec"`
 	Comment    *string        `gorm:"type:text" json:"comment,omitempty"`
 
+	// Number of targeted audiences
+	NumAudience *uint64 `gorm:"type:bigint" json:"num_audience,omitempty"`
+
 	// Relations
 	Customer          *Customer          `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
 	AgencyCommissions []AgencyCommission `gorm:"foreignKey:SourceCampaignID" json:"agency_commissions,omitempty"`
