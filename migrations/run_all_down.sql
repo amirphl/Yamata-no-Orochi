@@ -6,6 +6,18 @@
 \echo 'Running 0034_create_audience_profiles_down.sql...'
 \i migrations/0034_create_audience_profiles_down.sql
 
+\echo 'Running 0039_add_num_target_after_finalize_to_sms_campaigns_down.sql...'
+\i migrations/0039_add_num_target_after_finalize_to_sms_campaigns_down.sql
+
+\echo 'Running 0038_create_tags_down.sql...'
+\i migrations/0038_create_tags_down.sql
+
+\echo 'Running 0037_create_sent_sms_down.sql...'
+\i migrations/0037_create_sent_sms_down.sql
+
+\echo 'Running 0036_create_processed_campaigns_down.sql...'
+\i migrations/0036_create_processed_campaigns_down.sql
+
 \echo 'Running 0035_add_running_executed_to_sms_campaign_status_down.sql...'
 \i migrations/0035_add_running_executed_to_sms_campaign_status_down.sql
 
