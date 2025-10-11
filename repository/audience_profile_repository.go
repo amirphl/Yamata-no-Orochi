@@ -51,8 +51,8 @@ func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.Audien
 	if f.PhoneNumber != nil {
 		db = db.Where("phone_number = ?", *f.PhoneNumber)
 	}
-	if f.Tag != nil {
-		db = db.Where("? = ANY (tag_or_line_number)", *f.Tag)
+	if f.Tags != nil {
+		db = db.Where("? = ANY (tags)", *f.Tags)
 	}
 	if f.CreatedAfter != nil {
 		db = db.Where("created_at >= ?", *f.CreatedAfter)
@@ -65,18 +65,22 @@ func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.Audien
 
 func (r *AudienceProfileRepositoryImpl) ByFilter(ctx context.Context, filter models.AudienceProfileFilter, orderBy string, limit, offset int) ([]*models.AudienceProfile, error) {
 	db := r.getDB(ctx)
-	query := r.applyFilter(db.Model(&models.AudienceProfile{}), filter)
-	if orderBy != "" {
-		query = query.Order(orderBy)
-	}
+	base := r.applyFilter(db.Model(&models.AudienceProfile{}), filter)
+
+	// Randomize first inside a subquery, then apply limit/offset on the randomized set
+	randomized := base.Order("RANDOM()")
 	if limit > 0 {
-		query = query.Limit(limit)
+		randomized = randomized.Limit(limit)
 	}
 	if offset > 0 {
-		query = query.Offset(offset)
+		randomized = randomized.Offset(offset)
 	}
+
+	// Outer query applies the final stable ordering for the selected subset
+	outer := db.Table("(?) AS ap", randomized).Order("id ASC")
+
 	var rows []*models.AudienceProfile
-	if err := query.Find(&rows).Error; err != nil {
+	if err := outer.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("failed to find audience profiles by filter: %w", err)
 	}
 	return rows, nil
