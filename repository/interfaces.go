@@ -226,3 +226,26 @@ type AgencyDiscountRepository interface {
 	ListActiveDiscountsWithCustomer(ctx context.Context, agencyID uint, nameLike, orderBy string) ([]*AgencyDiscountWithCustomer, error)
 	ExpireActiveByAgencyAndCustomer(ctx context.Context, agencyID, customerID uint, expiredAt time.Time) error
 }
+
+// TagRepository defines operations for tags
+type TagRepository interface {
+	Repository[models.Tag, models.TagFilter]
+	ByID(ctx context.Context, id uint) (*models.Tag, error)
+	ByName(ctx context.Context, name string) (*models.Tag, error)
+	ListByNames(ctx context.Context, names []string) ([]*models.Tag, error)
+}
+
+// ProcessedCampaignRepository defines operations for processed campaigns
+type ProcessedCampaignRepository interface {
+	Repository[models.ProcessedCampaign, models.ProcessedCampaignFilter]
+	ByID(ctx context.Context, id uint) (*models.ProcessedCampaign, error)
+	ByCampaignID(ctx context.Context, campaignID uint) (*models.ProcessedCampaign, error)
+	Update(ctx context.Context, pc *models.ProcessedCampaign) error
+}
+
+// SentSMSRepository defines operations for sent SMS rows
+type SentSMSRepository interface {
+	Repository[models.SentSMS, models.SentSMSFilter]
+	ByID(ctx context.Context, id uint) (*models.SentSMS, error)
+	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSMS, error)
+}
