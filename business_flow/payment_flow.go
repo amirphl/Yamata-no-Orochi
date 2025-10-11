@@ -310,16 +310,45 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, customer model
 	scatteredSettlementItems[0].Amount *= 10       // TO IRR
 	scatteredSettlementItems[1].Amount *= 10       // TO IRR
 
+	refinedScatteredSettlementItems := make([]ScatteredSettlementItem, 0)
+	for _, item := range scatteredSettlementItems {
+		if item.Amount > 0 {
+			refinedScatteredSettlementItems = append(refinedScatteredSettlementItems, item)
+		}
+	}
+
+	// Merge scatteredSettlementItems with same sheba number (IBAN)
+	for i := 0; i < len(refinedScatteredSettlementItems); i++ {
+		for j := i + 1; j < len(refinedScatteredSettlementItems); j++ {
+			if refinedScatteredSettlementItems[i].IBAN == refinedScatteredSettlementItems[j].IBAN {
+				refinedScatteredSettlementItems[i].Amount += refinedScatteredSettlementItems[j].Amount
+				refinedScatteredSettlementItems = append(refinedScatteredSettlementItems[:j], refinedScatteredSettlementItems[j+1:]...)
+			}
+		}
+	}
+
 	// Prepare Atipay request payload
 	atipayPayload := map[string]any{
-		"amount":                   amountWithTaxIRR,
-		"cellNumber":               paymentRequest.CellNumber,
-		"description":              paymentRequest.Description,
-		"invoiceNumber":            paymentRequest.InvoiceNumber,
-		"redirectUrl":              paymentRequest.RedirectURL,
-		"apiKey":                   p.atipayCfg.APIKey,
-		"terminal":                 p.atipayCfg.Terminal,
-		"scatteredSettlementItems": scatteredSettlementItems,
+		"amount":        amountWithTaxIRR,
+		"cellNumber":    paymentRequest.CellNumber,
+		"description":   paymentRequest.Description,
+		"invoiceNumber": paymentRequest.InvoiceNumber,
+		"redirectUrl":   paymentRequest.RedirectURL,
+		"apiKey":        p.atipayCfg.APIKey,
+		"terminal":      p.atipayCfg.Terminal,
+	}
+
+	systemUser, err := getSystemUser(ctx, p.customerRepo, p.walletRepo, p.sysCfg)
+	if err != nil {
+		return "", err
+	}
+	if systemUser.ShebaNumber == nil {
+		return "", ErrSystemUserShebaNumberNotFound
+	}
+
+	if len(refinedScatteredSettlementItems) > 1 ||
+		(len(refinedScatteredSettlementItems) == 1 && refinedScatteredSettlementItems[0].IBAN != *systemUser.ShebaNumber) {
+		atipayPayload["scatteredSettlementItems"] = refinedScatteredSettlementItems
 	}
 
 	// Convert to JSON
@@ -447,8 +476,8 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 				// Failed but don't return error to avoid rollback
 				mapping.Status = models.PaymentRequestStatusFailed
 				mapping.Success = false
-				mapping.Message = "Payment verification failed"
-				mapping.Description = "Payment verification failed: " + err.Error()
+				mapping.Message = "Payment verification failed (step 1)"
+				mapping.Description = "Payment verification failed (step 1): " + err.Error()
 
 				// Update payment request status
 				if err := p.updatePaymentRequest(txCtx, paymentRequest, atipayRequest, mapping); err != nil {
@@ -456,19 +485,19 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 				}
 
 				// Create audit log for verification failure
-				errMsg := fmt.Sprintf("Payment verification failed for payment request %d: %s", paymentRequest.ID, err.Error())
+				errMsg := fmt.Sprintf("Payment verification failed (step 1) for payment request %d: %s", paymentRequest.ID, err.Error())
 				_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionPaymentFailed, mapping.Description, false, &errMsg, metadata)
 
 				return nil
 			}
 
 			// Check if verified amount matches the original amount
-			if verificationResult.AmountIRR != paymentRequest.Amount*10 { // Convert Tomans to Rials
+			if uint64(verificationResult.AmountIRR) != paymentRequest.Amount*10 { // Convert Tomans to Rials
 				// Amount mismatch - mark payment as failed and refund will occur
 				mapping.Status = models.PaymentRequestStatusFailed
 				mapping.Success = false
-				mapping.Message = "Payment verification failed: amount mismatch"
-				mapping.Description = fmt.Sprintf("Verified amount (%d Rials) does not match original amount (%d Rials)",
+				mapping.Message = "Payment verification failed (step 2): amount mismatch"
+				mapping.Description = fmt.Sprintf("Verified amount (%f Rials) does not match original amount (%d Rials)",
 					verificationResult.AmountIRR, paymentRequest.Amount*10)
 
 				// Update payment request status
@@ -477,7 +506,7 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 				}
 
 				// Create audit log for verification failure
-				errMsg := fmt.Sprintf("Payment verification failed for payment request %d: amount mismatch (verified: %d Rials, original: %d Rials)", paymentRequest.ID, verificationResult.AmountIRR, paymentRequest.Amount*10)
+				errMsg := fmt.Sprintf("Payment verification failed (step 2) for payment request %d: amount mismatch (verified: %d Rials, original: %d Rials)", paymentRequest.ID, verificationResult.AmountIRR, paymentRequest.Amount*10)
 				_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionPaymentFailed, mapping.Description, false, &errMsg, metadata)
 
 				return nil
@@ -488,8 +517,8 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 				// Failed but don't return error to avoid rollback
 				mapping.Status = models.PaymentRequestStatusFailed
 				mapping.Success = false
-				mapping.Message = "Increase customer balance failed"
-				mapping.Description = "Increase customer balance failed: " + err.Error()
+				mapping.Message = "Increase customer balance failed (step 3)"
+				mapping.Description = "Increase customer balance failed (step 3): " + err.Error()
 
 				// Update payment request status
 				if err := p.updatePaymentRequest(txCtx, paymentRequest, atipayRequest, mapping); err != nil {
@@ -497,7 +526,7 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 				}
 
 				// Create audit log for increase customer balance failure
-				errMsg := fmt.Sprintf("Increase customer balance failed for payment request %d: %s", paymentRequest.ID, err.Error())
+				errMsg := fmt.Sprintf("Increase customer balance failed (step 3) for payment request %d: %s", paymentRequest.ID, err.Error())
 				_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionPaymentFailed, mapping.Description, false, &errMsg, metadata)
 
 				return nil
@@ -1073,7 +1102,7 @@ func (p *PaymentFlowImpl) readTemplate(filename string) (string, error) {
 
 // AtipayVerificationResponse represents the response from Atipay's verify-payment API
 type AtipayVerificationResponse struct {
-	AmountIRR uint64 `json:"amount"`
+	AmountIRR float64 `json:"amount"`
 }
 
 // verifyPaymentWithAtipay calls Atipay's verify-payment API to finalize the transaction

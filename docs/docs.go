@@ -353,6 +353,179 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/campaigns/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Campaigns"
+                ],
+                "summary": "Admin Get Campaign",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Campaign ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminGetCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/customer-management/shares": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Customer Management"
+                ],
+                "summary": "Admin Customers Shares Report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter created_at \u003e= start_date (RFC3339)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter created_at \u003c= end_date (RFC3339)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminCustomersSharesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/customer-management/{customer_id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Customer Management"
+                ],
+                "summary": "Admin Get Customer With Campaigns",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Customer ID",
+                        "name": "customer_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminCustomerWithCampaignsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/line-numbers/": {
             "get": {
                 "description": "Retrieve all line numbers",
@@ -1009,6 +1182,201 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/bot/auth/login": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Authentication"
+                ],
+                "summary": "Bot Login",
+                "parameters": [
+                    {
+                        "description": "Bot login",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotLoginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotLoginResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/campaigns/audience-spec": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot Update Audience Spec",
+                "parameters": [
+                    {
+                        "description": "Audience spec update",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotUpdateAudienceSpecRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotUpdateAudienceSpecResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/campaigns/ready": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot List Ready Campaigns",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotListCampaignsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/campaigns/{id}/executed": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot Move Campaign to Executed",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Campaign ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/campaigns/{id}/running": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot Move Campaign to Running",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Campaign ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns": {
             "get": {
                 "description": "Retrieve the authenticated user's campaigns with pagination, ordering, and filters",
@@ -1052,7 +1420,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected)",
+                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed)",
                         "name": "status",
                         "in": "query"
                     }
@@ -1154,6 +1522,41 @@ const docTemplate = `{
                         "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/audience-spec": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "List Audience Spec",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "object",
+                                                "additionalProperties": true
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -1376,6 +1779,37 @@ const docTemplate = `{
                         "description": "Service is healthy",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/line-numbers/active": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Line Numbers"
+                ],
+                "summary": "List Active Line Numbers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListActiveLineNumbersResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -1966,6 +2400,14 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.ActiveLineNumberItem": {
+            "type": "object",
+            "properties": {
+                "line_number": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminApproveCampaignRequest": {
             "type": "object",
             "required": [
@@ -2057,6 +2499,193 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminCustomerCampaignItem": {
+            "type": "object",
+            "properties": {
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "click_rate": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "schedule_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "total_delivered": {
+                    "type": "integer"
+                },
+                "total_sent": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AdminCustomerDetailDTO": {
+            "type": "object",
+            "properties": {
+                "account_type_id": {
+                    "type": "integer"
+                },
+                "account_type_name": {
+                    "type": "string"
+                },
+                "agency_referer_code": {
+                    "type": "string"
+                },
+                "company_address": {
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "company_phone": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "email_verified_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_email_verified": {
+                    "type": "boolean"
+                },
+                "is_mobile_verified": {
+                    "type": "boolean"
+                },
+                "last_login_at": {
+                    "type": "string"
+                },
+                "mobile_verified_at": {
+                    "type": "string"
+                },
+                "national_id": {
+                    "type": "string"
+                },
+                "postal_code": {
+                    "type": "string"
+                },
+                "referrer_agency_id": {
+                    "type": "integer"
+                },
+                "representative_first_name": {
+                    "type": "string"
+                },
+                "representative_last_name": {
+                    "type": "string"
+                },
+                "representative_mobile": {
+                    "type": "string"
+                },
+                "sheba_number": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminCustomerWithCampaignsResponse": {
+            "type": "object",
+            "properties": {
+                "campaigns": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminCustomerCampaignItem"
+                    }
+                },
+                "customer": {
+                    "$ref": "#/definitions/dto.AdminCustomerDetailDTO"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminCustomersSharesItem": {
+            "type": "object",
+            "properties": {
+                "agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "click_rate": {
+                    "type": "number"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "first_name": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "last_name": {
+                    "type": "string"
+                },
+                "referrer_agency_name": {
+                    "type": "string"
+                },
+                "system_share": {
+                    "type": "integer"
+                },
+                "tax_share": {
+                    "type": "integer"
+                },
+                "total_sent": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AdminCustomersSharesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminCustomersSharesItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "sum_agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "sum_system_share": {
+                    "type": "integer"
+                },
+                "sum_tax_share": {
+                    "type": "integer"
+                },
+                "sum_total_sent": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.AdminDTO": {
             "type": "object",
             "properties": {
@@ -2079,6 +2708,77 @@ const docTemplate = `{
                 "uuid": {
                     "type": "string",
                     "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                }
+            }
+        },
+        "dto.AdminGetCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "comment": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "line_number_price_factor": {
+                    "type": "number"
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "segment": {
+                    "type": "string"
+                },
+                "segment_price_factor": {
+                    "type": "number"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subsegment": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
                 }
             }
         },
@@ -2392,6 +3092,193 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.BotDTO": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotGetCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "comment": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "num_audiences": {
+                    "type": "integer"
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "segment": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subsegment": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotListCampaignsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BotGetCampaignResponse"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotLoginRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 8
+                },
+                "username": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 3
+                }
+            }
+        },
+        "dto.BotLoginResponse": {
+            "type": "object",
+            "properties": {
+                "bot": {
+                    "$ref": "#/definitions/dto.BotDTO"
+                },
+                "session": {
+                    "$ref": "#/definitions/dto.BotSessionDTO"
+                }
+            }
+        },
+        "dto.BotSessionDTO": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_in": {
+                    "type": "integer"
+                },
+                "refresh_token": {
+                    "type": "string"
+                },
+                "token_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotUpdateAudienceSpecRequest": {
+            "type": "object",
+            "required": [
+                "available_audience",
+                "segment",
+                "subsegment",
+                "tags"
+            ],
+            "properties": {
+                "available_audience": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "segment": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "subsegment": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "tags": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "dto.BotUpdateAudienceSpecResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.CalculateCampaignCapacityRequest": {
             "type": "object",
             "properties": {
@@ -2430,6 +3317,13 @@ const docTemplate = `{
                     "maxLength": 255
                 },
                 "subsegment": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tags": {
                     "type": "array",
                     "maxItems": 255,
                     "items": {
@@ -2497,6 +3391,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "title": {
                     "type": "string",
                     "maxLength": 255
@@ -2515,7 +3415,7 @@ const docTemplate = `{
                 "msg_target": {
                     "type": "integer"
                 },
-                "total": {
+                "total_cost": {
                     "type": "integer"
                 }
             }
@@ -2627,6 +3527,13 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "tags": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "title": {
                     "type": "string",
                     "maxLength": 255
@@ -2709,6 +3616,12 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "title": {
                     "type": "string"
                 },
@@ -2755,6 +3668,20 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "dto.ListActiveLineNumbersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ActiveLineNumberItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -3167,6 +4094,13 @@ const docTemplate = `{
                     "maxLength": 255
                 },
                 "subsegment": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "tags": {
                     "type": "array",
                     "maxItems": 255,
                     "items": {

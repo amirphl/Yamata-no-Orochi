@@ -162,19 +162,34 @@ func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
 	// Extract invoice number from path
 	invoiceNumber := c.Params("invoice_number")
 
-	// Build from form values (Atipay posts as x-www-form-urlencoded)
+	// Prefer query parameters, then fallback to form and JSON
 	callbackReq := dto.AtipayRequest{
-		State:             c.FormValue("state"),
-		Status:            c.FormValue("status"),
-		ReferenceNumber:   c.FormValue("referenceNumber"),
-		ReservationNumber: c.FormValue("reservationNumber"),
-		TerminalID:        c.FormValue("terminalId"),
-		TraceNumber:       c.FormValue("traceNumber"),
-		MaskedPAN:         c.FormValue("maskedPan"),
-		RRN:               c.FormValue("rrn"),
+		State:             c.Query("state"),
+		Status:            c.Query("status"),
+		ReferenceNumber:   c.Query("referenceNumber"),
+		ReservationNumber: c.Query("reservationNumber"),
+		TerminalID:        c.Query("terminalId"),
+		TraceNumber:       c.Query("traceNumber"),
+		MaskedPAN:         c.Query("maskedPan"),
+		RRN:               c.Query("rrn"),
 	}
 
-	// Fallback to JSON body if not form
+	// Fallback to form values if query is empty
+	if callbackReq.State == "" && callbackReq.Status == "" && len(c.Body()) > 0 {
+		formReq := dto.AtipayRequest{
+			State:             c.FormValue("state"),
+			Status:            c.FormValue("status"),
+			ReferenceNumber:   c.FormValue("referenceNumber"),
+			ReservationNumber: c.FormValue("reservationNumber"),
+			TerminalID:        c.FormValue("terminalId"),
+			TraceNumber:       c.FormValue("traceNumber"),
+			MaskedPAN:         c.FormValue("maskedPan"),
+			RRN:               c.FormValue("rrn"),
+		}
+		callbackReq = formReq
+	}
+
+	// Fallback to JSON body if still empty
 	if callbackReq.State == "" && len(c.Body()) > 0 {
 		var alt dto.AtipayRequest
 		if err := c.Bind().JSON(&alt); err == nil {
@@ -218,7 +233,7 @@ func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Process callback
-	htmlResponse, err := h.paymentFlow.PaymentCallback(h.createRequestContext(c, "/api/v1/payments/callback/"+callbackReq.ReservationNumber), &callbackReq, metadata)
+	resultHTML, err := h.paymentFlow.PaymentCallback(h.createRequestContext(c, "/api/v1/payments/callback/"+invoiceNumber), &callbackReq, metadata)
 	if err != nil {
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -273,7 +288,7 @@ func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
 		}
 		if businessflow.IsPaymentRequestExpired(err) {
 			log.Printf("Payment request expired for invoice: %s", callbackReq.ReservationNumber)
-			return h.ErrorResponse(c, fiber.StatusConflict, "Payment request has expired", "PAYMENT_REQUEST_EXPIRED", nil)
+			return h.ErrorResponse(c, fiber.StatusConflict, "Payment request expired", "PAYMENT_REQUEST_EXPIRED", nil)
 		}
 
 		if businessErr, ok := err.(*businessflow.BusinessError); ok {
@@ -294,7 +309,7 @@ func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
 	}
 
 	c.Set("Content-Type", "text/html; charset=utf-8")
-	return c.SendString(htmlResponse)
+	return c.Status(fiber.StatusOK).SendString(resultHTML)
 }
 
 // GetTransactionHistory handles the retrieval of transaction history for a customer

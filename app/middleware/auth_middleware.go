@@ -170,6 +170,50 @@ func (m *AuthMiddleware) AdminAuthenticate() fiber.Handler {
 	}
 }
 
+// BotAuthenticate validates JWT tokens and sets bot-specific context values
+func (m *AuthMiddleware) BotAuthenticate() fiber.Handler {
+	return func(c fiber.Ctx) error {
+		authHeader := c.Get("Authorization")
+		if authHeader == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{Success: false, Message: "Authorization header is required", Error: dto.ErrorDetail{Code: "MISSING_AUTHORIZATION_HEADER"}})
+		}
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{Success: false, Message: "Invalid authorization header format. Expected 'Bearer <token>'", Error: dto.ErrorDetail{Code: "INVALID_AUTHORIZATION_FORMAT"}})
+		}
+		token := strings.TrimPrefix(authHeader, "Bearer ")
+		if token == "" {
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{Success: false, Message: "Access token is required", Error: dto.ErrorDetail{Code: "MISSING_ACCESS_TOKEN"}})
+		}
+
+		botClaims, err := m.tokenService.ValidateBotToken(token)
+		if err != nil {
+			var code, msg string
+			if errors.Is(err, services.ErrTokenExpired) {
+				code = "TOKEN_EXPIRED"
+				msg = "Access token has expired"
+			} else if errors.Is(err, services.ErrTokenInvalid) {
+				code = "TOKEN_INVALID"
+				msg = "Invalid access token"
+			} else if errors.Is(err, services.ErrTokenRevoked) {
+				code = "TOKEN_REVOKED"
+				msg = "Access token has been revoked"
+			} else {
+				code = "TOKEN_VALIDATION_FAILED"
+				msg = "Token validation failed"
+			}
+			return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{Success: false, Message: msg, Error: dto.ErrorDetail{Code: code}})
+		}
+
+		c.Locals("bot_id", botClaims.BotID)
+		c.Locals("token_id", botClaims.TokenID)
+		c.Locals("token_claims", botClaims)
+		if requestID := c.Get("X-Request-ID"); requestID != "" {
+			c.Locals("request_id", requestID)
+		}
+		return c.Next()
+	}
+}
+
 // OptionalAuth is a middleware that validates JWT tokens if present, but doesn't require them
 func (m *AuthMiddleware) OptionalAuth() fiber.Handler {
 	return func(c fiber.Ctx) error {
@@ -227,6 +271,12 @@ func GetAdminIDFromContext(c fiber.Ctx) (uint, bool) {
 	return adminID, ok
 }
 
+// GetBotIDFromContext extracts bot ID from the request context
+func GetBotIDFromContext(c fiber.Ctx) (uint, bool) {
+	botID, ok := c.Locals("bot_id").(uint)
+	return botID, ok
+}
+
 // GetTokenClaimsFromContext extracts token claims from the request context
 func GetTokenClaimsFromContext(c fiber.Ctx) (*services.TokenClaims, bool) {
 	claims, ok := c.Locals("token_claims").(*services.TokenClaims)
@@ -275,6 +325,26 @@ func RequireAdminAuth(c fiber.Ctx) error {
 			Success: false,
 			Message: "Invalid admin ID",
 			Error:   dto.ErrorDetail{Code: "INVALID_ADMIN_ID"},
+		})
+	}
+	return c.Next()
+}
+
+// RequireBotAuth ensures bot authentication is present
+func RequireBotAuth(c fiber.Ctx) error {
+	botID, exists := GetBotIDFromContext(c)
+	if !exists {
+		return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Bot authentication required",
+			Error:   dto.ErrorDetail{Code: "BOT_AUTHENTICATION_REQUIRED"},
+		})
+	}
+	if botID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(dto.APIResponse{
+			Success: false,
+			Message: "Invalid bot ID",
+			Error:   dto.ErrorDetail{Code: "INVALID_BOT_ID"},
 		})
 	}
 	return c.Next()
