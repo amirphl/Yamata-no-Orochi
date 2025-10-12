@@ -18,6 +18,7 @@ type CampaignBotHandlerInterface interface {
 	UpdateAudienceSpec(c fiber.Ctx) error
 	ListReadyCampaigns(c fiber.Ctx) error
 	MoveCampaignToExecuted(c fiber.Ctx) error
+	MoveCampaignToRunning(c fiber.Ctx) error
 }
 
 // CampaignBotHandler handles bot campaign-related HTTP requests
@@ -119,6 +120,28 @@ func (h *CampaignBotHandler) MoveCampaignToExecuted(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to executed", "MOVE_TO_EXECUTED_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign moved to executed", fiber.Map{"ok": true})
+}
+
+// MoveCampaignToRunning updates status to running
+// @Summary Bot Move Campaign to Running
+// @Tags Bot Campaigns
+// @Produce json
+// @Param id path int true "Campaign ID"
+// @Success 200 {object} dto.APIResponse
+// @Router /api/v1/bot/campaigns/{id}/running [post]
+func (h *CampaignBotHandler) MoveCampaignToRunning(c fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign id", "INVALID_CAMPAIGN_ID", nil)
+	}
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	_ = metadata
+	if err := h.campaignFlow.MoveCampaignToRunning(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/running"), uint(id)); err != nil {
+		log.Println("Move to running failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to running", "MOVE_TO_RUNNING_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaign moved to running", fiber.Map{"ok": true})
 }
 
 func (h *CampaignBotHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
