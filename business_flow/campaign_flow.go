@@ -250,12 +250,6 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
-			campaign.Status = models.CampaignStatusWaitingForApproval
-			campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
-			if err := s.campaignRepo.Update(txCtx, campaign); err != nil {
-				return err
-			}
-
 			cost, err := s.CalculateCampaignCost(txCtx, &dto.CalculateCampaignCostRequest{
 				Title:      title,
 				Segment:    segment,
@@ -273,6 +267,13 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
+			campaign.Status = models.CampaignStatusWaitingForApproval
+			campaign.NumAudience = utils.ToPtr(cost.NumTargetAudience)
+			campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+			if err := s.campaignRepo.Update(txCtx, campaign); err != nil {
+				return err
+			}
+
 			// Fetch wallet free balance
 			wallet, err := getWallet(txCtx, s.walletRepo, req.CustomerID)
 			if err != nil {
@@ -287,20 +288,20 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			}
 
 			availableBalance := latestBalance.FreeBalance + latestBalance.CreditBalance
-			if availableBalance < cost.Total {
+			if availableBalance < cost.TotalCost {
 				return ErrInsufficientFunds
 			}
 
 			newCreditBalance := uint64(0)
 			newFreeBalance := uint64(0)
-			if latestBalance.CreditBalance <= cost.Total {
+			if latestBalance.CreditBalance <= cost.TotalCost {
 				newCreditBalance = 0
-				newFreeBalance = latestBalance.FreeBalance - (cost.Total - latestBalance.CreditBalance)
+				newFreeBalance = latestBalance.FreeBalance - (cost.TotalCost - latestBalance.CreditBalance)
 			} else {
-				newCreditBalance = latestBalance.CreditBalance - cost.Total
+				newCreditBalance = latestBalance.CreditBalance - cost.TotalCost
 				newFreeBalance = latestBalance.FreeBalance
 			}
-			newFrozenBalance := latestBalance.FrozenBalance + cost.Total
+			newFrozenBalance := latestBalance.FrozenBalance + cost.TotalCost
 
 			// -------------------
 			// -------------------
@@ -313,7 +314,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				"source":        "campaign_update",
 				"operation":     "reserve_budget",
 				"campaign_id":   campaign.ID,
-				"amount":        cost.Total,
+				"amount":        cost.TotalCost,
 				"currency":      utils.TomanCurrency,
 				"campaign_spec": campaign.Spec,
 			}
@@ -355,13 +356,13 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				CorrelationID: corrID,
 				Type:          models.TransactionTypeLaunchCampaign,
 				Status:        models.TransactionStatusPending,
-				Amount:        cost.Total,
+				Amount:        cost.TotalCost,
 				Currency:      utils.TomanCurrency,
 				WalletID:      wallet.ID,
 				CustomerID:    customer.ID,
 				BalanceBefore: beforeMap,
 				BalanceAfter:  afterMap,
-				Description:   fmt.Sprintf("Campaign budget reserved: %d Tomans for campaign %d", cost.Total, campaign.ID),
+				Description:   fmt.Sprintf("Campaign budget reserved: %d Tomans for campaign %d", cost.TotalCost, campaign.ID),
 				Metadata:      metaBytes,
 				CreatedAt:     utils.UTCNow(),
 				UpdatedAt:     utils.UTCNow(),
@@ -503,17 +504,17 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	}
 
 	availableCapacity := capacityResp.Capacity
-	msgTarget := availableCapacity
+	numTargetAudience := availableCapacity
 	if req.Budget != nil {
-		msgTarget = uint64(math.Min(float64(availableCapacity), float64(*req.Budget)/float64(pricePerMsg)))
+		numTargetAudience = uint64(math.Min(float64(availableCapacity), float64(*req.Budget)/float64(pricePerMsg)))
 	}
 
-	total := pricePerMsg * msgTarget
+	total := pricePerMsg * numTargetAudience
 	response := &dto.CalculateCampaignCostResponse{
-		Message:      "Campaign cost calculated successfully",
-		Total:        total,
-		MsgTarget:    msgTarget,
-		MaxMsgTarget: availableCapacity,
+		Message:           "Campaign cost calculated successfully",
+		TotalCost:         total,
+		NumTargetAudience: numTargetAudience,
+		MaxTargetAudience: availableCapacity,
 	}
 
 	return response, nil
