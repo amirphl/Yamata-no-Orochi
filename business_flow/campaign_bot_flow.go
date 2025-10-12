@@ -19,6 +19,7 @@ import (
 // BotCampaignFlow handles campaign listing logic accessible to bots
 type BotCampaignFlow interface {
 	ListReadyCampaigns(ctx context.Context) (*dto.BotListCampaignsResponse, error)
+	MoveCampaignToRunning(ctx context.Context, campaignID uint) error
 	MoveCampaignToExecuted(ctx context.Context, campaignID uint) error
 	UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error)
 }
@@ -52,27 +53,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context) (*dto.BotL
 		ScheduleAfter:  utils.ToPtr(utils.UTCNow().Add(-1 * time.Hour)),
 	}
 
-	var readyCampaigns []*models.Campaign
-	var err error
-
-	// make all status to running in with transsction block
-	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
-		readyCampaigns, err = s.campaignRepo.ByFilter(ctx, cf, "created_at DESC", 0, 0)
-		if err != nil {
-			return err
-		}
-
-		for _, readyCampaign := range readyCampaigns {
-			readyCampaign.Status = models.CampaignStatusRunning
-			err = s.campaignRepo.Update(txCtx, *readyCampaign)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
-
+	readyCampaigns, err := s.campaignRepo.ByFilter(ctx, cf, "created_at DESC", 0, 0)
 	if err != nil {
 		return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to list ready campaigns", err)
 	}
@@ -80,26 +61,54 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context) (*dto.BotL
 	items := make([]dto.BotGetCampaignResponse, 0, len(readyCampaigns))
 	for _, c := range readyCampaigns {
 		items = append(items, dto.BotGetCampaignResponse{
-			ID:         c.ID,
-			Status:     c.Status.String(),
-			CreatedAt:  c.CreatedAt,
-			UpdatedAt:  c.UpdatedAt,
-			Title:      c.Spec.Title,
-			Segment:    c.Spec.Segment,
-			Subsegment: c.Spec.Subsegment,
-			Tags:       c.Spec.Tags,
-			Sex:        c.Spec.Sex,
-			City:       c.Spec.City,
-			AdLink:     c.Spec.AdLink,
-			Content:    c.Spec.Content,
-			ScheduleAt: c.Spec.ScheduleAt,
-			LineNumber: c.Spec.LineNumber,
-			Budget:     c.Spec.Budget,
-			Comment:    c.Comment,
+			ID:           c.ID,
+			Status:       c.Status.String(),
+			CreatedAt:    c.CreatedAt,
+			UpdatedAt:    c.UpdatedAt,
+			Title:        c.Spec.Title,
+			Segment:      c.Spec.Segment,
+			Subsegment:   c.Spec.Subsegment,
+			Tags:         c.Spec.Tags,
+			Sex:          c.Spec.Sex,
+			City:         c.Spec.City,
+			AdLink:       c.Spec.AdLink,
+			Content:      c.Spec.Content,
+			ScheduleAt:   c.Spec.ScheduleAt,
+			LineNumber:   c.Spec.LineNumber,
+			Budget:       c.Spec.Budget,
+			Comment:      c.Comment,
+			NumAudiences: *c.NumAudience,
 		})
 	}
 
-	return &dto.BotListCampaignsResponse{Message: "Ready campaigns retrieved successfully", Items: items}, nil
+	return &dto.BotListCampaignsResponse{
+		Message: "Ready campaigns retrieved successfully",
+		Items:   items,
+	}, nil
+}
+
+// MoveCampaignToRunning moves campaign status to running
+func (s *BotCampaignFlowImpl) MoveCampaignToRunning(ctx context.Context, campaignID uint) error {
+	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		campaign, err := s.campaignRepo.ByID(txCtx, campaignID)
+		if err != nil {
+			return err
+		}
+		if campaign == nil {
+			return ErrCampaignNotFound
+		}
+		campaign.Status = models.CampaignStatusRunning
+		err = s.campaignRepo.Update(txCtx, *campaign)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		return NewBusinessError("BOT_MOVE_CAMPAIGN_TO_RUNNING_FAILED", "Failed to move campaign to running", err)
+	}
+	return nil
 }
 
 // MoveCampaignToExecuted moves campaign status to executed
@@ -134,10 +143,6 @@ type AudienceSpecLeaf struct {
 type AudienceSpecMap map[string]map[string]AudienceSpecLeaf
 
 func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error) {
-	if req == nil {
-		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_VALIDATION_FAILED", "Request is required", errors.New("nil request"))
-	}
-
 	lockKey := redisKey(*s.cacheConfig, utils.AudienceSpecLockKey)
 	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
 	filePath := audienceSpecFilePath()
