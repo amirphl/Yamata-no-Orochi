@@ -53,7 +53,7 @@ func (r *TagRepositoryImpl) ListByNames(ctx context.Context, names []string) ([]
 		return []*models.Tag{}, nil
 	}
 	var rows []*models.Tag
-	if err := db.Model(&models.Tag{}).Where("name IN ?", names).Find(&rows).Error; err != nil {
+	if err := db.Model(&models.Tag{}).Where("name IN ? AND is_active = ?", names, true).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
