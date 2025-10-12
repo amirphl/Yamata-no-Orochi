@@ -115,10 +115,10 @@ type CalculateCampaignCostRequest struct {
 
 // CalculateCampaignCostResponse represents the response to calculate the cost of an campaign
 type CalculateCampaignCostResponse struct {
-	Message      string `json:"message"`
-	Total        uint64 `json:"total"`
-	MsgTarget    uint64 `json:"msg_target"`
-	MaxMsgTarget uint64 `json:"max_msg_target"`
+	Message           string `json:"message"`
+	TotalCost         uint64 `json:"total_cost"`
+	NumTargetAudience uint64 `json:"msg_target"`
+	MaxTargetAudience uint64 `json:"max_msg_target"`
 }
 
 // ListCampaignsFilter represents filter criteria for listing campaigns in request layer
@@ -211,22 +211,23 @@ type AdminRejectCampaignResponse struct {
 
 // BotGetCampaignResponse represents the campaign specification in responses
 type BotGetCampaignResponse struct {
-	ID         uint       `json:"id"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
-	Title      *string    `json:"title,omitempty" validate:"omitempty"`
-	Segment    *string    `json:"segment,omitempty" validate:"omitempty"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty"`
-	Tags       []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty"`
-	City       []string   `json:"city,omitempty" validate:"omitempty"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty"`
-	Content    *string    `json:"content,omitempty" validate:"omitempty"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Comment    *string    `json:"comment,omitempty" validate:"omitempty"`
+	ID           uint       `json:"id"`
+	Status       string     `json:"status"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+	Title        *string    `json:"title,omitempty" validate:"omitempty"`
+	Segment      *string    `json:"segment,omitempty" validate:"omitempty"`
+	Subsegment   []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Tags         []string   `json:"tags,omitempty" validate:"omitempty"`
+	Sex          *string    `json:"sex,omitempty" validate:"omitempty"`
+	City         []string   `json:"city,omitempty" validate:"omitempty"`
+	AdLink       *string    `json:"adlink,omitempty" validate:"omitempty"`
+	Content      *string    `json:"content,omitempty" validate:"omitempty"`
+	ScheduleAt   *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber   *string    `json:"line_number,omitempty" validate:"omitempty"`
+	Budget       *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	Comment      *string    `json:"comment,omitempty" validate:"omitempty"`
+	NumAudiences uint64     `json:"num_audiences"`
 }
 
 // BotListCampaignsResponse represents list of campaigns for bot
