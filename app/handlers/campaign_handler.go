@@ -324,9 +324,9 @@ func (h *CampaignHandler) CalculateCampaignCost(c fiber.Ctx) error {
 	// Successful cost calculation
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign cost calculated successfully", fiber.Map{
 		"message":        result.Message,
-		"total":          result.Total,
-		"msg_target":     result.MsgTarget,
-		"max_msg_target": result.MaxMsgTarget,
+		"total":          result.TotalCost,
+		"msg_target":     result.NumTargetAudience,
+		"max_msg_target": result.MaxTargetAudience,
 	})
 }
 
