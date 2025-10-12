@@ -54,6 +54,9 @@ func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.Audien
 	if f.Tags != nil {
 		db = db.Where("? = ANY (tags)", *f.Tags)
 	}
+	if f.Color != nil {
+		db = db.Where("color = ?", *f.Color)
+	}
 	if f.CreatedAfter != nil {
 		db = db.Where("created_at >= ?", *f.CreatedAfter)
 	}
