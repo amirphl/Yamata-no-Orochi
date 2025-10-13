@@ -282,6 +282,15 @@ services:
       PAYAM_SMS_SCOPE: ${PAYAM_SMS_SCOPE}
       PAYAM_SMS_GRANT_TYPE: ${PAYAM_SMS_GRANT_TYPE}
       PAYAM_SMS_ROOT_ACCESS_TOKEN: ${PAYAM_SMS_ROOT_ACCESS_TOKEN}
+
+      # Bot Configuration
+      BOT_USERNAME: ${BOT_USERNAME}
+      BOT_PASSWORD: ${BOT_PASSWORD}
+      BOT_API_DOMAIN: ${BOT_API_DOMAIN}
+
+      # Scheduler Configuration
+      CAMPAIGN_EXECUTION_ENABLED: ${CAMPAIGN_EXECUTION_ENABLED}
+      CAMPAIGN_EXECUTION_INTERVAL: ${CAMPAIGN_EXECUTION_INTERVAL}
     volumes:
       - app_logs_local:/var/log/yamata
     # ports:
