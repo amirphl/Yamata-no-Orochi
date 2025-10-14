@@ -169,6 +169,7 @@ type AdminGetCampaignResponse struct {
 	Title                 *string    `json:"title,omitempty" validate:"omitempty"`
 	Segment               *string    `json:"segment,omitempty" validate:"omitempty"`
 	Subsegment            []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Tags                  []string   `json:"tags,omitempty" validate:"omitempty"`
 	Sex                   *string    `json:"sex,omitempty" validate:"omitempty"`
 	City                  []string   `json:"city,omitempty" validate:"omitempty"`
 	AdLink                *string    `json:"adlink,omitempty" validate:"omitempty"`
