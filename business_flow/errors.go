@@ -49,6 +49,7 @@ var (
 	ErrCampaignContentRequired      = errors.New("campaign content is required")
 	ErrCampaignSegmentRequired      = errors.New("campaign segment is required")
 	ErrCampaignLineNumberRequired   = errors.New("campaign line number is required")
+	ErrCampaignLineNumberNotActive  = errors.New("campaign line number is not active")
 	ErrCampaignBudgetRequired       = errors.New("campaign budget is required")
 	ErrCampaignSexRequired          = errors.New("campaign sex is required")
 	ErrCampaignAdLinkRequired       = errors.New("campaign ad link is required")
@@ -120,6 +121,8 @@ var (
 	ErrLineNumberValueRequired = errors.New("line number value is required")
 	ErrPriceFactorInvalid      = errors.New("price factor must be greater than zero")
 	ErrLineNumberAlreadyExists = errors.New("line number already exists")
+	ErrLineNumberNotFound      = errors.New("line number not found")
+	ErrLineNumberNotActive     = errors.New("line number is not active")
 )
 
 type BusinessError struct {
@@ -237,6 +240,10 @@ func IsCampaignSegmentRequired(err error) bool {
 
 func IsCampaignLineNumberRequired(err error) bool {
 	return errors.Is(err, ErrCampaignLineNumberRequired)
+}
+
+func IsCampaignLineNumberNotActive(err error) bool {
+	return errors.Is(err, ErrCampaignLineNumberNotActive)
 }
 
 func IsCampaignBudgetRequired(err error) bool {
@@ -477,4 +484,12 @@ func IsPriceFactorInvalid(err error) bool {
 
 func IsLineNumberAlreadyExists(err error) bool {
 	return errors.Is(err, ErrLineNumberAlreadyExists)
+}
+
+func IsLineNumberNotFound(err error) bool {
+	return errors.Is(err, ErrLineNumberNotFound)
+}
+
+func IsLineNumberNotActive(err error) bool {
+	return errors.Is(err, ErrLineNumberNotActive)
 }
