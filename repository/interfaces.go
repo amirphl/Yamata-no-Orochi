@@ -37,6 +37,21 @@ type AdminRepository interface {
 	ByUsername(ctx context.Context, username string) (*models.Admin, error)
 }
 
+// BotRepository defines operations for bots
+type BotRepository interface {
+	Repository[models.Bot, models.BotFilter]
+	ByID(ctx context.Context, id uint) (*models.Bot, error)
+	ByUUID(ctx context.Context, uuid string) (*models.Bot, error)
+	ByUsername(ctx context.Context, username string) (*models.Bot, error)
+}
+
+// AudienceProfileRepository defines operations for audience profiles
+type AudienceProfileRepository interface {
+	Repository[models.AudienceProfile, models.AudienceProfileFilter]
+	ByID(ctx context.Context, id uint) (*models.AudienceProfile, error)
+	ByUID(ctx context.Context, uid string) (*models.AudienceProfile, error)
+}
+
 // LineNumberRepository defines operations for line numbers
 type LineNumberRepository interface {
 	Repository[models.LineNumber, models.LineNumberFilter]
@@ -60,6 +75,7 @@ type CustomerRepository interface {
 	ListActiveCustomers(ctx context.Context, limit, offset int) ([]*models.Customer, error)
 	UpdatePassword(ctx context.Context, customerID uint, passwordHash string) error
 	UpdateVerificationStatus(ctx context.Context, customerID uint, isMobileVerified, isEmailVerified *bool, mobileVerifiedAt, emailVerifiedAt *time.Time) error
+	FindByIDs(ctx context.Context, ids []uint) ([]*models.Customer, error)
 }
 
 // OTPVerificationRepository defines operations for OTP verifications
@@ -210,4 +226,35 @@ type AgencyDiscountRepository interface {
 	GetActiveDiscount(ctx context.Context, agencyID, customerID uint) (*models.AgencyDiscount, error)
 	ListActiveDiscountsWithCustomer(ctx context.Context, agencyID uint, nameLike, orderBy string) ([]*AgencyDiscountWithCustomer, error)
 	ExpireActiveByAgencyAndCustomer(ctx context.Context, agencyID, customerID uint, expiredAt time.Time) error
+}
+
+// TagRepository defines operations for tags
+type TagRepository interface {
+	Repository[models.Tag, models.TagFilter]
+	ByID(ctx context.Context, id uint) (*models.Tag, error)
+	ByName(ctx context.Context, name string) (*models.Tag, error)
+	ListByNames(ctx context.Context, names []string) ([]*models.Tag, error)
+}
+
+// ProcessedCampaignRepository defines operations for processed campaigns
+type ProcessedCampaignRepository interface {
+	Repository[models.ProcessedCampaign, models.ProcessedCampaignFilter]
+	ByID(ctx context.Context, id uint) (*models.ProcessedCampaign, error)
+	ByCampaignID(ctx context.Context, campaignID uint) (*models.ProcessedCampaign, error)
+	Update(ctx context.Context, pc *models.ProcessedCampaign) error
+}
+
+// SentSMSRepository defines operations for sent SMS rows
+type SentSMSRepository interface {
+	Repository[models.SentSMS, models.SentSMSFilter]
+	ByID(ctx context.Context, id uint) (*models.SentSMS, error)
+	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSMS, error)
+}
+
+// TicketRepository defines operations for tickets
+type TicketRepository interface {
+	Repository[models.Ticket, models.TicketFilter]
+	ByID(ctx context.Context, id uint) (*models.Ticket, error)
+	ByUUID(ctx context.Context, uuid string) (*models.Ticket, error)
+	ByCorrelationID(ctx context.Context, correlationID string) ([]*models.Ticket, error)
 }

@@ -380,3 +380,20 @@ func (r *CustomerRepositoryImpl) UpdateVerificationStatus(ctx context.Context, c
 
 	return nil
 }
+
+// FindByIDs retrieves customers by a list of IDs with necessary preloads
+func (r *CustomerRepositoryImpl) FindByIDs(ctx context.Context, ids []uint) ([]*models.Customer, error) {
+	db := r.getDB(ctx)
+	if len(ids) == 0 {
+		return []*models.Customer{}, nil
+	}
+	var customers []*models.Customer
+	if err := db.
+		Where("id IN ?", ids).
+		Preload("AccountType").
+		Preload("ReferrerAgency").
+		Find(&customers).Error; err != nil {
+		return nil, err
+	}
+	return customers, nil
+}

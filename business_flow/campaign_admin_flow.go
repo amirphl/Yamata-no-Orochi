@@ -104,6 +104,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			Title:      c.Spec.Title,
 			Segment:    c.Spec.Segment,
 			Subsegment: c.Spec.Subsegment,
+			Tags:       c.Spec.Tags,
 			Sex:        c.Spec.Sex,
 			City:       c.Spec.City,
 			AdLink:     c.Spec.AdLink,
@@ -451,7 +452,9 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		_ = s.notifier.SendSMS(smsCtx, customerMobile, msgCustomer, &id64)
 	}
 
-	return &dto.AdminRejectCampaignResponse{Message: "Campaign rejected and budget refunded successfully"}, nil
+	return &dto.AdminRejectCampaignResponse{
+		Message: "Campaign rejected and budget refunded successfully",
+	}, nil
 }
 
 func normalizeIranMobile(m string) string {

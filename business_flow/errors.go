@@ -49,6 +49,7 @@ var (
 	ErrCampaignContentRequired      = errors.New("campaign content is required")
 	ErrCampaignSegmentRequired      = errors.New("campaign segment is required")
 	ErrCampaignLineNumberRequired   = errors.New("campaign line number is required")
+	ErrCampaignLineNumberNotActive  = errors.New("campaign line number is not active")
 	ErrCampaignBudgetRequired       = errors.New("campaign budget is required")
 	ErrCampaignSexRequired          = errors.New("campaign sex is required")
 	ErrCampaignAdLinkRequired       = errors.New("campaign ad link is required")
@@ -56,6 +57,7 @@ var (
 	ErrScheduleTimeTooSoon          = errors.New("schedule time is too soon")
 	ErrCampaignCityRequired         = errors.New("campaign city is required")
 	ErrCampaignSubsegmentRequired   = errors.New("campaign subsegment is required")
+	ErrCampaignTagsRequired         = errors.New("campaign tags is required")
 	ErrCampaignUpdateRequired       = errors.New("at least one field must be provided for update")
 	ErrCampaignUUIDRequired         = errors.New("campaign UUID is required")
 
@@ -111,10 +113,19 @@ var (
 	ErrAdminInactive  = errors.New("admin account is inactive")
 	ErrInvalidCaptcha = errors.New("invalid captcha")
 
+	// Bot related errors
+	ErrBotNotFound = errors.New("bot not found")
+	ErrBotInactive = errors.New("bot account is inactive")
+
 	// Line number related errors
 	ErrLineNumberValueRequired = errors.New("line number value is required")
 	ErrPriceFactorInvalid      = errors.New("price factor must be greater than zero")
 	ErrLineNumberAlreadyExists = errors.New("line number already exists")
+	ErrLineNumberNotFound      = errors.New("line number not found")
+	ErrLineNumberNotActive     = errors.New("line number is not active")
+
+	// Ticket related errors
+	ErrTicketNotFound = errors.New("ticket not found")
 )
 
 type BusinessError struct {
@@ -234,6 +245,10 @@ func IsCampaignLineNumberRequired(err error) bool {
 	return errors.Is(err, ErrCampaignLineNumberRequired)
 }
 
+func IsCampaignLineNumberNotActive(err error) bool {
+	return errors.Is(err, ErrCampaignLineNumberNotActive)
+}
+
 func IsCampaignBudgetRequired(err error) bool {
 	return errors.Is(err, ErrCampaignBudgetRequired)
 }
@@ -260,6 +275,10 @@ func IsCampaignCityRequired(err error) bool {
 
 func IsCampaignSubsegmentRequired(err error) bool {
 	return errors.Is(err, ErrCampaignSubsegmentRequired)
+}
+
+func IsCampaignTagsRequired(err error) bool {
+	return errors.Is(err, ErrCampaignTagsRequired)
 }
 
 func IsCampaignUpdateRequired(err error) bool {
@@ -450,6 +469,14 @@ func IsInvalidCaptcha(err error) bool {
 	return errors.Is(err, ErrInvalidCaptcha)
 }
 
+func IsBotNotFound(err error) bool {
+	return errors.Is(err, ErrBotNotFound)
+}
+
+func IsBotInactive(err error) bool {
+	return errors.Is(err, ErrBotInactive)
+}
+
 func IsLineNumberValueRequired(err error) bool {
 	return errors.Is(err, ErrLineNumberValueRequired)
 }
@@ -460,4 +487,16 @@ func IsPriceFactorInvalid(err error) bool {
 
 func IsLineNumberAlreadyExists(err error) bool {
 	return errors.Is(err, ErrLineNumberAlreadyExists)
+}
+
+func IsLineNumberNotFound(err error) bool {
+	return errors.Is(err, ErrLineNumberNotFound)
+}
+
+func IsLineNumberNotActive(err error) bool {
+	return errors.Is(err, ErrLineNumberNotActive)
+}
+
+func IsTicketNotFound(err error) bool {
+	return errors.Is(err, ErrTicketNotFound)
 }

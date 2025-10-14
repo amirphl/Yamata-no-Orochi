@@ -19,6 +19,8 @@ const (
 	CampaignStatusInProgress         CampaignStatus = "in-progress"
 	CampaignStatusWaitingForApproval CampaignStatus = "waiting-for-approval"
 	CampaignStatusApproved           CampaignStatus = "approved"
+	CampaignStatusRunning            CampaignStatus = "running"
+	CampaignStatusExecuted           CampaignStatus = "executed"
 	CampaignStatusRejected           CampaignStatus = "rejected"
 )
 
@@ -32,7 +34,7 @@ func (s CampaignStatus) Valid() bool {
 	switch s {
 	case CampaignStatusInitiated, CampaignStatusInProgress,
 		CampaignStatusWaitingForApproval, CampaignStatusApproved,
-		CampaignStatusRejected:
+		CampaignStatusRejected, CampaignStatusRunning, CampaignStatusExecuted:
 		return true
 	default:
 		return false
@@ -74,6 +76,7 @@ type CampaignSpec struct {
 	// Target audience
 	Segment    *string  `json:"segment,omitempty"`
 	Subsegment []string `json:"subsegment,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
 	Sex        *string  `json:"sex,omitempty"`
 	City       []string `json:"city,omitempty"`
 
@@ -124,6 +127,9 @@ type Campaign struct {
 	UpdatedAt  *time.Time     `gorm:"index:idx_sms_campaigns_updated_at" json:"updated_at,omitempty"`
 	Spec       CampaignSpec   `gorm:"type:jsonb;not null" json:"spec"`
 	Comment    *string        `gorm:"type:text" json:"comment,omitempty"`
+
+	// Number of targeted audiences
+	NumAudience *uint64 `gorm:"type:bigint" json:"num_audience,omitempty"`
 
 	// Relations
 	Customer          *Customer          `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`

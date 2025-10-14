@@ -250,3 +250,13 @@ app/services/jwt_public.pem
 
 .env.local
 .env.beta
+
+py-ai/Customer Persona New.xlsx
+py-ai/Customer Title.csv
+py-ai/process_persona_excel.py
+py-ai/persona_analysis_results.csv
+py-ai/AI command.txt
+
+data/
+
+scripts/update-audience-spec.sh

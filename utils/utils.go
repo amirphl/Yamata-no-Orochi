@@ -27,7 +27,7 @@ func ParseUUID(uuidStr string) (uuid.UUID, error) {
 func GenerateRandomAgencyRefererCode() string {
 	// Ensure first digit is non-zero to keep 10 digits
 	digits := make([]byte, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		var b [1]byte
 		for {
 			_, _ = rand.Read(b[:])

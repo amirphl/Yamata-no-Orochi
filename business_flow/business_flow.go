@@ -4,6 +4,9 @@ package businessflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -119,6 +122,26 @@ func ToAdminDTOModel(a models.Admin) dto.AdminDTO {
 
 func ToAdminSessionDTO(accessToken, refreshToken string) dto.AdminSessionDTO {
 	return dto.AdminSessionDTO{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    utils.AccessTokenTTLSeconds,
+		TokenType:    "Bearer",
+		CreatedAt:    utils.UTCNow().Format(time.RFC3339),
+	}
+}
+
+func ToBotDTOModel(b models.Bot) dto.BotDTO {
+	return dto.BotDTO{
+		ID:        b.ID,
+		UUID:      b.UUID.String(),
+		Username:  b.Username,
+		IsActive:  b.IsActive,
+		CreatedAt: b.CreatedAt.Format(time.RFC3339),
+	}
+}
+
+func ToBotSessionDTO(accessToken, refreshToken string) dto.BotSessionDTO {
+	return dto.BotSessionDTO{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    utils.AccessTokenTTLSeconds,
@@ -275,7 +298,7 @@ func getCampaign(ctx context.Context, campaignRepo repository.CampaignRepository
 // canUpdateCampaign checks if a campaign can be updated based on its current status
 func canUpdateCampaign(status models.CampaignStatus) bool {
 	// Only campaigns with 'initiated' or 'in-progress' status can be updated
-	// Campaigns with 'waiting-for-approval', 'approved', or 'rejected' status cannot be updated
+	// Campaigns with 'waiting-for-approval', 'approved', 'rejected', 'running', or 'executed' status cannot be updated
 	return status == models.CampaignStatusInitiated || status == models.CampaignStatusInProgress
 }
 
@@ -401,4 +424,30 @@ func ValidateShebaNumber(shebaNumber *string) (string, error) {
 	}
 
 	return shebaNumberStr, nil
+}
+
+func redisKey(cacheConfig config.CacheConfig, suffix string) string {
+	prefix := cacheConfig.RedisPrefix
+	if prefix == "" {
+		prefix = "yamata"
+	}
+	return fmt.Sprintf("%s:%s", prefix, suffix)
+}
+
+func audienceSpecFilePath() string {
+	// Default to ./data; could be extended via config if needed
+	base := "data"
+	return filepath.Join(base, "audience_spec.json")
+}
+
+func atomicWrite(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, fmt.Sprintf(".%s.tmp", filepath.Base(path)))
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

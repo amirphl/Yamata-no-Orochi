@@ -17,6 +17,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -27,6 +28,7 @@ type CampaignFlow interface {
 	CalculateCampaignCapacity(ctx context.Context, req *dto.CalculateCampaignCapacityRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCapacityResponse, error)
 	CalculateCampaignCost(ctx context.Context, req *dto.CalculateCampaignCostRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error)
 	ListCampaigns(ctx context.Context, req *dto.ListCampaignsRequest, metadata *ClientMetadata) (*dto.ListCampaignsResponse, error)
+	ListAudienceSpec(ctx context.Context) (*dto.ListAudienceSpecResponse, error)
 }
 
 // CampaignFlowImpl implements the campaign business flow
@@ -37,8 +39,11 @@ type CampaignFlowImpl struct {
 	balanceSnapshotRepo repository.BalanceSnapshotRepository
 	transactionRepo     repository.TransactionRepository
 	auditRepo           repository.AuditLogRepository
+	lineNumberRepo      repository.LineNumberRepository
 	notifier            services.NotificationService
 	adminConfig         config.AdminConfig
+	cacheConfig         *config.CacheConfig
+	rc                  *redis.Client
 	db                  *gorm.DB
 }
 
@@ -50,9 +55,12 @@ func NewCampaignFlow(
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
+	lineNumberRepo repository.LineNumberRepository,
 	db *gorm.DB,
+	rc *redis.Client,
 	notifier services.NotificationService,
 	adminConfig config.AdminConfig,
+	cacheConfig *config.CacheConfig,
 ) CampaignFlow {
 	return &CampaignFlowImpl{
 		campaignRepo:        campaignRepo,
@@ -61,8 +69,11 @@ func NewCampaignFlow(
 		balanceSnapshotRepo: balanceSnapshotRepo,
 		transactionRepo:     transactionRepo,
 		auditRepo:           auditRepo,
+		lineNumberRepo:      lineNumberRepo,
 		notifier:            notifier,
 		adminConfig:         adminConfig,
+		cacheConfig:         cacheConfig,
+		rc:                  rc,
 		db:                  db,
 	}
 }
@@ -138,6 +149,11 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_NOT_ALLOWED", "Campaign cannot be updated in current status", ErrCampaignUpdateNotAllowed)
 	}
 
+	if req.ScheduleAt == nil && campaign.Spec.ScheduleAt == nil {
+		req.ScheduleAt = utils.ToPtr(utils.UTCNow().Add(time.Hour))
+		campaign.Spec.ScheduleAt = req.ScheduleAt
+	}
+
 	// Validate schedule time must be at least 10 minutes in the future
 	scheduleTime := req.ScheduleAt
 	if scheduleTime == nil {
@@ -153,6 +169,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		title      = req.Title
 		segment    = req.Segment
 		subsegment = req.Subsegment
+		tags       = req.Tags
 		sex        = req.Sex
 		city       = req.City
 		adLink     = req.AdLink
@@ -169,6 +186,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if req.Subsegment == nil {
 		subsegment = campaign.Spec.Subsegment
+	}
+	if req.Tags == nil {
+		tags = campaign.Spec.Tags
 	}
 	if req.Sex == nil {
 		sex = campaign.Spec.Sex
@@ -196,6 +216,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		Title:      title,
 		Segment:    segment,
 		Subsegment: subsegment,
+		Tags:       tags,
 		Sex:        sex,
 		City:       city,
 		AdLink:     adLink,
@@ -224,7 +245,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			// TODO: -------------------
 			// TODO: validate all required fields are present like line number, budget
 			// schedule time must be present and be in future
-			// title (len), sex (choice), segment (db, len), subsegment (db, len), city (db, len), adlink (len), content (len), line number (db, len), budget (min, max)
+			// title (len), sex (choice), segment (db, len), subsegment (db, len), tags (db, len), city (db, len), adlink (len), content (len), line number (db, len), budget (min, max)
 			// TODO: ------------------- Line number must be valid (db)
 
 			// retrieve campaign again (last state)
@@ -237,9 +258,22 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
-			campaign.Status = models.CampaignStatusWaitingForApproval
-			campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
-			if err := s.campaignRepo.Update(txCtx, campaign); err != nil {
+			if req.LineNumber != nil {
+				// query line number exists
+				lineNumber, err := s.lineNumberRepo.ByValue(txCtx, *req.LineNumber)
+				if err != nil {
+					return err
+				}
+				if lineNumber == nil {
+					return ErrLineNumberNotFound
+				}
+				if !*lineNumber.IsActive {
+					return ErrLineNumberNotActive
+				}
+			}
+
+			lineNumberPriceFactor, err := s.fetchLineNumberPriceFactor(txCtx, *req.LineNumber)
+			if err != nil {
 				return err
 			}
 
@@ -247,6 +281,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				Title:      title,
 				Segment:    segment,
 				Subsegment: subsegment,
+				Tags:       tags,
 				Sex:        sex,
 				City:       city,
 				AdLink:     adLink,
@@ -256,6 +291,13 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				Budget:     budget,
 			}, metadata)
 			if err != nil {
+				return err
+			}
+
+			campaign.Status = models.CampaignStatusWaitingForApproval
+			campaign.NumAudience = utils.ToPtr(cost.NumTargetAudience)
+			campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+			if err := s.campaignRepo.Update(txCtx, campaign); err != nil {
 				return err
 			}
 
@@ -273,20 +315,20 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			}
 
 			availableBalance := latestBalance.FreeBalance + latestBalance.CreditBalance
-			if availableBalance < cost.Total {
+			if availableBalance < cost.TotalCost {
 				return ErrInsufficientFunds
 			}
 
 			newCreditBalance := uint64(0)
 			newFreeBalance := uint64(0)
-			if latestBalance.CreditBalance <= cost.Total {
+			if latestBalance.CreditBalance <= cost.TotalCost {
 				newCreditBalance = 0
-				newFreeBalance = latestBalance.FreeBalance - (cost.Total - latestBalance.CreditBalance)
+				newFreeBalance = latestBalance.FreeBalance - (cost.TotalCost - latestBalance.CreditBalance)
 			} else {
-				newCreditBalance = latestBalance.CreditBalance - cost.Total
+				newCreditBalance = latestBalance.CreditBalance - cost.TotalCost
 				newFreeBalance = latestBalance.FreeBalance
 			}
-			newFrozenBalance := latestBalance.FrozenBalance + cost.Total
+			newFrozenBalance := latestBalance.FrozenBalance + cost.TotalCost
 
 			// -------------------
 			// -------------------
@@ -296,12 +338,13 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 			// Build metadata with full campaign spec
 			meta := map[string]any{
-				"source":        "campaign_update",
-				"operation":     "reserve_budget",
-				"campaign_id":   campaign.ID,
-				"amount":        cost.Total,
-				"currency":      utils.TomanCurrency,
-				"campaign_spec": campaign.Spec,
+				"source":                   "campaign_update",
+				"operation":                "reserve_budget",
+				"campaign_id":              campaign.ID,
+				"amount":                   cost.TotalCost,
+				"currency":                 utils.TomanCurrency,
+				"campaign_spec":            campaign.Spec,
+				"line_number_price_factor": lineNumberPriceFactor,
 			}
 			metaBytes, _ := json.Marshal(meta)
 
@@ -341,13 +384,13 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				CorrelationID: corrID,
 				Type:          models.TransactionTypeLaunchCampaign,
 				Status:        models.TransactionStatusPending,
-				Amount:        cost.Total,
+				Amount:        cost.TotalCost,
 				Currency:      utils.TomanCurrency,
 				WalletID:      wallet.ID,
 				CustomerID:    customer.ID,
 				BalanceBefore: beforeMap,
 				BalanceAfter:  afterMap,
-				Description:   fmt.Sprintf("Campaign budget reserved: %d Tomans for campaign %d", cost.Total, campaign.ID),
+				Description:   fmt.Sprintf("Campaign budget reserved: %d Tomans for campaign %d", cost.TotalCost, campaign.ID),
 				Metadata:      metaBytes,
 				CreatedAt:     utils.UTCNow(),
 				UpdatedAt:     utils.UTCNow(),
@@ -392,20 +435,69 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 // CalculateCampaignCapacity handles the campaign capacity calculation process
 func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *dto.CalculateCampaignCapacityRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCapacityResponse, error) {
-	// For now, just return a fixed capacity of 11000
-	// In the future, this could be enhanced with:
-	// - Target audience analysis based on segment/subsegment
-	// - Geographic reach calculation based on cities
-	// - Budget-based capacity estimation
-	// - Historical campaign performance data
-	// - Seasonal factors and market conditions
-
-	response := &dto.CalculateCampaignCapacityResponse{
-		Message:  "Campaign capacity calculated successfully",
-		Capacity: 501,
+	if req.Segment == nil {
+		return nil, NewBusinessError("SEGMENT_REQUIRED", "Segment is required", ErrCampaignSegmentRequired)
+	}
+	if req.Subsegment == nil {
+		return nil, NewBusinessError("SUBSEGMENT_REQUIRED", "Subsegment is required", ErrCampaignSubsegmentRequired)
+	}
+	if req.Tags == nil {
+		return nil, NewBusinessError("TAGS_REQUIRED", "Tags is required", ErrCampaignTagsRequired)
 	}
 
-	return response, nil
+	// Fetch audience spec (from cache or file)
+	specResp, err := s.ListAudienceSpec(ctx)
+	if err != nil {
+		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_FAILED", "Failed to load audience spec", err)
+	}
+
+	var capacity uint64
+
+	// Determine subsegments to evaluate
+	subsegments := req.Subsegment
+	if len(subsegments) == 0 {
+		// If not provided, consider all subsegments under the selected segment
+		if segMap, ok := specResp.Spec[*req.Segment]; ok {
+			for ss := range segMap {
+				subsegments = append(subsegments, ss)
+			}
+		}
+	}
+
+	// Build a set of requested tags for quick lookup
+	tagSet := make(map[string]struct{}, len(req.Tags))
+	for _, t := range req.Tags {
+		if t != "" {
+			tagSet[t] = struct{}{}
+		}
+	}
+
+	// Sum available audience where at least one tag matches
+	if segMap, ok := specResp.Spec[*req.Segment]; ok {
+		for _, ss := range subsegments {
+			if item, ok := segMap[ss]; ok {
+				if len(tagSet) == 0 {
+					capacity += uint64(item.AvailableAudience)
+					continue
+				}
+				matched := false
+				for _, it := range item.Tags {
+					if _, ok := tagSet[it]; ok {
+						matched = true
+						break
+					}
+				}
+				if matched {
+					capacity += uint64(item.AvailableAudience)
+				}
+			}
+		}
+	}
+
+	return &dto.CalculateCampaignCapacityResponse{
+		Message:  "Campaign capacity calculated successfully",
+		Capacity: capacity,
+	}, nil
 }
 
 // CalculateCampaignCost handles the campaign cost calculation process
@@ -413,10 +505,17 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	// Calculate the number of parts based on content length
 	numPages := s.calculateSMSParts(req.Content)
 
+	if req.LineNumber == nil {
+		return nil, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required", ErrCampaignLineNumberRequired)
+	}
+
 	// Pricing constants
-	basePrice := uint64(140)
-	lineFactor := uint64(20)
-	segmentFactor := float64(2.2)
+	basePrice := uint64(150)
+	lineFactor, err := s.fetchLineNumberPriceFactor(ctx, *req.LineNumber)
+	if err != nil {
+		return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
+	}
+	segmentFactor := float64(1.5)
 
 	// Calculate price per message
 	pricePerMsg := uint64(200*numPages) + basePrice*uint64(float64(lineFactor)*segmentFactor)
@@ -426,6 +525,7 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 		Title:      req.Title,
 		Segment:    req.Segment,
 		Subsegment: req.Subsegment,
+		Tags:       req.Tags,
 		Sex:        req.Sex,
 		City:       req.City,
 		AdLink:     req.AdLink,
@@ -439,20 +539,35 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	}
 
 	availableCapacity := capacityResp.Capacity
-	msgTarget := availableCapacity
+	numTargetAudience := availableCapacity
 	if req.Budget != nil {
-		msgTarget = uint64(math.Min(float64(availableCapacity), float64(*req.Budget)/float64(pricePerMsg)))
+		numTargetAudience = uint64(math.Min(float64(availableCapacity), float64(*req.Budget)/float64(pricePerMsg)))
 	}
 
-	total := pricePerMsg * msgTarget
+	total := pricePerMsg * numTargetAudience
 	response := &dto.CalculateCampaignCostResponse{
-		Message:      "Campaign cost calculated successfully",
-		Total:        total,
-		MsgTarget:    msgTarget,
-		MaxMsgTarget: availableCapacity,
+		Message:           "Campaign cost calculated successfully",
+		TotalCost:         total,
+		NumTargetAudience: numTargetAudience,
+		MaxTargetAudience: availableCapacity,
 	}
 
 	return response, nil
+}
+
+func (s *CampaignFlowImpl) fetchLineNumberPriceFactor(ctx context.Context, lineNumber string) (float64, error) {
+	ln, err := s.lineNumberRepo.ByValue(ctx, lineNumber)
+	if err != nil {
+		return 0, err
+	}
+	if ln == nil {
+		return 0, ErrLineNumberNotFound
+	}
+	if !*ln.IsActive {
+		return 0, ErrLineNumberNotActive
+	}
+
+	return ln.PriceFactor, nil
 }
 
 // ListCampaigns retrieves user's campaigns with pagination, ordering and filters
@@ -530,6 +645,7 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 			Title:      c.Spec.Title,
 			Segment:    c.Spec.Segment,
 			Subsegment: c.Spec.Subsegment,
+			Tags:       c.Spec.Tags,
 			Sex:        c.Spec.Sex,
 			City:       c.Spec.City,
 			AdLink:     c.Spec.AdLink,
@@ -603,6 +719,12 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 		}
 	}
 
+	if len(req.Tags) > 0 {
+		if slices.Contains(req.Tags, "") {
+			return ErrCampaignTagsRequired
+		}
+	}
+
 	return nil
 }
 
@@ -619,6 +741,9 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	}
 	if len(req.Subsegment) > 0 {
 		spec.Subsegment = req.Subsegment
+	}
+	if len(req.Tags) > 0 {
+		spec.Tags = req.Tags
 	}
 	if req.Sex != nil && *req.Sex != "" {
 		spec.Sex = req.Sex
@@ -676,7 +801,7 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	}
 
 	// At least one field should be provided for update
-	hasUpdateFields := req.Title != nil || req.Segment != nil || len(req.Subsegment) > 0 ||
+	hasUpdateFields := req.Title != nil || req.Segment != nil || len(req.Subsegment) > 0 || len(req.Tags) > 0 ||
 		req.Sex != nil || len(req.City) > 0 || req.AdLink != nil || req.Content != nil ||
 		req.ScheduleAt != nil || req.LineNumber != nil || req.Budget != nil
 
@@ -696,6 +821,9 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(campaign models.Campaign) error {
 	}
 	if campaign.Spec.Subsegment == nil {
 		return ErrCampaignSubsegmentRequired
+	}
+	if campaign.Spec.Tags == nil {
+		return ErrCampaignTagsRequired
 	}
 	if campaign.Spec.Content == nil || *campaign.Spec.Content == "" {
 		return ErrCampaignContentRequired
@@ -729,6 +857,9 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if len(req.Subsegment) > 0 {
 		spec.Subsegment = req.Subsegment
+	}
+	if len(req.Tags) > 0 {
+		spec.Tags = req.Tags
 	}
 	if req.Sex != nil && *req.Sex != "" {
 		spec.Sex = req.Sex
@@ -764,6 +895,57 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 
 	return nil
+}
+
+// ListAudienceSpec returns the current audience spec from cache or file
+func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context) (*dto.ListAudienceSpecResponse, error) {
+	// derive redis key and file path consistent with bot audience spec flow
+
+	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
+	filePath := audienceSpecFilePath()
+
+	// try redis first
+	if bs, err := s.rc.Get(ctx, cacheKey).Bytes(); err == nil && len(bs) > 0 {
+		var out dto.AudienceSpec
+		if err := json.Unmarshal(bs, &out); err == nil {
+			return &dto.ListAudienceSpecResponse{
+				Message: "Audience spec retrieved from cache",
+				Spec:    out,
+			}, nil
+		}
+	}
+
+	// Read existing JSON file (if any)
+	current, err := readAudienceSpecFile(filePath)
+	if err != nil {
+		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
+	}
+
+	// Marshal and write atomically (tmp + rename)
+	bytes, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal merged spec", err)
+	}
+
+	// Update Redis cache
+	_ = s.rc.Set(ctx, cacheKey, bytes, 0).Err()
+
+	out := dto.AudienceSpec{}
+	for segment, subsegment := range current {
+		for subsegment, item := range subsegment {
+			if item.AvailableAudience > 0 {
+				out[segment][subsegment] = dto.AudienceSpecItem{
+					Tags:              item.Tags,
+					AvailableAudience: item.AvailableAudience,
+				}
+			}
+		}
+	}
+
+	return &dto.ListAudienceSpecResponse{
+		Message: "Audience spec retrieved",
+		Spec:    out,
+	}, nil
 }
 
 // calculateSMSParts calculates the number of SMS parts based on character count
