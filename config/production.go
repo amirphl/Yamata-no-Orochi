@@ -28,6 +28,9 @@ type ProductionConfig struct {
 	Atipay     AtipayConfig     `json:"atipay"`
 	Admin      AdminConfig      `json:"admin"`
 	System     SystemConfig     `json:"system"`
+	PayamSMS   PayamSMSConfig   `json:"payam_sms"`
+	Bot        BotConfig        `json:"bot"`
+	Scheduler  SchedulerConfig  `json:"scheduler"`
 }
 
 type DatabaseConfig struct {
@@ -239,6 +242,12 @@ type AdminConfig struct {
 	Mobile string `json:"admin_mobile"`
 }
 
+type BotConfig struct {
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	APIDomain string `json:"api_domain"`
+}
+
 // SystemConfig holds system/tax actors and wallets UUIDs configured by admin
 type SystemConfig struct {
 	SystemUserUUID    string `json:"system_user_uuid"`
@@ -250,6 +259,22 @@ type SystemConfig struct {
 	SystemWalletUUID  string `json:"system_wallet_uuid"`
 	TaxWalletUUID     string `json:"tax_wallet_uuid"`
 	SystemShebaNumber string `json:"system_sheba_number"`
+}
+
+// PayamSMSConfig holds credentials and endpoints for PayamSMS OAuth
+type PayamSMSConfig struct {
+	TokenURL        string `json:"token_url"`
+	SystemName      string `json:"system_name"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	Scope           string `json:"scope"`
+	GrantType       string `json:"grant_type"`
+	RootAccessToken string `json:"root_access_token"`
+}
+
+type SchedulerConfig struct {
+	CampaignExecutionEnabled  bool          `json:"campaign_execution_enabled"`
+	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
 }
 
 // LoadProductionConfig loads and validates configuration from environment variables
@@ -433,6 +458,24 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			SystemWalletUUID:  getEnvString("SYSTEM_WALLET_UUID", ""),
 			TaxWalletUUID:     getEnvString("TAX_WALLET_UUID", ""),
 			SystemShebaNumber: getEnvString("SYSTEM_SHEBA_NUMBER", ""),
+		},
+		PayamSMS: PayamSMSConfig{
+			TokenURL:        getEnvString("PAYAM_SMS_TOKEN_URL", "https://www.payamsms.com/auth/oauth/token/"),
+			SystemName:      getEnvString("PAYAM_SMS_SYSTEM_NAME", "jaazebeh.ir"),
+			Username:        getEnvString("PAYAM_SMS_USERNAME", ""),
+			Password:        getEnvString("PAYAM_SMS_PASSWORD", ""),
+			Scope:           getEnvString("PAYAM_SMS_SCOPE", "webservice"),
+			GrantType:       getEnvString("PAYAM_SMS_GRANT_TYPE", "password"),
+			RootAccessToken: getEnvString("PAYAM_SMS_ROOT_ACCESS_TOKEN", ""),
+		},
+		Bot: BotConfig{
+			Username:  getEnvString("BOT_USERNAME", ""),
+			Password:  getEnvString("BOT_PASSWORD", ""),
+			APIDomain: getEnvString("BOT_API_DOMAIN", ""),
+		},
+		Scheduler: SchedulerConfig{
+			CampaignExecutionEnabled:  getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
+			CampaignExecutionInterval: getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
 		},
 	}
 

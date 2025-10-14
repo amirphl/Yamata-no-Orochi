@@ -9,7 +9,7 @@ import (
 
 // ChargeWalletRequest represents the request to charge a wallet
 type ChargeWalletRequest struct {
-	AmountWithTax uint64 `json:"amount" validate:"required,min=100000,max=1000000000"` // Amount in Tomans (minimum 10000, maximum 1000000000)
+	AmountWithTax uint64 `json:"amount" validate:"required,min=1000,max=1000000000"` // Amount in Tomans (minimum 1000, maximum 1000000000)
 	CustomerID    uint   `json:"-"`
 }
 

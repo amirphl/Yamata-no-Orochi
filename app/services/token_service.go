@@ -33,6 +33,9 @@ type TokenService interface {
 	IsTokenRevoked(token string) bool
 	GenerateAdminTokens(adminID uint) (accessToken, refreshToken string, err error)
 	ValidateAdminToken(token string) (*AdminTokenClaims, error)
+	// Bot tokens
+	GenerateBotTokens(botID uint) (accessToken, refreshToken string, err error)
+	ValidateBotToken(token string) (*BotTokenClaims, error)
 }
 
 // TokenClaims represents the claims in a JWT token
@@ -47,6 +50,15 @@ type TokenClaims struct {
 // AdminTokenClaims represents claims for admin JWTs
 type AdminTokenClaims struct {
 	AdminID   uint      `json:"admin_id"`
+	IssuedAt  time.Time `json:"issued_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	TokenType string    `json:"token_type"`
+	TokenID   string    `json:"jti"`
+}
+
+// BotTokenClaims represents claims for bot JWTs
+type BotTokenClaims struct {
+	BotID     uint      `json:"bot_id"`
 	IssuedAt  time.Time `json:"issued_at"`
 	ExpiresAt time.Time `json:"expires_at"`
 	TokenType string    `json:"token_type"`
@@ -237,6 +249,53 @@ func (s *TokenServiceImpl) GenerateAdminTokens(adminID uint) (accessToken, refre
 	return accessToken, refreshToken, nil
 }
 
+// GenerateBotTokens generates access and refresh tokens for a bot
+func (s *TokenServiceImpl) GenerateBotTokens(botID uint) (accessToken, refreshToken string, err error) {
+	now := utils.UTCNow()
+
+	accessTokenID, err := generateTokenID()
+	if err != nil {
+		return "", "", err
+	}
+
+	refreshTokenID, err := generateTokenID()
+	if err != nil {
+		return "", "", err
+	}
+
+	accessClaims := jwt.MapClaims{
+		"bot_id":     botID,
+		"token_type": "access",
+		"jti":        accessTokenID,
+		"iat":        now.Unix(),
+		"exp":        now.Add(s.accessTokenTTL).Unix(),
+		"iss":        s.issuer,
+		"aud":        s.audience,
+	}
+
+	accessToken, err = s.generateToken(accessClaims)
+	if err != nil {
+		return "", "", err
+	}
+
+	refreshClaims := jwt.MapClaims{
+		"bot_id":     botID,
+		"token_type": "refresh",
+		"jti":        refreshTokenID,
+		"iat":        now.Unix(),
+		"exp":        now.Add(s.refreshTokenTTL).Unix(),
+		"iss":        s.issuer,
+		"aud":        s.audience,
+	}
+
+	refreshToken, err = s.generateToken(refreshClaims)
+	if err != nil {
+		return "", "", err
+	}
+
+	return accessToken, refreshToken, nil
+}
+
 // ValidateToken validates a JWT token and returns claims
 func (s *TokenServiceImpl) ValidateToken(token string) (*TokenClaims, error) {
 	var err error
@@ -387,6 +446,73 @@ func (s *TokenServiceImpl) ValidateAdminToken(token string) (*AdminTokenClaims, 
 	}
 	return &AdminTokenClaims{
 		AdminID:   uint(adminID),
+		TokenType: tokenType,
+		TokenID:   tokenID,
+		IssuedAt:  time.Unix(int64(issuedAt), 0),
+		ExpiresAt: time.Unix(int64(expiresAt), 0),
+	}, nil
+}
+
+// ValidateBotToken validates a bot JWT and returns bot-specific claims
+func (s *TokenServiceImpl) ValidateBotToken(token string) (*BotTokenClaims, error) {
+	var err error
+	var parsedToken *jwt.Token
+	if s.useRSAKeys {
+		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return s.publicKey, nil
+		})
+	} else {
+		parsedToken, err = jwt.Parse(token, func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return s.secretKey, nil
+		})
+	}
+	if err != nil {
+		if strings.Contains(err.Error(), "expired") || strings.Contains(err.Error(), "exp") {
+			return nil, ErrTokenExpired
+		}
+		return nil, ErrTokenInvalid
+	}
+	if !parsedToken.Valid {
+		return nil, ErrTokenInvalid
+	}
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+	botID, ok := claims["bot_id"].(float64)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+	tokenType, ok := claims["token_type"].(string)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+	tokenID, ok := claims["jti"].(string)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+	issuedAt, ok := claims["iat"].(float64)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+	expiresAt, ok := claims["exp"].(float64)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+	if utils.UTCNow().After(time.Unix(int64(expiresAt), 0)) {
+		return nil, ErrTokenExpired
+	}
+	if s.IsTokenRevoked(token) {
+		return nil, ErrTokenRevoked
+	}
+	return &BotTokenClaims{
+		BotID:     uint(botID),
 		TokenType: tokenType,
 		TokenID:   tokenID,
 		IssuedAt:  time.Unix(int64(issuedAt), 0),

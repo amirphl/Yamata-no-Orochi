@@ -8,6 +8,11 @@ definitions:
       success:
         type: boolean
     type: object
+  dto.ActiveLineNumberItem:
+    properties:
+      line_number:
+        type: string
+    type: object
   dto.AdminApproveCampaignRequest:
     properties:
       campaign_id:
@@ -71,6 +76,155 @@ definitions:
     - line_number
     - price_factor
     type: object
+  dto.AdminCreateResponseTicketRequest:
+    properties:
+      attached_file_name:
+        type: string
+      attached_file_size:
+        type: integer
+      attached_file_url:
+        type: string
+      content:
+        type: string
+      ticket_id:
+        type: integer
+    type: object
+  dto.AdminCreateResponseTicketResponse:
+    properties:
+      correlation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.AdminCustomerCampaignItem:
+    properties:
+      campaign_id:
+        type: integer
+      click_rate:
+        type: number
+      created_at:
+        type: string
+      schedule_at:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+      total_delivered:
+        type: integer
+      total_sent:
+        type: integer
+    type: object
+  dto.AdminCustomerDetailDTO:
+    properties:
+      account_type_id:
+        type: integer
+      account_type_name:
+        type: string
+      agency_referer_code:
+        type: string
+      company_address:
+        type: string
+      company_name:
+        type: string
+      company_phone:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      email_verified_at:
+        type: string
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      is_email_verified:
+        type: boolean
+      is_mobile_verified:
+        type: boolean
+      last_login_at:
+        type: string
+      mobile_verified_at:
+        type: string
+      national_id:
+        type: string
+      postal_code:
+        type: string
+      referrer_agency_id:
+        type: integer
+      representative_first_name:
+        type: string
+      representative_last_name:
+        type: string
+      representative_mobile:
+        type: string
+      sheba_number:
+        type: string
+      updated_at:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.AdminCustomerWithCampaignsResponse:
+    properties:
+      campaigns:
+        items:
+          $ref: '#/definitions/dto.AdminCustomerCampaignItem'
+        type: array
+      customer:
+        $ref: '#/definitions/dto.AdminCustomerDetailDTO'
+      message:
+        type: string
+    type: object
+  dto.AdminCustomersSharesItem:
+    properties:
+      agency_share_with_tax:
+        type: integer
+      click_rate:
+        type: number
+      company_name:
+        type: string
+      customer_id:
+        type: integer
+      first_name:
+        type: string
+      full_name:
+        type: string
+      last_name:
+        type: string
+      referrer_agency_name:
+        type: string
+      system_share:
+        type: integer
+      tax_share:
+        type: integer
+      total_sent:
+        type: integer
+    type: object
+  dto.AdminCustomersSharesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminCustomersSharesItem'
+        type: array
+      message:
+        type: string
+      sum_agency_share_with_tax:
+        type: integer
+      sum_system_share:
+        type: integer
+      sum_tax_share:
+        type: integer
+      sum_total_sent:
+        type: integer
+    type: object
   dto.AdminDTO:
     properties:
       created_at:
@@ -87,6 +241,53 @@ definitions:
         type: string
       uuid:
         example: f47ac10b-58cc-4372-a567-0e02b2c3d479
+        type: string
+    type: object
+  dto.AdminGetCampaignResponse:
+    properties:
+      adlink:
+        type: string
+      budget:
+        type: integer
+      city:
+        items:
+          type: string
+        type: array
+      comment:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      line_number:
+        type: string
+      line_number_price_factor:
+        type: number
+      scheduleat:
+        type: string
+      segment:
+        type: string
+      segment_price_factor:
+        type: number
+      sex:
+        type: string
+      status:
+        type: string
+      subsegment:
+        items:
+          type: string
+        type: array
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
+      uuid:
         type: string
     type: object
   dto.AdminLineNumberDTO:
@@ -126,6 +327,15 @@ definitions:
         type: integer
       total_sent:
         type: integer
+    type: object
+  dto.AdminListTicketsResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/dto.TicketGroup'
+        type: array
+      message:
+        type: string
     type: object
   dto.AdminRejectCampaignRequest:
     properties:
@@ -299,6 +509,132 @@ definitions:
         example: "+989123456789"
         type: string
     type: object
+  dto.BotDTO:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      username:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.BotGetCampaignResponse:
+    properties:
+      adlink:
+        type: string
+      budget:
+        type: integer
+      city:
+        items:
+          type: string
+        type: array
+      comment:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      line_number:
+        type: string
+      num_audiences:
+        type: integer
+      scheduleat:
+        type: string
+      segment:
+        type: string
+      sex:
+        type: string
+      status:
+        type: string
+      subsegment:
+        items:
+          type: string
+        type: array
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  dto.BotListCampaignsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.BotGetCampaignResponse'
+        type: array
+      message:
+        type: string
+    type: object
+  dto.BotLoginRequest:
+    properties:
+      password:
+        maxLength: 100
+        minLength: 8
+        type: string
+      username:
+        maxLength: 255
+        minLength: 3
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  dto.BotLoginResponse:
+    properties:
+      bot:
+        $ref: '#/definitions/dto.BotDTO'
+      session:
+        $ref: '#/definitions/dto.BotSessionDTO'
+    type: object
+  dto.BotSessionDTO:
+    properties:
+      access_token:
+        type: string
+      created_at:
+        type: string
+      expires_in:
+        type: integer
+      refresh_token:
+        type: string
+      token_type:
+        type: string
+    type: object
+  dto.BotUpdateAudienceSpecRequest:
+    properties:
+      available_audience:
+        minimum: 0
+        type: integer
+      segment:
+        maxLength: 255
+        type: string
+      subsegment:
+        maxLength: 255
+        type: string
+      tags:
+        items:
+          type: string
+        minItems: 1
+        type: array
+    required:
+    - available_audience
+    - segment
+    - subsegment
+    - tags
+    type: object
+  dto.BotUpdateAudienceSpecResponse:
+    properties:
+      message:
+        type: string
+    type: object
   dto.CalculateCampaignCapacityRequest:
     properties:
       adlink:
@@ -327,6 +663,11 @@ definitions:
         maxLength: 255
         type: string
       subsegment:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      tags:
         items:
           type: string
         maxItems: 255
@@ -374,6 +715,10 @@ definitions:
           type: string
         maxItems: 255
         type: array
+      tags:
+        items:
+          type: string
+        type: array
       title:
         maxLength: 255
         type: string
@@ -386,7 +731,7 @@ definitions:
         type: string
       msg_target:
         type: integer
-      total:
+      total_cost:
         type: integer
     type: object
   dto.ChargeWalletRequest:
@@ -465,6 +810,11 @@ definitions:
           type: string
         maxItems: 255
         type: array
+      tags:
+        items:
+          type: string
+        maxItems: 255
+        type: array
       title:
         maxLength: 255
         type: string
@@ -476,6 +826,62 @@ definitions:
       message:
         type: string
       status:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.CreateResponseTicketRequest:
+    properties:
+      attached_file_name:
+        type: string
+      attached_file_size:
+        type: integer
+      attached_file_url:
+        type: string
+      content:
+        type: string
+      customer_id:
+        type: integer
+      ticket_id:
+        type: integer
+    type: object
+  dto.CreateResponseTicketResponse:
+    properties:
+      correlation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.CreateTicketRequest:
+    properties:
+      attached_file_name:
+        type: string
+      attached_file_size:
+        type: integer
+      attached_file_url:
+        type: string
+      content:
+        type: string
+      customer_id:
+        type: integer
+      title:
+        type: string
+    type: object
+  dto.CreateTicketResponse:
+    properties:
+      correlation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
         type: string
       uuid:
         type: string
@@ -520,6 +926,10 @@ definitions:
         items:
           type: string
         type: array
+      tags:
+        items:
+          type: string
+        type: array
       title:
         type: string
       updated_at:
@@ -551,6 +961,15 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  dto.ListActiveLineNumbersResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.ActiveLineNumberItem'
+        type: array
+      message:
+        type: string
     type: object
   dto.ListAgencyActiveDiscountsResponse:
     properties:
@@ -589,6 +1008,15 @@ definitions:
         type: string
       pagination:
         $ref: '#/definitions/dto.PaginationInfo'
+    type: object
+  dto.ListTicketsResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/dto.TicketGroup'
+        type: array
+      message:
+        type: string
     type: object
   dto.LoginRequest:
     properties:
@@ -741,6 +1169,39 @@ definitions:
         description: Mobile number (masked for security)
         type: string
     type: object
+  dto.TicketGroup:
+    properties:
+      correlation_id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/dto.TicketItem'
+        type: array
+    type: object
+  dto.TicketItem:
+    properties:
+      agency_name:
+        type: string
+      company_name:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      customer_first_name:
+        description: Admin-only fields (populated in admin listings only)
+        type: string
+      customer_last_name:
+        type: string
+      id:
+        type: integer
+      phone_number:
+        type: string
+      replied_by_admin:
+        type: boolean
+      title:
+        type: string
+    type: object
   dto.TransactionHistoryItem:
     properties:
       amount:
@@ -844,6 +1305,11 @@ definitions:
         maxLength: 255
         type: string
       subsegment:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      tags:
         items:
           type: string
         maxItems: 255
@@ -982,6 +1448,37 @@ paths:
       summary: Admin List Campaigns
       tags:
       - Admin Campaigns
+  /api/v1/admin/campaigns/{id}:
+    get:
+      parameters:
+      - description: Campaign ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminGetCampaignResponse'
+              type: object
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Get Campaign
+      tags:
+      - Admin Campaigns
   /api/v1/admin/campaigns/approve:
     post:
       consumes:
@@ -1070,6 +1567,79 @@ paths:
       summary: Reject Campaign
       tags:
       - Admin Campaigns
+  /api/v1/admin/customer-management/{customer_id}:
+    get:
+      parameters:
+      - description: Customer ID
+        in: path
+        name: customer_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCustomerWithCampaignsResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Get Customer With Campaigns
+      tags:
+      - Admin Customer Management
+  /api/v1/admin/customer-management/shares:
+    get:
+      parameters:
+      - description: Filter created_at >= start_date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: Filter created_at <= end_date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCustomersSharesResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Customers Shares Report
+      tags:
+      - Admin Customer Management
   /api/v1/admin/line-numbers/:
     get:
       description: Retrieve all line numbers
@@ -1190,6 +1760,121 @@ paths:
       summary: Line Numbers Report (Admin)
       tags:
       - Admin Line Numbers
+  /api/v1/admin/tickets:
+    get:
+      consumes:
+      - application/json
+      description: Admin lists tickets with optional filters
+      parameters:
+      - description: Filter by customer id
+        in: query
+        name: customer_id
+        type: integer
+      - description: Exact title filter
+        in: query
+        name: title
+        type: string
+      - description: Start date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      - description: Filter by replied flag
+        in: query
+        name: replied_by_admin
+        type: boolean
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 20, max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Admin tickets retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListTicketsResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
+  /api/v1/admin/tickets/reply:
+    post:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: Admin creates a response to an existing ticket; new ticket shares
+        correlation ID with the original. Supports multipart or JSON.
+      parameters:
+      - description: Original ticket ID
+        in: formData
+        name: ticket_id
+        type: integer
+      - description: Response content (<=1000 chars)
+        in: formData
+        name: content
+        type: string
+      - description: Attachment (jpg/png/pdf/docx/xlsx/zip, <=10MB)
+        in: formData
+        name: file
+        type: file
+      - description: JSON alternative payload
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.AdminCreateResponseTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Admin response created successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCreateResponseTicketResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Ticket not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
   /api/v1/auth/forgot-password:
     post:
       consumes:
@@ -1471,6 +2156,123 @@ paths:
       summary: Verify OTP
       tags:
       - Authentication
+  /api/v1/bot/auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Bot login
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotLoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotLoginResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Login
+      tags:
+      - Bot Authentication
+  /api/v1/bot/campaigns/{id}/executed:
+    post:
+      parameters:
+      - description: Campaign ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Move Campaign to Executed
+      tags:
+      - Bot Campaigns
+  /api/v1/bot/campaigns/{id}/running:
+    post:
+      parameters:
+      - description: Campaign ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Move Campaign to Running
+      tags:
+      - Bot Campaigns
+  /api/v1/bot/campaigns/audience-spec:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Audience spec update
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotUpdateAudienceSpecRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotUpdateAudienceSpecResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Update Audience Spec
+      tags:
+      - Bot Campaigns
+  /api/v1/bot/campaigns/ready:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotListCampaignsResponse'
+              type: object
+      summary: Bot List Ready Campaigns
+      tags:
+      - Bot Campaigns
   /api/v1/campaigns:
     get:
       consumes:
@@ -1497,7 +2299,7 @@ paths:
         in: query
         name: title
         type: string
-      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected)
+      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed)
         in: query
         name: status
         type: string
@@ -1618,6 +2420,26 @@ paths:
       summary: Update Campaign
       tags:
       - Campaigns
+  /api/v1/campaigns/audience-spec:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  additionalProperties:
+                    additionalProperties: true
+                    type: object
+                  type: object
+              type: object
+      summary: List Audience Spec
+      tags:
+      - Campaigns
   /api/v1/campaigns/calculate-capacity:
     post:
       consumes:
@@ -1705,6 +2527,23 @@ paths:
       summary: Health Check
       tags:
       - Health
+  /api/v1/line-numbers/active:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListActiveLineNumbersResponse'
+              type: object
+      summary: List Active Line Numbers
+      tags:
+      - Line Numbers
   /api/v1/payments/callback/{invoice_number}:
     post:
       consumes:
@@ -2026,6 +2865,168 @@ paths:
       summary: List Active Discounts of Agency
       tags:
       - Reports
+  /api/v1/tickets:
+    get:
+      consumes:
+      - application/json
+      description: List customer's tickets grouped by correlation ID (each group sorted
+        by id DESC)
+      parameters:
+      - description: Exact title filter
+        in: query
+        name: title
+        type: string
+      - description: Start date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 20, max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Tickets retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListTicketsResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
+    post:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: Create a new support ticket for the authenticated customer. Supports
+        multipart form upload or JSON.
+      parameters:
+      - description: Ticket title (<=80 chars)
+        in: formData
+        name: title
+        type: string
+      - description: Ticket content (<=1000 chars)
+        in: formData
+        name: content
+        type: string
+      - description: Attachment (jpg/png/pdf/docx/xlsx/zip, <=10MB)
+        in: formData
+        name: file
+        type: file
+      - description: JSON alternative for creating ticket
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.CreateTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Ticket created successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreateTicketResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
+  /api/v1/tickets/reply:
+    post:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: Create a response to an existing ticket. Customer can reply to
+        their own tickets. Supports multipart form upload or JSON.
+      parameters:
+      - description: Original ticket ID to respond to
+        in: formData
+        name: ticket_id
+        type: integer
+      - description: Response content (<=1000 chars)
+        in: formData
+        name: content
+        type: string
+      - description: Attachment (jpg/png/pdf/docx/xlsx/zip, <=10MB)
+        in: formData
+        name: file
+        type: file
+      - description: JSON alternative for creating response
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.CreateResponseTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Response ticket created successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreateResponseTicketResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden - ticket does not belong to customer
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Ticket not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
   /api/v1/wallet/balance:
     get:
       consumes:

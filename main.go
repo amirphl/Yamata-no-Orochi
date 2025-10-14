@@ -21,13 +21,14 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/gofiber/fiber/v3"
 	"github.com/redis/go-redis/v9"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+
+	"github.com/amirphl/Yamata-no-Orochi/app/scheduler"
 )
 
 // Application represents the main application structure
@@ -233,6 +234,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	agencyDiscountRepo := repository.NewAgencyDiscountRepository(db)
 	adminRepo := repository.NewAdminRepository(db)
 	lineNumberRepo := repository.NewLineNumberRepository(db)
+	botRepo := repository.NewBotRepository(db)
+	audienceProfileRepo := repository.NewAudienceProfileRepository(db)
+	tagRepo := repository.NewTagRepository(db)
+	sentSMSRepo := repository.NewSentSMSRepository(db)
+	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
+	ticketRepo := repository.NewTicketRepository(db)
 
 	// Initialize services
 	notificationService := initializeNotificationService(cfg)
@@ -257,6 +264,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize token service: %w", err)
 	}
+
+	// Log that services are initialized
+	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
 
 	// Initialize flows
 	signupFlow := businessflow.NewSignupFlow(
@@ -291,9 +301,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		balanceSnapshotRepo,
 		transactionRepo,
 		auditRepo,
+		lineNumberRepo,
 		db,
+		rc,
 		notificationService,
 		cfg.Admin,
+		&cfg.Cache,
 	)
 
 	// Initialize PaymentFlow
@@ -327,6 +340,11 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		captchaSvc,
 	)
 
+	botAuthFlow := businessflow.NewBotAuthFlow(
+		botRepo,
+		tokenService,
+	)
+
 	adminCampaignFlow := businessflow.NewAdminCampaignFlow(
 		campaignRepo,
 		customerRepo,
@@ -339,9 +357,15 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cfg.Admin,
 	)
 
+	lineNumberFlow := businessflow.NewLineNumberFlow(lineNumberRepo)
+
 	adminLineNumberFlow := businessflow.NewAdminLineNumberFlow(lineNumberRepo, db)
 
 	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo)
+
+	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, &cfg.Cache, db, rc)
+
+	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
@@ -349,9 +373,13 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 	agencyHandler := handlers.NewAgencyHandler(agencyFlow)
 	authAdminHandler := handlers.NewAuthAdminHandler(adminAuthFlow)
+	authBotHandler := handlers.NewAuthBotHandler(botAuthFlow)
 	campaignAdminHandler := handlers.NewCampaignAdminHandler(adminCampaignFlow)
+	lineNumberHandler := handlers.NewLineNumberHandler(lineNumberFlow)
 	lineNumberAdminHandler := handlers.NewLineNumberAdminHandler(adminLineNumberFlow)
 	adminCustomerManagementHandler := handlers.NewAdminCustomerManagementHandler(adminCustomerManagementFlow)
+	campaignBotHandler := handlers.NewCampaignBotHandler(botCampaignFlow)
+	ticketHandler := handlers.NewTicketHandler(ticketFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
@@ -364,13 +392,21 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		agencyHandler,
 		authMiddleware,
 		authAdminHandler,
+		authBotHandler,
 		campaignAdminHandler,
+		lineNumberHandler,
 		lineNumberAdminHandler,
 		adminCustomerManagementHandler,
+		campaignBotHandler,
+		ticketHandler,
 	)
 
-	// Log that services are initialized
-	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
+	if cfg.Scheduler.CampaignExecutionEnabled {
+		// Start campaign scheduler (every 1 minute)
+		sched := scheduler.NewCampaignScheduler(audienceProfileRepo, tagRepo, sentSMSRepo, processedCampaignRepo, notificationService, db, log.Default(), cfg.Scheduler.CampaignExecutionInterval, cfg.PayamSMS, cfg.Bot)
+		stopScheduler := sched.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopScheduler)
+	}
 
 	// Create application struct from FiberRouter
 	fiberRouter := appRouter.(*router.FiberRouter)
@@ -449,16 +485,6 @@ func ensureSystemAndTaxEntities(db *gorm.DB, cfg *config.ProductionConfig) error
 			return err
 		}
 	}
-
-	// Create admin user
-	// adminRepo := repository.NewAdminRepository(db)
-	// if err := ensureAdminByUUID(
-	// 	adminRepo,
-	// 	"admin2",
-	// 	"Admin123456",
-	// ); err != nil {
-	// 	return err
-	// }
 
 	return nil
 }
@@ -549,28 +575,5 @@ func ensureWalletByUUID(
 	if err != nil {
 		return err
 	}
-	return nil
-}
-
-func ensureAdminByUUID(
-	adminRepo repository.AdminRepository,
-	username, password string,
-) error {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return err
-	}
-
-	if err := adminRepo.Save(context.Background(), &models.Admin{
-		UUID:         uuid.New(),
-		Username:     username,
-		PasswordHash: string(hashedPassword),
-		IsActive:     utils.ToPtr(true),
-		CreatedAt:    utils.UTCNow(),
-		UpdatedAt:    utils.UTCNow(),
-	}); err != nil {
-		return err
-	}
-
 	return nil
 }
