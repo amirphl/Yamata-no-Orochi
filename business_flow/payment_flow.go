@@ -310,6 +310,23 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, customer model
 	scatteredSettlementItems[0].Amount *= 10       // TO IRR
 	scatteredSettlementItems[1].Amount *= 10       // TO IRR
 
+	refinedScatteredSettlementItems := make([]ScatteredSettlementItem, 0)
+	for _, item := range scatteredSettlementItems {
+		if item.Amount > 0 {
+			refinedScatteredSettlementItems = append(refinedScatteredSettlementItems, item)
+		}
+	}
+
+	// Merge scatteredSettlementItems with same sheba number (IBAN)
+	for i := 0; i < len(refinedScatteredSettlementItems); i++ {
+		for j := i + 1; j < len(refinedScatteredSettlementItems); j++ {
+			if refinedScatteredSettlementItems[i].IBAN == refinedScatteredSettlementItems[j].IBAN {
+				refinedScatteredSettlementItems[i].Amount += refinedScatteredSettlementItems[j].Amount
+				refinedScatteredSettlementItems = append(refinedScatteredSettlementItems[:j], refinedScatteredSettlementItems[j+1:]...)
+			}
+		}
+	}
+
 	// Prepare Atipay request payload
 	atipayPayload := map[string]any{
 		"amount":                   amountWithTaxIRR,
@@ -319,7 +336,7 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, customer model
 		"redirectUrl":              paymentRequest.RedirectURL,
 		"apiKey":                   p.atipayCfg.APIKey,
 		"terminal":                 p.atipayCfg.Terminal,
-		"scatteredSettlementItems": scatteredSettlementItems,
+		"scatteredSettlementItems": refinedScatteredSettlementItems,
 	}
 
 	// Convert to JSON
