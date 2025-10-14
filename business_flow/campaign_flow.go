@@ -39,6 +39,7 @@ type CampaignFlowImpl struct {
 	balanceSnapshotRepo repository.BalanceSnapshotRepository
 	transactionRepo     repository.TransactionRepository
 	auditRepo           repository.AuditLogRepository
+	lineNumberRepo      repository.LineNumberRepository
 	notifier            services.NotificationService
 	adminConfig         config.AdminConfig
 	cacheConfig         *config.CacheConfig
@@ -54,6 +55,7 @@ func NewCampaignFlow(
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
+	lineNumberRepo repository.LineNumberRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -67,6 +69,7 @@ func NewCampaignFlow(
 		balanceSnapshotRepo: balanceSnapshotRepo,
 		transactionRepo:     transactionRepo,
 		auditRepo:           auditRepo,
+		lineNumberRepo:      lineNumberRepo,
 		notifier:            notifier,
 		adminConfig:         adminConfig,
 		cacheConfig:         cacheConfig,
@@ -250,6 +253,25 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
+			if req.LineNumber != nil {
+				// query line number exists
+				lineNumber, err := s.lineNumberRepo.ByValue(txCtx, *req.LineNumber)
+				if err != nil {
+					return err
+				}
+				if lineNumber == nil {
+					return ErrLineNumberNotFound
+				}
+				if !*lineNumber.IsActive {
+					return ErrLineNumberNotActive
+				}
+			}
+
+			lineNumberPriceFactor, err := s.fetchLineNumberPriceFactor(txCtx, *req.LineNumber)
+			if err != nil {
+				return err
+			}
+
 			cost, err := s.CalculateCampaignCost(txCtx, &dto.CalculateCampaignCostRequest{
 				Title:      title,
 				Segment:    segment,
@@ -311,12 +333,13 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 			// Build metadata with full campaign spec
 			meta := map[string]any{
-				"source":        "campaign_update",
-				"operation":     "reserve_budget",
-				"campaign_id":   campaign.ID,
-				"amount":        cost.TotalCost,
-				"currency":      utils.TomanCurrency,
-				"campaign_spec": campaign.Spec,
+				"source":                   "campaign_update",
+				"operation":                "reserve_budget",
+				"campaign_id":              campaign.ID,
+				"amount":                   cost.TotalCost,
+				"currency":                 utils.TomanCurrency,
+				"campaign_spec":            campaign.Spec,
+				"line_number_price_factor": lineNumberPriceFactor,
 			}
 			metaBytes, _ := json.Marshal(meta)
 
@@ -477,9 +500,16 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	// Calculate the number of parts based on content length
 	numPages := s.calculateSMSParts(req.Content)
 
+	if req.LineNumber == nil {
+		return nil, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required", ErrCampaignLineNumberRequired)
+	}
+
 	// Pricing constants
 	basePrice := uint64(150)
-	lineFactor := uint64(20)
+	lineFactor, err := s.fetchLineNumberPriceFactor(ctx, *req.LineNumber)
+	if err != nil {
+		return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
+	}
 	segmentFactor := float64(1.5)
 
 	// Calculate price per message
@@ -518,6 +548,21 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	}
 
 	return response, nil
+}
+
+func (s *CampaignFlowImpl) fetchLineNumberPriceFactor(ctx context.Context, lineNumber string) (float64, error) {
+	ln, err := s.lineNumberRepo.ByValue(ctx, lineNumber)
+	if err != nil {
+		return 0, err
+	}
+	if ln == nil {
+		return 0, ErrLineNumberNotFound
+	}
+	if !*ln.IsActive {
+		return 0, ErrLineNumberNotActive
+	}
+
+	return ln.PriceFactor, nil
 }
 
 // ListCampaigns retrieves user's campaigns with pagination, ordering and filters
