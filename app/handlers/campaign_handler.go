@@ -228,6 +228,15 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 		if businessflow.IsCampaignBudgetRequired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign budget is required", "CAMPAIGN_BUDGET_REQUIRED", nil)
 		}
+		if businessflow.IsCampaignLineNumberRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign line number is required", "CAMPAIGN_LINE_NUMBER_REQUIRED", nil)
+		}
+		if businessflow.IsLineNumberNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number not found", "LINE_NUMBER_NOT_FOUND", nil)
+		}
+		if businessflow.IsLineNumberNotActive(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number is not active", "LINE_NUMBER_NOT_ACTIVE", nil)
+		}
 
 		log.Println("Campaign update failed", err)
 		// Handle generic business errors
@@ -316,6 +325,15 @@ func (h *CampaignHandler) CalculateCampaignCost(c fiber.Ctx) error {
 	// Call business logic with proper context
 	result, err := h.campaignFlow.CalculateCampaignCost(h.createRequestContext(c, "/api/v1/campaigns/calculate-cost"), &req, metadata)
 	if err != nil {
+		if businessflow.IsCampaignLineNumberRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign line number is required", "CAMPAIGN_LINE_NUMBER_REQUIRED", nil)
+		}
+		if businessflow.IsLineNumberNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number not found", "LINE_NUMBER_NOT_FOUND", nil)
+		}
+		if businessflow.IsLineNumberNotActive(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number is not active", "LINE_NUMBER_NOT_ACTIVE", nil)
+		}
 		log.Println("Campaign cost calculation failed", err)
 		// Handle generic business errors
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Campaign cost calculation failed", "COST_CALCULATION_FAILED", nil)
