@@ -223,6 +223,7 @@ func (r *FiberRouter) SetupRoutes() {
 	botCampaigns.Get("/ready", r.campaignBotHandler.ListReadyCampaigns)
 	botCampaigns.Post("/audience-spec", r.campaignBotHandler.UpdateAudienceSpec)
 	botCampaigns.Post("/:id/executed", r.campaignBotHandler.MoveCampaignToExecuted)
+	botCampaigns.Post("/:id/running", r.campaignBotHandler.MoveCampaignToRunning)
 
 	// Admin customer reports
 	adminCustomers := api.Group("/admin/customer-management")
