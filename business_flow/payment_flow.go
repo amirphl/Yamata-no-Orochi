@@ -329,14 +329,26 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, customer model
 
 	// Prepare Atipay request payload
 	atipayPayload := map[string]any{
-		"amount":                   amountWithTaxIRR,
-		"cellNumber":               paymentRequest.CellNumber,
-		"description":              paymentRequest.Description,
-		"invoiceNumber":            paymentRequest.InvoiceNumber,
-		"redirectUrl":              paymentRequest.RedirectURL,
-		"apiKey":                   p.atipayCfg.APIKey,
-		"terminal":                 p.atipayCfg.Terminal,
-		"scatteredSettlementItems": refinedScatteredSettlementItems,
+		"amount":        amountWithTaxIRR,
+		"cellNumber":    paymentRequest.CellNumber,
+		"description":   paymentRequest.Description,
+		"invoiceNumber": paymentRequest.InvoiceNumber,
+		"redirectUrl":   paymentRequest.RedirectURL,
+		"apiKey":        p.atipayCfg.APIKey,
+		"terminal":      p.atipayCfg.Terminal,
+	}
+
+	systemUser, err := getSystemUser(ctx, p.customerRepo, p.walletRepo, p.sysCfg)
+	if err != nil {
+		return "", err
+	}
+	if systemUser.ShebaNumber == nil {
+		return "", ErrSystemUserShebaNumberNotFound
+	}
+
+	if len(refinedScatteredSettlementItems) > 1 ||
+		(len(refinedScatteredSettlementItems) == 1 && refinedScatteredSettlementItems[0].IBAN != *systemUser.ShebaNumber) {
+		atipayPayload["scatteredSettlementItems"] = refinedScatteredSettlementItems
 	}
 
 	// Convert to JSON
