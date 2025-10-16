@@ -102,6 +102,9 @@ RUN adduser -D -s /bin/sh appuser
 # Copy compiled binary
 COPY --from=builder /app/yamata-no-orochi /usr/local/bin/yamata-no-orochi
 
+# Copy templates required at runtime
+COPY --from=builder /app/templates /templates
+
 # Create directories for logs and temp files
 RUN mkdir -p /var/log/yamata /tmp /var/cache
 
