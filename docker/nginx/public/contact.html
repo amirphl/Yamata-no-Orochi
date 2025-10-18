@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jazebeh - Contact Us</title>
+    <style>
+        :root {
+            --red: #dc2626;
+            --red-dark: #b91c1c;
+            --gray-900: #111827;
+            --gray-600: #4b5563;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+            color: var(--gray-900);
+            background: #fafafa;
+        }
+
+        a {
+            color: var(--red);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 16px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            display: grid;
+            place-items: center;
+            border-radius: 8px;
+            background: var(--red);
+        }
+
+        .logo svg {
+            width: 24px;
+            height: 24px;
+            stroke: #fff;
+        }
+
+        nav {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid #eee;
+            border-left: 6px solid var(--red);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 24px 0;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+        }
+
+        .muted {
+            color: var(--gray-600);
+        }
+
+        footer {
+            position: relative;
+            background: #111;
+            color: #e5e7eb;
+            padding: 56px 0 96px;
+            margin-top: 48px;
+        }
+
+        .enamad {
+            position: fixed;
+            left: 16px;
+            bottom: 16px;
+            z-index: 50;
+        }
+
+        .enamad img {
+            height: 86px;
+            width: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="container">
+        <div class="brand">
+            <div class="logo" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                </svg>
+            </div>
+            <span>Jazebeh</span>
+        </div>
+        <nav>
+            <a href="home.html">Home</a>
+            <a href="#contact-info">Contact Us</a>
+        </nav>
+    </header>
+
+    <main class="container">
+        <h1 style="margin-top: 8px;">Contact Us</h1>
+        <p class="muted">We'd love to hear from you. Reach out using the details below.</p>
+
+        <section id="contact-info" class="card" aria-live="polite">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px;">
+                <div>
+                    <h3 style="margin:0 0 6px 0;">English</h3>
+                    <p style="margin:6px 0;">Rahkarhaye Hadafmand-e Khalagh Company (Private Joint Stock)</p>
+                    <p style="margin:6px 0;">Address: Tehran, Molla Sadra Street, North Shirazi Street, Hakim Azam
+                        Street, No. 19, Monstrect</p>
+                    <p style="margin:6px 0;">Postal Code: 1991647419</p>
+                    <p style="margin:6px 0;">Phone: +98 21 8967 7330</p>
+                    <p style="margin:6px 0;">Email: <a href="mailto:info@jazebeh.ir">info@jazebeh.ir</a></p>
+                </div>
+                <div dir="rtl" style="text-align:right;">
+                    <h3 style="margin:0 0 6px 0;">فارسی</h3>
+                    <p style="margin:6px 0;">شرکت راه کارهای هدفمند خلاق (سهامی خاص)</p>
+                    <p style="margin:6px 0;">تهران، خیابان ملاصدرا، خیابان شیرازی شمالی، خیابان حکیم اعظم پلاک ۱۹ (طبقه
+                        3 واحد 6)</p>
+                    <p style="margin:6px 0;">کدپستی: ۱۹۹۱۶۴۷۴۱۹</p>
+                    <p style="margin:6px 0;">تلفن ثابت: ۰۲۱۸۹۶۷۷۳۳۰ - ۰۲۱۸۹۶۷۰۰۰۰</p>
+                    <p style="margin:6px 0;">ایمیل: <a href="mailto:info@jazebeh.ir">info@jazebeh.ir</a></p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p class="muted">© 2024 Jazebeh. All rights reserved.</p>
+        </div>
+        <div class="enamad" aria-label="Enamad Trust Seal">
+            <a referrerpolicy='origin' target='_blank'
+                href='https://trustseal.enamad.ir/?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl'><img
+                    referrerpolicy='origin'
+                    src='https://trustseal.enamad.ir/logo.aspx?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl' alt=''
+                    style='cursor:pointer' code='8m3trW0HWMHwsdycPLC79HZTsO97SjFl'></a>
+        </div>
+    </footer>
+</body>
+
+</html>

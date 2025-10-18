@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jazebeh - Home</title>
+    <style>
+        :root {
+            --red: #dc2626;
+            --red-dark: #b91c1c;
+            --gray-900: #111827;
+            --gray-600: #4b5563;
+            --gray-100: #f3f4f6;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+            color: var(--gray-900);
+            background: linear-gradient(135deg, #fff, #fdecec);
+        }
+
+        a {
+            color: var(--red);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .container {
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 0 16px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            display: grid;
+            place-items: center;
+            border-radius: 8px;
+            background: var(--red);
+        }
+
+        .logo svg {
+            width: 24px;
+            height: 24px;
+            stroke: #fff;
+        }
+
+        nav {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background .2s ease, color .2s ease, opacity .2s ease;
+        }
+
+        .btn-primary {
+            background: var(--red);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: var(--red-dark);
+        }
+
+        .btn-secondary {
+            background: #fff;
+            color: var(--red);
+            border: 1px solid var(--red);
+        }
+
+        .btn-secondary:hover {
+            background: #fff0f0;
+        }
+
+        .hero {
+            padding: 64px 0 32px;
+            text-align: center;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: #fee2e2;
+            color: var(--red-dark);
+            padding: 8px 12px;
+            border-radius: 999px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        h1 {
+            font-size: clamp(32px, 5vw, 56px);
+            margin: 16px 0;
+            line-height: 1.1;
+        }
+
+        .subtitle {
+            font-size: 18px;
+            color: var(--gray-600);
+            max-width: 720px;
+            margin: 0 auto 24px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .section {
+            padding: 48px 0;
+            background: #fff;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 16px;
+            margin-top: 24px;
+        }
+
+        .card {
+            padding: 16px;
+            border-radius: 12px;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+            background: #fff;
+        }
+
+        .card h3 {
+            margin: 12px 0 8px;
+        }
+
+        .muted {
+            color: var(--gray-600);
+        }
+
+        .cta {
+            background: var(--red);
+            color: #fff;
+            padding: 64px 0;
+            text-align: center;
+        }
+
+        .cta p {
+            color: #ffe3e3;
+        }
+
+        footer {
+            position: relative;
+            background: #111;
+            color: #e5e7eb;
+            padding: 56px 0 96px;
+            margin-top: 48px;
+        }
+
+        footer .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 24px;
+        }
+
+        footer a {
+            color: #fca5a5;
+        }
+
+        .contact-panel {
+            display: none;
+            background: #fff;
+            border: 1px solid #f5c2c2;
+            border-left: 6px solid var(--red);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 24px 0;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+        }
+
+        .contact-panel.visible {
+            display: block;
+        }
+
+        .enamad {
+            position: fixed;
+            left: 16px;
+            bottom: 16px;
+            z-index: 50;
+        }
+
+        .enamad img {
+            height: 86px;
+            width: auto;
+        }
+
+        @media (max-width: 640px) {
+            .logo {
+                width: 36px;
+                height: 36px;
+            }
+
+            .logo svg {
+                width: 20px;
+                height: 20px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="container">
+        <div class="brand">
+            <div class="logo" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                </svg>
+            </div>
+            <span>Jazebeh</span>
+        </div>
+        <nav>
+            <a href="home.html">Home</a>
+            <a id="contact-link" href="contact.html">Contact Us</a>
+            <a class="btn btn-secondary" href="/signin">Sign In</a>
+            <a class="btn btn-primary" href="/signup">Get Started</a>
+        </nav>
+    </header>
+
+    <main>
+        <section class="hero container">
+            <span class="badge">Consulting and Data-Driven Technology</span>
+            <h1>Transform Your Business with Targeted SMS Marketing</h1>
+            <p class="subtitle">Reach your customers with precision, drive engagement, and boost conversions with
+                advanced data-driven tools designed for modern businesses.</p>
+            <div class="actions">
+                <a class="btn btn-primary" href="/signup">Get Started Free</a>
+                <a class="btn btn-secondary" href="/signin">Sign In</a>
+                <a class="btn" id="contact-link-2" href="contact.html">Contact Us</a>
+            </div>
+
+            <div id="contact-info" class="contact-panel" aria-live="polite">
+                <h2 style="margin:0 0 8px 0;">Contact Information</h2>
+                <div class="muted" style="margin-bottom:12px;">You can also view this page at <a
+                        href="contact.html">contact.html</a></div>
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px;">
+                    <div>
+                        <h3 style="margin:0 0 6px 0;">English</h3>
+                        <p style="margin:6px 0;">Rahkarhaye Hadafmand-e Khalagh Company (Private Joint Stock)</p>
+                        <p style="margin:6px 0;">Address: Tehran, Molla Sadra Street, North Shirazi Street, Hakim Azam
+                            Street, No. 19, Monstrect</p>
+                        <p style="margin:6px 0;">Postal Code: 1991647419</p>
+                        <p style="margin:6px 0;">Phone: +98 21 8967 7330</p>
+                        <p style="margin:6px 0;">Email: <a href="mailto:info@jazebeh.ir">info@jazebeh.ir</a></p>
+                    </div>
+                    <div dir="rtl" style="text-align:right;">
+                        <h3 style="margin:0 0 6px 0;">فارسی</h3>
+                        <p style="margin:6px 0;">شرکت راه کارهای هدفمند خلاق (سهامی خاص)</p>
+                        <p style="margin:6px 0;">تهران، خیابان ملاصدرا، خیابان شیرازی شمالی، خیابان حکیم اعظم پلاک ۱۹
+                            (طبقه 3 واحد 6)</p>
+                        <p style="margin:6px 0;">کدپستی: ۱۹۹۱۶۴۷۴۱۹</p>
+                        <p style="margin:6px 0;">تلفن ثابت: ۰۲۱۸۹۶۷۷۳۳۰ - ۰۲۱۸۹۶۷۰۰۰۰</p>
+                        <p style="margin:6px 0;">ایمیل: <a href="mailto:info@jazebeh.ir">info@jazebeh.ir</a></p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="container">
+                <h2 style="margin:0;">Why Choose Our Platform?</h2>
+                <div class="features">
+                    <div class="card">
+                        <h3>Targeted Campaigns</h3>
+                        <p class="muted">Create highly targeted SMS campaigns based on customer behavior, demographics,
+                            and preferences.</p>
+                    </div>
+                    <div class="card">
+                        <h3>Smart Segmentation</h3>
+                        <p class="muted">Segment your audience intelligently and send personalized messages that
+                            resonate.</p>
+                    </div>
+                    <div class="card">
+                        <h3>Real-time Analytics</h3>
+                        <p class="muted">Track campaign performance with detailed analytics and actionable insights.</p>
+                    </div>
+                    <div class="card">
+                        <h3>Regulatory Compliance</h3>
+                        <p class="muted">Built-in compliance features ensure your campaigns meet all regulatory
+                            requirements.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="cta">
+            <div class="container">
+                <h2 style="margin: 0 0 8px 0;">Ready to Get Started?</h2>
+                <p style="margin: 0 0 20px 0;">Join thousands of businesses already using our platform to grow their
+                    customer base.</p>
+                <a class="btn btn-secondary" href="/signup" style="background:#fff; color: var(--red);">Start Your Free
+                    Trial</a>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <div class="grid">
+                <div>
+                    <h3 style="margin-top:0;">About</h3>
+                    <p class="muted">Empower your business with targeted SMS marketing campaigns. Reach your customers
+                        with precision and drive results.</p>
+                </div>
+                <div>
+                    <h3 style="margin-top:0;">Quick Links</h3>
+                    <p><a id="contact-link-3" href="contact.html">Contact Us</a></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="enamad" aria-label="Enamad Trust Seal">
+            <a referrerpolicy='origin' target='_blank'
+                href='https://trustseal.enamad.ir/?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl'><img
+                    referrerpolicy='origin'
+                    src='https://trustseal.enamad.ir/logo.aspx?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl' alt=''
+                    style='cursor:pointer' code='8m3trW0HWMHwsdycPLC79HZTsO97SjFl'></a>
+        </div>
+    </footer>
+
+    <script>
+        (function () {
+            function showContact(e) {
+                e && e.preventDefault && e.preventDefault();
+                var panel = document.getElementById('contact-info');
+                if (panel) {
+                    panel.classList.add('visible');
+                    try { panel.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (_) { }
+                } else {
+                    window.location.href = 'contact.html';
+                }
+            }
+            ['contact-link', 'contact-link-2', 'contact-link-3'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) {
+                    el.addEventListener('click', showContact, { passive: false });
+                }
+            });
+        })();
+    </script>
+</body>
+
+</html>
