@@ -335,7 +335,7 @@ services:
       - ./docker/nginx/proxy.conf:/etc/nginx/proxy.conf:ro
       - nginx_logs_beta:/var/log/nginx
       - /etc/letsencrypt:/etc/letsencrypt:ro  # Let's Encrypt certificates
-      - ./docker/public:/var/www/jaazebeh:ro  # Static site root for jaazebeh.ir
+      - ./docker/nginx/public:/var/www/jaazebeh:ro  # Static site root for jaazebeh.ir
     ports:
       - "80:80"
       - "443:443"
