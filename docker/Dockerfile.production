@@ -105,11 +105,11 @@ COPY --from=builder /app/yamata-no-orochi /usr/local/bin/yamata-no-orochi
 # Copy templates required at runtime
 COPY --from=builder /app/templates /templates
 
-# Create directories for logs and temp files
-RUN mkdir -p /var/log/yamata /tmp /var/cache
+# Create directories for logs, temp files, and data uploads
+RUN mkdir -p /var/log/yamata /tmp /var/cache /data/uploads/tickets
 
-# Set ownership for log directories
-RUN chown -R appuser:appuser /var/log/yamata /tmp /var/cache
+# Set ownership for directories that appuser needs to write to
+RUN chown -R appuser:appuser /var/log/yamata /tmp /var/cache /data
 
 # Expose port
 EXPOSE 8080
