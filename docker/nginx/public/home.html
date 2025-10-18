@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fa" dir="rtl">
 
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Jazebeh - Home</title>
+    <title>جاذبه - صفحهٔ اصلی</title>
     <style>
         :root {
             --red: #dc2626;
@@ -203,11 +203,12 @@
             display: none;
             background: #fff;
             border: 1px solid #f5c2c2;
-            border-left: 6px solid var(--red);
+            border-right: 6px solid var(--red);
             border-radius: 12px;
             padding: 16px;
             margin: 24px 0;
             box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+            text-align: right;
         }
 
         .contact-panel.visible {
@@ -216,7 +217,7 @@
 
         .enamad {
             position: fixed;
-            left: 16px;
+            right: 16px;
             bottom: 16px;
             z-index: 50;
         }
@@ -244,54 +245,45 @@
     <header class="container">
         <div class="brand">
             <div class="logo" aria-hidden="true">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"
-                    stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                    <path d="M2 17l10 5 10-5" />
-                    <path d="M2 12l10 5 10-5" />
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <circle cx="12" cy="12" r="5" />
+                    <circle cx="12" cy="12" r="1" />
+                    <line x1="12" y1="2" x2="12" y2="4" />
+                    <line x1="12" y1="20" x2="12" y2="22" />
+                    <line x1="2" y1="12" x2="4" y2="12" />
+                    <line x1="20" y1="12" x2="22" y2="12" />
                 </svg>
             </div>
-            <span>Jazebeh</span>
+            <span>جاذبه</span>
         </div>
         <nav>
-            <a href="home.html">Home</a>
-            <a id="contact-link" href="contact.html">Contact Us</a>
-            <a class="btn btn-secondary" href="/signin">Sign In</a>
-            <a class="btn btn-primary" href="/signup">Get Started</a>
+            <a href="home.html">خانه</a>
+            <a id="contact-link" href="contact.html">تماس با ما</a>
+            <a class="btn btn-secondary" href="/signin">ورود</a>
+            <a class="btn btn-primary" href="/signup">ثبت‌نام</a>
         </nav>
     </header>
 
     <main>
         <section class="hero container">
-            <span class="badge">Consulting and Data-Driven Technology</span>
-            <h1>Transform Your Business with Targeted SMS Marketing</h1>
-            <p class="subtitle">Reach your customers with precision, drive engagement, and boost conversions with
-                advanced data-driven tools designed for modern businesses.</p>
+            <span class="badge">مشاوره و فناوری داده‌محور</span>
+            <h1>تحول کسب‌وکار شما با بازاریابی هوشمند هدفمند</h1>
+            <p class="subtitle">با ابزارهای هوشمند و داده‌محور، به مشتریان خود دقیق‌تر دسترسی پیدا کنید، تعامل را افزایش دهید و نرخ تبدیل را بهبود دهید.</p>
             <div class="actions">
-                <a class="btn btn-primary" href="/signup">Get Started Free</a>
-                <a class="btn btn-secondary" href="/signin">Sign In</a>
-                <a class="btn" id="contact-link-2" href="contact.html">Contact Us</a>
+                <a class="btn btn-primary" href="/signup">شروع رایگان</a>
+                <a class="btn btn-secondary" href="/signin">ورود</a>
+                <a class="btn" id="contact-link-2" href="contact.html">تماس با ما</a>
             </div>
 
             <div id="contact-info" class="contact-panel" aria-live="polite">
-                <h2 style="margin:0 0 8px 0;">Contact Information</h2>
-                <div class="muted" style="margin-bottom:12px;">You can also view this page at <a
-                        href="contact.html">contact.html</a></div>
+                <h2 style="margin:0 0 8px 0;">اطلاعات تماس</h2>
+                <div class="muted" style="margin-bottom:12px;">می‌توانید این اطلاعات را در صفحهٔ <a
+                        href="contact.html">تماس با ما</a> نیز مشاهده کنید.</div>
                 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px;">
                     <div>
-                        <h3 style="margin:0 0 6px 0;">English</h3>
-                        <p style="margin:6px 0;">Rahkarhaye Hadafmand-e Khalagh Company (Private Joint Stock)</p>
-                        <p style="margin:6px 0;">Address: Tehran, Molla Sadra Street, North Shirazi Street, Hakim Azam
-                            Street, No. 19, Monstrect</p>
-                        <p style="margin:6px 0;">Postal Code: 1991647419</p>
-                        <p style="margin:6px 0;">Phone: +98 21 8967 7330</p>
-                        <p style="margin:6px 0;">Email: <a href="mailto:info@jazebeh.ir">info@jazebeh.ir</a></p>
-                    </div>
-                    <div dir="rtl" style="text-align:right;">
-                        <h3 style="margin:0 0 6px 0;">فارسی</h3>
                         <p style="margin:6px 0;">شرکت راه کارهای هدفمند خلاق (سهامی خاص)</p>
-                        <p style="margin:6px 0;">تهران، خیابان ملاصدرا، خیابان شیرازی شمالی، خیابان حکیم اعظم پلاک ۱۹
-                            (طبقه 3 واحد 6)</p>
+                        <p style="margin:6px 0;">تهران، خیابان ملاصدرا، خیابان شیرازی شمالی، خیابان حکیم اعظم، پلاک ۱۹ (طبقهٔ ۳، واحد ۶)</p>
                         <p style="margin:6px 0;">کدپستی: ۱۹۹۱۶۴۷۴۱۹</p>
                         <p style="margin:6px 0;">تلفن ثابت: ۰۲۱۸۹۶۷۷۳۳۰ - ۰۲۱۸۹۶۷۰۰۰۰</p>
                         <p style="margin:6px 0;">ایمیل: <a href="mailto:info@jazebeh.ir">info@jazebeh.ir</a></p>
@@ -302,26 +294,23 @@
 
         <section class="section">
             <div class="container">
-                <h2 style="margin:0;">Why Choose Our Platform?</h2>
+                <h2 style="margin:0;">چرا جاذبه؟</h2>
                 <div class="features">
                     <div class="card">
-                        <h3>Targeted Campaigns</h3>
-                        <p class="muted">Create highly targeted SMS campaigns based on customer behavior, demographics,
-                            and preferences.</p>
+                        <h3>کمپین‌های هدفمند</h3>
+                        <p class="muted">کمپین‌های هوشمند بسیار هدفمند بر اساس رفتار مشتری، ویژگی‌های جمعیت‌شناختی و ترجیحات.</p>
                     </div>
                     <div class="card">
-                        <h3>Smart Segmentation</h3>
-                        <p class="muted">Segment your audience intelligently and send personalized messages that
-                            resonate.</p>
+                        <h3>بخش‌بندی هوشمند</h3>
+                        <p class="muted">بخش‌بندی دقیق مخاطبان و ارسال پیام‌های شخصی‌سازی‌شده که اثرگذار باشند.</p>
                     </div>
                     <div class="card">
-                        <h3>Real-time Analytics</h3>
-                        <p class="muted">Track campaign performance with detailed analytics and actionable insights.</p>
+                        <h3>تحلیل لحظه‌ای</h3>
+                        <p class="muted">پایش عملکرد کمپین با تحلیل‌های دقیق و بینش‌های قابل اقدام.</p>
                     </div>
                     <div class="card">
-                        <h3>Regulatory Compliance</h3>
-                        <p class="muted">Built-in compliance features ensure your campaigns meet all regulatory
-                            requirements.</p>
+                        <h3>رعایت الزامات قانونی</h3>
+                        <p class="muted">ویژگی‌های درون‌ساختهٔ انطباق با قوانین برای اطمینان از رعایت مقررات.</p>
                     </div>
                 </div>
             </div>
@@ -329,11 +318,9 @@
 
         <section class="cta">
             <div class="container">
-                <h2 style="margin: 0 0 8px 0;">Ready to Get Started?</h2>
-                <p style="margin: 0 0 20px 0;">Join thousands of businesses already using our platform to grow their
-                    customer base.</p>
-                <a class="btn btn-secondary" href="/signup" style="background:#fff; color: var(--red);">Start Your Free
-                    Trial</a>
+                <h2 style="margin: 0 0 8px 0;">آمادهٔ شروع هستید؟</h2>
+                <p style="margin: 0 0 20px 0;">به جمع کسب‌وکارهایی بپیوندید که با جاذبه، ارتباط مؤثر با مشتریان را تجربه می‌کنند.</p>
+                <a class="btn btn-secondary" href="/signup" style="background:#fff; color: var(--red);">شروع رایگان</a>
             </div>
         </section>
     </main>
@@ -342,22 +329,21 @@
         <div class="container">
             <div class="grid">
                 <div>
-                    <h3 style="margin-top:0;">About</h3>
-                    <p class="muted">Empower your business with targeted SMS marketing campaigns. Reach your customers
-                        with precision and drive results.</p>
+                    <h3 style="margin-top:0;">دربارهٔ جاذبه</h3>
+                    <p class="muted">با جاذبه، کمپین‌های هوشمند هدفمند بسازید و با دقت به مشتریان خود دسترسی پیدا کنید.</p>
                 </div>
                 <div>
-                    <h3 style="margin-top:0;">Quick Links</h3>
-                    <p><a id="contact-link-3" href="contact.html">Contact Us</a></p>
+                    <h3 style="margin-top:0;">پیوندهای سریع</h3>
+                    <p><a id="contact-link-3" href="contact.html">تماس با ما</a></p>
                 </div>
             </div>
         </div>
 
-        <div class="enamad" aria-label="Enamad Trust Seal">
+        <div class="enamad" aria-label="نماد اعتماد الکترونیکی">
             <a referrerpolicy='origin' target='_blank'
                 href='https://trustseal.enamad.ir/?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl'><img
                     referrerpolicy='origin'
-                    src='https://trustseal.enamad.ir/logo.aspx?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl' alt=''
+                    src='https://trustseal.enamad.ir/logo.aspx?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl' alt='نماد اعتماد'
                     style='cursor:pointer' code='8m3trW0HWMHwsdycPLC79HZTsO97SjFl'></a>
         </div>
     </footer>
