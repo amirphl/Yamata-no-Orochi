@@ -44,9 +44,6 @@ const (
 	MinAcceptableCampaignCapacity = 500
 
 	TomanCurrency = "TMN"
-
-	// TaxRate is the tax rate applied to payments (10%)
-	TaxRate = 0.10
 )
 
 const (
