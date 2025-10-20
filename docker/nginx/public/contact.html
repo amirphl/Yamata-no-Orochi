@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>جاذبه - تماس با ما</title>
+    <style>
+        :root {
+            --red: #dc2626;
+            --red-dark: #b91c1c;
+            --gray-900: #111827;
+            --gray-600: #4b5563;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+            color: var(--gray-900);
+            background: #fafafa;
+        }
+
+        a {
+            color: var(--red);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 16px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-weight: 700;
+            font-size: 18px;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            display: grid;
+            place-items: center;
+            border-radius: 8px;
+            background: var(--red);
+        }
+
+        .logo svg {
+            width: 24px;
+            height: 24px;
+            stroke: #fff;
+        }
+
+        nav {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .card {
+            background: #fff;
+            border: 1px solid #eee;
+            border-right: 6px solid var(--red);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 24px 0;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+        }
+
+        .muted {
+            color: var(--gray-600);
+        }
+
+        footer {
+            position: relative;
+            background: #111;
+            color: #e5e7eb;
+            padding: 56px 0 96px;
+            margin-top: 48px;
+        }
+
+        .enamad {
+            position: fixed;
+            right: 16px;
+            bottom: 16px;
+            z-index: 50;
+        }
+
+        .enamad img {
+            height: 86px;
+            width: auto;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="container">
+        <div class="brand">
+            <div class="logo" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="9" />
+                    <circle cx="12" cy="12" r="5" />
+                    <circle cx="12" cy="12" r="1" />
+                    <line x1="12" y1="2" x2="12" y2="4" />
+                    <line x1="12" y1="20" x2="12" y2="22" />
+                    <line x1="2" y1="12" x2="4" y2="12" />
+                    <line x1="20" y1="12" x2="22" y2="12" />
+                </svg>
+            </div>
+            <span>جاذبه</span>
+        </div>
+        <nav>
+            <a href="home.html">خانه</a>
+            <a href="#contact-info">تماس با ما</a>
+        </nav>
+    </header>
+
+    <main class="container">
+        <h1 style="margin-top: 8px;">تماس با ما</h1>
+        <p class="muted">خوشحال می‌شویم با ما در ارتباط باشید. از طریق راه‌های زیر با ما تماس بگیرید.</p>
+
+        <section id="contact-info" class="card" aria-live="polite">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:16px;">
+                <div>
+                    <p style="margin:6px 0;">شرکت راه کارهای هدفمند خلاق (سهامی خاص)</p>
+                    <p style="margin:6px 0;">تهران، خیابان ملاصدرا، خیابان شیرازی شمالی، خیابان حکیم اعظم، پلاک ۱۹ (طبقهٔ ۳، واحد ۶)</p>
+                    <p style="margin:6px 0;">کدپستی: ۱۹۹۱۶۴۷۴۱۹</p>
+                    <p style="margin:6px 0;">تلفن ثابت: ۰۲۱۸۹۶۷۷۳۳۰ - ۰۲۱۸۹۶۷۰۰۰۰</p>
+                    <p style="margin:6px 0;">ایمیل: <a href="mailto:info@jaazebeh.ir">info@jaazebeh.ir</a></p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p class="muted">© ۲۰۲۴ جاذبه. تمامی حقوق محفوظ است.</p>
+        </div>
+        <div class="enamad" aria-label="نماد اعتماد الکترونیکی">
+            <a referrerpolicy='origin' target='_blank'
+                href='https://trustseal.enamad.ir/?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl'><img
+                    referrerpolicy='origin'
+                    src='https://trustseal.enamad.ir/logo.aspx?id=654611&Code=8m3trW0HWMHwsdycPLC79HZTsO97SjFl' alt='نماد اعتماد'
+                    style='cursor:pointer' code='8m3trW0HWMHwsdycPLC79HZTsO97SjFl'></a>
+        </div>
+    </footer>
+</body>
+
+</html>

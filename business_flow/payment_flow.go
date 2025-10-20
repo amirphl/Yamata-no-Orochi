@@ -212,7 +212,7 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 		Description:   "charge wallet",
 		InvoiceNumber: invoiceNumber,
 		CellNumber:    customer.RepresentativeMobile,
-		RedirectURL:   fmt.Sprintf("https://%s/api/v1/payments/callback/%s", p.deploymentCfg.Domain, invoiceNumber),
+		RedirectURL:   fmt.Sprintf("https://jaazebeh.ir/api/v1/payments/callback/%s", invoiceNumber),
 		AtipayToken:   "", // Will be set later
 		AtipayStatus:  "", // Will be set later
 		// Payment*: "",   // Will be set later
@@ -506,7 +506,7 @@ func (p *PaymentFlowImpl) PaymentCallback(ctx context.Context, atipayRequest *dt
 				}
 
 				// Create audit log for verification failure
-				errMsg := fmt.Sprintf("Payment verification failed (step 2) for payment request %d: amount mismatch (verified: %d Rials, original: %d Rials)", paymentRequest.ID, verificationResult.AmountIRR, paymentRequest.Amount*10)
+				errMsg := fmt.Sprintf("Payment verification failed (step 2) for payment request %d: amount mismatch (verified: %f Rials, original: %d Rials)", paymentRequest.ID, verificationResult.AmountIRR, paymentRequest.Amount*10)
 				_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionPaymentFailed, mapping.Description, false, &errMsg, metadata)
 
 				return nil
