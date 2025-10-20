@@ -109,3 +109,4 @@ func (r *ProcessedCampaignRepositoryImpl) Update(ctx context.Context, pc *models
 	}
 	return db.Save(pc).Error
 }
+ 
