@@ -75,6 +75,7 @@ type CustomerRepository interface {
 	ListActiveCustomers(ctx context.Context, limit, offset int) ([]*models.Customer, error)
 	UpdatePassword(ctx context.Context, customerID uint, passwordHash string) error
 	UpdateVerificationStatus(ctx context.Context, customerID uint, isMobileVerified, isEmailVerified *bool, mobileVerifiedAt, emailVerifiedAt *time.Time) error
+	FindByIDs(ctx context.Context, ids []uint) ([]*models.Customer, error)
 }
 
 // OTPVerificationRepository defines operations for OTP verifications
@@ -248,4 +249,12 @@ type SentSMSRepository interface {
 	Repository[models.SentSMS, models.SentSMSFilter]
 	ByID(ctx context.Context, id uint) (*models.SentSMS, error)
 	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSMS, error)
+}
+
+// TicketRepository defines operations for tickets
+type TicketRepository interface {
+	Repository[models.Ticket, models.TicketFilter]
+	ByID(ctx context.Context, id uint) (*models.Ticket, error)
+	ByUUID(ctx context.Context, uuid string) (*models.Ticket, error)
+	ByCorrelationID(ctx context.Context, correlationID string) ([]*models.Ticket, error)
 }
