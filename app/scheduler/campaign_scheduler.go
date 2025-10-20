@@ -16,6 +16,8 @@ import (
 	"gorm.io/gorm"
 
 	"io"
+	"os"
+	"path/filepath"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/config"
@@ -39,6 +41,8 @@ type CampaignScheduler struct {
 	db          *gorm.DB
 	payamSMSCfg config.PayamSMSConfig
 	botCfg      config.BotConfig
+
+	logFile *os.File
 }
 
 // NotificationSender is a minimal interface extracted from NotificationService for SMS
@@ -63,9 +67,7 @@ func NewCampaignScheduler(
 	if interval <= 0 {
 		interval = time.Minute
 	}
-	if logger == nil {
-		logger = log.Default()
-	}
+
 	s := &CampaignScheduler{
 		audRepo:     audRepo,
 		tagRepo:     tagRepo,
@@ -73,7 +75,6 @@ func NewCampaignScheduler(
 		pcRepo:      pcRepo,
 		notifier:    notifier,
 		db:          db,
-		logger:      logger,
 		interval:    interval,
 		payamSMSCfg: payamSMSCfg,
 		botCfg:      botCfg,
@@ -81,7 +82,42 @@ func NewCampaignScheduler(
 	if s.botCfg.APIDomain == "" {
 		s.botCfg.APIDomain = "https://jazebeh.ir"
 	}
+
+	// Initialize scheduler-specific logger (to stdout and persistent file)
+	if err := s.initSchedulerLogger(); err != nil {
+		// Fallback to default stdout logger if file logger init fails
+		s.logger = log.Default()
+		s.logger.Printf("scheduler: failed to initialize file logger: %v", err)
+	}
+
 	return s
+}
+
+// initSchedulerLogger configures a logger that writes to both stdout and a persistent file under data/ (or /data)
+func (s *CampaignScheduler) initSchedulerLogger() error {
+	// Prefer relative data/ then fallback to /data for containerized environments
+	candidates := []string{
+		filepath.Join("data"),
+		"/data",
+	}
+	var logPath string
+	for _, dir := range candidates {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			continue
+		}
+		logPath = filepath.Join(dir, "scheduler.log")
+		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+		if err != nil {
+			continue
+		}
+		// Success
+		s.logFile = f
+		mw := io.MultiWriter(os.Stdout, f)
+		// log.Logger is goroutine-safe; include timestamps with microseconds and UTC
+		s.logger = log.New(mw, "scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		return nil
+	}
+	return fmt.Errorf("could not create scheduler log file in any candidate directory")
 }
 
 // Start launches the scheduler loop in a background goroutine and returns a stop function
