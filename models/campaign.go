@@ -34,7 +34,7 @@ func (s CampaignStatus) Valid() bool {
 	switch s {
 	case CampaignStatusInitiated, CampaignStatusInProgress,
 		CampaignStatusWaitingForApproval, CampaignStatusApproved,
-		CampaignStatusRejected:
+		CampaignStatusRejected, CampaignStatusRunning, CampaignStatusExecuted:
 		return true
 	default:
 		return false
