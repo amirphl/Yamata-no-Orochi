@@ -2,5 +2,5 @@
 -- Description: Drop tags table
 
 -- DOWN MIGRATION
-
+ 
 DROP TABLE IF EXISTS tags; 
