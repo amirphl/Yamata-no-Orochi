@@ -2,5 +2,5 @@
 -- Description: Drop processed_campaigns table
 
 -- DOWN MIGRATION
-
+ 
 DROP TABLE IF EXISTS processed_campaigns; 
