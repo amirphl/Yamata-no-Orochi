@@ -762,12 +762,11 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		return ErrAgencyDiscountNotFound
 	}
 
-	taxCoff := 1 + utils.TaxRate
-	real := uint64(float64(realWithTax) / taxCoff)
+	real := uint64(realWithTax * 10 / 11)
 	tax := realWithTax - real
-	realSystemShare := uint64(float64(systemShareWithTax) / taxCoff)
+	realSystemShare := uint64(systemShareWithTax * 10 / 11)
 	taxSystemShare := systemShareWithTax - realSystemShare
-	realAgencyShare := uint64(float64(agencyShareWithTax) / taxCoff)
+	realAgencyShare := uint64(agencyShareWithTax * 10 / 11)
 	taxAgencyShare := agencyShareWithTax - realAgencyShare
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
@@ -1059,8 +1058,7 @@ func (p *PaymentFlowImpl) generatePaymentResultHTML(
 		return "", ErrAgencyDiscountNotFound
 	}
 
-	taxCoff := 1 + utils.TaxRate
-	real := uint64(float64(realWithTax) / taxCoff)
+	real := uint64(realWithTax * 10 / 11)
 	tax := realWithTax - real
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
