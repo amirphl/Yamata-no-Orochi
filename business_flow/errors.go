@@ -123,6 +123,9 @@ var (
 	ErrLineNumberAlreadyExists = errors.New("line number already exists")
 	ErrLineNumberNotFound      = errors.New("line number not found")
 	ErrLineNumberNotActive     = errors.New("line number is not active")
+
+	// Ticket related errors
+	ErrTicketNotFound = errors.New("ticket not found")
 )
 
 type BusinessError struct {
@@ -492,4 +495,8 @@ func IsLineNumberNotFound(err error) bool {
 
 func IsLineNumberNotActive(err error) bool {
 	return errors.Is(err, ErrLineNumberNotActive)
+}
+
+func IsTicketNotFound(err error) bool {
+	return errors.Is(err, ErrTicketNotFound)
 }
