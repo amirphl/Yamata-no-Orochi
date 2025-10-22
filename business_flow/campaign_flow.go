@@ -149,6 +149,11 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_NOT_ALLOWED", "Campaign cannot be updated in current status", ErrCampaignUpdateNotAllowed)
 	}
 
+	if req.ScheduleAt == nil && campaign.Spec.ScheduleAt == nil {
+		req.ScheduleAt = utils.ToPtr(utils.UTCNow().Add(time.Hour))
+		campaign.Spec.ScheduleAt = req.ScheduleAt
+	}
+
 	// Validate schedule time must be at least 10 minutes in the future
 	scheduleTime := req.ScheduleAt
 	if scheduleTime == nil {
