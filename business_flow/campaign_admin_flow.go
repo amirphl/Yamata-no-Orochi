@@ -452,7 +452,9 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		_ = s.notifier.SendSMS(smsCtx, customerMobile, msgCustomer, &id64)
 	}
 
-	return &dto.AdminRejectCampaignResponse{Message: "Campaign rejected and budget refunded successfully"}, nil
+	return &dto.AdminRejectCampaignResponse{
+		Message: "Campaign rejected and budget refunded successfully",
+	}, nil
 }
 
 func normalizeIranMobile(m string) string {
