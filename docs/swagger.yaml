@@ -76,6 +76,32 @@ definitions:
     - line_number
     - price_factor
     type: object
+  dto.AdminCreateResponseTicketRequest:
+    properties:
+      attached_file_name:
+        type: string
+      attached_file_size:
+        type: integer
+      attached_file_url:
+        type: string
+      content:
+        type: string
+      ticket_id:
+        type: integer
+    type: object
+  dto.AdminCreateResponseTicketResponse:
+    properties:
+      correlation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      uuid:
+        type: string
+    type: object
   dto.AdminCustomerCampaignItem:
     properties:
       campaign_id:
@@ -301,6 +327,15 @@ definitions:
         type: integer
       total_sent:
         type: integer
+    type: object
+  dto.AdminListTicketsResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/dto.TicketGroup'
+        type: array
+      message:
+        type: string
     type: object
   dto.AdminRejectCampaignRequest:
     properties:
@@ -795,6 +830,62 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.CreateResponseTicketRequest:
+    properties:
+      attached_file_name:
+        type: string
+      attached_file_size:
+        type: integer
+      attached_file_url:
+        type: string
+      content:
+        type: string
+      customer_id:
+        type: integer
+      ticket_id:
+        type: integer
+    type: object
+  dto.CreateResponseTicketResponse:
+    properties:
+      correlation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      uuid:
+        type: string
+    type: object
+  dto.CreateTicketRequest:
+    properties:
+      attached_file_name:
+        type: string
+      attached_file_size:
+        type: integer
+      attached_file_url:
+        type: string
+      content:
+        type: string
+      customer_id:
+        type: integer
+      title:
+        type: string
+    type: object
+  dto.CreateTicketResponse:
+    properties:
+      correlation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      uuid:
+        type: string
+    type: object
   dto.ForgotPasswordRequest:
     properties:
       identifier:
@@ -917,6 +1008,15 @@ definitions:
         type: string
       pagination:
         $ref: '#/definitions/dto.PaginationInfo'
+    type: object
+  dto.ListTicketsResponse:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/dto.TicketGroup'
+        type: array
+      message:
+        type: string
     type: object
   dto.LoginRequest:
     properties:
@@ -1067,6 +1167,39 @@ definitions:
         type: boolean
       otp_target:
         description: Mobile number (masked for security)
+        type: string
+    type: object
+  dto.TicketGroup:
+    properties:
+      correlation_id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/dto.TicketItem'
+        type: array
+    type: object
+  dto.TicketItem:
+    properties:
+      agency_name:
+        type: string
+      company_name:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      customer_first_name:
+        description: Admin-only fields (populated in admin listings only)
+        type: string
+      customer_last_name:
+        type: string
+      id:
+        type: integer
+      phone_number:
+        type: string
+      replied_by_admin:
+        type: boolean
+      title:
         type: string
     type: object
   dto.TransactionHistoryItem:
@@ -1627,6 +1760,121 @@ paths:
       summary: Line Numbers Report (Admin)
       tags:
       - Admin Line Numbers
+  /api/v1/admin/tickets:
+    get:
+      consumes:
+      - application/json
+      description: Admin lists tickets with optional filters
+      parameters:
+      - description: Filter by customer id
+        in: query
+        name: customer_id
+        type: integer
+      - description: Exact title filter
+        in: query
+        name: title
+        type: string
+      - description: Start date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      - description: Filter by replied flag
+        in: query
+        name: replied_by_admin
+        type: boolean
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 20, max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Admin tickets retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListTicketsResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
+  /api/v1/admin/tickets/reply:
+    post:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: Admin creates a response to an existing ticket; new ticket shares
+        correlation ID with the original. Supports multipart or JSON.
+      parameters:
+      - description: Original ticket ID
+        in: formData
+        name: ticket_id
+        type: integer
+      - description: Response content (<=1000 chars)
+        in: formData
+        name: content
+        type: string
+      - description: Attachment (jpg/png/pdf/docx/xlsx/zip, <=10MB)
+        in: formData
+        name: file
+        type: file
+      - description: JSON alternative payload
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.AdminCreateResponseTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Admin response created successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCreateResponseTicketResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Ticket not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
   /api/v1/auth/forgot-password:
     post:
       consumes:
@@ -2617,6 +2865,168 @@ paths:
       summary: List Active Discounts of Agency
       tags:
       - Reports
+  /api/v1/tickets:
+    get:
+      consumes:
+      - application/json
+      description: List customer's tickets grouped by correlation ID (each group sorted
+        by id DESC)
+      parameters:
+      - description: Exact title filter
+        in: query
+        name: title
+        type: string
+      - description: Start date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      - description: 'Page number (default: 1)'
+        in: query
+        name: page
+        type: integer
+      - description: 'Items per page (default: 20, max: 100)'
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Tickets retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListTicketsResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
+    post:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: Create a new support ticket for the authenticated customer. Supports
+        multipart form upload or JSON.
+      parameters:
+      - description: Ticket title (<=80 chars)
+        in: formData
+        name: title
+        type: string
+      - description: Ticket content (<=1000 chars)
+        in: formData
+        name: content
+        type: string
+      - description: Attachment (jpg/png/pdf/docx/xlsx/zip, <=10MB)
+        in: formData
+        name: file
+        type: file
+      - description: JSON alternative for creating ticket
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.CreateTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Ticket created successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreateTicketResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
+  /api/v1/tickets/reply:
+    post:
+      consumes:
+      - multipart/form-data
+      - application/json
+      description: Create a response to an existing ticket. Customer can reply to
+        their own tickets. Supports multipart form upload or JSON.
+      parameters:
+      - description: Original ticket ID to respond to
+        in: formData
+        name: ticket_id
+        type: integer
+      - description: Response content (<=1000 chars)
+        in: formData
+        name: content
+        type: string
+      - description: Attachment (jpg/png/pdf/docx/xlsx/zip, <=10MB)
+        in: formData
+        name: file
+        type: file
+      - description: JSON alternative for creating response
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.CreateResponseTicketRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Response ticket created successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreateResponseTicketResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden - ticket does not belong to customer
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Ticket not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
   /api/v1/wallet/balance:
     get:
       consumes:
