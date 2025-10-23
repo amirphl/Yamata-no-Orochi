@@ -725,6 +725,189 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/tickets": {
+            "get": {
+                "description": "Admin lists tickets with optional filters",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tickets"
+                ],
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Filter by customer id",
+                        "name": "customer_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Exact title filter",
+                        "name": "title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (RFC3339)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (RFC3339)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Filter by replied flag",
+                        "name": "replied_by_admin",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default: 20, max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Admin tickets retrieved successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminListTicketsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/tickets/reply": {
+            "post": {
+                "description": "Admin creates a response to an existing ticket; new ticket shares correlation ID with the original. Supports multipart or JSON.",
+                "consumes": [
+                    "multipart/form-data",
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tickets"
+                ],
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Original ticket ID",
+                        "name": "ticket_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Response content (\u003c=1000 chars)",
+                        "name": "content",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Attachment (jpg/png/pdf/docx/xlsx/zip, \u003c=10MB)",
+                        "name": "file",
+                        "in": "formData"
+                    },
+                    {
+                        "description": "JSON alternative payload",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminCreateResponseTicketRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Admin response created successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminCreateResponseTicketResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Ticket not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/auth/forgot-password": {
             "post": {
                 "description": "Initiate password reset by sending OTP to registered mobile",
@@ -2332,6 +2515,262 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/tickets": {
+            "get": {
+                "description": "List customer's tickets grouped by correlation ID (each group sorted by id DESC)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tickets"
+                ],
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Exact title filter",
+                        "name": "title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (RFC3339)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (RFC3339)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page number (default: 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Items per page (default: 20, max: 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tickets retrieved successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListTicketsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new support ticket for the authenticated customer. Supports multipart form upload or JSON.",
+                "consumes": [
+                    "multipart/form-data",
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tickets"
+                ],
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Ticket title (\u003c=80 chars)",
+                        "name": "title",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Ticket content (\u003c=1000 chars)",
+                        "name": "content",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Attachment (jpg/png/pdf/docx/xlsx/zip, \u003c=10MB)",
+                        "name": "file",
+                        "in": "formData"
+                    },
+                    {
+                        "description": "JSON alternative for creating ticket",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreateTicketRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Ticket created successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CreateTicketResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/tickets/reply": {
+            "post": {
+                "description": "Create a response to an existing ticket. Customer can reply to their own tickets. Supports multipart form upload or JSON.",
+                "consumes": [
+                    "multipart/form-data",
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Tickets"
+                ],
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Original ticket ID to respond to",
+                        "name": "ticket_id",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Response content (\u003c=1000 chars)",
+                        "name": "content",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "file",
+                        "description": "Attachment (jpg/png/pdf/docx/xlsx/zip, \u003c=10MB)",
+                        "name": "file",
+                        "in": "formData"
+                    },
+                    {
+                        "description": "JSON alternative for creating response",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreateResponseTicketRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Response ticket created successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CreateResponseTicketResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - ticket does not belong to customer",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Ticket not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/wallet/balance": {
             "get": {
                 "description": "Retrieve the current wallet balance and financial information for the authenticated user",
@@ -2496,6 +2935,46 @@ const docTemplate = `{
                 },
                 "priority": {
                     "type": "integer"
+                }
+            }
+        },
+        "dto.AdminCreateResponseTicketRequest": {
+            "type": "object",
+            "properties": {
+                "attached_file_name": {
+                    "type": "string"
+                },
+                "attached_file_size": {
+                    "type": "integer"
+                },
+                "attached_file_url": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "ticket_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AdminCreateResponseTicketResponse": {
+            "type": "object",
+            "properties": {
+                "correlation_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
                 }
             }
         },
@@ -2837,6 +3316,20 @@ const docTemplate = `{
                 },
                 "total_sent": {
                     "type": "integer"
+                }
+            }
+        },
+        "dto.AdminListTicketsResponse": {
+            "type": "object",
+            "properties": {
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.TicketGroup"
+                    }
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -3557,6 +4050,92 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.CreateResponseTicketRequest": {
+            "type": "object",
+            "properties": {
+                "attached_file_name": {
+                    "type": "string"
+                },
+                "attached_file_size": {
+                    "type": "integer"
+                },
+                "attached_file_url": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "ticket_id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.CreateResponseTicketResponse": {
+            "type": "object",
+            "properties": {
+                "correlation_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CreateTicketRequest": {
+            "type": "object",
+            "properties": {
+                "attached_file_name": {
+                    "type": "string"
+                },
+                "attached_file_size": {
+                    "type": "integer"
+                },
+                "attached_file_url": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CreateTicketResponse": {
+            "type": "object",
+            "properties": {
+                "correlation_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.ForgotPasswordRequest": {
             "type": "object",
             "required": [
@@ -3741,6 +4320,20 @@ const docTemplate = `{
                 },
                 "pagination": {
                     "$ref": "#/definitions/dto.PaginationInfo"
+                }
+            }
+        },
+        "dto.ListTicketsResponse": {
+            "type": "object",
+            "properties": {
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.TicketGroup"
+                    }
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -3946,6 +4539,56 @@ const docTemplate = `{
                 },
                 "otp_target": {
                     "description": "Mobile number (masked for security)",
+                    "type": "string"
+                }
+            }
+        },
+        "dto.TicketGroup": {
+            "type": "object",
+            "properties": {
+                "correlation_id": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.TicketItem"
+                    }
+                }
+            }
+        },
+        "dto.TicketItem": {
+            "type": "object",
+            "properties": {
+                "agency_name": {
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "customer_first_name": {
+                    "description": "Admin-only fields (populated in admin listings only)",
+                    "type": "string"
+                },
+                "customer_last_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "phone_number": {
+                    "type": "string"
+                },
+                "replied_by_admin": {
+                    "type": "boolean"
+                },
+                "title": {
                     "type": "string"
                 }
             }
