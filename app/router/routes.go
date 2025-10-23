@@ -48,6 +48,7 @@ type FiberRouter struct {
 	lineNumberAdminHandler         handlers.LineNumberAdminHandlerInterface
 	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
 	campaignBotHandler             handlers.CampaignBotHandlerInterface
+	ticketHandler                  handlers.TicketHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -64,6 +65,7 @@ func NewFiberRouter(
 	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
 	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
 	campaignBotHandler handlers.CampaignBotHandlerInterface,
+	ticketHandler handlers.TicketHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -93,6 +95,7 @@ func NewFiberRouter(
 
 		adminCustomerManagementHandler: adminCustomerManagemetHandler,
 		campaignBotHandler:             campaignBotHandler,
+		ticketHandler:                  ticketHandler,
 	}
 }
 
@@ -245,6 +248,20 @@ func (r *FiberRouter) SetupRoutes() {
 	adminLineNumbers.Post("/", r.lineNumberAdminHandler.CreateLineNumber)
 	adminLineNumbers.Put("/", r.lineNumberAdminHandler.UpdateLineNumbersBatch)
 	adminLineNumbers.Get("/report", r.lineNumberAdminHandler.GetLineNumbersReport)
+
+	// Tickets
+	tickets := api.Group("/tickets")
+	tickets.Use(r.authMiddleware.Authenticate())
+	tickets.Post("/", r.ticketHandler.Create)
+	tickets.Post("/reply", r.ticketHandler.CreateResponse)
+	tickets.Get("/", r.ticketHandler.List)
+
+	// Admin tickets (reply)
+	adminTickets := api.Group("/admin/tickets")
+	adminTickets.Use(r.authMiddleware.AdminAuthenticate())
+	adminTickets.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminTickets.Post("/reply", r.ticketHandler.AdminCreateResponse)
+	adminTickets.Get("/", r.ticketHandler.AdminList)
 
 	// Wallet routes (protected with authentication)
 	wallet := api.Group("/wallet")
