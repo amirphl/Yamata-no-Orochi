@@ -239,6 +239,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	tagRepo := repository.NewTagRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
+	ticketRepo := repository.NewTicketRepository(db)
 
 	// Initialize services
 	notificationService := initializeNotificationService(cfg)
@@ -364,6 +365,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, &cfg.Cache, db, rc)
 
+	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
@@ -376,6 +379,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	lineNumberAdminHandler := handlers.NewLineNumberAdminHandler(adminLineNumberFlow)
 	adminCustomerManagementHandler := handlers.NewAdminCustomerManagementHandler(adminCustomerManagementFlow)
 	campaignBotHandler := handlers.NewCampaignBotHandler(botCampaignFlow)
+	ticketHandler := handlers.NewTicketHandler(ticketFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
@@ -394,6 +398,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberAdminHandler,
 		adminCustomerManagementHandler,
 		campaignBotHandler,
+		ticketHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
