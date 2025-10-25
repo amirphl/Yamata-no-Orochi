@@ -256,6 +256,11 @@ py-ai/Customer Title.csv
 py-ai/process_persona_excel.py
 py-ai/persona_analysis_results.csv
 py-ai/AI command.txt
+py-ai/Customer Persona New.processed.xlsx
+py-ai/customer title.xlsx
+py-ai/persona_progress.json
+py-ai/system_prompt.txt
+py-ai/user_prompt.tx
 
 data/
 

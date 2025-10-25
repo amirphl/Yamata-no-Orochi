@@ -212,7 +212,7 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 		Description:   "charge wallet",
 		InvoiceNumber: invoiceNumber,
 		CellNumber:    customer.RepresentativeMobile,
-		RedirectURL:   fmt.Sprintf("https://jaazebeh.ir/api/v1/payments/callback/%s", invoiceNumber),
+		RedirectURL:   fmt.Sprintf("https://%s/api/v1/payments/callback/%s", p.deploymentCfg.Domain, invoiceNumber),
 		AtipayToken:   "", // Will be set later
 		AtipayStatus:  "", // Will be set later
 		// Payment*: "",   // Will be set later
