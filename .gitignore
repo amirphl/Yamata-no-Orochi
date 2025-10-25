@@ -256,3 +256,5 @@ py-ai/Customer Title.csv
 py-ai/process_persona_excel.py
 py-ai/persona_analysis_results.csv
 py-ai/AI command.txt
+
+data/

@@ -78,7 +78,7 @@ func NewCampaignScheduler(
 		botCfg:      botCfg,
 	}
 	if s.botCfg.APIDomain == "" {
-		s.botCfg.APIDomain = "https://jaazebeh.ir"
+		s.botCfg.APIDomain = "https://jazebeh.ir"
 	}
 	return s
 }
