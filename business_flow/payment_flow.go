@@ -155,11 +155,11 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 
 // validateChargeWalletRequest validates the business rules for charging a wallet
 func (p *PaymentFlowImpl) validateChargeWalletRequest(req *dto.ChargeWalletRequest) error {
-	// Validate amount (minimum 100000 Tomans and must be multiple of 10000)
-	if req.AmountWithTax < 100000 {
+	// Validate amount (minimum 1000 Tomans and must be multiple of 1000)
+	if req.AmountWithTax < 1000 {
 		return ErrAmountTooLow
 	}
-	if req.AmountWithTax%10000 != 0 {
+	if req.AmountWithTax%1000 != 0 {
 		return ErrAmountNotMultiple
 	}
 
