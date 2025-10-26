@@ -258,3 +258,5 @@ py-ai/persona_analysis_results.csv
 py-ai/AI command.txt
 
 data/
+
+scripts/update-audience-spec.sh
