@@ -14,7 +14,7 @@ volumes:
     driver: local
   app_logs_beta:
     driver: local
-  ticket_uploads_beta:
+  uploads_beta:
     driver: local
   prometheus_data_beta:
     driver: local
@@ -297,7 +297,7 @@ services:
       CAMPAIGN_EXECUTION_INTERVAL: ${CAMPAIGN_EXECUTION_INTERVAL}
     volumes:
       - app_logs_beta:/var/log/yamata
-      - ticket_uploads_beta:/data/uploads/tickets
+      - uploads_beta:/data
     # ports:
     #   - "127.0.0.1:8080:8080"  # Only accessible from localhost
     #   - "127.0.0.1:9090:9090"  # Metrics port
