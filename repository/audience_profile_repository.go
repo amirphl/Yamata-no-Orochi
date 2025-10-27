@@ -51,8 +51,8 @@ func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.Audien
 	if f.PhoneNumber != nil {
 		db = db.Where("phone_number = ?", *f.PhoneNumber)
 	}
-	if f.Tags != nil {
-		db = db.Where("? = ANY (tags)", *f.Tags)
+	if f.Tags != nil && len(*f.Tags) > 0 {
+		db = db.Where("tags && ?", *f.Tags) // overlap operator for arrays
 	}
 	if f.Color != nil {
 		db = db.Where("color = ?", *f.Color)
