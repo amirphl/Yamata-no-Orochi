@@ -19,8 +19,14 @@ type SentSMS struct {
 	TrackingID          string        `gorm:"size:64;not null;index:idx_sent_sms_tracking_id" json:"tracking_id"`
 	PartsDelivered      int           `gorm:"default:0" json:"parts_delivered"`
 	Status              SMSSendStatus `gorm:"type:sent_sms_status;not null;default:'pending';index:idx_sent_sms_status" json:"status"`
-	CreatedAt           time.Time     `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sent_sms_created_at" json:"created_at"`
-	UpdatedAt           time.Time     `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"updated_at"`
+
+	// Provider response fields (optional, populated after provider acknowledgement)
+	ServerID    *string `gorm:"size:64" json:"server_id,omitempty"`
+	ErrorCode   *string `gorm:"size:64" json:"error_code,omitempty"`
+	Description *string `gorm:"type:text" json:"description,omitempty"`
+
+	CreatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sent_sms_created_at" json:"created_at"`
+	UpdatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"updated_at"`
 }
 
 func (SentSMS) TableName() string { return "sent_sms" }
@@ -34,4 +40,3 @@ type SentSMSFilter struct {
 	CreatedAfter        *time.Time
 	CreatedBefore       *time.Time
 }
- 
