@@ -92,3 +92,34 @@ func (r *SentSMSRepositoryImpl) Exists(ctx context.Context, filter models.SentSM
 	}
 	return c > 0, nil
 }
+
+func (r *SentSMSRepositoryImpl) UpdateProviderFieldsByTrackingIDs(ctx context.Context, updates []SentSMSProviderUpdate) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+	// Perform updates one by one inside the same transaction to keep it simple and safe
+	for _, u := range updates {
+		m := map[string]any{
+			"server_id":   u.ServerID,
+			"error_code":  u.ErrorCode,
+			"description": u.Description,
+		}
+		if e := db.Model(&models.SentSMS{}).Where("tracking_id = ?", u.TrackingID).Updates(m).Error; e != nil {
+			return e
+		}
+	}
+	return nil
+}
