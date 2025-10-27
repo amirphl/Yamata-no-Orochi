@@ -129,5 +129,8 @@
 \echo 'Running 0041_add_replied_by_admin_to_tickets.sql...'
 \i migrations/0041_add_replied_by_admin_to_tickets.sql
 
+\echo 'Running 0042_add_provider_fields_to_sent_sms.sql...'
+\i migrations/0042_add_provider_fields_to_sent_sms.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
