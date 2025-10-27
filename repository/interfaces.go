@@ -244,11 +244,20 @@ type ProcessedCampaignRepository interface {
 	Update(ctx context.Context, pc *models.ProcessedCampaign) error
 }
 
+// SentSMSProviderUpdate describes provider fields update identified by tracking id
+type SentSMSProviderUpdate struct {
+	TrackingID  string
+	ServerID    *string
+	ErrorCode   *string
+	Description *string
+}
+
 // SentSMSRepository defines operations for sent SMS rows
 type SentSMSRepository interface {
 	Repository[models.SentSMS, models.SentSMSFilter]
 	ByID(ctx context.Context, id uint) (*models.SentSMS, error)
 	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSMS, error)
+	UpdateProviderFieldsByTrackingIDs(ctx context.Context, updates []SentSMSProviderUpdate) error
 }
 
 // TicketRepository defines operations for tickets
