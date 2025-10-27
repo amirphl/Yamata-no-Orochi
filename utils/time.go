@@ -91,3 +91,11 @@ func TimeToUTCPtr(t *time.Time) *time.Time {
 	utc := TimeToUTC(*t)
 	return &utc
 }
+
+func TehranNow() (time.Time, error) {
+	loc, err := time.LoadLocation("Asia/Tehran")
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Now().In(loc), nil
+}
