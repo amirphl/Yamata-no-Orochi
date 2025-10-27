@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0042_add_provider_fields_to_sent_sms_down.sql...'
+\i migrations/0042_add_provider_fields_to_sent_sms_down.sql
+
 \echo 'Running 0041_add_replied_by_admin_to_tickets_down.sql...'
 \i migrations/0041_add_replied_by_admin_to_tickets_down.sql
 
