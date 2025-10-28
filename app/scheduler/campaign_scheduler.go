@@ -12,9 +12,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
-	"sync"
 
 	"gorm.io/gorm"
+
+	"io"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/config"
@@ -92,6 +93,8 @@ func (s *CampaignScheduler) Start(parent context.Context) func() {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
+		s.runOnce(ctx)
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -144,12 +147,9 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	}
 
 	// 5) Spawn goroutines per campaign
-	var wg sync.WaitGroup
-	wg.Add(len(pending))
 	for _, camp := range pending {
 		c := camp
 		go func() {
-			defer wg.Done()
 			if err := s.processCampaign(ctx, token, c); err != nil {
 				s.logger.Printf("scheduler: process campaign id=%d failed: %v", c.ID, err)
 			}
@@ -175,8 +175,11 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	// 7) Save the campaign in the processed campaign table AND 8), 9), 10) Save the list of audiences in the processed campaign table
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
-			CampaignID:   c.ID,
-			CampaignJSON: func() json.RawMessage { b, _ := json.Marshal(c); return b }(),
+			CampaignID:     c.ID,
+			CampaignJSON:   func() json.RawMessage { b, _ := json.Marshal(c); return b }(),
+			AudienceIDs:    pq.Int64Array{},
+			AudienceCodes:  []string{},
+			LastAudienceID: nil,
 		}
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
 			return err
@@ -262,9 +265,28 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 		// TODO: Update j0in.ir db before sending
 
 		// Send via PayamSMS for this batch
-		_, err := s.sendPayamSMSBatchWithBodies(ctx, sender, items)
+		respItems, err := s.sendPayamSMSBatchWithBodies(ctx, sender, items)
 		if err != nil {
 			// TODO: handle error
+		} else {
+			// Map provider response back to our sent_sms rows by customerId (trackingID) using a batch update
+			updates := make([]repository.SentSMSProviderUpdate, 0, len(respItems))
+			for _, r := range respItems {
+				if r.CustomerID == "" {
+					continue
+				}
+				updates = append(updates, repository.SentSMSProviderUpdate{
+					TrackingID:  r.CustomerID,
+					ServerID:    r.ServerID,
+					ErrorCode:   r.ErrorCode,
+					Description: r.Desc,
+				})
+			}
+			if len(updates) > 0 {
+				if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, updates); updateErr != nil {
+					s.logger.Printf("scheduler: failed to batch update sent_sms provider fields: %v", updateErr)
+				}
+			}
 		}
 	}
 
@@ -298,14 +320,38 @@ func (s *CampaignScheduler) loginBot(ctx context.Context) (string, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", fmt.Errorf("bot login http status: %d", resp.StatusCode)
 	}
-	var out dto.BotLoginResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
 	}
-	if out.Session.AccessToken == "" {
+
+	// Now try to decode into the expected struct
+	var apiResp dto.APIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("failed to decode JSON into APIResponse: %w", err)
+	}
+
+	// Check if the API call was successful
+	if !apiResp.Success {
+		return "", fmt.Errorf("bot login failed: %v", apiResp.Message)
+	}
+
+	// Convert the Data field to JSON again to parse into BotLoginResponse
+	dataBytes, err := json.Marshal(apiResp.Data)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal APIResponse data: %w", err)
+	}
+
+	var botLoginResp dto.BotLoginResponse
+	if err := json.Unmarshal(dataBytes, &botLoginResp); err != nil {
+		return "", fmt.Errorf("failed to decode JSON into BotLoginResponse: %w", err)
+	}
+
+	if botLoginResp.Session.AccessToken == "" {
 		return "", fmt.Errorf("empty bot access token")
 	}
-	return out.Session.AccessToken, nil
+
+	return botLoginResp.Session.AccessToken, nil
 }
 
 func (s *CampaignScheduler) listReadyCampaigns(ctx context.Context, token string) ([]dto.BotGetCampaignResponse, error) {
@@ -323,11 +369,34 @@ func (s *CampaignScheduler) listReadyCampaigns(ctx context.Context, token string
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("ready campaigns http status: %d", resp.StatusCode)
 	}
-	var data dto.BotListCampaignsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return nil, err
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-	return data.Items, nil
+
+	var apiResp dto.APIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON into APIResponse: %w", err)
+	}
+
+	// Check if the API call was successful
+	if !apiResp.Success {
+		return nil, fmt.Errorf("list ready campaigns failed: %v", apiResp.Message)
+	}
+
+	// Convert the Data field to JSON again to parse into BotListCampaignsResponse
+	dataBytes, err := json.Marshal(apiResp.Data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal APIResponse data: %w", err)
+	}
+
+	var listCampaignsResp dto.BotListCampaignsResponse
+	if err := json.Unmarshal(dataBytes, &listCampaignsResp); err != nil {
+		return nil, fmt.Errorf("failed to decode JSON into BotListCampaignsResponse: %w", err)
+	}
+
+	return listCampaignsResp.Items, nil
 }
 
 func (s *CampaignScheduler) moveCampaignToRunning(ctx context.Context, token string, id uint) error {
@@ -509,11 +578,18 @@ func (s *CampaignScheduler) sendPayamSMSBatchWithBodies(ctx context.Context, sen
 		Sender:   sender,
 		SMSItems: make([]any, 0, len(items)),
 	}
+	sendDate, err := utils.TehranNow()
+	if err != nil {
+		return nil, err
+	}
+	sendDate = sendDate.Add(time.Minute)
+
 	for _, it := range items {
 		payload.SMSItems = append(payload.SMSItems, map[string]any{
 			"recipient":  it.Recipient,
 			"body":       it.Body,
 			"customerId": it.CustomerID,
+			"sendDate":   sendDate.Format("2006-01-02 15:04:05"),
 		})
 	}
 	b, _ := json.Marshal(payload)
