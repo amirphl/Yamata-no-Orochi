@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0043_create_short_links_down.sql...'
+\i migrations/0043_create_short_links_down.sql
+
 \echo 'Running 0042_add_provider_fields_to_sent_sms_down.sql...'
 \i migrations/0042_add_provider_fields_to_sent_sms_down.sql
 
