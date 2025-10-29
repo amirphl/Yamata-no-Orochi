@@ -381,6 +381,36 @@ func (r *CustomerRepositoryImpl) UpdateVerificationStatus(ctx context.Context, c
 	return nil
 }
 
+// UpdateActiveStatus toggles is_active for a given customer ID
+func (r *CustomerRepositoryImpl) UpdateActiveStatus(ctx context.Context, customerID uint, isActive bool) error {
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+	res := db.Model(&models.Customer{}).
+		Where("id = ?", customerID).
+		Updates(map[string]any{
+			"is_active":  isActive,
+			"updated_at": utils.UTCNow(),
+		})
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("customer not found with ID: " + strconv.Itoa(int(customerID)))
+	}
+	return nil
+}
+
 // FindByIDs retrieves customers by a list of IDs with necessary preloads
 func (r *CustomerRepositoryImpl) FindByIDs(ctx context.Context, ids []uint) ([]*models.Customer, error) {
 	db := r.getDB(ctx)
