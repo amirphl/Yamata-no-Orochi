@@ -76,6 +76,7 @@ type CustomerRepository interface {
 	UpdatePassword(ctx context.Context, customerID uint, passwordHash string) error
 	UpdateVerificationStatus(ctx context.Context, customerID uint, isMobileVerified, isEmailVerified *bool, mobileVerifiedAt, emailVerifiedAt *time.Time) error
 	FindByIDs(ctx context.Context, ids []uint) ([]*models.Customer, error)
+	UpdateActiveStatus(ctx context.Context, customerID uint, isActive bool) error
 }
 
 // OTPVerificationRepository defines operations for OTP verifications
@@ -156,6 +157,7 @@ type TransactionRepository interface {
 	AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, nameLike string, startDate, endDate *time.Time, orderBy string) ([]*AgencyCustomerTransactionAggregate, error)
 	AggregateAgencyTransactionsByDiscounts(ctx context.Context, agencyID uint, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error)
 	AggregateCustomersShares(ctx context.Context, startDate, endDate *time.Time) ([]*CustomerShareAggregate, error)
+	AggregateCustomerTransactionsByDiscounts(ctx context.Context, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error)
 }
 
 // BalanceSnapshotRepository defines the interface for balance snapshot data access
@@ -233,6 +235,7 @@ type TagRepository interface {
 	Repository[models.Tag, models.TagFilter]
 	ByID(ctx context.Context, id uint) (*models.Tag, error)
 	ByName(ctx context.Context, name string) (*models.Tag, error)
+	ListByIDs(ctx context.Context, ids []uint) ([]*models.Tag, error)
 	ListByNames(ctx context.Context, names []string) ([]*models.Tag, error)
 }
 
@@ -266,4 +269,12 @@ type TicketRepository interface {
 	ByID(ctx context.Context, id uint) (*models.Ticket, error)
 	ByUUID(ctx context.Context, uuid string) (*models.Ticket, error)
 	ByCorrelationID(ctx context.Context, correlationID string) ([]*models.Ticket, error)
+}
+
+// ShortLinkRepository defines operations for short links
+type ShortLinkRepository interface {
+	Repository[models.ShortLink, models.ShortLinkFilter]
+	ByID(ctx context.Context, id uint) (*models.ShortLink, error)
+	ByUID(ctx context.Context, uid string) (*models.ShortLink, error)
+	IncrementClicksByUID(ctx context.Context, uid string, userAgent *string, ip *string) error
 }
