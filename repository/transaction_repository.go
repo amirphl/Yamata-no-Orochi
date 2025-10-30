@@ -36,6 +36,8 @@ type CustomerShareAggregate struct {
 	FullName           string `json:"full_name"`
 	CompanyName        string `json:"company_name"`
 	ReferrerAgencyName string `json:"referrer_agency_name"`
+	AccountTypeName    string `json:"account_type_name"`
+	IsActive           *bool  `json:"is_active"`
 	AgencyShareWithTax uint64 `json:"agency_share_with_tax"`
 	SystemShare        uint64 `json:"system_share"`
 	TaxShare           uint64 `json:"tax_share"`
@@ -405,6 +407,37 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByDiscounts(ctx c
 	return rows, nil
 }
 
+// AggregateCustomerTransactionsByDiscounts aggregates discounts used by a customer across all agencies
+func (r *TransactionRepositoryImpl) AggregateCustomerTransactionsByDiscounts(ctx context.Context, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error) {
+	db := r.getDB(ctx)
+	rows := make([]*AgencyCustomerDiscountAggregate, 0)
+
+	allowed := map[string]string{
+		"share_desc": "agency_share_with_tax DESC",
+		"share_asc":  "agency_share_with_tax ASC",
+		"id_desc":    "agency_discount_id DESC",
+		"id_asc":     "agency_discount_id ASC",
+	}
+	order := allowed[orderBy]
+	if order == "" {
+		order = "agency_share_with_tax DESC"
+	}
+
+	query := db.
+		Table("transactions t").
+		Select("r.id as agency_discount_id, COALESCE(SUM(t.amount),0) as agency_share_with_tax, r.discount_rate as discount_rate, r.expires_at as expires_at, r.created_at as created_at").
+		Joins("JOIN agency_discounts r ON r.id = (t.metadata->>'agency_discount_id')::bigint").
+		Where("(t.metadata->>'customer_id')::bigint = ?", customerID).
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
+		Group("r.id, r.discount_rate, r.expires_at, r.created_at").
+		Order(order)
+
+	if err := query.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // AggregateCustomersShares aggregates agency/system/tax shares per customer across the platform
 func (r *TransactionRepositoryImpl) AggregateCustomersShares(ctx context.Context, startDate, endDate *time.Time) ([]*CustomerShareAggregate, error) {
 	db := r.getDB(ctx)
@@ -454,8 +487,9 @@ func (r *TransactionRepositoryImpl) AggregateCustomersShares(ctx context.Context
 
 	query := db.
 		Table("customers c").
-		Select("c.id AS customer_id, c.representative_first_name AS first_name, c.representative_last_name AS last_name, (c.representative_first_name || ' ' || c.representative_last_name) AS full_name, COALESCE(c.company_name, '') AS company_name, COALESCE(COALESCE(a.company_name, a.representative_first_name || ' ' || a.representative_last_name), '') AS referrer_agency_name, COALESCE(ag.agency_total_share_with_tax, 0) AS agency_share_with_tax, COALESCE(sys.system_total_share, 0) AS system_share, COALESCE(tax.tax_total_share, 0) AS tax_share").
+		Select("c.id AS customer_id, c.representative_first_name AS first_name, c.representative_last_name AS last_name, (c.representative_first_name || ' ' || c.representative_last_name) AS full_name, COALESCE(c.company_name, '') AS company_name, COALESCE(COALESCE(a.company_name, a.representative_first_name || ' ' || a.representative_last_name), '') AS referrer_agency_name, at.type_name AS account_type_name, c.is_active AS is_active, COALESCE(ag.agency_total_share_with_tax, 0) AS agency_share_with_tax, COALESCE(sys.system_total_share, 0) AS system_share, COALESCE(tax.tax_total_share, 0) AS tax_share").
 		Joins("LEFT JOIN customers a ON a.id = c.referrer_agency_id").
+		Joins("JOIN account_types at ON at.id = c.account_type_id").
 		Joins("LEFT JOIN (?) ag ON ag.customer_id = c.id", agSub).
 		Joins("LEFT JOIN (?) sys ON sys.customer_id = c.id", sysSub).
 		Joins("LEFT JOIN (?) tax ON tax.customer_id = c.id", taxSub).
