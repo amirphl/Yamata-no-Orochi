@@ -126,6 +126,9 @@ var (
 
 	// Ticket related errors
 	ErrTicketNotFound = errors.New("ticket not found")
+
+	// Short link related errors
+	ErrShortLinkNotFound = errors.New("short link not found")
 )
 
 type BusinessError struct {
@@ -499,4 +502,8 @@ func IsLineNumberNotActive(err error) bool {
 
 func IsTicketNotFound(err error) bool {
 	return errors.Is(err, ErrTicketNotFound)
+}
+
+func IsShortLinkNotFound(err error) bool {
+	return errors.Is(err, ErrShortLinkNotFound)
 }
