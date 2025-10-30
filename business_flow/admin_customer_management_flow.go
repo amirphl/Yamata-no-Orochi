@@ -14,6 +14,8 @@ import (
 type AdminCustomerManagementFlow interface {
 	GetCustomersShares(ctx context.Context, req *dto.AdminCustomersSharesRequest) (*dto.AdminCustomersSharesResponse, error)
 	GetCustomerWithCampaigns(ctx context.Context, customerID uint) (*dto.AdminCustomerWithCampaignsResponse, error)
+	GetCustomerDiscountsHistory(ctx context.Context, customerID uint) (*dto.AdminCustomerDiscountHistoryResponse, error)
+	SetCustomerActiveStatus(ctx context.Context, req *dto.AdminSetCustomerActiveStatusRequest) (*dto.AdminSetCustomerActiveStatusResponse, error)
 }
 
 // AdminCustomerManagementFlowImpl implements AdminCustomerManagementFlow
@@ -76,6 +78,8 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomersShares(ctx context.Context
 			FullName:           r.FullName,
 			CompanyName:        r.CompanyName,
 			ReferrerAgencyName: r.ReferrerAgencyName,
+			AccountTypeName:    r.AccountTypeName,
+			IsActive:           r.IsActive,
 			AgencyShareWithTax: r.AgencyShareWithTax,
 			SystemShare:        r.SystemShare,
 			TaxShare:           r.TaxShare,
@@ -160,4 +164,77 @@ func toAdminCustomerDetailDTO(c models.Customer) dto.AdminCustomerDetailDTO {
 		MobileVerifiedAt:        c.MobileVerifiedAt,
 		LastLoginAt:             c.LastLoginAt,
 	}
+}
+
+// GetCustomerDiscountsHistory returns discounts used by a customer across agencies
+func (f *AdminCustomerManagementFlowImpl) GetCustomerDiscountsHistory(ctx context.Context, customerID uint) (*dto.AdminCustomerDiscountHistoryResponse, error) {
+	var err error
+	defer func() {
+		if err != nil {
+			err = NewBusinessError("GET_ADMIN_CUSTOMER_DISCOUNTS_HISTORY_FAILED", "Failed to get customer discounts history", err)
+		}
+	}()
+
+	cust, err := f.customerRepo.ByID(ctx, customerID)
+	if err != nil {
+		return nil, err
+	}
+	if cust == nil {
+		return nil, ErrCustomerNotFound
+	}
+
+	rows, err := f.transactionRepo.AggregateCustomerTransactionsByDiscounts(ctx, customerID, "share_desc")
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]dto.AdminCustomerDiscountHistoryItem, 0, len(rows))
+	for _, v := range rows {
+		items = append(items, dto.AdminCustomerDiscountHistoryItem{
+			DiscountRate:       v.DiscountRate,
+			CreatedAt:          v.CreatedAt,
+			ExpiresAt:          v.ExpiresAt,
+			TotalSent:          0, // TODO: integrate sent counts when available
+			AgencyShareWithTax: v.AgencyShareWithTax,
+		})
+	}
+
+	return &dto.AdminCustomerDiscountHistoryResponse{
+		Message: "Customer discounts history retrieved successfully",
+		Items:   items,
+	}, nil
+}
+
+// SetCustomerActiveStatus sets the is_active flag based on request body
+func (f *AdminCustomerManagementFlowImpl) SetCustomerActiveStatus(ctx context.Context, req *dto.AdminSetCustomerActiveStatusRequest) (*dto.AdminSetCustomerActiveStatusResponse, error) {
+	if req == nil || req.CustomerID == 0 {
+		return nil, NewBusinessError("VALIDATION_ERROR", "Invalid request", nil)
+	}
+	cust, err := f.customerRepo.ByID(ctx, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("SET_CUSTOMER_ACTIVE_STATUS_FAILED", "Failed to get customer", err)
+	}
+	if cust == nil {
+		return nil, NewBusinessError("CUSTOMER_NOT_FOUND", "Customer not found", ErrCustomerNotFound)
+	}
+	if !req.IsActive {
+		// TODO: Use account type name instead of representative names
+		fullName := (cust.RepresentativeFirstName + " " + cust.RepresentativeLastName)
+		if fullName == "System Account" || fullName == "Tax Collector" {
+			return nil, NewBusinessError("FORBIDDEN_OPERATION", "System and Tax users cannot be deactivated", ErrAccountInactive)
+		}
+	}
+	if cust.IsActive != nil && *cust.IsActive == req.IsActive {
+		return &dto.AdminSetCustomerActiveStatusResponse{
+			Message:  "No change required",
+			IsActive: req.IsActive,
+		}, nil
+	}
+	if err := f.customerRepo.UpdateActiveStatus(ctx, req.CustomerID, req.IsActive); err != nil {
+		return nil, NewBusinessError("SET_CUSTOMER_ACTIVE_STATUS_FAILED", "Failed to update active status", err)
+	}
+	return &dto.AdminSetCustomerActiveStatusResponse{
+		Message:  "Customer status updated successfully",
+		IsActive: req.IsActive,
+	}, nil
 }
