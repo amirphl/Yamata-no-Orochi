@@ -46,6 +46,19 @@ func (r *TagRepositoryImpl) ByName(ctx context.Context, name string) (*models.Ta
 	return rows[0], nil
 }
 
+// ListByIDs retrieves tags for a list of IDs
+func (r *TagRepositoryImpl) ListByIDs(ctx context.Context, ids []uint) ([]*models.Tag, error) {
+	db := r.getDB(ctx)
+	if len(ids) == 0 {
+		return []*models.Tag{}, nil
+	}
+	var rows []*models.Tag
+	if err := db.Model(&models.Tag{}).Where("id IN ? AND is_active = ?", ids, true).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ListByNames retrieves tags for a list of names
 func (r *TagRepositoryImpl) ListByNames(ctx context.Context, names []string) ([]*models.Tag, error) {
 	db := r.getDB(ctx)
