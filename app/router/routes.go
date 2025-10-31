@@ -49,6 +49,8 @@ type FiberRouter struct {
 	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
 	campaignBotHandler             handlers.CampaignBotHandlerInterface
 	ticketHandler                  handlers.TicketHandlerInterface
+	shortLinkBotHandler            handlers.ShortLinkBotHandlerInterface
+	shortLinkHandler               handlers.ShortLinkHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -66,6 +68,8 @@ func NewFiberRouter(
 	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
 	campaignBotHandler handlers.CampaignBotHandlerInterface,
 	ticketHandler handlers.TicketHandlerInterface,
+	shortLinkBotHandler handlers.ShortLinkBotHandlerInterface,
+	shortLinkHandler handlers.ShortLinkHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -96,6 +100,8 @@ func NewFiberRouter(
 		adminCustomerManagementHandler: adminCustomerManagemetHandler,
 		campaignBotHandler:             campaignBotHandler,
 		ticketHandler:                  ticketHandler,
+		shortLinkBotHandler:            shortLinkBotHandler,
+		shortLinkHandler:               shortLinkHandler,
 	}
 }
 
@@ -228,12 +234,21 @@ func (r *FiberRouter) SetupRoutes() {
 	botCampaigns.Post("/:id/executed", r.campaignBotHandler.MoveCampaignToExecuted)
 	botCampaigns.Post("/:id/running", r.campaignBotHandler.MoveCampaignToRunning)
 
+	// Bot short-links routes (protected)
+	botShortLinks := api.Group("/bot/short-links")
+	botShortLinks.Use(r.authMiddleware.BotAuthenticate())
+	botShortLinks.Use(func(c fiber.Ctx) error { return middleware.RequireBotAuth(c) })
+	botShortLinks.Post("/", r.shortLinkBotHandler.CreateShortLinks)
+	botShortLinks.Post("/one", r.shortLinkBotHandler.CreateShortLink)
+
 	// Admin customer reports
 	adminCustomers := api.Group("/admin/customer-management")
 	adminCustomers.Use(r.authMiddleware.AdminAuthenticate())
 	adminCustomers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
 	adminCustomers.Get("/shares", r.adminCustomerManagementHandler.GetCustomersShares)
 	adminCustomers.Get("/:customer_id", r.adminCustomerManagementHandler.GetCustomerWithCampaigns)
+	adminCustomers.Post("/active-status", r.adminCustomerManagementHandler.SetCustomerActiveStatus)
+	adminCustomers.Get("/:customer_id/discounts", r.adminCustomerManagementHandler.GetCustomerDiscountsHistory)
 
 	// Line numbers
 	lineNumbers := api.Group("/line-numbers")
@@ -285,6 +300,9 @@ func (r *FiberRouter) SetupRoutes() {
 	agency.Get("/agency/discounts/active", r.agencyHandler.ListAgencyActiveDiscounts)
 	agency.Get("/agency/customers/:customer_id/discounts", r.agencyHandler.ListAgencyCustomerDiscounts)
 	agency.Post("/agency/discounts", r.agencyHandler.CreateAgencyDiscount)
+
+	// Public short-link redirect (no auth)
+	r.app.Get("/s/:uid", r.shortLinkHandler.Visit)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
