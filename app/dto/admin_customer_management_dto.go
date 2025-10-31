@@ -16,6 +16,8 @@ type AdminCustomersSharesItem struct {
 	FullName           string  `json:"full_name"`
 	CompanyName        string  `json:"company_name"`
 	ReferrerAgencyName string  `json:"referrer_agency_name"`
+	AccountTypeName    string  `json:"account_type_name"`
+	IsActive           *bool   `json:"is_active"`
 	AgencyShareWithTax uint64  `json:"agency_share_with_tax"`
 	SystemShare        uint64  `json:"system_share"`
 	TaxShare           uint64  `json:"tax_share"`
@@ -78,4 +80,31 @@ type AdminCustomerWithCampaignsResponse struct {
 	Message   string                      `json:"message"`
 	Customer  AdminCustomerDetailDTO      `json:"customer"`
 	Campaigns []AdminCustomerCampaignItem `json:"campaigns"`
+}
+
+// AdminCustomerDiscountHistoryItem represents a discount used by customer across agencies
+type AdminCustomerDiscountHistoryItem struct {
+	DiscountRate       float64    `json:"discount_rate"`
+	CreatedAt          time.Time  `json:"created_at"`
+	ExpiresAt          *time.Time `json:"expires_at,omitempty" validate:"omitempty"`
+	TotalSent          uint64     `json:"total_sent"`
+	AgencyShareWithTax uint64     `json:"agency_share_with_tax"`
+}
+
+// AdminCustomerDiscountHistoryResponse is the response for customer discounts history
+type AdminCustomerDiscountHistoryResponse struct {
+	Message string                             `json:"message"`
+	Items   []AdminCustomerDiscountHistoryItem `json:"items"`
+}
+
+// AdminSetCustomerActiveStatusRequest is the request to toggle customer activity
+type AdminSetCustomerActiveStatusRequest struct {
+	CustomerID uint `json:"customer_id" validate:"required,min=1"`
+	IsActive   bool `json:"is_active"`
+}
+
+// AdminSetCustomerActiveStatusResponse reports the resulting status
+type AdminSetCustomerActiveStatusResponse struct {
+	Message  string `json:"message"`
+	IsActive bool   `json:"is_active"`
 }
