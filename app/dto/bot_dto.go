@@ -44,3 +44,39 @@ type BotLoginResponse struct {
 	Bot     BotDTO        `json:"bot"`
 	Session BotSessionDTO `json:"session"`
 }
+
+// Short Link creation DTOs for bot
+
+type ShortLinkDTO struct {
+	ID          uint    `json:"id"`
+	UID         string  `json:"uid"`
+	CampaignID  *uint   `json:"campaign_id,omitempty"`
+	PhoneNumber string  `json:"phone_number"`
+	Clicks      uint64  `json:"clicks"`
+	Link        string  `json:"link"`
+	UserAgent   *string `json:"user_agent,omitempty"`
+	IP          *string `json:"ip,omitempty"`
+}
+
+type BotCreateShortLinkRequest struct {
+	UID         string  `json:"uid" validate:"required,max=64"`
+	CampaignID  *uint   `json:"campaign_id" validate:"omitempty"`
+	PhoneNumber string  `json:"phone_number" validate:"required,max=20"`
+	Link        string  `json:"link" validate:"required"`
+	UserAgent   *string `json:"user_agent" validate:"omitempty"`
+	IP          *string `json:"ip" validate:"omitempty,max=64"`
+}
+
+type BotCreateShortLinkResponse struct {
+	Message string       `json:"message"`
+	Item    ShortLinkDTO `json:"item"`
+}
+
+type BotCreateShortLinksRequest struct {
+	Items []BotCreateShortLinkRequest `json:"items" validate:"required,min=1,dive"`
+}
+
+type BotCreateShortLinksResponse struct {
+	Message string         `json:"message"`
+	Items   []ShortLinkDTO `json:"items"`
+}
