@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import json
 import logging
 import os
@@ -7,7 +8,8 @@ import random
 import shutil
 import sys
 import time
-from typing import Any, Dict, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from openai import OpenAI  # type: ignore
@@ -20,21 +22,49 @@ except Exception:  # pragma: no cover
     pd = None  # type: ignore
 
 try:
-    from openpyxl import load_workbook  # type: ignore
+    from openpyxl import load_workbook, Workbook  # type: ignore
 except Exception as exc:  # pragma: no cover
     print("ERROR: openpyxl is required. Install with: pip install openpyxl", file=sys.stderr)
     print(str(exc), file=sys.stderr)
     sys.exit(1)
 
 
-DEFAULT_INPUT_XLSX = "Customer Persona New.xlsx"
-DEFAULT_OUTPUT_XLSX = "Customer Persona New.processed.xlsx"
+DEFAULT_INPUT_XLSX = "Customer Persona New.csv"
+DEFAULT_OUTPUT_XLSX = "Customer Persona New.processed.csv"
 DEFAULT_SYSTEM_PROMPT = "system_prompt.txt"
 DEFAULT_USER_PROMPT = "user_prompt.txt"
 DEFAULT_ATTACHMENT_XLSX = "customer title.xlsx"
 DEFAULT_PROGRESS_PATH = "persona_progress.json"
 DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5")
 DEFAULT_MAX_ROWS = int(os.environ.get("PERSONA_MAX_ROWS", "0"))
+
+
+def detect_file_type(file_path: str) -> str:
+    """Detect file type from extension."""
+    ext = Path(file_path).suffix.lower()
+    if ext in ('.csv',):
+        return 'csv'
+    elif ext in ('.xlsx', '.xls'):
+        return 'xlsx'
+    else:
+        raise ValueError(f"Unsupported file type: {ext}. Supported: .csv, .xlsx, .xls")
+
+
+def read_csv_file(file_path: str) -> Tuple[List[str], List[List[str]]]:
+    """Read CSV file and return (headers, rows)."""
+    with open(file_path, 'r', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        headers = next(reader, [])
+        rows = list(reader)
+    return headers, rows
+
+
+def write_csv_file(file_path: str, headers: List[str], rows: List[List[str]]) -> None:
+    """Write CSV file with headers and rows."""
+    with open(file_path, 'w', encoding='utf-8', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        writer.writerows(rows)
 
 
 def setup_logging() -> None:
@@ -155,7 +185,7 @@ def call_openai_with_retry(client: Any, model: str, messages: Any, max_retries: 
                 # temperature=0.2,
                 # top_p=1.0,
                 # timeout=timeout_seconds,
-                reasoning={"effort": "medium"},
+                # reasoning={"effort": "medium"},
             )
             # return _extract_openai_content(resp)
             return resp.output_text
@@ -229,6 +259,105 @@ def build_messages(system_prompt: str, user_prompt_template: str, new_persona: s
     return messages
 
 
+def process_rows_csv(
+    input_csv: str,
+    output_csv: str,
+    system_prompt_path: str,
+    user_prompt_path: str,
+    attachment_xlsx: str,
+    start_row: int,
+    progress_path: str,
+    model: str,
+    resume: bool,
+    max_rows: Optional[int] = None,
+) -> None:
+    """Process CSV file with OpenAI."""
+    if OpenAI is None:
+        raise RuntimeError("The 'openai' package (v1.x) is required. Install with: pip install openai")
+    if pd is None:
+        raise RuntimeError("The 'pandas' package is required. Install with: pip install pandas openpyxl")
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Please set the OPENAI_API_KEY environment variable.")
+
+    system_prompt = read_text_file(system_prompt_path)
+    user_prompt_template = read_text_file(user_prompt_path)
+    attachment_csv_text = load_attachment_as_csv_text(attachment_xlsx)
+
+    # Read CSV
+    headers, rows = read_csv_file(input_csv)
+
+    # Find required columns
+    if "New Persona" not in headers:
+        raise RuntimeError("Input CSV must have a 'New Persona' column header.")
+    brand_key = "brand_name" if "brand_name" in headers else ("Brand Name" if "Brand Name" in headers else None)
+    if brand_key is None:
+        raise RuntimeError("Input CSV must have a 'brand_name' (or 'Brand Name') column header.")
+
+    persona_col_idx = headers.index("New Persona")
+    brand_col_idx = headers.index(brand_key)
+
+    # Add response column if not exists
+    if "openai_response" not in headers:
+        headers.append("openai_response")
+    response_col_idx = headers.index("openai_response")
+    output_rows = [list(row) + ([""] * (len(headers) - len(row))) for row in rows]
+
+    # Progress tracking
+    progress = load_progress(progress_path) if resume else {}
+    last_processed_row = int(progress.get("last_processed_row", 0))
+    if resume and last_processed_row >= 0:
+        start_data_row = max(start_row - 1, last_processed_row + 1)
+    else:
+        start_data_row = max(start_row - 1, 0)
+
+    client = OpenAI()
+    processed = 0
+
+    for row_idx in range(start_data_row, len(output_rows)):
+        if max_rows is not None and max_rows > 0 and processed >= max_rows:
+            logging.info("Reached max_rows=%d. Stopping.", max_rows)
+            break
+
+        row = output_rows[row_idx]
+        new_persona = row[persona_col_idx] if persona_col_idx < len(row) else ""
+        brand_name = row[brand_col_idx] if brand_col_idx < len(row) else ""
+
+        if (not new_persona or not new_persona.strip()) and (not brand_name or not brand_name.strip()):
+            logging.debug("Skipping empty row %d", row_idx + 1)
+            last_processed_row = row_idx
+            save_progress(progress_path, {"last_processed_row": last_processed_row, "output": output_csv})
+            write_csv_file(output_csv, headers, output_rows)
+            continue
+
+        new_persona_str = str(new_persona).strip() if new_persona else ""
+        brand_name_str = str(brand_name).strip() if brand_name else ""
+
+        logging.info("Processing row %d/%d: brand='%s' persona_len=%d", row_idx + 1, len(output_rows), brand_name_str, len(new_persona_str))
+
+        messages = build_messages(system_prompt, user_prompt_template, new_persona_str, brand_name_str, attachment_csv_text)
+
+        try:
+            answer = call_openai_with_retry(client, model, messages)
+        except Exception as e:
+            answer = f"ERROR: {e}"
+            logging.exception("OpenAI call failed for row %d", row_idx + 1)
+
+        # Expand row if necessary
+        while len(row) <= response_col_idx:
+            row.append("")
+        row[response_col_idx] = answer
+
+        write_csv_file(output_csv, headers, output_rows)
+        last_processed_row = row_idx
+        save_progress(progress_path, {"last_processed_row": last_processed_row, "output": output_csv})
+
+        processed += 1
+
+    logging.info("Done. Processed %d row(s). Results saved to %s. Progress in %s", processed, output_csv, progress_path)
+
+
 def process_rows(
     input_xlsx: str,
     output_xlsx: str,
@@ -241,6 +370,7 @@ def process_rows(
     resume: bool,
     max_rows: Optional[int] = None,
 ) -> None:
+    """Process Excel file with OpenAI."""
     if OpenAI is None:
         raise RuntimeError("The 'openai' package (v1.x) is required. Install with: pip install openai")
     if pd is None:
@@ -325,9 +455,9 @@ def process_rows(
 
 
 def parse_args(argv: Optional[list] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Process 'Customer Persona New.xlsx' row-by-row with OpenAI, appending responses to a replicated Excel while checkpointing progress.")
-    parser.add_argument("--input-xlsx", default=DEFAULT_INPUT_XLSX, help=f"Input Excel file (default: {DEFAULT_INPUT_XLSX})")
-    parser.add_argument("--output-xlsx", default=DEFAULT_OUTPUT_XLSX, help=f"Output Excel file (default: {DEFAULT_OUTPUT_XLSX})")
+    parser = argparse.ArgumentParser(description="Process CSV or Excel file row-by-row with OpenAI, appending responses to output file while checkpointing progress.")
+    parser.add_argument("--input-xlsx", default=DEFAULT_INPUT_XLSX, help=f"Input file (CSV or Excel, default: {DEFAULT_INPUT_XLSX})")
+    parser.add_argument("--output-xlsx", default=DEFAULT_OUTPUT_XLSX, help=f"Output file (format matches input, default: {DEFAULT_OUTPUT_XLSX})")
     parser.add_argument("--system-prompt", default=DEFAULT_SYSTEM_PROMPT, help=f"System prompt file (default: {DEFAULT_SYSTEM_PROMPT})")
     parser.add_argument("--user-prompt", default=DEFAULT_USER_PROMPT, help=f"User prompt file with placeholders (default: {DEFAULT_USER_PROMPT})")
     parser.add_argument("--attachment-xlsx", default=DEFAULT_ATTACHMENT_XLSX, help=f"Attachment Excel to include in each prompt (default: {DEFAULT_ATTACHMENT_XLSX})")
@@ -344,18 +474,50 @@ def main(argv: Optional[list] = None) -> int:
     args = parse_args(argv)
 
     try:
-        process_rows(
-            input_xlsx=os.path.abspath(args.input_xlsx),
-            output_xlsx=os.path.abspath(args.output_xlsx),
-            system_prompt_path=os.path.abspath(args.system_prompt),
-            user_prompt_path=os.path.abspath(args.user_prompt),
-            attachment_xlsx=os.path.abspath(args.attachment_xlsx),
-            start_row=int(args.start_row),
-            progress_path=os.path.abspath(args.progress),
-            model=args.model,
-            resume=not args.no_resume,
-            max_rows=args.max_rows,
-        )
+        # Detect file type from input file
+        input_path = os.path.abspath(args.input_xlsx)
+        output_path = os.path.abspath(args.output_xlsx)
+        file_type = detect_file_type(input_path)
+
+        # Ensure output format matches input
+        output_type = detect_file_type(output_path)
+        if output_type != file_type:
+            logging.warning("Output file type (%s) doesn't match input (%s). Using input format.", output_type, file_type)
+            # Change output extension to match input
+            base = os.path.splitext(output_path)[0]
+            if file_type == 'csv':
+                output_path = base + '.csv'
+            else:
+                output_path = base + '.xlsx'
+
+        if file_type == 'csv':
+            logging.info("Processing CSV file: %s", input_path)
+            process_rows_csv(
+                input_csv=input_path,
+                output_csv=output_path,
+                system_prompt_path=os.path.abspath(args.system_prompt),
+                user_prompt_path=os.path.abspath(args.user_prompt),
+                attachment_xlsx=os.path.abspath(args.attachment_xlsx),
+                start_row=int(args.start_row),
+                progress_path=os.path.abspath(args.progress),
+                model=args.model,
+                resume=not args.no_resume,
+                max_rows=args.max_rows,
+            )
+        else:
+            logging.info("Processing Excel file: %s", input_path)
+            process_rows(
+                input_xlsx=input_path,
+                output_xlsx=output_path,
+                system_prompt_path=os.path.abspath(args.system_prompt),
+                user_prompt_path=os.path.abspath(args.user_prompt),
+                attachment_xlsx=os.path.abspath(args.attachment_xlsx),
+                start_row=int(args.start_row),
+                progress_path=os.path.abspath(args.progress),
+                model=args.model,
+                resume=not args.no_resume,
+                max_rows=args.max_rows,
+            )
     except Exception as exc:
         logging.exception("Failed: %s", exc)
         return 1
