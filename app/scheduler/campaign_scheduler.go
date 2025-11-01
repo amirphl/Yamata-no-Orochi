@@ -1,3 +1,4 @@
+// Package scheduler
 package scheduler
 
 import (
@@ -298,7 +299,25 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 			return err
 		}
 
-		// TODO: Update j0in.ir db before sending
+		// Create short links for this batch (if campaign has AdLink) via bot API
+		if c.AdLink != nil && *c.AdLink != "" {
+			req := dto.BotCreateShortLinksRequest{Items: make([]dto.BotCreateShortLinkRequest, 0, len(batchPhones))}
+			for i := range batchPhones {
+				campaignID := c.ID
+				req.Items = append(req.Items, dto.BotCreateShortLinkRequest{
+					UID:         batchCodes[i],
+					CampaignID:  &campaignID,
+					PhoneNumber: batchPhones[i],
+					Link:        *c.AdLink,
+				})
+			}
+			if len(req.Items) > 0 {
+				if err := s.createShortLinksViaAPI(ctx, token, &req); err != nil {
+					s.logger.Printf("scheduler: failed to create short links via api: %v", err)
+					return fmt.Errorf("create short links via api: %w", err)
+				}
+			}
+		}
 
 		// Send via PayamSMS for this batch
 		respItems, err := s.sendPayamSMSBatchWithBodies(ctx, sender, items)
@@ -471,6 +490,37 @@ func (s *CampaignScheduler) moveCampaignToExecuted(ctx context.Context, token st
 	return nil
 }
 
+func (s *CampaignScheduler) createShortLinksViaAPI(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error {
+	url := s.botCfg.APIDomain + "/api/v1/bot/short-links"
+	payload, _ := json.Marshal(reqBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("create short-links http status: %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %w", err)
+	}
+	var apiResp dto.APIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("failed to decode JSON into APIResponse: %w", err)
+	}
+	if !apiResp.Success {
+		return fmt.Errorf("create short-links failed: %v", apiResp.Message)
+	}
+	return nil
+}
+
 func (s *CampaignScheduler) validateCampaign(c dto.BotGetCampaignResponse) error {
 	// check status = approved, created_at < nowutc, schedule_at < nowutc, updated_at < nowutc
 	if c.Status != string(models.CampaignStatusApproved) {
@@ -492,7 +542,15 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 	var result []string
 	var ids []int64
 
-	tags, err := s.tagRepo.ListByNames(ctx, c.Tags)
+	tagIDs := make([]uint, len(c.Tags))
+	for i, tag := range c.Tags {
+		tagID, err := strconv.ParseUint(tag, 10, 32)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		tagIDs[i] = uint(tagID)
+	}
+	tags, err := s.tagRepo.ListByIDs(ctx, tagIDs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -501,6 +559,8 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 	for i, tag := range tags {
 		tagIds[i] = int32(tag.ID)
 	}
+
+	// NOTE: len(tagIds) <= len(c.Tags) because some tags may not be found or are inactive
 
 	filter := models.AudienceProfileFilter{
 		Tags:  &tagIds,
@@ -557,7 +617,7 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 		content = *c.Content
 	}
 	if c.AdLink != nil && *c.AdLink != "" {
-		shortened := "https://j0in.ir/" + code
+		shortened := "https://j01n.ir/s/" + code
 		return strings.ReplaceAll(content, "🔗", shortened) + "\n" + "لغو۱۱"
 
 	}
