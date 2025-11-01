@@ -405,6 +405,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/customer-management/active-status": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Customer Management"
+                ],
+                "summary": "Admin Set Customer Active Status",
+                "parameters": [
+                    {
+                        "description": "Customer active status",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminSetCustomerActiveStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminSetCustomerActiveStatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/customer-management/shares": {
             "get": {
                 "produces": [
@@ -499,6 +568,64 @@ const docTemplate = `{
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/dto.AdminCustomerWithCampaignsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/customer-management/{customer_id}/discounts": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Customer Management"
+                ],
+                "summary": "Admin List Customer Discounts History",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Customer ID",
+                        "name": "customer_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminCustomerDiscountHistoryResponse"
                                         }
                                     }
                                 }
@@ -1553,6 +1680,120 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/short-links": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot ShortLinks"
+                ],
+                "summary": "Bot Create Short Links (Batch)",
+                "parameters": [
+                    {
+                        "description": "Short links creation",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotCreateShortLinksRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotCreateShortLinksResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/short-links/one": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot ShortLinks"
+                ],
+                "summary": "Bot Create Short Link",
+                "parameters": [
+                    {
+                        "description": "Short link creation",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotCreateShortLinkRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotCreateShortLinkResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -2823,6 +3064,42 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/s/{uid}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ShortLinks"
+                ],
+                "summary": "Visit Short Link",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Short link UID",
+                        "name": "uid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Redirect",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {}
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {}
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -3084,6 +3361,40 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminCustomerDiscountHistoryItem": {
+            "type": "object",
+            "properties": {
+                "agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "discount_rate": {
+                    "type": "number"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "total_sent": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AdminCustomerDiscountHistoryResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminCustomerDiscountHistoryItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminCustomerWithCampaignsResponse": {
             "type": "object",
             "properties": {
@@ -3104,6 +3415,9 @@ const docTemplate = `{
         "dto.AdminCustomersSharesItem": {
             "type": "object",
             "properties": {
+                "account_type_name": {
+                    "type": "string"
+                },
                 "agency_share_with_tax": {
                     "type": "integer"
                 },
@@ -3121,6 +3435,9 @@ const docTemplate = `{
                 },
                 "full_name": {
                     "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
                 },
                 "last_name": {
                     "type": "string"
@@ -3357,6 +3674,32 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminSetCustomerActiveStatusRequest": {
+            "type": "object",
+            "required": [
+                "customer_id"
+            ],
+            "properties": {
+                "customer_id": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "is_active": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.AdminSetCustomerActiveStatusResponse": {
+            "type": "object",
+            "properties": {
+                "is_active": {
+                    "type": "boolean"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminUpdateLineNumberItem": {
             "type": "object",
             "required": [
@@ -3582,6 +3925,77 @@ const docTemplate = `{
                 "representative_mobile": {
                     "type": "string",
                     "example": "+989123456789"
+                }
+            }
+        },
+        "dto.BotCreateShortLinkRequest": {
+            "type": "object",
+            "required": [
+                "link",
+                "phone_number",
+                "uid"
+            ],
+            "properties": {
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "ip": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "link": {
+                    "type": "string"
+                },
+                "phone_number": {
+                    "type": "string",
+                    "maxLength": 20
+                },
+                "uid": {
+                    "type": "string",
+                    "maxLength": 64
+                },
+                "user_agent": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotCreateShortLinkResponse": {
+            "type": "object",
+            "properties": {
+                "item": {
+                    "$ref": "#/definitions/dto.ShortLinkDTO"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotCreateShortLinksRequest": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/dto.BotCreateShortLinkRequest"
+                    }
+                }
+            }
+        },
+        "dto.BotCreateShortLinksResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.ShortLinkDTO"
+                    }
+                },
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -3920,10 +4334,10 @@ const docTemplate = `{
             ],
             "properties": {
                 "amount": {
-                    "description": "Amount in Tomans (minimum 10000, maximum 1000000000)",
+                    "description": "Amount in Tomans (minimum 1000, maximum 1000000000)",
                     "type": "integer",
                     "maximum": 1000000000,
-                    "minimum": 100000
+                    "minimum": 1000
                 }
             }
         },
@@ -4446,6 +4860,35 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.ShortLinkDTO": {
+            "type": "object",
+            "properties": {
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "clicks": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "ip": {
+                    "type": "string"
+                },
+                "link": {
+                    "type": "string"
+                },
+                "phone_number": {
+                    "type": "string"
+                },
+                "uid": {
+                    "type": "string"
+                },
+                "user_agent": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.SignupRequest": {
             "type": "object",
             "required": [
@@ -4763,6 +5206,14 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        }
+    },
+    "securityDefinitions": {
+        "Bearer": {
+            "description": "JWT Bearer token: Bearer \u003caccess_token\u003e",
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
         }
     }
 }`

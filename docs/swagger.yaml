@@ -172,6 +172,28 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.AdminCustomerDiscountHistoryItem:
+    properties:
+      agency_share_with_tax:
+        type: integer
+      created_at:
+        type: string
+      discount_rate:
+        type: number
+      expires_at:
+        type: string
+      total_sent:
+        type: integer
+    type: object
+  dto.AdminCustomerDiscountHistoryResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminCustomerDiscountHistoryItem'
+        type: array
+      message:
+        type: string
+    type: object
   dto.AdminCustomerWithCampaignsResponse:
     properties:
       campaigns:
@@ -185,6 +207,8 @@ definitions:
     type: object
   dto.AdminCustomersSharesItem:
     properties:
+      account_type_name:
+        type: string
       agency_share_with_tax:
         type: integer
       click_rate:
@@ -197,6 +221,8 @@ definitions:
         type: string
       full_name:
         type: string
+      is_active:
+        type: boolean
       last_name:
         type: string
       referrer_agency_name:
@@ -350,6 +376,23 @@ definitions:
     type: object
   dto.AdminRejectCampaignResponse:
     properties:
+      message:
+        type: string
+    type: object
+  dto.AdminSetCustomerActiveStatusRequest:
+    properties:
+      customer_id:
+        minimum: 1
+        type: integer
+      is_active:
+        type: boolean
+    required:
+    - customer_id
+    type: object
+  dto.AdminSetCustomerActiveStatusResponse:
+    properties:
+      is_active:
+        type: boolean
       message:
         type: string
     type: object
@@ -507,6 +550,54 @@ definitions:
         type: string
       representative_mobile:
         example: "+989123456789"
+        type: string
+    type: object
+  dto.BotCreateShortLinkRequest:
+    properties:
+      campaign_id:
+        type: integer
+      ip:
+        maxLength: 64
+        type: string
+      link:
+        type: string
+      phone_number:
+        maxLength: 20
+        type: string
+      uid:
+        maxLength: 64
+        type: string
+      user_agent:
+        type: string
+    required:
+    - link
+    - phone_number
+    - uid
+    type: object
+  dto.BotCreateShortLinkResponse:
+    properties:
+      item:
+        $ref: '#/definitions/dto.ShortLinkDTO'
+      message:
+        type: string
+    type: object
+  dto.BotCreateShortLinksRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.BotCreateShortLinkRequest'
+        minItems: 1
+        type: array
+    required:
+    - items
+    type: object
+  dto.BotCreateShortLinksResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.ShortLinkDTO'
+        type: array
+      message:
         type: string
     type: object
   dto.BotDTO:
@@ -737,9 +828,9 @@ definitions:
   dto.ChargeWalletRequest:
     properties:
       amount:
-        description: Amount in Tomans (minimum 10000, maximum 1000000000)
+        description: Amount in Tomans (minimum 1000, maximum 1000000000)
         maximum: 1000000000
-        minimum: 100000
+        minimum: 1000
         type: integer
     required:
     - amount
@@ -1095,6 +1186,25 @@ definitions:
     - customer_id
     - new_password
     - otp_code
+    type: object
+  dto.ShortLinkDTO:
+    properties:
+      campaign_id:
+        type: integer
+      clicks:
+        type: integer
+      id:
+        type: integer
+      ip:
+        type: string
+      link:
+        type: string
+      phone_number:
+        type: string
+      uid:
+        type: string
+      user_agent:
+        type: string
     type: object
   dto.SignupRequest:
     properties:
@@ -1600,6 +1710,83 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Admin Get Customer With Campaigns
+      tags:
+      - Admin Customer Management
+  /api/v1/admin/customer-management/{customer_id}/discounts:
+    get:
+      parameters:
+      - description: Customer ID
+        in: path
+        name: customer_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCustomerDiscountHistoryResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin List Customer Discounts History
+      tags:
+      - Admin Customer Management
+  /api/v1/admin/customer-management/active-status:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Customer active status
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminSetCustomerActiveStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminSetCustomerActiveStatusResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Set Customer Active Status
       tags:
       - Admin Customer Management
   /api/v1/admin/customer-management/shares:
@@ -2273,6 +2460,74 @@ paths:
       summary: Bot List Ready Campaigns
       tags:
       - Bot Campaigns
+  /api/v1/bot/short-links:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Short links creation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotCreateShortLinksRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotCreateShortLinksResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Create Short Links (Batch)
+      tags:
+      - Bot ShortLinks
+  /api/v1/bot/short-links/one:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Short link creation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotCreateShortLinkRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotCreateShortLinkResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Create Short Link
+      tags:
+      - Bot ShortLinks
   /api/v1/campaigns:
     get:
       consumes:
@@ -3060,4 +3315,34 @@ paths:
       summary: Get User Wallet Balance
       tags:
       - Wallet
+  /s/{uid}:
+    get:
+      parameters:
+      - description: Short link UID
+        in: path
+        name: uid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Redirect
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema: {}
+        "500":
+          description: Internal Server Error
+          schema: {}
+      summary: Visit Short Link
+      tags:
+      - ShortLinks
+securityDefinitions:
+  Bearer:
+    description: 'JWT Bearer token: Bearer <access_token>'
+    in: header
+    name: Authorization
+    type: apiKey
 swagger: "2.0"
