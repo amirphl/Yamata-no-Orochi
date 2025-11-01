@@ -252,16 +252,19 @@ app/services/jwt_public.pem
 .env.beta
 
 py-ai/Customer Persona New.xlsx
+py-ai/Customer Persona New.processed.xlsx
 py-ai/Customer Title.csv
 py-ai/process_persona_excel.py
 py-ai/persona_analysis_results.csv
 py-ai/AI command.txt
-py-ai/Customer Persona New.processed.xlsx
 py-ai/customer title.xlsx
 py-ai/persona_progress.json
 py-ai/system_prompt.txt
-py-ai/user_prompt.tx
-
+py-ai/user_prompt.txt
+py-ai/backup/
+py-ai/backup 2/
+py-ai/Customer Persona New.csv
+py-ai/Customer Persona New.processed.csv
 data/
 
 scripts/update-audience-spec.sh
