@@ -1,4 +1,9 @@
 // Package main provides the main entry point for the Yamata no Orochi authentication system
+//
+// @securityDefinitions.apikey Bearer
+// @in header
+// @name Authorization
+// @description JWT Bearer token: Bearer <access_token>
 package main
 
 import (
@@ -240,6 +245,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
+	shortLinkRepo := repository.NewShortLinkRepository(db)
 
 	// Initialize services
 	notificationService := initializeNotificationService(cfg)
@@ -364,8 +370,11 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo)
 
 	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, &cfg.Cache, db, rc)
+	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
+
+	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
@@ -379,6 +388,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	lineNumberAdminHandler := handlers.NewLineNumberAdminHandler(adminLineNumberFlow)
 	adminCustomerManagementHandler := handlers.NewAdminCustomerManagementHandler(adminCustomerManagementFlow)
 	campaignBotHandler := handlers.NewCampaignBotHandler(botCampaignFlow)
+	shortLinkBotHandler := handlers.NewShortLinkBotHandler(botShortLinkFlow)
+	shortLinkHandler := handlers.NewShortLinkHandler(shortLinkVisitFlow)
 	ticketHandler := handlers.NewTicketHandler(ticketFlow)
 
 	// Initialize auth middleware
@@ -399,6 +410,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		adminCustomerManagementHandler,
 		campaignBotHandler,
 		ticketHandler,
+		shortLinkBotHandler,
+		shortLinkHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
