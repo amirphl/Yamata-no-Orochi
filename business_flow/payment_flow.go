@@ -346,10 +346,10 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, customer model
 		return "", ErrSystemUserShebaNumberNotFound
 	}
 
-	if len(refinedScatteredSettlementItems) > 1 ||
-		(len(refinedScatteredSettlementItems) == 1 && refinedScatteredSettlementItems[0].IBAN != *systemUser.ShebaNumber) {
-		atipayPayload["scatteredSettlementItems"] = refinedScatteredSettlementItems
-	}
+	// if len(refinedScatteredSettlementItems) > 1 ||
+	// 	(len(refinedScatteredSettlementItems) == 1 && refinedScatteredSettlementItems[0].IBAN != *systemUser.ShebaNumber) {
+	// 	atipayPayload["scatteredSettlementItems"] = refinedScatteredSettlementItems
+	// }
 
 	// Convert to JSON
 	payloadBytes, err := json.Marshal(atipayPayload)
