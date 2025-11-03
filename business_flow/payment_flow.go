@@ -350,6 +350,7 @@ func (p *PaymentFlowImpl) callAtipayGetToken(ctx context.Context, customer model
 	// 	(len(refinedScatteredSettlementItems) == 1 && refinedScatteredSettlementItems[0].IBAN != *systemUser.ShebaNumber) {
 	// 	atipayPayload["scatteredSettlementItems"] = refinedScatteredSettlementItems
 	// }
+	atipayPayload["scatteredSettlementItems"] = refinedScatteredSettlementItems
 
 	// Convert to JSON
 	payloadBytes, err := json.Marshal(atipayPayload)
