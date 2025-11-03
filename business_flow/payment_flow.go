@@ -173,7 +173,7 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 	}
 
 	// Generate unique invoice number
-	invoiceNumber := fmt.Sprintf("INV-%s-%d", uuid.New().String(), time.Now().Unix())
+	invoiceNumber := fmt.Sprintf("INV-%s", uuid.New().String())
 
 	// Set expiration time (30 minutes from now)
 	expiresAt := time.Now().Add(30 * time.Minute)
