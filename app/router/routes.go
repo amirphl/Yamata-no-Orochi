@@ -231,6 +231,7 @@ func (r *FiberRouter) SetupRoutes() {
 	botCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireBotAuth(c) })
 	botCampaigns.Get("/ready", r.campaignBotHandler.ListReadyCampaigns)
 	botCampaigns.Post("/audience-spec", r.campaignBotHandler.UpdateAudienceSpec)
+	botCampaigns.Post("/audience-spec/reset", r.campaignBotHandler.ResetAudienceSpec)
 	botCampaigns.Post("/:id/executed", r.campaignBotHandler.MoveCampaignToExecuted)
 	botCampaigns.Post("/:id/running", r.campaignBotHandler.MoveCampaignToRunning)
 
