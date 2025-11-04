@@ -22,6 +22,7 @@ type BotCampaignFlow interface {
 	MoveCampaignToRunning(ctx context.Context, campaignID uint) error
 	MoveCampaignToExecuted(ctx context.Context, campaignID uint) error
 	UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error)
+	ResetAudienceSpec(ctx context.Context, req *dto.BotResetAudienceSpecRequest) (*dto.BotResetAudienceSpecResponse, error)
 }
 
 type BotCampaignFlowImpl struct {
@@ -189,6 +190,65 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 	}
 
 	return &dto.BotUpdateAudienceSpecResponse{Message: "Audience spec updated"}, nil
+}
+
+// ResetAudienceSpec deletes the specified segment/subsegment from the audience spec
+func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.BotResetAudienceSpecRequest) (*dto.BotResetAudienceSpecResponse, error) {
+	lockKey := redisKey(*s.cacheConfig, utils.AudienceSpecLockKey)
+	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
+	filePath := audienceSpecFilePath()
+
+	// Acquire distributed lock (SETNX with TTL)
+	ok, err := s.rc.SetNX(ctx, lockKey, "1", 10*time.Second).Result()
+	if err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_LOCK_FAILED", "Failed to acquire lock", err)
+	}
+	if !ok {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_LOCK_BUSY", "Another worker is updating audience spec", errors.New("lock busy"))
+	}
+	defer func() {
+		_ = s.rc.Del(context.Background(), lockKey).Err()
+	}()
+
+	// Read existing JSON file (if any)
+	current, err := readAudienceSpecFile(filePath)
+	if err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
+	}
+
+	// Check if segment exists
+	if _, exists := current[req.Segment]; !exists {
+		return &dto.BotResetAudienceSpecResponse{Message: "Segment not found, nothing to reset"}, nil
+	}
+
+	// Check if subsegment exists
+	if _, exists := current[req.Segment][req.Subsegment]; !exists {
+		return &dto.BotResetAudienceSpecResponse{Message: "Subsegment not found, nothing to reset"}, nil
+	}
+
+	// Delete the subsegment
+	delete(current[req.Segment], req.Subsegment)
+
+	// If the segment is now empty, delete it too
+	if len(current[req.Segment]) == 0 {
+		delete(current, req.Segment)
+	}
+
+	// Marshal and write atomically (tmp + rename)
+	bytes, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal updated spec", err)
+	}
+	if err := atomicWrite(filePath, bytes, 0o644); err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_WRITE_FAILED", "Failed to write audience spec file", err)
+	}
+
+	// Update Redis cache
+	if err := s.rc.Set(ctx, cacheKey, bytes, 0).Err(); err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_CACHE_FAILED", "Failed to cache audience spec", err)
+	}
+
+	return &dto.BotResetAudienceSpecResponse{Message: "Audience spec reset successfully"}, nil
 }
 
 func readAudienceSpecFile(path string) (AudienceSpecMap, error) {
