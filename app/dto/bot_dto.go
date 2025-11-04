@@ -16,6 +16,18 @@ type BotUpdateAudienceSpecResponse struct {
 	Message string `json:"message"`
 }
 
+// BotResetAudienceSpecRequest is used by bots to reset/delete audience spec
+// This will completely remove the specified segment/subsegment from the audience spec
+type BotResetAudienceSpecRequest struct {
+	Segment    string `json:"segment" validate:"required,max=255"`
+	Subsegment string `json:"subsegment" validate:"required,max=255"`
+}
+
+// BotResetAudienceSpecResponse acknowledges a successful reset/deletion
+type BotResetAudienceSpecResponse struct {
+	Message string `json:"message"`
+}
+
 // Bot DTOs for auth and listing (referenced by business flows)
 // Minimal types used in flows; detailed types may live elsewhere
 
