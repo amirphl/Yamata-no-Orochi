@@ -16,6 +16,7 @@ import (
 // CampaignBotHandlerInterface defines the contract for bot campaign handlers
 type CampaignBotHandlerInterface interface {
 	UpdateAudienceSpec(c fiber.Ctx) error
+	ResetAudienceSpec(c fiber.Ctx) error
 	ListReadyCampaigns(c fiber.Ctx) error
 	MoveCampaignToExecuted(c fiber.Ctx) error
 	MoveCampaignToRunning(c fiber.Ctx) error
@@ -83,6 +84,37 @@ func (h *CampaignBotHandler) UpdateAudienceSpec(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update audience spec", "UPDATE_AUDIENCE_SPEC_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusCreated, "Audience spec updated", res)
+}
+
+// ResetAudienceSpec resets/deletes audience spec (bot)
+// @Summary Bot Reset Audience Spec
+// @Tags Bot Campaigns
+// @Accept json
+// @Produce json
+// @Param request body dto.BotResetAudienceSpecRequest true "Audience spec reset"
+// @Success 200 {object} dto.APIResponse{data=dto.BotResetAudienceSpecResponse}
+// @Failure 400 {object} dto.APIResponse
+// @Router /api/v1/bot/campaigns/audience-spec/reset [post]
+func (h *CampaignBotHandler) ResetAudienceSpec(c fiber.Ctx) error {
+	var req dto.BotResetAudienceSpecRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	_ = metadata
+	res, err := h.campaignFlow.ResetAudienceSpec(h.createRequestContext(c, "/api/v1/bot/campaigns/audience-spec/reset"), &req)
+	if err != nil {
+		log.Println("Reset audience spec failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reset audience spec", "RESET_AUDIENCE_SPEC_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Audience spec reset", res)
 }
 
 // ListReadyCampaigns lists ready campaigns and marks them running
