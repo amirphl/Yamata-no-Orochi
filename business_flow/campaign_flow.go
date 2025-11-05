@@ -520,6 +520,9 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	// Calculate price per message
 	pricePerMsg := uint64(200*numPages) + basePrice*uint64(float64(lineFactor)*segmentFactor)
 
+	// TODO: Fix it
+	pricePerMsg = 2
+
 	// Calculate campaign capacity (target audience size)
 	capacityResp, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
 		Title:      req.Title,
