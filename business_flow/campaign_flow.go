@@ -510,12 +510,12 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	}
 
 	// Pricing constants
-	basePrice := uint64(150)
+	basePrice := uint64(150) // 600
 	lineFactor, err := s.fetchLineNumberPriceFactor(ctx, *req.LineNumber)
 	if err != nil {
 		return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
 	}
-	segmentFactor := float64(1.5)
+	segmentFactor := float64(1)
 
 	// Calculate price per message
 	pricePerMsg := uint64(200*numPages) + basePrice*uint64(float64(lineFactor)*segmentFactor)
