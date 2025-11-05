@@ -68,22 +68,23 @@ func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.Audien
 
 func (r *AudienceProfileRepositoryImpl) ByFilter(ctx context.Context, filter models.AudienceProfileFilter, orderBy string, limit, offset int) ([]*models.AudienceProfile, error) {
 	db := r.getDB(ctx)
-	base := r.applyFilter(db.Model(&models.AudienceProfile{}), filter)
+	query := r.applyFilter(db.Model(&models.AudienceProfile{}), filter)
 
-	// Randomize first inside a subquery, then apply limit/offset on the randomized set
-	randomized := base.Order("RANDOM()")
+	if orderBy == "" {
+		query = query.Order("id ASC")
+	} else {
+		query = query.Order(orderBy)
+	}
+
 	if limit > 0 {
-		randomized = randomized.Limit(limit)
+		query = query.Limit(limit)
 	}
 	if offset > 0 {
-		randomized = randomized.Offset(offset)
+		query = query.Offset(offset)
 	}
 
-	// Outer query applies the final stable ordering for the selected subset
-	outer := db.Table("(?) AS ap", randomized).Order("id ASC")
-
 	var rows []*models.AudienceProfile
-	if err := outer.Find(&rows).Error; err != nil {
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("failed to find audience profiles by filter: %w", err)
 	}
 	return rows, nil
