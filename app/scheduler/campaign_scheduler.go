@@ -567,7 +567,9 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 		Color: utils.ToPtr("white"),
 	}
 
-	whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", int(c.NumAudiences), 0)
+	const MAX = 10000000
+
+	whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", MAX, 0)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -588,11 +590,8 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 		return result, ids, codes, nil
 	}
 
-	remaining := int(c.NumAudiences) - len(result)
-	upperbound := remaining * 2
-
 	filter.Color = utils.ToPtr("pink")
-	pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", upperbound, 0)
+	pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", MAX, 0)
 	if err != nil {
 		return nil, nil, nil, err
 	}
