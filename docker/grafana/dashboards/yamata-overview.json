@@ -1,0 +1,187 @@
+{
+    "annotations": {
+        "list": [
+            {
+                "builtIn": 1,
+                "datasource": {
+                    "type": "grafana",
+                    "uid": "-- Grafana --"
+                },
+                "enable": true,
+                "hide": true,
+                "iconColor": "rgba(0, 211, 255, 1)",
+                "name": "Annotations & Alerts",
+                "type": "dashboard"
+            }
+        ]
+    },
+    "editable": true,
+    "fiscalYearStartMonth": 0,
+    "graphTooltip": 0,
+    "id": null,
+    "links": [],
+    "liveNow": false,
+    "panels": [
+        {
+            "type": "timeseries",
+            "title": "HTTP Request Rate (rps) by route/method",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 0
+            },
+            "options": {
+                "legend": {
+                    "showLegend": true
+                },
+                "tooltip": {
+                    "mode": "single"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "sum by (route, method) (rate(http_requests_total[5m]))",
+                    "refId": "A",
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "Prometheus"
+                    }
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "HTTP Latency p99 (s)",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 0
+            },
+            "options": {
+                "legend": {
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "mode": "single"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))",
+                    "refId": "A",
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "Prometheus"
+                    }
+                }
+            ]
+        },
+        {
+            "type": "timeseries",
+            "title": "HTTP Error Rate (%)",
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 8
+            },
+            "options": {
+                "legend": {
+                    "showLegend": false
+                },
+                "tooltip": {
+                    "mode": "single"
+                }
+            },
+            "targets": [
+                {
+                    "expr": "100 * (sum(rate(http_requests_total{status=~\"5..\"}[5m])) / sum(rate(http_requests_total[5m])))",
+                    "refId": "A",
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "Prometheus"
+                    }
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "HTTP Inflight Requests",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 12,
+                "y": 8
+            },
+            "options": {
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": ""
+                },
+                "orientation": "auto"
+            },
+            "targets": [
+                {
+                    "expr": "http_inflight_requests",
+                    "refId": "A",
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "Prometheus"
+                    }
+                }
+            ]
+        },
+        {
+            "type": "stat",
+            "title": "DB Open Connections",
+            "gridPos": {
+                "h": 8,
+                "w": 6,
+                "x": 18,
+                "y": 8
+            },
+            "options": {
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ],
+                    "fields": ""
+                },
+                "orientation": "auto"
+            },
+            "targets": [
+                {
+                    "expr": "db_open_connections{name=\"primary\"}",
+                    "refId": "A",
+                    "datasource": {
+                        "type": "prometheus",
+                        "uid": "Prometheus"
+                    }
+                }
+            ]
+        }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 39,
+    "style": "dark",
+    "tags": [
+        "yamata",
+        "overview"
+    ],
+    "templating": {
+        "list": []
+    },
+    "time": {
+        "from": "now-6h",
+        "to": "now"
+    },
+    "timepicker": {},
+    "timezone": "",
+    "title": "Yamata Overview",
+    "version": 1,
+    "weekStart": ""
+}
