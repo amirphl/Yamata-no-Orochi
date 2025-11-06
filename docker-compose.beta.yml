@@ -363,8 +363,8 @@ services:
     restart: unless-stopped
     volumes:
       - prometheus_data_beta:/prometheus
-      # - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      # - ./docker/prometheus/rules:/etc/prometheus/rules:ro
+      - ./docker/prometheus_config.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/prometheus/rules:/etc/prometheus/rules:ro
     # ports:
     #   - "127.0.0.1:9091:9090"  # Only accessible from localhost
     networks:
@@ -392,10 +392,11 @@ services:
       GF_SECURITY_COOKIE_SECURE: true
       GF_SECURITY_COOKIE_SAMESITE: strict
       GF_SECURITY_STRICT_TRANSPORT_SECURITY: true
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/yamata-overview.json
     volumes:
       - grafana_data_beta:/var/lib/grafana
-      # - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
-      # - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
     # ports:
     #   - "127.0.0.1:3000:3000"  # Only accessible from localhost
     networks:
@@ -406,6 +407,55 @@ services:
     security_opt:
       - no-new-privileges:true
     user: "472:472"  # grafana user 
+
+  # Postgres Exporter for DB metrics
+  postgres-exporter-beta:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: yamata-postgres-exporter-beta
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: postgresql://${DB_USER}:${DB_PASSWORD}@postgres-beta:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE}
+    depends_on:
+      postgres-beta:
+        condition: service_healthy
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.60
+
+  # Node Exporter for host metrics
+  node-exporter-beta:
+    image: prom/node-exporter:v1.10.2
+    container_name: yamata-node-exporter-beta
+    restart: unless-stopped
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.70
+
+  # cAdvisor for container metrics
+  cadvisor-beta:
+    image: gcr.io/cadvisor/cadvisor:v0.49.2
+    container_name: yamata-cadvisor-beta
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.80
 
   frontend-beta:
     image: yamata-frontend-beta
