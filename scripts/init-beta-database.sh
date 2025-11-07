@@ -320,18 +320,7 @@ main() {
     
     # Check if database exists
     if check_database_exists; then
-        print_warning "Database '$DB_NAME' already exists"
-        read -p "Do you want to reinitialize the database? This will drop and recreate it. (y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            print_status "Dropping existing database..."
-            docker exec yamata-postgres-beta dropdb -U "$DB_USER" "$DB_NAME" 2>/dev/null || true
-            create_database || true
-            # Reset migration tracker when reinitializing database
-            reset_migration_tracker
-        else
-            print_status "Skipping database creation"
-        fi
+        print_status "Database '$DB_NAME' already exists; skipping drop and creation"
     else
         create_database || true
     fi
