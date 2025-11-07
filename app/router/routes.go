@@ -321,6 +321,9 @@ func (r *FiberRouter) setupMiddleware() {
 		},
 	}))
 
+	// Prometheus HTTP metrics (concise)
+	r.app.Use(middleware.Metrics())
+
 	// Security headers middleware
 	r.app.Use(helmet.New(helmet.Config{
 		XSSProtection:             "1; mode=block",
