@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -63,6 +64,8 @@ type dbStatsCollector struct {
 	maxLC *prometheus.Desc
 }
 
+var metricsRegisterOnce sync.Once
+
 func newDBStatsCollector(db *sql.DB, name string) *dbStatsCollector {
 	const ns = "db"
 	labels := []string{"name"}
@@ -109,16 +112,24 @@ func startMetricsServer(cfg config.MetricsConfig, db *gorm.DB) (func(), error) {
 		return func() {}, nil
 	}
 
-	// Register default collectors (idempotent if already registered)
-	prometheus.MustRegister(collectors.NewGoCollector())
-	prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
-
-	// Register DB stats collector
-	if db != nil {
-		if sqlDB, err := db.DB(); err == nil && sqlDB != nil {
-			prometheus.MustRegister(newDBStatsCollector(sqlDB, "primary"))
+	metricsRegisterOnce.Do(func() {
+		register := func(col prometheus.Collector) {
+			if err := prometheus.DefaultRegisterer.Register(col); err != nil {
+				if _, ok := err.(prometheus.AlreadyRegisteredError); ok {
+					return
+				}
+				log.Printf("metrics register error: %v", err)
+			}
 		}
-	}
+		register(collectors.NewGoCollector())
+		register(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+
+		if db != nil {
+			if sqlDB, err := db.DB(); err == nil && sqlDB != nil {
+				register(newDBStatsCollector(sqlDB, "primary"))
+			}
+		}
+	})
 
 	mux := http.NewServeMux()
 	path := cfg.Path

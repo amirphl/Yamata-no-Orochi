@@ -238,6 +238,9 @@ services:
       METRICS_COLLECT_CACHE: ${METRICS_COLLECT_CACHE}
       METRICS_COLLECT_APP: ${METRICS_COLLECT_APP}
 
+      # Ensure libraries that need cache write to tmpfs, not $HOME
+      XDG_CACHE_HOME: /tmp
+
       # Cache Configuration
       CACHE_ENABLED: ${CACHE_ENABLED}
       CACHE_PROVIDER: ${CACHE_PROVIDER}
