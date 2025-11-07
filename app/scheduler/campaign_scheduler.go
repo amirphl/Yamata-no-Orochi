@@ -152,6 +152,8 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 		s.logger.Printf("scheduler: bot login failed: %v", err)
 		return
 	}
+	// Success (concise)
+	s.logger.Printf("scheduler: bot login succeeded")
 
 	// 3) Get ready campaigns
 	ready, err := s.listReadyCampaigns(ctx, token)
@@ -162,6 +164,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	if len(ready) == 0 {
 		return
 	}
+	s.logger.Printf("scheduler: listed %d ready campaigns", len(ready))
 
 	// 4) Filter already processed
 	pending := make([]dto.BotGetCampaignResponse, 0, len(ready))
@@ -182,6 +185,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	if len(pending) == 0 {
 		return
 	}
+	s.logger.Printf("scheduler: %d campaigns pending processing", len(pending))
 
 	// 5) Spawn goroutines per campaign
 	for _, camp := range pending {
@@ -201,6 +205,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	if err := s.moveCampaignToRunning(ctx, token, c.ID); err != nil {
 		return fmt.Errorf("move to running: %w", err)
 	}
+	s.logger.Printf("scheduler: campaign id=%d moved to running", c.ID)
 
 	// First transaction: create processed_campaign and persist full audience IDs
 	var (
@@ -238,9 +243,10 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	}); err != nil {
 		return err
 	}
+	s.logger.Printf("scheduler: persisted processed campaign id=%d audiences=%d", pc.ID, len(ids))
 
 	// 12/13) Send batches; after each batch, save sent_sms and update LastAudienceID in SAME transaction
-	batchSize := 100
+	batchSize := 1000
 	// Sender from campaign line number
 	if c.LineNumber == nil {
 		return fmt.Errorf("sender is nil")
@@ -316,6 +322,8 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 					s.logger.Printf("scheduler: failed to create short links via api: %v", err)
 					return fmt.Errorf("create short links via api: %w", err)
 				}
+				// Success (concise)
+				s.logger.Printf("scheduler: created %d short links for campaign id=%d", len(req.Items), c.ID)
 			}
 		}
 
@@ -340,6 +348,9 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 			if len(updates) > 0 {
 				if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, updates); updateErr != nil {
 					s.logger.Printf("scheduler: failed to batch update sent_sms provider fields: %v", updateErr)
+				} else {
+					// Success (concise)
+					s.logger.Printf("scheduler: sent sms batch items=%d for campaign id=%d", len(items), c.ID)
 				}
 			}
 		}
@@ -349,6 +360,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	if err := s.moveCampaignToExecuted(ctx, token, c.ID); err != nil {
 		s.logger.Printf("scheduler: move executed failed for id=%d: %v", c.ID, err)
 	}
+	s.logger.Printf("scheduler: campaign id=%d moved to executed", c.ID)
 	return nil
 }
 
