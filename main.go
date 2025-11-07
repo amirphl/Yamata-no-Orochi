@@ -8,9 +8,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,6 +27,9 @@ import (
 	_ "github.com/amirphl/Yamata-no-Orochi/docs"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/gofiber/fiber/v3"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -42,6 +47,99 @@ type Application struct {
 	config    *config.ProductionConfig
 	server    *fiber.App
 	stopFuncs []func()
+}
+
+// dbStatsCollector exposes sql.DB Stats to Prometheus
+type dbStatsCollector struct {
+	db    *sql.DB
+	name  string
+	open  *prometheus.Desc
+	inUse *prometheus.Desc
+	idle  *prometheus.Desc
+	waitC *prometheus.Desc
+	waitD *prometheus.Desc
+	maxOC *prometheus.Desc
+	maxIC *prometheus.Desc
+	maxLC *prometheus.Desc
+}
+
+func newDBStatsCollector(db *sql.DB, name string) *dbStatsCollector {
+	const ns = "db"
+	labels := []string{"name"}
+	return &dbStatsCollector{
+		db:    db,
+		name:  name,
+		open:  prometheus.NewDesc(ns+"_open_connections", "The number of established connections both in use and idle.", labels, nil),
+		inUse: prometheus.NewDesc(ns+"_in_use_connections", "The number of connections currently in use.", labels, nil),
+		idle:  prometheus.NewDesc(ns+"_idle_connections", "The number of idle connections.", labels, nil),
+		waitC: prometheus.NewDesc(ns+"_wait_count_total", "The total number of connections waited for.", labels, nil),
+		waitD: prometheus.NewDesc(ns+"_wait_duration_seconds_total", "The total time blocked waiting for a new connection.", labels, nil),
+		maxOC: prometheus.NewDesc(ns+"_max_open_connections", "Maximum number of open connections to the database.", labels, nil),
+		maxIC: prometheus.NewDesc(ns+"_max_idle_closed_total", "The total number of connections closed due to SetMaxIdleConns.", labels, nil),
+		maxLC: prometheus.NewDesc(ns+"_max_lifetime_closed_total", "The total number of connections closed due to SetConnMaxLifetime.", labels, nil),
+	}
+}
+
+func (c *dbStatsCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.open
+	ch <- c.inUse
+	ch <- c.idle
+	ch <- c.waitC
+	ch <- c.waitD
+	ch <- c.maxOC
+	ch <- c.maxIC
+	ch <- c.maxLC
+}
+
+func (c *dbStatsCollector) Collect(ch chan<- prometheus.Metric) {
+	s := c.db.Stats()
+	labels := []string{c.name}
+	ch <- prometheus.MustNewConstMetric(c.open, prometheus.GaugeValue, float64(s.OpenConnections), labels...)
+	ch <- prometheus.MustNewConstMetric(c.inUse, prometheus.GaugeValue, float64(s.InUse), labels...)
+	ch <- prometheus.MustNewConstMetric(c.idle, prometheus.GaugeValue, float64(s.Idle), labels...)
+	ch <- prometheus.MustNewConstMetric(c.waitC, prometheus.CounterValue, float64(s.WaitCount), labels...)
+	ch <- prometheus.MustNewConstMetric(c.waitD, prometheus.CounterValue, s.WaitDuration.Seconds(), labels...)
+	ch <- prometheus.MustNewConstMetric(c.maxOC, prometheus.GaugeValue, float64(s.MaxOpenConnections), labels...)
+	ch <- prometheus.MustNewConstMetric(c.maxIC, prometheus.CounterValue, float64(s.MaxIdleClosed), labels...)
+	ch <- prometheus.MustNewConstMetric(c.maxLC, prometheus.CounterValue, float64(s.MaxLifetimeClosed), labels...)
+}
+
+func startMetricsServer(cfg config.MetricsConfig, db *gorm.DB) (func(), error) {
+	if !cfg.Enabled || !cfg.EnablePrometheus {
+		return func() {}, nil
+	}
+
+	// Register default collectors (idempotent if already registered)
+	prometheus.MustRegister(collectors.NewGoCollector())
+	prometheus.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
+
+	// Register DB stats collector
+	if db != nil {
+		if sqlDB, err := db.DB(); err == nil && sqlDB != nil {
+			prometheus.MustRegister(newDBStatsCollector(sqlDB, "primary"))
+		}
+	}
+
+	mux := http.NewServeMux()
+	path := cfg.Path
+	if path == "" {
+		path = "/metrics"
+	}
+	mux.Handle(path, promhttp.Handler())
+
+	addr := fmt.Sprintf(":%d", cfg.Port)
+	srv := &http.Server{Addr: addr, Handler: mux}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("metrics server error: %v", err)
+		}
+	}()
+	log.Printf("Metrics server started on %s%s", addr, path)
+	return func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(ctx)
+	}, nil
 }
 
 func main() {
@@ -423,6 +521,13 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Create application struct from FiberRouter
 	fiberRouter := appRouter.(*router.FiberRouter)
+	// Start metrics server (Prometheus) if enabled
+	if stop, err := startMetricsServer(cfg.Metrics, db); err == nil && stop != nil {
+		stopFuncs = append(stopFuncs, stop)
+	} else if err != nil {
+		log.Printf("failed to start metrics server: %v", err)
+	}
+
 	application := &Application{
 		router:    fiberRouter,
 		config:    cfg,
