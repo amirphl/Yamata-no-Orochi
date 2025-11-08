@@ -292,7 +292,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			User:            getEnvString("DB_USER", "postgres"),
 			Password:        getEnvString("DB_PASSWORD", ""),
 			SSLMode:         getEnvString("DB_SSL_MODE", "require"),
-			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 100),
+			MaxOpenConns:    getEnvInt("DB_MAX_OPEN_CONNS", 20),
 			MaxIdleConns:    getEnvInt("DB_MAX_IDLE_CONNS", 10),
 			ConnMaxLifetime: getEnvDuration("DB_CONN_MAX_LIFETIME", 30*time.Minute),
 			ConnMaxIdleTime: getEnvDuration("DB_CONN_MAX_IDLE_TIME", 15*time.Minute),
