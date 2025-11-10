@@ -1,0 +1,7 @@
+BEGIN;
+
+ALTER TABLE short_links
+    DROP COLUMN IF EXISTS user_agent,
+    DROP COLUMN IF EXISTS ip;
+
+COMMIT; 
