@@ -5,9 +5,7 @@ import (
 	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
-	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // ShortLinkRepositoryImpl implements ShortLinkRepository
@@ -53,14 +51,14 @@ func (r *ShortLinkRepositoryImpl) applyFilter(db *gorm.DB, f models.ShortLinkFil
 	if f.CampaignID != nil {
 		db = db.Where("campaign_id = ?", *f.CampaignID)
 	}
+	if f.ClientID != nil {
+		db = db.Where("client_id = ?", *f.ClientID)
+	}
+	if f.ScenarioID != nil {
+		db = db.Where("scenario_id = ?", *f.ScenarioID)
+	}
 	if f.PhoneNumber != nil {
 		db = db.Where("phone_number = ?", *f.PhoneNumber)
-	}
-	if f.ClicksMin != nil {
-		db = db.Where("clicks >= ?", *f.ClicksMin)
-	}
-	if f.ClicksMax != nil {
-		db = db.Where("clicks <= ?", *f.ClicksMax)
 	}
 	if f.CreatedAfter != nil {
 		db = db.Where("created_at >= ?", *f.CreatedAfter)
@@ -108,39 +106,17 @@ func (r *ShortLinkRepositoryImpl) Exists(ctx context.Context, filter models.Shor
 	return c > 0, nil
 }
 
-func (r *ShortLinkRepositoryImpl) IncrementClicksByUID(ctx context.Context, uid string, userAgent *string, ip *string) error {
-	db, shouldCommit, err := r.getDBForWrite(ctx)
-	if err != nil {
-		return err
+func (r *ShortLinkRepositoryImpl) ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error) {
+	db := r.getDB(ctx)
+	query := db.Model(&models.ShortLink{}).
+		Where("scenario_id = ?", scenarioID).
+		Where("EXISTS (SELECT 1 FROM short_link_clicks c WHERE c.short_link_id = short_links.id)")
+	if orderBy != "" {
+		query = query.Order(orderBy)
 	}
-	if shouldCommit {
-		defer func() {
-			if err != nil {
-				db.Rollback()
-			} else {
-				db.Commit()
-			}
-		}()
+	var rows []*models.ShortLink
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
 	}
-	updates := map[string]any{
-		"clicks":     gorm.Expr("clicks + ?", 1),
-		"updated_at": utils.UTCNow(),
-	}
-	if userAgent != nil {
-		updates["user_agent"] = *userAgent
-	}
-	if ip != nil {
-		updates["ip"] = *ip
-	}
-	res := db.Model(&models.ShortLink{}).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("uid = ?", uid).
-		Updates(updates)
-	if res.Error != nil {
-		return res.Error
-	}
-	if res.RowsAffected == 0 {
-		return errors.New("short link not found")
-	}
-	return nil
+	return rows, nil
 }
