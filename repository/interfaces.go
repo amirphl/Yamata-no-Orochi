@@ -277,6 +277,7 @@ type ShortLinkRepository interface {
 	ByID(ctx context.Context, id uint) (*models.ShortLink, error)
 	ByUID(ctx context.Context, uid string) (*models.ShortLink, error)
 	ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error)
+	GetLastScenarioID(ctx context.Context) (uint, error)
 }
 
 // ShortLinkClickRepository defines operations for short link clicks
