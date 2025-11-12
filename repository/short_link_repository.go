@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -119,4 +120,16 @@ func (r *ShortLinkRepositoryImpl) ListByScenarioWithClicks(ctx context.Context, 
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r *ShortLinkRepositoryImpl) GetLastScenarioID(ctx context.Context) (uint, error) {
+	db := r.getDB(ctx)
+	var max sql.NullInt64
+	if err := db.Model(&models.ShortLink{}).Select("MAX(scenario_id)").Scan(&max).Error; err != nil {
+		return 0, err
+	}
+	if !max.Valid {
+		return 0, nil
+	}
+	return uint(max.Int64), nil
 }
