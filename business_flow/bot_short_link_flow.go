@@ -12,7 +12,6 @@ import (
 // BotShortLinkFlow handles creation of short links by bot
 // Validates inputs and persists records in a transaction for batch
 // UID must be unique and provided by the caller
-// Clicks initialize to 0
 // CampaignID is optional (no FK)
 type BotShortLinkFlow interface {
 	CreateShortLink(ctx context.Context, req *dto.BotCreateShortLinkRequest) (*dto.BotCreateShortLinkResponse, error)
@@ -32,18 +31,25 @@ func (s *BotShortLinkFlowImpl) CreateShortLink(ctx context.Context, req *dto.Bot
 	if req == nil {
 		return nil, NewBusinessError("VALIDATION_ERROR", "Request body is required", nil)
 	}
-	if req.UID == "" || req.PhoneNumber == "" || req.Link == "" {
-		return nil, NewBusinessError("VALIDATION_ERROR", "uid, phone_number and link are required", nil)
+	if req.UID == "" || req.LongLink == "" || req.ShortLink == "" {
+		return nil, NewBusinessError("VALIDATION_ERROR", "uid, long_link and short_link are required", nil)
 	}
+
+	// read last scenario id from last short link from database and increment it
+	lastScenarioID, err := s.shortRepo.GetLastScenarioID(ctx)
+	if err != nil {
+		return nil, NewBusinessError("FETCH_SCENARIO_ID_FAILED", "Failed to determine next scenario id", err)
+	}
+	newScenarioID := lastScenarioID + 1
 
 	row := &models.ShortLink{
 		UID:         req.UID,
 		CampaignID:  req.CampaignID,
+		ClientID:    req.ClientID,
+		ScenarioID:  &newScenarioID,
 		PhoneNumber: req.PhoneNumber,
-		Clicks:      0,
-		Link:        req.Link,
-		UserAgent:   req.UserAgent,
-		IP:          req.IP,
+		LongLink:    req.LongLink,
+		ShortLink:   req.ShortLink,
 	}
 	if err := s.shortRepo.Save(ctx, row); err != nil {
 		return nil, NewBusinessError("BOT_CREATE_SHORT_LINK_FAILED", "Failed to create short link", err)
@@ -58,19 +64,27 @@ func (s *BotShortLinkFlowImpl) CreateShortLinks(ctx context.Context, req *dto.Bo
 	if req == nil || len(req.Items) == 0 {
 		return nil, NewBusinessError("VALIDATION_ERROR", "items must contain at least one element", nil)
 	}
+
+	// read last scenario id from last short link from database and increment it
+	lastScenarioID, err := s.shortRepo.GetLastScenarioID(ctx)
+	if err != nil {
+		return nil, NewBusinessError("FETCH_SCENARIO_ID_FAILED", "Failed to determine next scenario id", err)
+	}
+	newScenarioID := lastScenarioID + 1
+
 	rows := make([]*models.ShortLink, 0, len(req.Items))
 	for _, it := range req.Items {
-		if it.UID == "" || it.PhoneNumber == "" || it.Link == "" {
-			return nil, NewBusinessError("VALIDATION_ERROR", "uid, phone_number and link are required for all items", nil)
+		if it.UID == "" || it.LongLink == "" || it.ShortLink == "" {
+			return nil, NewBusinessError("VALIDATION_ERROR", "uid, long_link and short_link are required for all items", nil)
 		}
 		rows = append(rows, &models.ShortLink{
 			UID:         it.UID,
 			CampaignID:  it.CampaignID,
+			ClientID:    it.ClientID,
+			ScenarioID:  &newScenarioID,
 			PhoneNumber: it.PhoneNumber,
-			Clicks:      0,
-			Link:        it.Link,
-			UserAgent:   it.UserAgent,
-			IP:          it.IP,
+			LongLink:    it.LongLink,
+			ShortLink:   it.ShortLink,
 		})
 	}
 
@@ -96,10 +110,9 @@ func mapShortLinkDTO(m *models.ShortLink) dto.ShortLinkDTO {
 		ID:          m.ID,
 		UID:         m.UID,
 		CampaignID:  m.CampaignID,
+		ClientID:    m.ClientID,
 		PhoneNumber: m.PhoneNumber,
-		Clicks:      m.Clicks,
-		Link:        m.Link,
-		UserAgent:   m.UserAgent,
-		IP:          m.IP,
+		LongLink:    m.LongLink,
+		ShortLink:   m.ShortLink,
 	}
 }
