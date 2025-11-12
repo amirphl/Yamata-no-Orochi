@@ -276,5 +276,11 @@ type ShortLinkRepository interface {
 	Repository[models.ShortLink, models.ShortLinkFilter]
 	ByID(ctx context.Context, id uint) (*models.ShortLink, error)
 	ByUID(ctx context.Context, uid string) (*models.ShortLink, error)
-	IncrementClicksByUID(ctx context.Context, uid string, userAgent *string, ip *string) error
+	ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error)
+}
+
+// ShortLinkClickRepository defines operations for short link clicks
+type ShortLinkClickRepository interface {
+	Repository[models.ShortLinkClick, any]
+	ByID(ctx context.Context, id uint) (*models.ShortLinkClick, error)
 }
