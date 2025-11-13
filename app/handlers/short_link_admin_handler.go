@@ -1,0 +1,149 @@
+package handlers
+
+import (
+	"context"
+	"log"
+	"mime/multipart"
+	"time"
+
+	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/go-playground/validator/v10"
+	"github.com/gofiber/fiber/v3"
+)
+
+// ShortLinkAdminHandlerInterface defines admin endpoints for short links (CSV upload and downloads)
+type ShortLinkAdminHandlerInterface interface {
+	UploadCSV(c fiber.Ctx) error
+	DownloadByScenario(c fiber.Ctx) error
+	DownloadWithClicksByScenario(c fiber.Ctx) error
+}
+
+// ShortLinkAdminHandler implements the admin short link endpoints
+type ShortLinkAdminHandler struct {
+	uploadFlow  businessflow.AdminShortLinkFlow
+	downloadAll businessflow.AdminShortLinkFlow
+	downloadHit businessflow.AdminShortLinkFlow
+	validator   *validator.Validate
+}
+
+func NewShortLinkAdminHandler(uploadFlow businessflow.AdminShortLinkFlow, downloadAll businessflow.AdminShortLinkFlow, downloadHit businessflow.AdminShortLinkFlow) ShortLinkAdminHandlerInterface {
+	return &ShortLinkAdminHandler{
+		uploadFlow:  uploadFlow,
+		downloadAll: downloadAll,
+		downloadHit: downloadHit,
+		validator:   validator.New(),
+	}
+}
+
+func (h *ShortLinkAdminHandler) ErrorResponse(c fiber.Ctx, statusCode int, message, code string, details any) error {
+	return c.Status(statusCode).JSON(dto.APIResponse{Success: false, Message: message, Error: dto.ErrorDetail{Code: code, Details: details}})
+}
+
+// UploadCSV accepts a multipart/form-data with file (CSV) and short_link_domain fields
+// @Summary Admin Upload Short Links CSV
+// @Tags Admin ShortLinks
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "CSV file with long_link column"
+// @Param short_link_domain formData string true "Domain for short links (e.g., https://j0in.ir)"
+// @Success 201 {object} dto.APIResponse{data=dto.AdminCreateShortLinksResponse}
+// @Failure 400 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/admin/short-links/upload-csv [post]
+func (h *ShortLinkAdminHandler) UploadCSV(c fiber.Ctx) error {
+	fileHeader, err := c.FormFile("file")
+	if err != nil || fileHeader == nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "file is required", "INVALID_REQUEST", nil)
+	}
+	domain := c.FormValue("short_link_domain")
+	fh, err := openFormFile(fileHeader)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "invalid file", "INVALID_FILE", err.Error())
+	}
+	defer fh.Close()
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	res, flowErr := h.uploadFlow.CreateShortLinksFromCSV(h.createRequestContext(c, "/api/v1/admin/short-links/upload-csv"), fh, domain)
+	if flowErr != nil {
+		log.Println("Admin upload short links failed:", flowErr)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to create short links", "CREATE_SHORT_LINKS_FAILED", nil)
+	}
+	_ = metadata // reserved for audit if needed later
+	return c.Status(fiber.StatusCreated).JSON(dto.APIResponse{Success: true, Message: "Short links created", Data: res})
+}
+
+// DownloadByScenario posts scenario_id and returns CSV of all short links with that scenario
+// @Summary Admin Download Short Links by Scenario
+// @Tags Admin ShortLinks
+// @Accept json
+// @Produce text/csv
+// @Param request body dto.AdminDownloadShortLinksRequest true "Scenario ID"
+// @Success 200 {string} string "CSV file"
+// @Failure 400 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/admin/short-links/download [post]
+func (h *ShortLinkAdminHandler) DownloadByScenario(c fiber.Ctx) error {
+	var req dto.AdminDownloadShortLinksRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
+	}
+	filename, data, err := h.downloadAll.DownloadShortLinksCSV(h.createRequestContext(c, "/api/v1/admin/short-links/download"), req.ScenarioID)
+	if err != nil {
+		log.Println("Admin download short links failed:", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate CSV", "DOWNLOAD_FAILED", nil)
+	}
+	c.Set("Content-Type", "text/csv; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename="+filename)
+	return c.Send(data)
+}
+
+// DownloadWithClicksByScenario posts scenario_id and returns CSV of short links that have at least one click
+// @Summary Admin Download Short Links With Clicks by Scenario
+// @Tags Admin ShortLinks
+// @Accept json
+// @Produce text/csv
+// @Param request body dto.AdminDownloadShortLinksRequest true "Scenario ID"
+// @Success 200 {string} string "CSV file"
+// @Failure 400 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/admin/short-links/download-with-clicks [post]
+func (h *ShortLinkAdminHandler) DownloadWithClicksByScenario(c fiber.Ctx) error {
+	var req dto.AdminDownloadShortLinksRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
+	}
+	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksCSV(h.createRequestContext(c, "/api/v1/admin/short-links/download-with-clicks"), req.ScenarioID)
+	if err != nil {
+		log.Println("Admin download short links with clicks failed:", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate CSV", "DOWNLOAD_FAILED", nil)
+	}
+	c.Set("Content-Type", "text/csv; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename="+filename)
+	return c.Send(data)
+}
+
+func openFormFile(fh *multipart.FileHeader) (multipart.File, error) {
+	return fh.Open()
+}
+
+func (h *ShortLinkAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
+	return h.createRequestContextWithTimeout(c, endpoint, 60*time.Second)
+}
+
+func (h *ShortLinkAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
+	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
+	ctx = context.WithValue(ctx, utils.IPAddressKey, c.IP())
+	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
+	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
+	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
+	return ctx
+}
