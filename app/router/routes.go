@@ -51,6 +51,7 @@ type FiberRouter struct {
 	ticketHandler                  handlers.TicketHandlerInterface
 	shortLinkBotHandler            handlers.ShortLinkBotHandlerInterface
 	shortLinkHandler               handlers.ShortLinkHandlerInterface
+	shortLinkAdminHandler          handlers.ShortLinkAdminHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -70,6 +71,7 @@ func NewFiberRouter(
 	ticketHandler handlers.TicketHandlerInterface,
 	shortLinkBotHandler handlers.ShortLinkBotHandlerInterface,
 	shortLinkHandler handlers.ShortLinkHandlerInterface,
+	shortLinkAdminHandler handlers.ShortLinkAdminHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -102,6 +104,7 @@ func NewFiberRouter(
 		ticketHandler:                  ticketHandler,
 		shortLinkBotHandler:            shortLinkBotHandler,
 		shortLinkHandler:               shortLinkHandler,
+		shortLinkAdminHandler:          shortLinkAdminHandler,
 	}
 }
 
@@ -241,6 +244,14 @@ func (r *FiberRouter) SetupRoutes() {
 	botShortLinks.Use(func(c fiber.Ctx) error { return middleware.RequireBotAuth(c) })
 	botShortLinks.Post("/", r.shortLinkBotHandler.CreateShortLinks)
 	botShortLinks.Post("/one", r.shortLinkBotHandler.CreateShortLink)
+
+	// Admin short-links routes (protected)
+	adminShortLinks := api.Group("/admin/short-links")
+	adminShortLinks.Use(r.authMiddleware.AdminAuthenticate())
+	adminShortLinks.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminShortLinks.Post("/upload-csv", r.shortLinkAdminHandler.UploadCSV)
+	adminShortLinks.Post("/download", r.shortLinkAdminHandler.DownloadByScenario)
+	adminShortLinks.Post("/download-with-clicks", r.shortLinkAdminHandler.DownloadWithClicksByScenario)
 
 	// Admin customer reports
 	adminCustomers := api.Group("/admin/customer-management")
