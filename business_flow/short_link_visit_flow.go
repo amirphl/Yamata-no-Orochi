@@ -3,6 +3,7 @@ package businessflow
 import (
 	"context"
 
+	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 )
 
@@ -15,11 +16,12 @@ type ShortLinkVisitFlow interface {
 }
 
 type ShortLinkVisitFlowImpl struct {
-	repo repository.ShortLinkRepository
+	repo      repository.ShortLinkRepository
+	clickRepo repository.ShortLinkClickRepository
 }
 
-func NewShortLinkVisitFlow(repo repository.ShortLinkRepository) ShortLinkVisitFlow {
-	return &ShortLinkVisitFlowImpl{repo: repo}
+func NewShortLinkVisitFlow(repo repository.ShortLinkRepository, clickRepo repository.ShortLinkClickRepository) ShortLinkVisitFlow {
+	return &ShortLinkVisitFlowImpl{repo: repo, clickRepo: clickRepo}
 }
 
 func (f *ShortLinkVisitFlowImpl) Visit(ctx context.Context, uid string, userAgent *string, ip *string) (string, error) {
@@ -30,8 +32,13 @@ func (f *ShortLinkVisitFlowImpl) Visit(ctx context.Context, uid string, userAgen
 	if row == nil {
 		return "", ErrShortLinkNotFound
 	}
-	if err := f.repo.IncrementClicksByUID(ctx, uid, userAgent, ip); err != nil {
+	// Insert click row
+	if err := f.clickRepo.Save(ctx, &models.ShortLinkClick{
+		ShortLinkID: row.ID,
+		UserAgent:   userAgent,
+		IP:          ip,
+	}); err != nil {
 		return "", NewBusinessError("SHORT_LINK_TRACK_FAILED", "Failed to track short link click", err)
 	}
-	return row.Link, nil
+	return row.LongLink, nil
 }
