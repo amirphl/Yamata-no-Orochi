@@ -34,3 +34,20 @@ type AdminLoginResponse struct {
 	Admin   AdminDTO        `json:"admin"`
 	Session AdminSessionDTO `json:"session"`
 }
+
+// Admin short link CSV creation response
+// Contains summary and the created short links
+// Items use ShortLinkDTO defined in bot_dto.go for consistency
+type AdminCreateShortLinksResponse struct {
+	Message    string `json:"message"`
+	TotalRows  int    `json:"total_rows"`
+	Created    int    `json:"created"`
+	Skipped    int    `json:"skipped"`
+	ScenarioID uint   `json:"scenario_id"`
+}
+
+// Admin download short links request
+// Posts scenario_id to retrieve CSV
+type AdminDownloadShortLinksRequest struct {
+	ScenarioID uint `json:"scenario_id" validate:"required,gt=0"`
+}
