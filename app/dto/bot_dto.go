@@ -63,20 +63,19 @@ type ShortLinkDTO struct {
 	ID          uint    `json:"id"`
 	UID         string  `json:"uid"`
 	CampaignID  *uint   `json:"campaign_id,omitempty"`
-	PhoneNumber string  `json:"phone_number"`
-	Clicks      uint64  `json:"clicks"`
-	Link        string  `json:"link"`
-	UserAgent   *string `json:"user_agent,omitempty"`
-	IP          *string `json:"ip,omitempty"`
+	ClientID    *uint   `json:"client_id,omitempty"`
+	PhoneNumber *string `json:"phone_number,omitempty"`
+	LongLink    string  `json:"long_link"`
+	ShortLink   string  `json:"short_link"`
 }
 
 type BotCreateShortLinkRequest struct {
 	UID         string  `json:"uid" validate:"required,max=64"`
 	CampaignID  *uint   `json:"campaign_id" validate:"omitempty"`
-	PhoneNumber string  `json:"phone_number" validate:"required,max=20"`
-	Link        string  `json:"link" validate:"required"`
-	UserAgent   *string `json:"user_agent" validate:"omitempty"`
-	IP          *string `json:"ip" validate:"omitempty,max=64"`
+	ClientID    *uint   `json:"client_id" validate:"omitempty"`
+	PhoneNumber *string `json:"phone_number" validate:"omitempty,max=20"`
+	LongLink    string  `json:"long_link" validate:"required"`
+	ShortLink   string  `json:"short_link" validate:"required"`
 }
 
 type BotCreateShortLinkResponse struct {
