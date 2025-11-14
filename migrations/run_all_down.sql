@@ -3,6 +3,15 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0046_remove_user_agent_ip_from_short_links_down.sql...'
+\i migrations/0046_remove_user_agent_ip_from_short_links_down.sql
+
+\echo 'Running 0045_add_scenario_id_to_short_links_down.sql...'
+\i migrations/0045_add_scenario_id_to_short_links_down.sql
+
+\echo 'Running 0044_update_short_links_and_create_clicks_down.sql...'
+\i migrations/0044_update_short_links_and_create_clicks_down.sql
+
 \echo 'Running 0043_create_short_links_down.sql...'
 \i migrations/0043_create_short_links_down.sql
 
