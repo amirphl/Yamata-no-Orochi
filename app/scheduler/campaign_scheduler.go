@@ -313,8 +313,10 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 				req.Items = append(req.Items, dto.BotCreateShortLinkRequest{
 					UID:         batchCodes[i],
 					CampaignID:  &campaignID,
-					PhoneNumber: batchPhones[i],
-					Link:        *c.AdLink,
+					ClientID:    nil,
+					PhoneNumber: &batchPhones[i],
+					LongLink:    *c.AdLink,
+					ShortLink:   "https://jo1n.ir/s/" + batchCodes[i],
 				})
 			}
 			if len(req.Items) > 0 {
