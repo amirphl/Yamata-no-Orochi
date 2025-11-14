@@ -355,6 +355,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
+	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
 
 	// Initialize services
 	notificationService := initializeNotificationService(cfg)
@@ -483,7 +484,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
 
-	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo)
+	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo, shortLinkClickRepo)
+
+	// Admin short-links flows and handler
+	adminShortLinkFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo)
+	adminShortLinkDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo)
+	adminShortLinkClicksDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
@@ -499,6 +505,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	campaignBotHandler := handlers.NewCampaignBotHandler(botCampaignFlow)
 	shortLinkBotHandler := handlers.NewShortLinkBotHandler(botShortLinkFlow)
 	shortLinkHandler := handlers.NewShortLinkHandler(shortLinkVisitFlow)
+	shortLinkAdminHandler := handlers.NewShortLinkAdminHandler(adminShortLinkFlow, adminShortLinkDownloadFlow, adminShortLinkClicksDownloadFlow)
+
 	ticketHandler := handlers.NewTicketHandler(ticketFlow)
 
 	// Initialize auth middleware
@@ -521,6 +529,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		ticketHandler,
 		shortLinkBotHandler,
 		shortLinkHandler,
+		shortLinkAdminHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
