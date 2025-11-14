@@ -135,5 +135,14 @@
 \echo 'Running 0043_create_short_links.sql...'
 \i migrations/0043_create_short_links.sql
 
+\echo 'Running 0044_update_short_links_and_create_clicks.sql...'
+\i migrations/0044_update_short_links_and_create_clicks.sql
+
+\echo 'Running 0045_add_scenario_id_to_short_links.sql...'
+\i migrations/0045_add_scenario_id_to_short_links.sql
+
+\echo 'Running 0046_remove_user_agent_ip_from_short_links.sql...'
+\i migrations/0046_remove_user_agent_ip_from_short_links.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
