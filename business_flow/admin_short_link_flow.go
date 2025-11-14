@@ -170,7 +170,13 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksCSV(ctx context.Context, scen
 
 	buf := &bytes.Buffer{}
 	w := csv.NewWriter(buf)
-	defer w.Flush()
+	alreadyFlushed := false
+	defer func() {
+		if !alreadyFlushed {
+			w.Flush()
+			alreadyFlushed = true
+		}
+	}()
 
 	// Header: all current columns in short_links
 	header := []string{
@@ -225,6 +231,10 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksCSV(ctx context.Context, scen
 	}
 
 	filename := fmt.Sprintf("short_links_scenario_%d.csv", scenarioID)
+	if !alreadyFlushed {
+		w.Flush()
+		alreadyFlushed = true
+	}
 	return filename, buf.Bytes(), nil
 }
 
@@ -240,7 +250,13 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 
 	buf := &bytes.Buffer{}
 	w := csv.NewWriter(buf)
-	defer w.Flush()
+	alreadyFlushed := false
+	defer func() {
+		if !alreadyFlushed {
+			w.Flush()
+			alreadyFlushed = true
+		}
+	}()
 
 	header := []string{
 		"id",
@@ -294,5 +310,9 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 	}
 
 	filename := fmt.Sprintf("short_links_with_clicks_scenario_%d.csv", scenarioID)
+	if !alreadyFlushed {
+		w.Flush()
+		alreadyFlushed = true
+	}
 	return filename, buf.Bytes(), nil
 }
