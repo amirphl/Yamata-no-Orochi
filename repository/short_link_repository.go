@@ -110,8 +110,8 @@ func (r *ShortLinkRepositoryImpl) Exists(ctx context.Context, filter models.Shor
 func (r *ShortLinkRepositoryImpl) ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error) {
 	db := r.getDB(ctx)
 	query := db.Model(&models.ShortLink{}).
-		Where("scenario_id = ?", scenarioID).
-		Where("EXISTS (SELECT 1 FROM short_link_clicks c WHERE c.short_link_id = short_links.id)")
+		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id").
+		Where("c.scenario_id = ?", scenarioID)
 	if orderBy != "" {
 		query = query.Order(orderBy)
 	}
