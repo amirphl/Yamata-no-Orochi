@@ -8,6 +8,7 @@ import "time"
 type ShortLinkClick struct {
 	ID          uint      `gorm:"primaryKey" json:"id"`
 	ShortLinkID uint      `gorm:"index:idx_short_link_clicks_short_link_id;not null" json:"short_link_id"`
+	ScenarioID  *uint     `gorm:"index:idx_short_link_clicks_scenario_id" json:"scenario_id,omitempty"`
 	UserAgent   *string   `gorm:"type:text" json:"user_agent,omitempty"`
 	IP          *string   `gorm:"size:64" json:"ip,omitempty"`
 	CreatedAt   time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_short_link_clicks_created_at" json:"created_at"`
