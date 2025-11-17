@@ -35,6 +35,7 @@ func (f *ShortLinkVisitFlowImpl) Visit(ctx context.Context, uid string, userAgen
 	// Insert click row
 	if err := f.clickRepo.Save(ctx, &models.ShortLinkClick{
 		ShortLinkID: row.ID,
+		ScenarioID:  row.ScenarioID,
 		UserAgent:   userAgent,
 		IP:          ip,
 	}); err != nil {
