@@ -84,6 +84,8 @@ func NewFiberRouter(
 		IdleTimeout:  60 * time.Second,
 		JSONEncoder:  json.Marshal,
 		JSONDecoder:  json.Unmarshal,
+		// Trust proxy headers from nginx to get real client IP
+		ProxyHeader: "X-Forwarded-For",
 	})
 
 	return &FiberRouter{
