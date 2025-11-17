@@ -35,11 +35,12 @@ type AdminShortLinkFlow interface {
 }
 
 type AdminShortLinkFlowImpl struct {
-	repo repository.ShortLinkRepository
+	repo      repository.ShortLinkRepository
+	clickRepo repository.ShortLinkClickRepository
 }
 
-func NewAdminShortLinkFlow(repo repository.ShortLinkRepository) AdminShortLinkFlow {
-	return &AdminShortLinkFlowImpl{repo: repo}
+func NewAdminShortLinkFlow(repo repository.ShortLinkRepository, clickRepo repository.ShortLinkClickRepository) AdminShortLinkFlow {
+	return &AdminShortLinkFlowImpl{repo: repo, clickRepo: clickRepo}
 }
 
 func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, csvReader io.Reader, shortLinkDomain string) (*dto.AdminCreateShortLinksResponse, error) {
@@ -96,7 +97,7 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 			continue
 		}
 
-		uid := generateRandomBase62(10)
+		uid := generateRandomBase62(6)
 		shortURL := fmt.Sprintf("%s/s/%s", shortLinkDomain, uid)
 		scenarioID := newScenarioID
 		rows = append(rows, &models.ShortLink{
