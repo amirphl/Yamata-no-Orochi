@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"gorm.io/gorm"
@@ -16,6 +17,22 @@ type ShortLinkRepositoryImpl struct {
 
 func NewShortLinkRepository(db *gorm.DB) ShortLinkRepository {
 	return &ShortLinkRepositoryImpl{BaseRepository: NewBaseRepository[models.ShortLink, models.ShortLinkFilter](db)}
+}
+
+// ShortLinkWithClick is a projection row combining short link columns with click context fields
+type ShortLinkWithClick struct {
+	ID             uint      `gorm:"column:id"`
+	UID            string    `gorm:"column:uid"`
+	CampaignID     *uint     `gorm:"column:campaign_id"`
+	ClientID       *uint     `gorm:"column:client_id"`
+	ScenarioID     *uint     `gorm:"column:scenario_id"`
+	PhoneNumber    *string   `gorm:"column:phone_number"`
+	LongLink       string    `gorm:"column:long_link"`
+	ShortLink      string    `gorm:"column:short_link"`
+	CreatedAt      time.Time `gorm:"column:created_at"`
+	UpdatedAt      time.Time `gorm:"column:updated_at"`
+	ClickUserAgent *string   `gorm:"column:click_user_agent"`
+	ClickIP        *string   `gorm:"column:click_ip"`
 }
 
 func (r *ShortLinkRepositoryImpl) ByID(ctx context.Context, id uint) (*models.ShortLink, error) {
@@ -120,6 +137,32 @@ func (r *ShortLinkRepositoryImpl) ListByScenarioWithClicks(ctx context.Context, 
 		return nil, err
 	}
 	return rows, nil
+}
+
+func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenario(ctx context.Context, scenarioID uint, orderBy string) ([]*ShortLinkWithClick, error) {
+	db := r.getDB(ctx)
+	q := db.Table("short_links").
+		Select(`short_links.id,
+			short_links.uid,
+			short_links.campaign_id,
+			short_links.client_id,
+			short_links.scenario_id,
+			short_links.phone_number,
+			short_links.long_link,
+			short_links.short_link,
+			short_links.created_at,
+			short_links.updated_at,
+			c.user_agent AS click_user_agent,
+			c.ip AS click_ip`).
+		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id AND c.scenario_id = ?", scenarioID)
+	if orderBy != "" {
+		q = q.Order(orderBy)
+	}
+	var out []*ShortLinkWithClick
+	if err := q.Scan(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (r *ShortLinkRepositoryImpl) GetLastScenarioID(ctx context.Context) (uint, error) {
