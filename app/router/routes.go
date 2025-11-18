@@ -317,6 +317,7 @@ func (r *FiberRouter) SetupRoutes() {
 
 	// Public short-link redirect (no auth)
 	r.app.Get("/s/:uid", r.shortLinkHandler.Visit)
+	r.app.Get("/:uid", r.shortLinkHandler.Visit)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
