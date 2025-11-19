@@ -165,6 +165,32 @@ func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenario(ctx context.Co
 	return out, nil
 }
 
+func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioRange(ctx context.Context, scenarioFrom, scenarioTo uint, orderBy string) ([]*ShortLinkWithClick, error) {
+	db := r.getDB(ctx)
+	q := db.Table("short_links").
+		Select(`short_links.id,
+			short_links.uid,
+			short_links.campaign_id,
+			short_links.client_id,
+			short_links.scenario_id,
+			short_links.phone_number,
+			short_links.long_link,
+			short_links.short_link,
+			short_links.created_at,
+			short_links.updated_at,
+			c.user_agent AS click_user_agent,
+			c.ip AS click_ip`).
+		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id AND c.scenario_id >= ? AND c.scenario_id < ?", scenarioFrom, scenarioTo)
+	if orderBy != "" {
+		q = q.Order(orderBy)
+	}
+	var out []*ShortLinkWithClick
+	if err := q.Scan(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (r *ShortLinkRepositoryImpl) GetLastScenarioID(ctx context.Context) (uint, error) {
 	db := r.getDB(ctx)
 	var max sql.NullInt64
