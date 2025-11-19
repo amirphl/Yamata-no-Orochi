@@ -51,3 +51,10 @@ type AdminCreateShortLinksResponse struct {
 type AdminDownloadShortLinksRequest struct {
 	ScenarioID uint `json:"scenario_id" validate:"required,gt=0"`
 }
+
+// Admin download short links with clicks by scenario range [from, to)
+// scenario_to must be greater than scenario_from
+type AdminDownloadShortLinksRangeRequest struct {
+	ScenarioFrom uint `json:"scenario_from" validate:"required,gt=0"`
+	ScenarioTo   uint `json:"scenario_to" validate:"required,gt=0,gtfield=ScenarioFrom"`
+}
