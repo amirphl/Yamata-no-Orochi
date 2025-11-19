@@ -244,7 +244,7 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_id must be greater than 0", nil)
 	}
 
-	rows, err := f.repo.ListByScenarioWithClicks(ctx, scenarioID, "id ASC")
+	rows, err := f.repo.ListWithClicksDetailsByScenario(ctx, scenarioID, "short_links.id ASC, c.id ASC")
 	if err != nil {
 		return "", nil, NewBusinessError("FETCH_SHORT_LINKS_FAILED", "Failed to fetch short links with clicks", err)
 	}
@@ -270,6 +270,8 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 		"short_link",
 		"created_at",
 		"updated_at",
+		"user_agent",
+		"ip",
 	}
 	if err := w.Write(header); err != nil {
 		return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV header", err)
@@ -292,6 +294,14 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 		if r.PhoneNumber != nil {
 			phone = *r.PhoneNumber
 		}
+		ua := ""
+		if r.ClickUserAgent != nil {
+			ua = *r.ClickUserAgent
+		}
+		ip := ""
+		if r.ClickIP != nil {
+			ip = *r.ClickIP
+		}
 
 		record := []string{
 			strconv.FormatUint(uint64(r.ID), 10),
@@ -304,6 +314,8 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 			r.ShortLink,
 			r.CreatedAt.UTC().Format(time.RFC3339),
 			r.UpdatedAt.UTC().Format(time.RFC3339),
+			ua,
+			ip,
 		}
 		if err := w.Write(record); err != nil {
 			return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV row", err)
