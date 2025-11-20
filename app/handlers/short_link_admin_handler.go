@@ -18,6 +18,7 @@ type ShortLinkAdminHandlerInterface interface {
 	UploadCSV(c fiber.Ctx) error
 	DownloadByScenario(c fiber.Ctx) error
 	DownloadWithClicksByScenario(c fiber.Ctx) error
+	DownloadWithClicksByScenarioRange(c fiber.Ctx) error
 }
 
 // ShortLinkAdminHandler implements the admin short link endpoints
@@ -122,6 +123,34 @@ func (h *ShortLinkAdminHandler) DownloadWithClicksByScenario(c fiber.Ctx) error 
 	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksCSV(h.createRequestContext(c, "/api/v1/admin/short-links/download-with-clicks"), req.ScenarioID)
 	if err != nil {
 		log.Println("Admin download short links with clicks failed:", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate CSV", "DOWNLOAD_FAILED", nil)
+	}
+	c.Set("Content-Type", "text/csv; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename="+filename)
+	return c.Send(data)
+}
+
+// DownloadWithClicksByScenarioRange posts scenario_from and scenario_to and returns CSV of short links with clicks in [from, to)
+// @Summary Admin Download Short Links With Clicks by Scenario Range
+// @Tags Admin ShortLinks
+// @Accept json
+// @Produce text/csv
+// @Param request body dto.AdminDownloadShortLinksRangeRequest true "Scenario range [from, to)"
+// @Success 200 {string} string "CSV file"
+// @Failure 400 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/admin/short-links/download-with-clicks-range [post]
+func (h *ShortLinkAdminHandler) DownloadWithClicksByScenarioRange(c fiber.Ctx) error {
+	var req dto.AdminDownloadShortLinksRangeRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
+	}
+	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksCSVRange(h.createRequestContext(c, "/api/v1/admin/short-links/download-with-clicks-range"), req.ScenarioFrom, req.ScenarioTo)
+	if err != nil {
+		log.Println("Admin download short links with clicks range failed:", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate CSV", "DOWNLOAD_FAILED", nil)
 	}
 	c.Set("Content-Type", "text/csv; charset=utf-8")
