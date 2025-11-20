@@ -32,6 +32,7 @@ type AdminShortLinkFlow interface {
 	CreateShortLinksFromCSV(ctx context.Context, csvReader io.Reader, shortLinkDomain string) (*dto.AdminCreateShortLinksResponse, error)
 	DownloadShortLinksCSV(ctx context.Context, scenarioID uint) (string, []byte, error)
 	DownloadShortLinksWithClicksCSV(ctx context.Context, scenarioID uint) (string, []byte, error)
+	DownloadShortLinksWithClicksCSVRange(ctx context.Context, scenarioFrom, scenarioTo uint) (string, []byte, error)
 }
 
 type AdminShortLinkFlowImpl struct {
@@ -323,6 +324,100 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 	}
 
 	filename := fmt.Sprintf("short_links_with_clicks_scenario_%d.csv", scenarioID)
+	if !alreadyFlushed {
+		w.Flush()
+		alreadyFlushed = true
+	}
+	return filename, buf.Bytes(), nil
+}
+
+func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSVRange(ctx context.Context, scenarioFrom, scenarioTo uint) (string, []byte, error) {
+	if scenarioFrom == 0 || scenarioTo == 0 {
+		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_from and scenario_to must be greater than 0", nil)
+	}
+	if scenarioTo <= scenarioFrom {
+		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_to must be greater than scenario_from", nil)
+	}
+
+	rows, err := f.repo.ListWithClicksDetailsByScenarioRange(ctx, scenarioFrom, scenarioTo, "short_links.id ASC, c.id ASC")
+	if err != nil {
+		return "", nil, NewBusinessError("FETCH_SHORT_LINKS_FAILED", "Failed to fetch short links with clicks by range", err)
+	}
+
+	buf := &bytes.Buffer{}
+	w := csv.NewWriter(buf)
+	alreadyFlushed := false
+	defer func() {
+		if !alreadyFlushed {
+			w.Flush()
+			alreadyFlushed = true
+		}
+	}()
+
+	header := []string{
+		"id",
+		"uid",
+		"campaign_id",
+		"client_id",
+		"scenario_id",
+		"phone_number",
+		"long_link",
+		"short_link",
+		"created_at",
+		"updated_at",
+		"user_agent",
+		"ip",
+	}
+	if err := w.Write(header); err != nil {
+		return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV header", err)
+	}
+
+	for _, r := range rows {
+		campaignID := ""
+		if r.CampaignID != nil {
+			campaignID = strconv.FormatUint(uint64(*r.CampaignID), 10)
+		}
+		clientID := ""
+		if r.ClientID != nil {
+			clientID = strconv.FormatUint(uint64(*r.ClientID), 10)
+		}
+		scenario := ""
+		if r.ScenarioID != nil {
+			scenario = strconv.FormatUint(uint64(*r.ScenarioID), 10)
+		}
+		phone := ""
+		if r.PhoneNumber != nil {
+			phone = *r.PhoneNumber
+		}
+		ua := ""
+		if r.ClickUserAgent != nil {
+			ua = *r.ClickUserAgent
+		}
+		ip := ""
+		if r.ClickIP != nil {
+			ip = *r.ClickIP
+		}
+
+		record := []string{
+			strconv.FormatUint(uint64(r.ID), 10),
+			r.UID,
+			campaignID,
+			clientID,
+			scenario,
+			phone,
+			r.LongLink,
+			r.ShortLink,
+			r.CreatedAt.UTC().Format(time.RFC3339),
+			r.UpdatedAt.UTC().Format(time.RFC3339),
+			ua,
+			ip,
+		}
+		if err := w.Write(record); err != nil {
+			return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV row", err)
+		}
+	}
+
+	filename := fmt.Sprintf("short_links_with_clicks_scenarios_%d_to_%d.csv", scenarioFrom, scenarioTo)
 	if !alreadyFlushed {
 		w.Flush()
 		alreadyFlushed = true
