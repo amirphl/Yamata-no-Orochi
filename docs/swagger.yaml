@@ -102,6 +102,19 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.AdminCreateShortLinksResponse:
+    properties:
+      created:
+        type: integer
+      message:
+        type: string
+      scenario_id:
+        type: integer
+      skipped:
+        type: integer
+      total_rows:
+        type: integer
+    type: object
   dto.AdminCustomerCampaignItem:
     properties:
       campaign_id:
@@ -268,6 +281,23 @@ definitions:
       uuid:
         example: f47ac10b-58cc-4372-a567-0e02b2c3d479
         type: string
+    type: object
+  dto.AdminDownloadShortLinksRangeRequest:
+    properties:
+      scenario_from:
+        type: integer
+      scenario_to:
+        type: integer
+    required:
+    - scenario_from
+    - scenario_to
+    type: object
+  dto.AdminDownloadShortLinksRequest:
+    properties:
+      scenario_id:
+        type: integer
+    required:
+    - scenario_id
     type: object
   dto.AdminGetCampaignResponse:
     properties:
@@ -556,22 +586,21 @@ definitions:
     properties:
       campaign_id:
         type: integer
-      ip:
-        maxLength: 64
-        type: string
-      link:
+      client_id:
+        type: integer
+      long_link:
         type: string
       phone_number:
         maxLength: 20
         type: string
+      short_link:
+        type: string
       uid:
         maxLength: 64
         type: string
-      user_agent:
-        type: string
     required:
-    - link
-    - phone_number
+    - long_link
+    - short_link
     - uid
     type: object
   dto.BotCreateShortLinkResponse:
@@ -685,6 +714,23 @@ definitions:
         $ref: '#/definitions/dto.BotDTO'
       session:
         $ref: '#/definitions/dto.BotSessionDTO'
+    type: object
+  dto.BotResetAudienceSpecRequest:
+    properties:
+      segment:
+        maxLength: 255
+        type: string
+      subsegment:
+        maxLength: 255
+        type: string
+    required:
+    - segment
+    - subsegment
+    type: object
+  dto.BotResetAudienceSpecResponse:
+    properties:
+      message:
+        type: string
     type: object
   dto.BotSessionDTO:
     properties:
@@ -1191,19 +1237,17 @@ definitions:
     properties:
       campaign_id:
         type: integer
-      clicks:
+      client_id:
         type: integer
       id:
         type: integer
-      ip:
-        type: string
-      link:
+      long_link:
         type: string
       phone_number:
         type: string
-      uid:
+      short_link:
         type: string
-      user_agent:
+      uid:
         type: string
     type: object
   dto.SignupRequest:
@@ -1947,6 +1991,131 @@ paths:
       summary: Line Numbers Report (Admin)
       tags:
       - Admin Line Numbers
+  /api/v1/admin/short-links/download:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Scenario ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminDownloadShortLinksRequest'
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV file
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Download Short Links by Scenario
+      tags:
+      - Admin ShortLinks
+  /api/v1/admin/short-links/download-with-clicks:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Scenario ID
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminDownloadShortLinksRequest'
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV file
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Download Short Links With Clicks by Scenario
+      tags:
+      - Admin ShortLinks
+  /api/v1/admin/short-links/download-with-clicks-range:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Scenario range [from, to)
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminDownloadShortLinksRangeRequest'
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV file
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Download Short Links With Clicks by Scenario Range
+      tags:
+      - Admin ShortLinks
+  /api/v1/admin/short-links/upload-csv:
+    post:
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: CSV file with long_link column
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Domain for short links (e.g., https://j0in.ir)
+        in: formData
+        name: short_link_domain
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCreateShortLinksResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Upload Short Links CSV
+      tags:
+      - Admin ShortLinks
   /api/v1/admin/tickets:
     get:
       consumes:
@@ -2441,6 +2610,36 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Bot Update Audience Spec
+      tags:
+      - Bot Campaigns
+  /api/v1/bot/campaigns/audience-spec/reset:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Audience spec reset
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotResetAudienceSpecRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotResetAudienceSpecResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Reset Audience Spec
       tags:
       - Bot Campaigns
   /api/v1/bot/campaigns/ready:
