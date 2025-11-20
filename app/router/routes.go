@@ -254,6 +254,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminShortLinks.Post("/upload-csv", r.shortLinkAdminHandler.UploadCSV)
 	adminShortLinks.Post("/download", r.shortLinkAdminHandler.DownloadByScenario)
 	adminShortLinks.Post("/download-with-clicks", r.shortLinkAdminHandler.DownloadWithClicksByScenario)
+	adminShortLinks.Post("/download-with-clicks-range", r.shortLinkAdminHandler.DownloadWithClicksByScenarioRange)
 
 	// Admin customer reports
 	adminCustomers := api.Group("/admin/customer-management")
