@@ -78,7 +78,7 @@ func NewFiberRouter(
 		AppName:      "Yamata no Orochi API",
 		ServerHeader: "Yamata-no-Orochi",
 		ErrorHandler: errorHandler,
-		BodyLimit:    4 * 1024 * 1024, // 4MB
+		BodyLimit:    50 * 1024 * 1024, // 50MB (raised to support large CSV uploads)
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 		IdleTimeout:  60 * time.Second,
