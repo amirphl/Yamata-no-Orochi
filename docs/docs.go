@@ -852,6 +852,203 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/short-links/download": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "Admin ShortLinks"
+                ],
+                "summary": "Admin Download Short Links by Scenario",
+                "parameters": [
+                    {
+                        "description": "Scenario ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminDownloadShortLinksRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CSV file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/short-links/download-with-clicks": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "Admin ShortLinks"
+                ],
+                "summary": "Admin Download Short Links With Clicks by Scenario",
+                "parameters": [
+                    {
+                        "description": "Scenario ID",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminDownloadShortLinksRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CSV file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/short-links/download-with-clicks-range": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "Admin ShortLinks"
+                ],
+                "summary": "Admin Download Short Links With Clicks by Scenario Range",
+                "parameters": [
+                    {
+                        "description": "Scenario range [from, to)",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminDownloadShortLinksRangeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CSV file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/short-links/upload-csv": {
+            "post": {
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin ShortLinks"
+                ],
+                "summary": "Admin Upload Short Links CSV",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "CSV file with long_link column",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Domain for short links (e.g., https://j0in.ir)",
+                        "name": "short_link_domain",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminCreateShortLinksResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/tickets": {
             "get": {
                 "description": "Admin lists tickets with optional filters",
@@ -1585,6 +1782,57 @@ const docTemplate = `{
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/dto.BotUpdateAudienceSpecResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/campaigns/audience-spec/reset": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot Reset Audience Spec",
+                "parameters": [
+                    {
+                        "description": "Audience spec reset",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotResetAudienceSpecRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotResetAudienceSpecResponse"
                                         }
                                     }
                                 }
@@ -3255,6 +3503,26 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminCreateShortLinksResponse": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "scenario_id": {
+                    "type": "integer"
+                },
+                "skipped": {
+                    "type": "integer"
+                },
+                "total_rows": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.AdminCustomerCampaignItem": {
             "type": "object",
             "properties": {
@@ -3504,6 +3772,32 @@ const docTemplate = `{
                 "uuid": {
                     "type": "string",
                     "example": "f47ac10b-58cc-4372-a567-0e02b2c3d479"
+                }
+            }
+        },
+        "dto.AdminDownloadShortLinksRangeRequest": {
+            "type": "object",
+            "required": [
+                "scenario_from",
+                "scenario_to"
+            ],
+            "properties": {
+                "scenario_from": {
+                    "type": "integer"
+                },
+                "scenario_to": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AdminDownloadShortLinksRequest": {
+            "type": "object",
+            "required": [
+                "scenario_id"
+            ],
+            "properties": {
+                "scenario_id": {
+                    "type": "integer"
                 }
             }
         },
@@ -3931,31 +4225,30 @@ const docTemplate = `{
         "dto.BotCreateShortLinkRequest": {
             "type": "object",
             "required": [
-                "link",
-                "phone_number",
+                "long_link",
+                "short_link",
                 "uid"
             ],
             "properties": {
                 "campaign_id": {
                     "type": "integer"
                 },
-                "ip": {
-                    "type": "string",
-                    "maxLength": 64
+                "client_id": {
+                    "type": "integer"
                 },
-                "link": {
+                "long_link": {
                     "type": "string"
                 },
                 "phone_number": {
                     "type": "string",
                     "maxLength": 20
                 },
+                "short_link": {
+                    "type": "string"
+                },
                 "uid": {
                     "type": "string",
                     "maxLength": 64
-                },
-                "user_agent": {
-                    "type": "string"
                 }
             }
         },
@@ -4125,6 +4418,31 @@ const docTemplate = `{
                 },
                 "session": {
                     "$ref": "#/definitions/dto.BotSessionDTO"
+                }
+            }
+        },
+        "dto.BotResetAudienceSpecRequest": {
+            "type": "object",
+            "required": [
+                "segment",
+                "subsegment"
+            ],
+            "properties": {
+                "segment": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "subsegment": {
+                    "type": "string",
+                    "maxLength": 255
+                }
+            }
+        },
+        "dto.BotResetAudienceSpecResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -4866,25 +5184,22 @@ const docTemplate = `{
                 "campaign_id": {
                     "type": "integer"
                 },
-                "clicks": {
+                "client_id": {
                     "type": "integer"
                 },
                 "id": {
                     "type": "integer"
                 },
-                "ip": {
-                    "type": "string"
-                },
-                "link": {
+                "long_link": {
                     "type": "string"
                 },
                 "phone_number": {
                     "type": "string"
                 },
-                "uid": {
+                "short_link": {
                     "type": "string"
                 },
-                "user_agent": {
+                "uid": {
                     "type": "string"
                 }
             }
