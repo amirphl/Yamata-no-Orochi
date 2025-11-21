@@ -280,6 +280,7 @@ type ShortLinkRepository interface {
 	ListWithClicksDetailsByScenario(ctx context.Context, scenarioID uint, orderBy string) ([]*ShortLinkWithClick, error)
 	ListWithClicksDetailsByScenarioRange(ctx context.Context, scenarioFrom, scenarioTo uint, orderBy string) ([]*ShortLinkWithClick, error)
 	GetLastScenarioID(ctx context.Context) (uint, error)
+	GetMaxUIDSince(ctx context.Context, since time.Time) (string, error)
 }
 
 // ShortLinkClickRepository defines operations for short link clicks

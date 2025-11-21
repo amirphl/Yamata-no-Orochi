@@ -79,7 +79,22 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 	rows := make([]*models.ShortLink, 0, 256)
 	created := 0
 	skipped := 0
-	seq := uint64(0)
+	var seq uint64
+	// Determine starting UID sequence from the highest UID created after the cutoff
+	cutoff := time.Date(2025, 11, 10, 15, 45, 11, 401492000, time.UTC)
+	lastUID, err := f.repo.GetMaxUIDSince(ctx, cutoff)
+	if err != nil {
+		return nil, NewBusinessError("FETCH_MAX_UID_FAILED", "Failed to determine highest uid since cutoff", err)
+	}
+	if lastUID != "" {
+		n, err := decodeBase36(lastUID)
+		if err != nil {
+			return nil, NewBusinessError("INVALID_EXISTING_UID", "Found invalid uid in database", err)
+		}
+		seq = n + 1
+	} else {
+		seq = 0
+	}
 	for {
 		rec, err := reader.Read()
 		if err == io.EOF {
@@ -168,6 +183,29 @@ func encodeBase36(n uint64) string {
 		buf[i], buf[j] = buf[j], buf[i]
 	}
 	return string(buf)
+}
+
+func decodeBase36(s string) (uint64, error) {
+	var n uint64
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		var v int
+		switch {
+		case c >= '0' && c <= '9':
+			v = int(c - '0')
+		case c >= 'a' && c <= 'z':
+			v = int(c-'a') + 10
+		case c >= 'A' && c <= 'Z':
+			v = int(c-'A') + 10
+		default:
+			return 0, fmt.Errorf("invalid base36 character: %q", c)
+		}
+		if v >= 36 {
+			return 0, fmt.Errorf("invalid base36 value: %d", v)
+		}
+		n = n*36 + uint64(v)
+	}
+	return n, nil
 }
 
 func formatSequentialUID(seq uint64) (string, error) {
