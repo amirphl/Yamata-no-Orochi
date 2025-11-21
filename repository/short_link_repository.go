@@ -202,3 +202,23 @@ func (r *ShortLinkRepositoryImpl) GetLastScenarioID(ctx context.Context) (uint, 
 	}
 	return uint(max.Int64), nil
 }
+
+// GetMaxUIDSince returns the highest UID (by numeric base36 order) among
+// short links created strictly after the provided timestamp. It orders by
+// character length first, then lexicographically, which is correct for fixed-length
+// base36 strings used as UIDs.
+func (r *ShortLinkRepositoryImpl) GetMaxUIDSince(ctx context.Context, since time.Time) (string, error) {
+	db := r.getDB(ctx)
+	var uids []string
+	q := db.Model(&models.ShortLink{}).
+		Where("created_at > ?", since).
+		Order("char_length(uid) DESC, uid DESC").
+		Limit(1)
+	if err := q.Pluck("uid", &uids).Error; err != nil {
+		return "", err
+	}
+	if len(uids) == 0 {
+		return "", nil
+	}
+	return uids[0], nil
+}
