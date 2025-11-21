@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -22,7 +21,7 @@ import (
 // For each row with a valid long_link, a short link will be generated and inserted
 // The generated short URL format is: <short_link_domain>/s/<uid>
 // Note: This flow assumes a public redirect route exists at /s/:uid
-// Note: UID collisions are extremely unlikely; a random base62 string of length 10 is used
+// UIDs are generated sequentially from "0000" upward using base36 digits (0-9 then a-z), expanding up to 5 chars (max "zzzzz").
 // This function skips rows with empty long_link values
 // It returns a summary with counts and the created short links
 // Validations are minimal; consumers may validate long_link formats if needed
@@ -80,6 +79,7 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 	rows := make([]*models.ShortLink, 0, 256)
 	created := 0
 	skipped := 0
+	seq := uint64(0)
 	for {
 		rec, err := reader.Read()
 		if err == io.EOF {
@@ -98,7 +98,11 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 			continue
 		}
 
-		uid := generateRandomBase62(6)
+		uid, err := formatSequentialUID(seq)
+		if err != nil {
+			return nil, NewBusinessError("UID_SEQUENCE_EXHAUSTED", "No more UIDs available up to zzzzz", err)
+		}
+		seq++
 		shortURL := fmt.Sprintf("%s/s/%s", shortLinkDomain, uid)
 		scenarioID := newScenarioID
 		rows = append(rows, &models.ShortLink{
@@ -148,15 +152,33 @@ func normalizeDomain(domain string) string {
 	return strings.TrimRight(domain, "/")
 }
 
-func generateRandomBase62(n int) string {
-	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, n)
-	for i := range n {
-		var rb [1]byte
-		_, _ = rand.Read(rb[:])
-		b[i] = letters[int(rb[0])%len(letters)]
+func encodeBase36(n uint64) string {
+	const digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+	if n == 0 {
+		return "0"
 	}
-	return string(b)
+	buf := make([]byte, 0, 16)
+	for n > 0 {
+		r := n % 36
+		buf = append(buf, digits[r])
+		n /= 36
+	}
+	// reverse in place
+	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
+		buf[i], buf[j] = buf[j], buf[i]
+	}
+	return string(buf)
+}
+
+func formatSequentialUID(seq uint64) (string, error) {
+	s := encodeBase36(seq)
+	if len(s) < 4 {
+		s = strings.Repeat("0", 4-len(s)) + s
+	}
+	if len(s) > 5 {
+		return "", fmt.Errorf("sequence exhausted at %s", s)
+	}
+	return s, nil
 }
 
 func (f *AdminShortLinkFlowImpl) DownloadShortLinksCSV(ctx context.Context, scenarioID uint) (string, []byte, error) {
