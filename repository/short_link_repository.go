@@ -26,6 +26,7 @@ type ShortLinkWithClick struct {
 	CampaignID     *uint     `gorm:"column:campaign_id"`
 	ClientID       *uint     `gorm:"column:client_id"`
 	ScenarioID     *uint     `gorm:"column:scenario_id"`
+	ScenarioName   *string   `gorm:"column:scenario_name"`
 	PhoneNumber    *string   `gorm:"column:phone_number"`
 	LongLink       string    `gorm:"column:long_link"`
 	ShortLink      string    `gorm:"column:short_link"`
@@ -74,6 +75,9 @@ func (r *ShortLinkRepositoryImpl) applyFilter(db *gorm.DB, f models.ShortLinkFil
 	}
 	if f.ScenarioID != nil {
 		db = db.Where("scenario_id = ?", *f.ScenarioID)
+	}
+	if f.ScenarioNameLike != nil {
+		db = db.Where("scenario_name LIKE ?", *f.ScenarioNameLike)
 	}
 	if f.PhoneNumber != nil {
 		db = db.Where("phone_number = ?", *f.PhoneNumber)
@@ -173,6 +177,7 @@ func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioRange(ctx conte
 			short_links.campaign_id,
 			short_links.client_id,
 			short_links.scenario_id,
+			short_links.scenario_name,
 			short_links.phone_number,
 			short_links.long_link,
 			short_links.short_link,
@@ -181,6 +186,34 @@ func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioRange(ctx conte
 			c.user_agent AS click_user_agent,
 			c.ip AS click_ip`).
 		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id AND c.scenario_id >= ? AND c.scenario_id < ?", scenarioFrom, scenarioTo)
+	if orderBy != "" {
+		q = q.Order(orderBy)
+	}
+	var out []*ShortLinkWithClick
+	if err := q.Scan(&out).Error; err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioNameRegex(ctx context.Context, pattern string, orderBy string) ([]*ShortLinkWithClick, error) {
+	db := r.getDB(ctx)
+	q := db.Table("short_links").
+		Select(`short_links.id,
+			short_links.uid,
+			short_links.campaign_id,
+			short_links.client_id,
+			short_links.scenario_id,
+			short_links.scenario_name,
+			short_links.phone_number,
+			short_links.long_link,
+			short_links.short_link,
+			short_links.created_at,
+			short_links.updated_at,
+			c.user_agent AS click_user_agent,
+			c.ip AS click_ip`).
+		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id").
+		Where("short_links.scenario_name ~ ?", pattern)
 	if orderBy != "" {
 		q = q.Order(orderBy)
 	}
