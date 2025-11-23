@@ -147,5 +147,11 @@
 \echo 'Running 0047_add_scenario_id_to_short_link_clicks.sql...'
 \i migrations/0047_add_scenario_id_to_short_link_clicks.sql
 
+\echo 'Running 0048_add_scenario_name_to_short_links.sql...'
+\i migrations/0048_add_scenario_name_to_short_links.sql
+
+\echo 'Running 0049_create_crypto_payments.sql...'
+\i migrations/0049_create_crypto_payments.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
