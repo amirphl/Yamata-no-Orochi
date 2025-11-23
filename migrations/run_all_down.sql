@@ -3,6 +3,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0049_create_crypto_payments_down.sql...'
+\i migrations/0049_create_crypto_payments_down.sql
+
+\echo 'Running 0048_add_scenario_name_to_short_links_down.sql...'
+\i migrations/0048_add_scenario_name_to_short_links_down.sql
+
 \echo 'Running 0047_add_scenario_id_to_short_link_clicks_down.sql...'
 \i migrations/0047_add_scenario_id_to_short_link_clicks_down.sql
 
