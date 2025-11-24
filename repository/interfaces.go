@@ -190,6 +190,31 @@ type PaymentRequestRepository interface {
 	GetCompletedRequests(ctx context.Context, limit, offset int) ([]*models.PaymentRequest, error)
 }
 
+// CryptoPaymentRequestRepository defines data access for crypto payment requests
+type CryptoPaymentRequestRepository interface {
+	Repository[models.CryptoPaymentRequest, models.CryptoPaymentRequestFilter]
+	ByID(ctx context.Context, id uint) (*models.CryptoPaymentRequest, error)
+	ByUUID(ctx context.Context, uuid string) (*models.CryptoPaymentRequest, error)
+	ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.CryptoPaymentRequest, error)
+	ByDepositAddress(ctx context.Context, address, memo string) ([]*models.CryptoPaymentRequest, error)
+	ByProviderRequestID(ctx context.Context, providerRequestID string) (*models.CryptoPaymentRequest, error)
+	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.CryptoPaymentRequest, error)
+	ByWalletID(ctx context.Context, walletID uint, limit, offset int) ([]*models.CryptoPaymentRequest, error)
+	ByStatus(ctx context.Context, status models.CryptoPaymentStatus, limit, offset int) ([]*models.CryptoPaymentRequest, error)
+	GetPendingRequests(ctx context.Context, limit, offset int) ([]*models.CryptoPaymentRequest, error)
+	Update(ctx context.Context, request *models.CryptoPaymentRequest) error
+}
+
+// CryptoDepositRepository defines data access for on-chain deposits (may be provider-sourced)
+type CryptoDepositRepository interface {
+	Repository[models.CryptoDeposit, models.CryptoDepositFilter]
+	ByID(ctx context.Context, id uint) (*models.CryptoDeposit, error)
+	ByUUID(ctx context.Context, uuid string) (*models.CryptoDeposit, error)
+	ByTxHash(ctx context.Context, txHash string) (*models.CryptoDeposit, error)
+	ListUncreditedConfirmed(ctx context.Context, limit, offset int) ([]*models.CryptoDeposit, error)
+	Update(ctx context.Context, deposit *models.CryptoDeposit) error
+}
+
 // CommissionRateRepository defines the interface for commission rate data access
 type CommissionRateRepository interface {
 	Repository[models.CommissionRate, models.CommissionRateFilter]
@@ -279,6 +304,7 @@ type ShortLinkRepository interface {
 	ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error)
 	ListWithClicksDetailsByScenario(ctx context.Context, scenarioID uint, orderBy string) ([]*ShortLinkWithClick, error)
 	ListWithClicksDetailsByScenarioRange(ctx context.Context, scenarioFrom, scenarioTo uint, orderBy string) ([]*ShortLinkWithClick, error)
+	ListWithClicksDetailsByScenarioNameRegex(ctx context.Context, pattern string, orderBy string) ([]*ShortLinkWithClick, error)
 	GetLastScenarioID(ctx context.Context) (uint, error)
 	GetMaxUIDSince(ctx context.Context, since time.Time) (string, error)
 }
