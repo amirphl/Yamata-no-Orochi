@@ -31,6 +31,7 @@ type ProductionConfig struct {
 	PayamSMS   PayamSMSConfig   `json:"payam_sms"`
 	Bot        BotConfig        `json:"bot"`
 	Scheduler  SchedulerConfig  `json:"scheduler"`
+	Crypto     CryptoConfig     `json:"crypto"`
 }
 
 type DatabaseConfig struct {
@@ -246,6 +247,37 @@ type BotConfig struct {
 	Username  string `json:"username"`
 	Password  string `json:"password"`
 	APIDomain string `json:"api_domain"`
+}
+
+type CryptoConfig struct {
+	DefaultPlatform string             `json:"default_platform"`
+	SupportedCoins  []string           `json:"supported_coins"`
+	Bithide         BithideConfig      `json:"bithide"`
+	Coinremitter    CoinremitterConfig `json:"coinremitter"`
+	Oxapay          OxapayConfig       `json:"oxapay"`
+}
+
+type BithideConfig struct {
+	BaseURL       string        `json:"base_url"`
+	APIKey        string        `json:"api_key"`
+	WebhookSecret string        `json:"webhook_secret"`
+	Timeout       time.Duration `json:"timeout"`
+}
+
+type CoinremitterConfig struct {
+	BaseURL string        `json:"base_url"`
+	Timeout time.Duration `json:"timeout"`
+	// Wallet credentials per coin symbol (e.g., DOGE/ETH/BNB/XRP)
+	Wallets map[string]struct {
+		APIKey      string `json:"api_key"`
+		APIPassword string `json:"api_password"`
+	} `json:"wallets"`
+}
+
+type OxapayConfig struct {
+	BaseURL string        `json:"base_url"`
+	APIKey  string        `json:"api_key"`
+	Timeout time.Duration `json:"timeout"`
 }
 
 // SystemConfig holds system/tax actors and wallets UUIDs configured by admin
@@ -476,6 +508,34 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Scheduler: SchedulerConfig{
 			CampaignExecutionEnabled:  getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
 			CampaignExecutionInterval: getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
+		},
+		Crypto: CryptoConfig{
+			DefaultPlatform: getEnvString("CRYPTO_DEFAULT_PLATFORM", "oxapay"),
+			SupportedCoins:  getEnvStringSlice("CRYPTO_SUPPORTED_COINS", []string{"ETH", "DOGE", "XRP", "BNB"}),
+			Bithide: BithideConfig{
+				BaseURL:       getEnvString("CRYPTO_BITHIDE_BASE_URL", ""),
+				APIKey:        getEnvString("CRYPTO_BITHIDE_API_KEY", ""),
+				WebhookSecret: getEnvString("CRYPTO_BITHIDE_WEBHOOK_SECRET", ""),
+				Timeout:       getEnvDuration("CRYPTO_BITHIDE_TIMEOUT", 10*time.Second),
+			},
+			Coinremitter: CoinremitterConfig{
+				BaseURL: getEnvString("CR_BASE_URL", "https://api.coinremitter.com/v1"),
+				Timeout: getEnvDuration("CR_TIMEOUT", 10*time.Second),
+				Wallets: map[string]struct {
+					APIKey      string `json:"api_key"`
+					APIPassword string `json:"api_password"`
+				}{
+					"DOGE": {APIKey: getEnvString("CR_DOGE_API_KEY", ""), APIPassword: getEnvString("CR_DOGE_API_PASSWORD", "")},
+					"ETH":  {APIKey: getEnvString("CR_ETH_API_KEY", ""), APIPassword: getEnvString("CR_ETH_API_PASSWORD", "")},
+					"BNB":  {APIKey: getEnvString("CR_BNB_API_KEY", ""), APIPassword: getEnvString("CR_BNB_API_PASSWORD", "")},
+					"XRP":  {APIKey: getEnvString("CR_XRP_API_KEY", ""), APIPassword: getEnvString("CR_XRP_API_PASSWORD", "")},
+				},
+			},
+			Oxapay: OxapayConfig{
+				BaseURL: getEnvString("OXA_BASE_URL", "https://api.oxapay.com"),
+				APIKey:  getEnvString("OXA_API_KEY", ""),
+				Timeout: getEnvDuration("OXA_TIMEOUT", 10*time.Second),
+			},
 		},
 	}
 
@@ -758,6 +818,30 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 	_, err = utils.ValidateShebaNumber(&cfg.System.SystemShebaNumber)
 	if err != nil {
 		errors = append(errors, "SYSTEM_SHEBA_NUMBER is invalid")
+	}
+
+	// Crypto config - optional but if default platform is bithide, API key/base URL should be present
+	if cfg.Crypto.DefaultPlatform == "bithide" {
+		if cfg.Crypto.Bithide.BaseURL == "" {
+			errors = append(errors, "CRYPTO_BITHIDE_BASE_URL is required when bithide is default platform")
+		}
+		if cfg.Crypto.Bithide.APIKey == "" {
+			errors = append(errors, "CRYPTO_BITHIDE_API_KEY is required when bithide is default platform")
+		}
+	}
+	if cfg.Crypto.DefaultPlatform == "coinremitter" {
+		if cfg.Crypto.Coinremitter.BaseURL == "" {
+			errors = append(errors, "CR_BASE_URL is required when coinremitter is default platform")
+		}
+		// At least one wallet can be configured; not strictly required for validation
+	}
+	if cfg.Crypto.DefaultPlatform == "oxapay" {
+		if cfg.Crypto.Oxapay.BaseURL == "" {
+			errors = append(errors, "OXA_BASE_URL is required when oxapay is default platform")
+		}
+		if cfg.Crypto.Oxapay.APIKey == "" {
+			errors = append(errors, "OXA_API_KEY is required when oxapay is default platform")
+		}
 	}
 
 	// Return validation errors if any
