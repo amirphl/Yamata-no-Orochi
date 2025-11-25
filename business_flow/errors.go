@@ -129,6 +129,15 @@ var (
 
 	// Short link related errors
 	ErrShortLinkNotFound = errors.New("short link not found")
+
+	// Crypto payments
+	ErrCryptoRequestNotFound         = errors.New("crypto payment request not found")
+	ErrCryptoRequestAlreadyFinalized = errors.New("crypto payment request already finalized")
+	ErrCryptoUnsupportedCoin         = errors.New("unsupported crypto coin")
+	ErrCryptoUnsupportedPlatform     = errors.New("unsupported crypto platform")
+	ErrCryptoAddressProvisionFailed  = errors.New("failed to provision deposit address")
+	ErrCryptoProviderError           = errors.New("crypto provider error")
+	ErrCryptoDepositNotFound         = errors.New("crypto deposit not found")
 )
 
 type BusinessError struct {
@@ -507,3 +516,15 @@ func IsTicketNotFound(err error) bool {
 func IsShortLinkNotFound(err error) bool {
 	return errors.Is(err, ErrShortLinkNotFound)
 }
+
+func IsCryptoRequestNotFound(err error) bool { return errors.Is(err, ErrCryptoRequestNotFound) }
+func IsCryptoRequestAlreadyFinalized(err error) bool {
+	return errors.Is(err, ErrCryptoRequestAlreadyFinalized)
+}
+func IsCryptoUnsupportedCoin(err error) bool     { return errors.Is(err, ErrCryptoUnsupportedCoin) }
+func IsCryptoUnsupportedPlatform(err error) bool { return errors.Is(err, ErrCryptoUnsupportedPlatform) }
+func IsCryptoAddressProvisionFailed(err error) bool {
+	return errors.Is(err, ErrCryptoAddressProvisionFailed)
+}
+func IsCryptoProviderError(err error) bool   { return errors.Is(err, ErrCryptoProviderError) }
+func IsCryptoDepositNotFound(err error) bool { return errors.Is(err, ErrCryptoDepositNotFound) }
