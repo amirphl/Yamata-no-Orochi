@@ -91,3 +91,18 @@ type BotCreateShortLinksResponse struct {
 	Message string         `json:"message"`
 	Items   []ShortLinkDTO `json:"items"`
 }
+
+// BotGenerateShortLinksRequest is used by scheduler/bots to allocate sequential short links centrally
+// and persist them mapped to provided phones for a campaign.
+type BotGenerateShortLinksRequest struct {
+	CampaignID      uint     `json:"campaign_id" validate:"required"`
+	AdLink          string   `json:"ad_link" validate:"required,max=10000"`
+	Phones          []string `json:"phones" validate:"required,min=1,dive,required,max=20"`
+	ShortLinkDomain string   `json:"short_link_domain" validate:"required"`
+}
+
+// BotGenerateShortLinksResponse returns allocated codes in order
+type BotGenerateShortLinksResponse struct {
+	Message string   `json:"message"`
+	Codes   []string `json:"codes"`
+}
