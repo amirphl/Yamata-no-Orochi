@@ -14,6 +14,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
+	"github.com/xuri/excelize/v2"
 )
 
 // AdminShortLinkFlow provides use cases for admin short link creation
@@ -28,10 +29,11 @@ import (
 // Domain should include scheme (https://) if desired by the caller
 // If not provided with a scheme, https:// will be prefixed automatically
 type AdminShortLinkFlow interface {
-	CreateShortLinksFromCSV(ctx context.Context, csvReader io.Reader, shortLinkDomain string) (*dto.AdminCreateShortLinksResponse, error)
+	CreateShortLinksFromCSV(ctx context.Context, csvReader io.Reader, shortLinkDomain string, scenarioName string) (*dto.AdminCreateShortLinksResponse, error)
 	DownloadShortLinksCSV(ctx context.Context, scenarioID uint) (string, []byte, error)
 	DownloadShortLinksWithClicksCSV(ctx context.Context, scenarioID uint) (string, []byte, error)
 	DownloadShortLinksWithClicksCSVRange(ctx context.Context, scenarioFrom, scenarioTo uint) (string, []byte, error)
+	DownloadShortLinksWithClicksExcelByScenarioNameRegex(ctx context.Context, scenarioNameRegex string) (string, []byte, error)
 }
 
 type AdminShortLinkFlowImpl struct {
@@ -43,13 +45,18 @@ func NewAdminShortLinkFlow(repo repository.ShortLinkRepository, clickRepo reposi
 	return &AdminShortLinkFlowImpl{repo: repo, clickRepo: clickRepo}
 }
 
-func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, csvReader io.Reader, shortLinkDomain string) (*dto.AdminCreateShortLinksResponse, error) {
+func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, csvReader io.Reader, shortLinkDomain string, scenarioName string) (*dto.AdminCreateShortLinksResponse, error) {
 	if csvReader == nil {
 		return nil, NewBusinessError("VALIDATION_ERROR", "CSV file is required", nil)
 	}
 	shortLinkDomain = normalizeDomain(shortLinkDomain)
 	if shortLinkDomain == "" {
 		return nil, NewBusinessError("VALIDATION_ERROR", "short_link_domain is required", nil)
+	}
+
+	scenarioName = strings.TrimSpace(scenarioName)
+	if scenarioName == "" {
+		return nil, NewBusinessError("VALIDATION_ERROR", "scenario_name is required", nil)
 	}
 
 	reader := csv.NewReader(bufio.NewReader(csvReader))
@@ -121,13 +128,14 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 		shortURL := fmt.Sprintf("%s/s/%s", shortLinkDomain, uid)
 		scenarioID := newScenarioID
 		rows = append(rows, &models.ShortLink{
-			UID:         uid,
-			CampaignID:  nil,
-			ClientID:    nil,
-			PhoneNumber: nil,
-			ScenarioID:  &scenarioID,
-			LongLink:    longLink,
-			ShortLink:   shortURL,
+			UID:          uid,
+			CampaignID:   nil,
+			ClientID:     nil,
+			PhoneNumber:  nil,
+			ScenarioID:   &scenarioID,
+			ScenarioName: &scenarioName,
+			LongLink:     longLink,
+			ShortLink:    shortURL,
 		})
 		created++
 	}
@@ -483,4 +491,138 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSVRange(ctx contex
 		alreadyFlushed = true
 	}
 	return filename, buf.Bytes(), nil
+}
+
+func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksExcelByScenarioNameRegex(ctx context.Context, scenarioNameRegex string) (string, []byte, error) {
+	pattern := strings.TrimSpace(scenarioNameRegex)
+	if pattern == "" {
+		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_name_regex must not be empty", nil)
+	}
+
+	rows, err := f.repo.ListWithClicksDetailsByScenarioNameRegex(ctx, pattern, "short_links.scenario_id ASC, short_links.id ASC")
+	if err != nil {
+		return "", nil, NewBusinessError("FETCH_SHORT_LINKS_FAILED", "Failed to fetch short links by scenario name regex", err)
+	}
+
+	// Build Excel with one sheet per scenario
+	// Lazy import to avoid unused if excelize not referenced elsewhere
+	type excelFile interface{}
+	_ = excelFile(nil)
+
+	// Create workbook
+	xl := excelize.NewFile()
+	defer func() { _ = xl.Close() }()
+
+	// Prepare grouping by scenario
+	type rowData = *repository.ShortLinkWithClick
+	byScenario := make(map[uint][]rowData)
+	nameByScenario := make(map[uint]string)
+	order := make([]uint, 0)
+	for _, r := range rows {
+		if r.ScenarioID == nil {
+			continue
+		}
+		sid := *r.ScenarioID
+		byScenario[sid] = append(byScenario[sid], r)
+		if _, ok := nameByScenario[sid]; !ok {
+			if r.ScenarioName != nil && strings.TrimSpace(*r.ScenarioName) != "" {
+				nameByScenario[sid] = *r.ScenarioName
+			} else {
+				nameByScenario[sid] = fmt.Sprintf("scenario_%d", sid)
+			}
+			order = append(order, sid)
+		}
+	}
+
+	// Create sheets
+	usedNames := map[string]bool{}
+	for i, sid := range order {
+		baseName := sanitizeSheetName(nameByScenario[sid])
+		name := baseName
+		idx := 1
+		for usedNames[name] {
+			idx++
+			name = truncateSheetName(fmt.Sprintf("%s_%d", baseName, idx))
+		}
+		usedNames[name] = true
+		if i == 0 {
+			// Rename default sheet
+			xl.SetSheetName(xl.GetSheetName(0), name)
+		} else {
+			_, _ = xl.NewSheet(name)
+		}
+
+		header := []string{"id", "uid", "campaign_id", "client_id", "scenario_id", "scenario_name", "phone_number", "long_link", "short_link", "created_at", "updated_at", "user_agent", "ip"}
+		_ = xl.SetSheetRow(name, "A1", &header)
+
+		rowsForScenario := byScenario[sid]
+		for ri, r := range rowsForScenario {
+			campaignID := ""
+			if r.CampaignID != nil {
+				campaignID = strconv.FormatUint(uint64(*r.CampaignID), 10)
+			}
+			clientID := ""
+			if r.ClientID != nil {
+				clientID = strconv.FormatUint(uint64(*r.ClientID), 10)
+			}
+			scenario := strconv.FormatUint(uint64(sid), 10)
+			phone := ""
+			if r.PhoneNumber != nil {
+				phone = *r.PhoneNumber
+			}
+			scName := ""
+			if r.ScenarioName != nil {
+				scName = *r.ScenarioName
+			}
+			ua := ""
+			if r.ClickUserAgent != nil {
+				ua = *r.ClickUserAgent
+			}
+			ip := ""
+			if r.ClickIP != nil {
+				ip = *r.ClickIP
+			}
+			record := []string{
+				strconv.FormatUint(uint64(r.ID), 10),
+				r.UID,
+				campaignID,
+				clientID,
+				scenario,
+				scName,
+				phone,
+				r.LongLink,
+				r.ShortLink,
+				r.CreatedAt.UTC().Format(time.RFC3339),
+				r.UpdatedAt.UTC().Format(time.RFC3339),
+				ua,
+				ip,
+			}
+			cellRef, _ := excelize.CoordinatesToCellName(1, ri+2)
+			_ = xl.SetSheetRow(name, cellRef, &record)
+		}
+	}
+
+	buf, err := xl.WriteToBuffer()
+	if err != nil {
+		return "", nil, NewBusinessError("EXCEL_WRITE_ERROR", "Failed to write Excel file", err)
+	}
+	filename := "short_links_with_clicks_by_scenario_name.xlsx"
+	return filename, buf.Bytes(), nil
+}
+
+func sanitizeSheetName(name string) string {
+	// Excel sheet names cannot contain: : \\ / ? * [ ] and must be <= 31 chars
+	replacer := strings.NewReplacer(":", "_", "\\", "_", "/", "_", "?", "_", "*", "_", "[", "_", "]", "_")
+	safe := replacer.Replace(name)
+	return truncateSheetName(strings.TrimSpace(safe))
+}
+
+func truncateSheetName(name string) string {
+	if len(name) > 31 {
+		return name[:31]
+	}
+	if name == "" {
+		return "Sheet"
+	}
+	return name
 }
