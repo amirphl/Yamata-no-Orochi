@@ -3,7 +3,6 @@ package scheduler
 
 import (
 	"context"
-	"crypto/sha1"
 	"fmt"
 	"log"
 	"strconv"
@@ -258,7 +257,18 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 		end = min(end, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
-		batchCodes := codes[start:end]
+
+		// Generate sequential UIDs via bot API and persist short links centrally
+		var batchCodes []string
+		if c.AdLink != nil && *c.AdLink != "" {
+			var err error
+			batchCodes, err = s.allocateShortLinksViaAPI(ctx, token, c.ID, *c.AdLink, batchPhones)
+			if err != nil {
+				return fmt.Errorf("allocate short links: %w", err)
+			}
+		} else {
+			batchCodes = make([]string, len(batchPhones))
+		}
 
 		// Build per-recipient bodies by replacing short URL with unique 6-char code
 		items := make([]payamSMSItem, 0, len(batchPhones))
@@ -305,31 +315,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 			return err
 		}
 
-		// Create short links for this batch (if campaign has AdLink) via bot API
-		if c.AdLink != nil && *c.AdLink != "" {
-			req := dto.BotCreateShortLinksRequest{Items: make([]dto.BotCreateShortLinkRequest, 0, len(batchPhones))}
-			for i := range batchPhones {
-				campaignID := c.ID
-				req.Items = append(req.Items, dto.BotCreateShortLinkRequest{
-					UID:         batchCodes[i],
-					CampaignID:  &campaignID,
-					ClientID:    nil,
-					PhoneNumber: &batchPhones[i],
-					LongLink:    *c.AdLink,
-					ShortLink:   "https://jo1n.ir/s/" + batchCodes[i],
-				})
-			}
-			if len(req.Items) > 0 {
-				if err := s.createShortLinksViaAPI(ctx, token, &req); err != nil {
-					s.logger.Printf("scheduler: failed to create short links via api: %v", err)
-					return fmt.Errorf("create short links via api: %w", err)
-				}
-				// Success (concise)
-				s.logger.Printf("scheduler: created %d short links for campaign id=%d", len(req.Items), c.ID)
-			}
-		}
-
-		// Send via PayamSMS for this batch
+		// Sending via PayamSMS for this batch
 		respItems, err := s.sendPayamSMSBatchWithBodies(ctx, sender, items)
 		if err != nil {
 			// TODO: handle error
@@ -600,7 +586,7 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 	}
 
 	if len(result) >= int(c.NumAudiences) {
-		codes := s.generateCodes(c.ID, ids)
+		codes := make([]string, len(result))
 		return result, ids, codes, nil
 	}
 
@@ -620,7 +606,7 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 			break
 		}
 	}
-	codes := s.generateCodes(c.ID, ids)
+	codes := make([]string, len(result))
 	return result, ids, codes, nil
 }
 
@@ -635,32 +621,6 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 
 	}
 	return strings.ReplaceAll(content, "🔗", "") + "\n" + "لغو۱۱"
-}
-
-// generateCode creates a deterministic-like 6-char code per campaign/audience pair
-func (s *CampaignScheduler) generateCode(campaignID uint, audienceID int64) string {
-	// simple sha1-based hex digest, first 6 chars
-	src := fmt.Sprintf("%d-%d-%s", campaignID, audienceID, uuid.New().String())
-	// local hash (avoid external utils)
-	sum := sha1Sum(src)
-	if len(sum) < 6 {
-		sum = sum + "000000"
-	}
-	return sum[:6]
-}
-
-func (s *CampaignScheduler) generateCodes(campaignID uint, audienceIDs []int64) []string {
-	codes := make([]string, len(audienceIDs))
-	for i, id := range audienceIDs {
-		codes[i] = s.generateCode(campaignID, id)
-	}
-	return codes
-}
-
-func sha1Sum(s string) string {
-	h := sha1.New()
-	h.Write([]byte(s))
-	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // sendPayamSMSBatchWithBodies sends a batch using custom per-recipient bodies
@@ -782,4 +742,45 @@ func (s *CampaignScheduler) getPayamSMSToken(ctx context.Context) (string, error
 		return "", fmt.Errorf("empty access_token")
 	}
 	return out.AccessToken, nil
+}
+
+func (s *CampaignScheduler) allocateShortLinksViaAPI(ctx context.Context, token string, campaignID uint, adLink string, phones []string) ([]string, error) {
+	payload := dto.BotGenerateShortLinksRequest{
+		CampaignID:      campaignID,
+		AdLink:          adLink,
+		Phones:          phones,
+		ShortLinkDomain: "https://jo1n.ir/",
+	}
+	b, _ := json.Marshal(payload)
+	url := s.botCfg.APIDomain + "/api/v1/bot/short-links/allocate"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("allocate short-links http status: %d", resp.StatusCode)
+	}
+	var apiResp dto.APIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+	if !apiResp.Success {
+		return nil, fmt.Errorf("allocate short-links failed: %v", apiResp.Message)
+	}
+	dataBytes, err := json.Marshal(apiResp.Data)
+	if err != nil {
+		return nil, err
+	}
+	var out dto.BotGenerateShortLinksResponse
+	if err := json.Unmarshal(dataBytes, &out); err != nil {
+		return nil, err
+	}
+	return out.Codes, nil
 }
