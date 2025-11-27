@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"mime/multipart"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -19,6 +20,7 @@ type ShortLinkAdminHandlerInterface interface {
 	DownloadByScenario(c fiber.Ctx) error
 	DownloadWithClicksByScenario(c fiber.Ctx) error
 	DownloadWithClicksByScenarioRange(c fiber.Ctx) error
+	DownloadWithClicksByScenarioNameExcel(c fiber.Ctx) error
 }
 
 // ShortLinkAdminHandler implements the admin short link endpoints
@@ -42,13 +44,14 @@ func (h *ShortLinkAdminHandler) ErrorResponse(c fiber.Ctx, statusCode int, messa
 	return c.Status(statusCode).JSON(dto.APIResponse{Success: false, Message: message, Error: dto.ErrorDetail{Code: code, Details: details}})
 }
 
-// UploadCSV accepts a multipart/form-data with file (CSV) and short_link_domain fields
+// UploadCSV accepts a multipart/form-data with file (CSV), short_link_domain, and scenario_name fields
 // @Summary Admin Upload Short Links CSV
 // @Tags Admin ShortLinks
 // @Accept multipart/form-data
 // @Produce json
 // @Param file formData file true "CSV file with long_link column"
 // @Param short_link_domain formData string true "Domain for short links (e.g., https://j0in.ir)"
+// @Param scenario_name formData string true "Scenario name for grouping (stored in short_links.scenario_name)"
 // @Success 201 {object} dto.APIResponse{data=dto.AdminCreateShortLinksResponse}
 // @Failure 400 {object} dto.APIResponse
 // @Failure 500 {object} dto.APIResponse
@@ -59,13 +62,17 @@ func (h *ShortLinkAdminHandler) UploadCSV(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "file is required", "INVALID_REQUEST", nil)
 	}
 	domain := c.FormValue("short_link_domain")
+	scenarioName := strings.TrimSpace(c.FormValue("scenario_name"))
+	if scenarioName == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "scenario_name is required", "VALIDATION_ERROR", nil)
+	}
 	fh, err := openFormFile(fileHeader)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "invalid file", "INVALID_FILE", err.Error())
 	}
 	defer fh.Close()
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, flowErr := h.uploadFlow.CreateShortLinksFromCSV(h.createRequestContext(c, "/api/v1/admin/short-links/upload-csv"), fh, domain)
+	res, flowErr := h.uploadFlow.CreateShortLinksFromCSV(h.createRequestContext(c, "/api/v1/admin/short-links/upload-csv"), fh, domain, scenarioName)
 	if flowErr != nil {
 		log.Println("Admin upload short links failed:", flowErr)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to create short links", "CREATE_SHORT_LINKS_FAILED", nil)
@@ -154,6 +161,34 @@ func (h *ShortLinkAdminHandler) DownloadWithClicksByScenarioRange(c fiber.Ctx) e
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate CSV", "DOWNLOAD_FAILED", nil)
 	}
 	c.Set("Content-Type", "text/csv; charset=utf-8")
+	c.Set("Content-Disposition", "attachment; filename="+filename)
+	return c.Send(data)
+}
+
+// DownloadWithClicksByScenarioNameExcel posts a regex for scenario_name and returns an Excel file with each sheet per scenario
+// @Summary Admin Download Short Links With Clicks by Scenario Name Regex (Excel)
+// @Tags Admin ShortLinks
+// @Accept json
+// @Produce application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param request body dto.AdminDownloadShortLinksByScenarioNameRegexRequest true "Scenario name regex"
+// @Success 200 {string} string "Excel file"
+// @Failure 400 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/admin/short-links/download-with-clicks-by-scenario-name [post]
+func (h *ShortLinkAdminHandler) DownloadWithClicksByScenarioNameExcel(c fiber.Ctx) error {
+	var req dto.AdminDownloadShortLinksByScenarioNameRegexRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
+	}
+	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksExcelByScenarioNameRegex(h.createRequestContext(c, "/api/v1/admin/short-links/download-with-clicks-by-scenario-name"), req.ScenarioNameRegex)
+	if err != nil {
+		log.Println("Admin download short links with clicks by scenario_name failed:", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate Excel", "DOWNLOAD_FAILED", nil)
+	}
+	c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 	c.Set("Content-Disposition", "attachment; filename="+filename)
 	return c.Send(data)
 }
