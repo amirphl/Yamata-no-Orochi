@@ -52,6 +52,7 @@ type FiberRouter struct {
 	shortLinkBotHandler            handlers.ShortLinkBotHandlerInterface
 	shortLinkHandler               handlers.ShortLinkHandlerInterface
 	shortLinkAdminHandler          handlers.ShortLinkAdminHandlerInterface
+	cryptoPaymentHandler           handlers.CryptoPaymentHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -72,6 +73,7 @@ func NewFiberRouter(
 	shortLinkBotHandler handlers.ShortLinkBotHandlerInterface,
 	shortLinkHandler handlers.ShortLinkHandlerInterface,
 	shortLinkAdminHandler handlers.ShortLinkAdminHandlerInterface,
+	cryptoPaymentHandler handlers.CryptoPaymentHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -107,6 +109,7 @@ func NewFiberRouter(
 		shortLinkBotHandler:            shortLinkBotHandler,
 		shortLinkHandler:               shortLinkHandler,
 		shortLinkAdminHandler:          shortLinkAdminHandler,
+		cryptoPaymentHandler:           cryptoPaymentHandler,
 	}
 }
 
@@ -246,6 +249,7 @@ func (r *FiberRouter) SetupRoutes() {
 	botShortLinks.Use(func(c fiber.Ctx) error { return middleware.RequireBotAuth(c) })
 	botShortLinks.Post("/", r.shortLinkBotHandler.CreateShortLinks)
 	botShortLinks.Post("/one", r.shortLinkBotHandler.CreateShortLink)
+	botShortLinks.Post("/allocate", r.shortLinkBotHandler.AllocateShortLinks)
 
 	// Admin short-links routes (protected)
 	adminShortLinks := api.Group("/admin/short-links")
@@ -255,6 +259,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminShortLinks.Post("/download", r.shortLinkAdminHandler.DownloadByScenario)
 	adminShortLinks.Post("/download-with-clicks", r.shortLinkAdminHandler.DownloadWithClicksByScenario)
 	adminShortLinks.Post("/download-with-clicks-range", r.shortLinkAdminHandler.DownloadWithClicksByScenarioRange)
+	adminShortLinks.Post("/download-with-clicks-by-scenario-name", r.shortLinkAdminHandler.DownloadWithClicksByScenarioNameExcel)
 
 	// Admin customer reports
 	adminCustomers := api.Group("/admin/customer-management")
@@ -306,6 +311,16 @@ func (r *FiberRouter) SetupRoutes() {
 	payments.Post("/callback/:invoice_number", r.paymentHandler.PaymentCallback)
 	// Transaction history endpoint (protected with authentication)
 	payments.Get("/history", r.authMiddleware.Authenticate(), r.paymentHandler.GetTransactionHistory)
+
+	// Crypto payment routes
+	crypto := api.Group("/crypto")
+	// public provider callbacks
+	api.Post("/crypto/providers/:platform/callback", r.cryptoPaymentHandler.Webhook)
+	// protected crypto APIs
+	crypto.Use(r.authMiddleware.Authenticate())
+	crypto.Post("/payments/request", r.cryptoPaymentHandler.CreateRequest)
+	crypto.Get("/payments/:uuid/status", r.cryptoPaymentHandler.GetStatus)
+	crypto.Post("/payments/verify", r.cryptoPaymentHandler.ManualVerify)
 
 	// Agency routes (protected)
 	agency := api.Group("/reports")
