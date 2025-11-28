@@ -282,6 +282,13 @@ definitions:
         example: f47ac10b-58cc-4372-a567-0e02b2c3d479
         type: string
     type: object
+  dto.AdminDownloadShortLinksByScenarioNameRegexRequest:
+    properties:
+      scenario_name_regex:
+        type: string
+    required:
+    - scenario_name_regex
+    type: object
   dto.AdminDownloadShortLinksRangeRequest:
     properties:
       scenario_from:
@@ -967,6 +974,45 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.CreateCryptoPaymentRequest:
+    properties:
+      amount_with_tax:
+        minimum: 1000
+        type: integer
+      coin:
+        enum:
+        - ETH
+        - DOGE
+        - XRP
+        - BNB
+        type: string
+      network:
+        type: string
+      platform:
+        type: string
+    required:
+    - amount_with_tax
+    - coin
+    - network
+    - platform
+    type: object
+  dto.CreateCryptoPaymentResponse:
+    properties:
+      deposit_address:
+        type: string
+      deposit_memo:
+        type: string
+      exchange_rate:
+        type: string
+      expected_coin_amount:
+        type: string
+      expires_at:
+        type: string
+      rate_source:
+        type: string
+      request_uuid:
+        type: string
+    type: object
   dto.CreateResponseTicketRequest:
     properties:
       attached_file_name:
@@ -1023,6 +1069,25 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.DepositInfoDTO:
+    properties:
+      amount_coin:
+        type: string
+      confirmations:
+        type: integer
+      confirmed_at:
+        type: string
+      credited_at:
+        type: string
+      detected_at:
+        type: string
+      required_confirmations:
+        type: integer
+      status:
+        type: string
+      tx_hash:
+        type: string
+    type: object
   dto.ForgotPasswordRequest:
     properties:
       identifier:
@@ -1072,6 +1137,33 @@ definitions:
       updated_at:
         type: string
       uuid:
+        type: string
+    type: object
+  dto.GetCryptoPaymentStatusResponse:
+    properties:
+      coin:
+        type: string
+      deposit_address:
+        type: string
+      deposit_memo:
+        type: string
+      deposits:
+        items:
+          $ref: '#/definitions/dto.DepositInfoDTO'
+        type: array
+      expected_coin_amount:
+        type: string
+      expires_at:
+        type: string
+      fiat_amount_toman:
+        type: integer
+      network:
+        type: string
+      platform:
+        type: string
+      status:
+        type: string
+      status_reason:
         type: string
     type: object
   dto.GetWalletBalanceResponse:
@@ -1170,6 +1262,25 @@ definitions:
     required:
     - identifier
     - password
+    type: object
+  dto.ManualVerifyCryptoDepositRequest:
+    properties:
+      request_uuid:
+        type: string
+      tx_hash:
+        type: string
+    required:
+    - request_uuid
+    - tx_hash
+    type: object
+  dto.ManualVerifyCryptoDepositResponse:
+    properties:
+      credited:
+        type: boolean
+      credited_at:
+        type: string
+      status:
+        type: string
     type: object
   dto.OTPResendRequest:
     properties:
@@ -2049,6 +2160,35 @@ paths:
       summary: Admin Download Short Links With Clicks by Scenario
       tags:
       - Admin ShortLinks
+  /api/v1/admin/short-links/download-with-clicks-by-scenario-name:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Scenario name regex
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminDownloadShortLinksByScenarioNameRegexRequest'
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: Excel file
+          schema:
+            type: string
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin Download Short Links With Clicks by Scenario Name Regex (Excel)
+      tags:
+      - Admin ShortLinks
   /api/v1/admin/short-links/download-with-clicks-range:
     post:
       consumes:
@@ -2091,6 +2231,11 @@ paths:
       - description: Domain for short links (e.g., https://j0in.ir)
         in: formData
         name: short_link_domain
+        required: true
+        type: string
+      - description: Scenario name for grouping (stored in short_links.scenario_name)
+        in: formData
+        name: scenario_name
         required: true
         type: string
       produces:
@@ -2966,6 +3111,150 @@ paths:
       summary: Calculate Campaign Cost
       tags:
       - Campaigns
+  /api/v1/crypto/payments/{uuid}/status:
+    get:
+      consumes:
+      - application/json
+      description: Get the current status of a crypto payment request and list of
+        detected deposits
+      parameters:
+      - description: Crypto payment request UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.GetCryptoPaymentStatusResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get Crypto Payment Status
+      tags:
+      - Payments
+  /api/v1/crypto/payments/request:
+    post:
+      consumes:
+      - application/json
+      description: Create a crypto payment request and receive deposit address (with
+        optional memo/tag)
+      parameters:
+      - description: Crypto payment request payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateCryptoPaymentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreateCryptoPaymentResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Create Crypto Payment Request
+      tags:
+      - Payments
+  /api/v1/crypto/payments/verify:
+    post:
+      consumes:
+      - application/json
+      description: Manually verify a crypto deposit by transaction hash (for troubleshooting
+        or fallback)
+      parameters:
+      - description: Manual verify payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ManualVerifyCryptoDepositRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ManualVerifyCryptoDepositResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Manual Verify Crypto Deposit
+      tags:
+      - Payments
+  /api/v1/crypto/providers/{platform}/callback:
+    post:
+      consumes:
+      - application/json
+      description: Receives provider callbacks and updates deposit and wallet balances
+      parameters:
+      - description: Provider platform (oxapay|bithide)
+        in: path
+        name: platform
+        required: true
+        type: string
+      produces:
+      - text/plain
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: string
+      summary: Crypto Provider Webhook
+      tags:
+      - Payments
   /api/v1/health:
     get:
       consumes:

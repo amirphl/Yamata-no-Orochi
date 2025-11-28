@@ -942,6 +942,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/short-links/download-with-clicks-by-scenario-name": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ],
+                "tags": [
+                    "Admin ShortLinks"
+                ],
+                "summary": "Admin Download Short Links With Clicks by Scenario Name Regex (Excel)",
+                "parameters": [
+                    {
+                        "description": "Scenario name regex",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminDownloadShortLinksByScenarioNameRegexRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Excel file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/short-links/download-with-clicks-range": {
             "post": {
                 "consumes": [
@@ -1011,6 +1056,13 @@ const docTemplate = `{
                         "type": "string",
                         "description": "Domain for short links (e.g., https://j0in.ir)",
                         "name": "short_link_domain",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Scenario name for grouping (stored in short_links.scenario_name)",
+                        "name": "scenario_name",
                         "in": "formData",
                         "required": true
                     }
@@ -2433,6 +2485,234 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/crypto/payments/request": {
+            "post": {
+                "description": "Create a crypto payment request and receive deposit address (with optional memo/tag)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Create Crypto Payment Request",
+                "parameters": [
+                    {
+                        "description": "Crypto payment request payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreateCryptoPaymentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CreateCryptoPaymentResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/crypto/payments/verify": {
+            "post": {
+                "description": "Manually verify a crypto deposit by transaction hash (for troubleshooting or fallback)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Manual Verify Crypto Deposit",
+                "parameters": [
+                    {
+                        "description": "Manual verify payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.ManualVerifyCryptoDepositRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ManualVerifyCryptoDepositResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/crypto/payments/{uuid}/status": {
+            "get": {
+                "description": "Get the current status of a crypto payment request and list of detected deposits",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Get Crypto Payment Status",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Crypto payment request UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.GetCryptoPaymentStatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/crypto/providers/{platform}/callback": {
+            "post": {
+                "description": "Receives provider callbacks and updates deposit and wallet balances",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "text/plain"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Crypto Provider Webhook",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Provider platform (oxapay|bithide)",
+                        "name": "platform",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/health": {
             "get": {
                 "description": "Check the health status of the API",
@@ -3775,6 +4055,17 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminDownloadShortLinksByScenarioNameRegexRequest": {
+            "type": "object",
+            "required": [
+                "scenario_name_regex"
+            ],
+            "properties": {
+                "scenario_name_regex": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminDownloadShortLinksRangeRequest": {
             "type": "object",
             "required": [
@@ -4782,6 +5073,62 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.CreateCryptoPaymentRequest": {
+            "type": "object",
+            "required": [
+                "amount_with_tax",
+                "coin",
+                "network",
+                "platform"
+            ],
+            "properties": {
+                "amount_with_tax": {
+                    "type": "integer",
+                    "minimum": 1000
+                },
+                "coin": {
+                    "type": "string",
+                    "enum": [
+                        "ETH",
+                        "DOGE",
+                        "XRP",
+                        "BNB"
+                    ]
+                },
+                "network": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CreateCryptoPaymentResponse": {
+            "type": "object",
+            "properties": {
+                "deposit_address": {
+                    "type": "string"
+                },
+                "deposit_memo": {
+                    "type": "string"
+                },
+                "exchange_rate": {
+                    "type": "string"
+                },
+                "expected_coin_amount": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "rate_source": {
+                    "type": "string"
+                },
+                "request_uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.CreateResponseTicketRequest": {
             "type": "object",
             "properties": {
@@ -4868,6 +5215,35 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.DepositInfoDTO": {
+            "type": "object",
+            "properties": {
+                "amount_coin": {
+                    "type": "string"
+                },
+                "confirmations": {
+                    "type": "integer"
+                },
+                "confirmed_at": {
+                    "type": "string"
+                },
+                "credited_at": {
+                    "type": "string"
+                },
+                "detected_at": {
+                    "type": "string"
+                },
+                "required_confirmations": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tx_hash": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.ForgotPasswordRequest": {
             "type": "object",
             "required": [
@@ -4940,6 +5316,47 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.GetCryptoPaymentStatusResponse": {
+            "type": "object",
+            "properties": {
+                "coin": {
+                    "type": "string"
+                },
+                "deposit_address": {
+                    "type": "string"
+                },
+                "deposit_memo": {
+                    "type": "string"
+                },
+                "deposits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.DepositInfoDTO"
+                    }
+                },
+                "expected_coin_amount": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "fiat_amount_toman": {
+                    "type": "integer"
+                },
+                "network": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "status_reason": {
                     "type": "string"
                 }
             }
@@ -5087,6 +5504,35 @@ const docTemplate = `{
                     "maxLength": 100,
                     "minLength": 8,
                     "example": "SecurePass123!"
+                }
+            }
+        },
+        "dto.ManualVerifyCryptoDepositRequest": {
+            "type": "object",
+            "required": [
+                "request_uuid",
+                "tx_hash"
+            ],
+            "properties": {
+                "request_uuid": {
+                    "type": "string"
+                },
+                "tx_hash": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ManualVerifyCryptoDepositResponse": {
+            "type": "object",
+            "properties": {
+                "credited": {
+                    "type": "boolean"
+                },
+                "credited_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
