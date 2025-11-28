@@ -356,6 +356,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	ticketRepo := repository.NewTicketRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
+	// Crypto payment repositories
+	cryptoPaymentRequestRepo := repository.NewCryptoPaymentRequestRepository(db)
+	cryptoDepositRepo := repository.NewCryptoDepositRepository(db)
 
 	// Initialize services
 	notificationService := initializeNotificationService(cfg)
@@ -440,6 +443,50 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cfg.Deployment,
 	)
 
+	// Initialize CryptoPaymentFlow (providers registry)
+	providers := map[string]services.CryptoPaymentProvider{}
+	if cfg.Crypto.Bithide.BaseURL != "" && cfg.Crypto.Bithide.APIKey != "" {
+		defaultConfs := map[string]int{"ETH": 12, "BNB": 15, "XRP": 2, "DOGE": 6}
+		providers["bithide"] = services.NewBithideClient(
+			cfg.Crypto.Bithide.BaseURL,
+			cfg.Crypto.Bithide.APIKey,
+			cfg.Crypto.Bithide.Timeout,
+			defaultConfs,
+		)
+	}
+	if cfg.Crypto.Coinremitter.BaseURL != "" {
+		wallets := map[string]services.CoinremitterWalletConfig{}
+		for coin, w := range cfg.Crypto.Coinremitter.Wallets {
+			wallets[coin] = services.CoinremitterWalletConfig{APIKey: w.APIKey, APIPassword: w.APIPassword}
+		}
+		providers["coinremitter"] = services.NewCoinremitterClient(
+			cfg.Crypto.Coinremitter.BaseURL,
+			cfg.Crypto.Coinremitter.Timeout,
+			wallets,
+		)
+	}
+	if cfg.Crypto.Oxapay.BaseURL != "" && cfg.Crypto.Oxapay.APIKey != "" {
+		providers["oxapay"] = services.NewOxapayClient(
+			cfg.Crypto.Oxapay.BaseURL,
+			cfg.Crypto.Oxapay.APIKey,
+			cfg.Crypto.Oxapay.Timeout,
+		)
+	}
+	cryptoPaymentFlow := businessflow.NewCryptoPaymentFlow(
+		cryptoPaymentRequestRepo,
+		cryptoDepositRepo,
+		walletRepo,
+		customerRepo,
+		balanceSnapshotRepo,
+		transactionRepo,
+		auditRepo,
+		agencyDiscountRepo,
+		providers,
+		db,
+		cfg.System,
+		cfg.Deployment,
+	)
+
 	// Initialize AgencyFlow
 	agencyFlow := businessflow.NewAgencyFlow(
 		customerRepo,
@@ -495,6 +542,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
+	cryptoPaymentHandler := handlers.NewCryptoPaymentHandler(cryptoPaymentFlow, cfg)
 	agencyHandler := handlers.NewAgencyHandler(agencyFlow)
 	authAdminHandler := handlers.NewAuthAdminHandler(adminAuthFlow)
 	authBotHandler := handlers.NewAuthBotHandler(botAuthFlow)
@@ -530,6 +578,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		shortLinkBotHandler,
 		shortLinkHandler,
 		shortLinkAdminHandler,
+		cryptoPaymentHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
