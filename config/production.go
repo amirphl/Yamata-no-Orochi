@@ -32,6 +32,7 @@ type ProductionConfig struct {
 	Bot        BotConfig        `json:"bot"`
 	Scheduler  SchedulerConfig  `json:"scheduler"`
 	Crypto     CryptoConfig     `json:"crypto"`
+	Message    MessageConfig    `json:"message"`
 }
 
 type DatabaseConfig struct {
@@ -309,6 +310,13 @@ type SchedulerConfig struct {
 	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
 }
 
+type MessageConfig struct {
+	SignupVerificationCodeTemplate    string `json:"signup_verification_code_template"`
+	SigninVerificationCodeTemplate    string `json:"signin_verification_code_template"`
+	OTPResendVerificationCodeTemplate string `json:"otp_resend_verification_code_template"`
+	PasswordResetVerificationCodeTemplate string `json:"password_reset_verification_code_template"`
+}
+
 // LoadProductionConfig loads and validates configuration from environment variables
 func LoadProductionConfig() (*ProductionConfig, error) {
 	// Load environment variables from .env file
@@ -536,6 +544,12 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 				APIKey:  getEnvString("OXA_API_KEY", ""),
 				Timeout: getEnvDuration("OXA_TIMEOUT", 10*time.Second),
 			},
+		},
+		Message: MessageConfig{
+			SignupVerificationCodeTemplate:    getEnvString("MESSAGE_SIGNUP_VERIFICATION_CODE_TEMPLATE", "Your verification code is %s"),
+			SigninVerificationCodeTemplate:    getEnvString("MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE", "Your verification code is %s"),
+			OTPResendVerificationCodeTemplate: getEnvString("MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE", "Your new verification code is: %s. Valid for %v minutes."),
+			PasswordResetVerificationCodeTemplate: getEnvString("MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE", "Your password reset code is: %s. This code will expire in %v minutes."),
 		},
 	}
 
