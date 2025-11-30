@@ -398,6 +398,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		tokenService,
 		notificationService,
 		cfg.Admin,
+		cfg.Message,
 		db,
 		rc,
 	)
@@ -409,6 +410,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		accountTypeRepo,
 		tokenService,
 		notificationService,
+		cfg.Message,
 		db,
 		rc,
 	)

@@ -141,7 +141,8 @@ func (h *CryptoPaymentHandler) Webhook(c fiber.Ctx) error {
 		if err := h.flow.HandleOxapayWebhook(h.requestCtx(c, "/api/v1/crypto/providers/oxapay/callback"), raw, hmacHeader, h.cfg.Crypto.Oxapay.APIKey, meta); err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString("ERR")
 		}
-		return c.SendString("ok")
+		// return c.SendString("OK")
+		return c.SendString("ok") // TODO: TEST
 	case "bithide":
 		var payload dto.BitHideTransactionNotification
 		if err := c.Bind().JSON(&payload); err != nil {
@@ -150,7 +151,8 @@ func (h *CryptoPaymentHandler) Webhook(c fiber.Ctx) error {
 		if err := h.flow.HandleBithideWebhook(h.requestCtx(c, "/api/v1/crypto/providers/bithide/callback"), &payload, h.cfg.Crypto.Bithide.WebhookSecret, meta); err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString("ERR")
 		}
-		return c.SendString("ok")
+		// return c.SendString("OK")
+		return c.SendString("ok") // TODO: TEST
 	default:
 		return c.Status(fiber.StatusNotFound).SendString("NOT_SUPPORTED")
 	}
