@@ -38,6 +38,7 @@ type SignupFlowImpl struct {
 	tokenService       services.TokenService
 	notificationSvc    services.NotificationService
 	adminConfig        config.AdminConfig
+	messageConfig      config.MessageConfig
 	db                 *gorm.DB
 	rc                 *redis.Client
 }
@@ -53,6 +54,7 @@ func NewSignupFlow(
 	tokenService services.TokenService,
 	notificationSvc services.NotificationService,
 	adminConfig config.AdminConfig,
+	messageConfig config.MessageConfig,
 	db *gorm.DB,
 	rc *redis.Client,
 ) SignupFlow {
@@ -66,6 +68,7 @@ func NewSignupFlow(
 		tokenService:       tokenService,
 		notificationSvc:    notificationSvc,
 		adminConfig:        adminConfig,
+		messageConfig:      messageConfig,
 		db:                 db,
 		rc:                 rc,
 	}
@@ -127,8 +130,9 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 	// Send OTP via SMS (outside transaction to avoid rollback on SMS failure)
 	go func() {
 		customerID := int64(customer.ID)
-		err := s.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, fmt.Sprintf("Your verification code is: %s", otpCode), &customerID)
-		if err != nil {
+		message := fmt.Sprintf(s.messageConfig.SignupVerificationCodeTemplate, otpCode)
+		err := s.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, message, &customerID)
+		if err != nil {	
 			errMsg := fmt.Sprintf("Failed to send SMS: %v", err)
 			_ = s.createAuditLog(context.Background(), customer, models.AuditActionOTPSMSFailed, errMsg, false, &errMsg, metadata)
 		}
@@ -253,7 +257,7 @@ func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendReques
 		}
 
 		// Send notification
-		message := fmt.Sprintf("Your new verification code is: %s. Valid for %v minutes.", otpCode, utils.OTPExpiry.Minutes())
+		message := fmt.Sprintf(s.messageConfig.OTPResendVerificationCodeTemplate, otpCode, utils.OTPExpiry.Minutes())
 		if req.OTPType == models.OTPTypeMobile {
 			customerID := int64(req.CustomerID)
 			return s.notificationSvc.SendSMS(ctx, target, message, &customerID)

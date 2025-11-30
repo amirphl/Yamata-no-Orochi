@@ -11,6 +11,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
+	"github.com/amirphl/Yamata-no-Orochi/config"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -35,6 +36,7 @@ type LoginFlowImpl struct {
 	accountTypeRepo repository.AccountTypeRepository
 	tokenService    services.TokenService
 	notificationSvc services.NotificationService
+	messageConfig   config.MessageConfig
 	db              *gorm.DB
 	rc              *redis.Client
 }
@@ -47,6 +49,7 @@ func NewLoginFlow(
 	accountTypeRepo repository.AccountTypeRepository,
 	tokenService services.TokenService,
 	notificationSvc services.NotificationService,
+	messageConfig config.MessageConfig,
 	db *gorm.DB,
 	rc *redis.Client,
 ) LoginFlow {
@@ -57,6 +60,7 @@ func NewLoginFlow(
 		accountTypeRepo: accountTypeRepo,
 		tokenService:    tokenService,
 		notificationSvc: notificationSvc,
+		messageConfig:   messageConfig,
 		db:              db,
 		rc:              rc,
 	}
@@ -167,7 +171,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 		}
 
 		// Send OTP via SMS
-		smsMessage := fmt.Sprintf("Your password reset code is: %s. This code will expire in %v minutes.", otpCode, utils.OTPExpiry.Minutes())
+		smsMessage := fmt.Sprintf(lf.messageConfig.PasswordResetVerificationCodeTemplate, otpCode, utils.OTPExpiry.Minutes())
 		customerID := int64(customer.ID)
 		if err := lf.notificationSvc.SendSMS(txCtx, customer.RepresentativeMobile, smsMessage, &customerID); err != nil {
 			// Log SMS failure but don't fail the entire process
