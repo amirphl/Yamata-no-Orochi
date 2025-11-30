@@ -125,7 +125,7 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 			return nil, NewBusinessError("UID_SEQUENCE_EXHAUSTED", "No more UIDs available up to zzzzz", err)
 		}
 		seq++
-		shortURL := fmt.Sprintf("%s/s/%s", shortLinkDomain, uid)
+		shortURL := fmt.Sprintf("%s/%s", shortLinkDomain, uid)
 		scenarioID := newScenarioID
 		rows = append(rows, &models.ShortLink{
 			UID:          uid,
