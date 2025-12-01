@@ -156,5 +156,8 @@
 \echo 'Running 0050_remove_short_links_indexes.sql...'
 \i migrations/0050_remove_short_links_indexes.sql
 
+\echo 'Running 0051_add_job_category_to_customers.sql...'
+\i migrations/0051_add_job_category_to_customers.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
