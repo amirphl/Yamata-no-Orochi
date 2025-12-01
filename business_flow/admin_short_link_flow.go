@@ -499,7 +499,8 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksExcelByScenarioName
 		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_name_regex must not be empty", nil)
 	}
 
-	rows, err := f.repo.ListWithClicksDetailsByScenarioNameRegex(ctx, pattern, "short_links.scenario_id ASC, short_links.id ASC")
+	// rows, err := f.repo.ListWithClicksDetailsByScenarioNameRegex(ctx, pattern, "short_links.scenario_id ASC, short_links.id ASC")
+	rows, err := f.repo.ListWithClicksDetailsByScenarioNameLike(ctx, pattern, "short_links.scenario_id ASC, short_links.id ASC")
 	if err != nil {
 		return "", nil, NewBusinessError("FETCH_SHORT_LINKS_FAILED", "Failed to fetch short links by scenario name regex", err)
 	}
