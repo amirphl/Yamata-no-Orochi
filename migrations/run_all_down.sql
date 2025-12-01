@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0051_add_job_category_to_customers_down.sql...'
+\i migrations/0051_add_job_category_to_customers_down.sql
+
 \echo 'Running 0049_create_crypto_payments_down.sql...'
 \i migrations/0049_create_crypto_payments_down.sql
 
