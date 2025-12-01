@@ -153,5 +153,8 @@
 \echo 'Running 0049_create_crypto_payments.sql...'
 \i migrations/0049_create_crypto_payments.sql
 
+\echo 'Running 0050_remove_short_links_indexes.sql...'
+\i migrations/0050_remove_short_links_indexes.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
