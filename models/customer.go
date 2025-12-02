@@ -30,6 +30,8 @@ type Customer struct {
 	Email        string  `gorm:"size:255;not null;uniqueIndex:idx_customers_email" json:"email"`
 	PasswordHash string  `gorm:"size:255;not null" json:"-"` // Never serialize password hash
 	ShebaNumber  *string `gorm:"size:255" json:"sheba_number,omitempty"`
+	Job          *string `gorm:"size:255" json:"job,omitempty"`
+	Category     *string `gorm:"size:255" json:"category,omitempty"`
 
 	// Agency relationship (optional for individuals and independent companies)
 	ReferrerAgencyID *uint     `gorm:"index:idx_customers_referrer_agency_id" json:"referrer_agency_id,omitempty"`
