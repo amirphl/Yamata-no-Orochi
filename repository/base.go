@@ -104,7 +104,7 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 		}()
 	}
 
-	err = db.CreateInBatches(entities, 100).Error // Batch size of 100
+	err = db.CreateInBatches(entities, 1000).Error // Batch size of 1000
 	if err != nil {
 		return err
 	}
