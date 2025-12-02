@@ -4,9 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/lib/pq"
+	_ "github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -34,6 +37,99 @@ type ShortLinkWithClick struct {
 	UpdatedAt      time.Time `gorm:"column:updated_at"`
 	ClickUserAgent *string   `gorm:"column:click_user_agent"`
 	ClickIP        *string   `gorm:"column:click_ip"`
+}
+
+// Override SaveBatch with a fast path using PostgreSQL COPY for large batches
+func (r *ShortLinkRepositoryImpl) SaveBatch(ctx context.Context, entities []*models.ShortLink) error {
+	if len(entities) == 0 {
+		return nil
+	}
+
+	// Try COPY via database/sql using lib/pq for maximum throughput
+	sqlDB, err := r.DB.DB()
+	if err == nil && sqlDB != nil {
+		if err := r.copyInShortLinks(ctx, sqlDB, entities); err == nil {
+			return nil
+		}
+		// On COPY error, fall back to GORM batch insert
+	}
+
+	// Fallback: use GORM batching
+	db := r.getDB(ctx)
+	return db.CreateInBatches(entities, 1000).Error
+}
+
+func (r *ShortLinkRepositoryImpl) copyInShortLinks(ctx context.Context, sqlDB *sql.DB, entities []*models.ShortLink) error {
+	tx, err := sqlDB.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback()
+		} else {
+			_ = tx.Commit()
+		}
+	}()
+
+	stmt, err := tx.Prepare(pq.CopyIn(
+		"short_links",
+		"uid",
+		"campaign_id",
+		"client_id",
+		"scenario_id",
+		"scenario_name",
+		"phone_number",
+		"long_link",
+		"short_link",
+	))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, e := range entities {
+		var campaignID, clientID interface{}
+		var scenarioID interface{}
+		var scenarioName interface{}
+		var phone interface{}
+		if e.CampaignID != nil {
+			campaignID = *e.CampaignID
+		}
+		if e.ClientID != nil {
+			clientID = *e.ClientID
+		}
+		if e.ScenarioID != nil {
+			scenarioID = *e.ScenarioID
+		}
+		if e.ScenarioName != nil && strings.TrimSpace(*e.ScenarioName) != "" {
+			scenarioName = *e.ScenarioName
+		}
+		if e.PhoneNumber != nil && strings.TrimSpace(*e.PhoneNumber) != "" {
+			phone = *e.PhoneNumber
+		}
+
+		_, err = stmt.Exec(
+			e.UID,
+			campaignID,
+			clientID,
+			scenarioID,
+			scenarioName,
+			phone,
+			e.LongLink,
+			e.ShortLink,
+		)
+		if err != nil {
+			return err
+		}
+	}
+
+	// flush COPY
+	_, err = stmt.Exec()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *ShortLinkRepositoryImpl) ByID(ctx context.Context, id uint) (*models.ShortLink, error) {
