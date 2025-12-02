@@ -5,8 +5,9 @@ package dto
 // color must be one of: black, white, pink
 // tags must contain at least one non-empty element
 type BotUpdateAudienceSpecRequest struct {
-	Segment           string   `json:"segment" validate:"required,max=255"`
-	Subsegment        string   `json:"subsegment" validate:"required,max=255"`
+	Level1            string   `json:"level1" validate:"required,max=255"`
+	Level2            string   `json:"level2" validate:"required,max=255"`
+	Level3            string   `json:"level3" validate:"required,max=255"`
 	Tags              []string `json:"tags" validate:"required,min=1,dive,required,max=255"`
 	AvailableAudience int      `json:"available_audience" validate:"required,gte=0"`
 }
@@ -17,10 +18,11 @@ type BotUpdateAudienceSpecResponse struct {
 }
 
 // BotResetAudienceSpecRequest is used by bots to reset/delete audience spec
-// This will completely remove the specified segment/subsegment from the audience spec
+// This will completely remove the specified level1/level2/level3 from the audience spec
 type BotResetAudienceSpecRequest struct {
-	Segment    string `json:"segment" validate:"required,max=255"`
-	Subsegment string `json:"subsegment" validate:"required,max=255"`
+	Level1 string `json:"level1" validate:"required,max=255"`
+	Level2 string `json:"level2" validate:"required,max=255"`
+	Level3 string `json:"level3" validate:"required,max=255"`
 }
 
 // BotResetAudienceSpecResponse acknowledges a successful reset/deletion
