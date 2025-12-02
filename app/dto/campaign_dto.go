@@ -242,7 +242,7 @@ type AudienceSpecItem struct {
 	AvailableAudience int      `json:"available_audience"`
 }
 
-type AudienceSpec map[string]map[string]AudienceSpecItem
+type AudienceSpec map[string]map[string]map[string]AudienceSpecItem
 
 type ListAudienceSpecResponse struct {
 	Message string       `json:"message"`
