@@ -453,17 +453,6 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 
 	var capacity uint64
 
-	// Determine subsegments to evaluate
-	subsegments := req.Subsegment
-	if len(subsegments) == 0 {
-		// If not provided, consider all subsegments under the selected segment
-		if segMap, ok := specResp.Spec[*req.Segment]; ok {
-			for ss := range segMap {
-				subsegments = append(subsegments, ss)
-			}
-		}
-	}
-
 	// Build a set of requested tags for quick lookup
 	tagSet := make(map[string]struct{}, len(req.Tags))
 	for _, t := range req.Tags {
@@ -472,10 +461,10 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 		}
 	}
 
-	// Sum available audience where at least one tag matches
-	if segMap, ok := specResp.Spec[*req.Segment]; ok {
-		for _, ss := range subsegments {
-			if item, ok := segMap[ss]; ok {
+	// Sum available audience where at least one tag matches across all levels
+	for _, lvl2 := range specResp.Spec {
+		for _, lvl3 := range lvl2 {
+			for _, item := range lvl3 {
 				if len(tagSet) == 0 {
 					capacity += uint64(item.AvailableAudience)
 					continue
@@ -933,13 +922,21 @@ func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context) (*dto.ListAudie
 	// Update Redis cache
 	_ = s.rc.Set(ctx, cacheKey, bytes, 0).Err()
 
-	out := dto.AudienceSpec{}
-	for segment, subsegment := range current {
-		for subsegment, item := range subsegment {
-			if item.AvailableAudience > 0 {
-				out[segment][subsegment] = dto.AudienceSpecItem{
-					Tags:              item.Tags,
-					AvailableAudience: item.AvailableAudience,
+	out := make(dto.AudienceSpec)
+	for l1, l2 := range current {
+		for l2k, l3 := range l2 {
+			for l3k, item := range l3 {
+				if item.AvailableAudience > 0 {
+					if _, ok := out[l1]; !ok {
+						out[l1] = make(map[string]map[string]dto.AudienceSpecItem)
+					}
+					if _, ok := out[l1][l2k]; !ok {
+						out[l1][l2k] = make(map[string]dto.AudienceSpecItem)
+					}
+					out[l1][l2k][l3k] = dto.AudienceSpecItem{
+						Tags:              item.Tags,
+						AvailableAudience: item.AvailableAudience,
+					}
 				}
 			}
 		}
