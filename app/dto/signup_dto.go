@@ -19,6 +19,10 @@ type SignupRequest struct {
 	RepresentativeLastName  string `json:"representative_last_name" validate:"required,max=255"`
 	RepresentativeMobile    string `json:"representative_mobile" validate:"required,mobile_format"`
 
+	// Additional fields (mandatory for non-agency customers; enforced in business logic)
+	Job      *string `json:"job,omitempty" validate:"omitempty,max=255"`
+	Category *string `json:"category,omitempty" validate:"omitempty,max=255"`
+
 	// Common fields (required for all types)
 	Email           string `json:"email" validate:"required,email,max=255"`
 	Password        string `json:"password" validate:"required,min=8,password_strength"`
