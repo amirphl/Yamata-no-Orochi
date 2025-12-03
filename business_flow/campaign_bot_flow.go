@@ -141,7 +141,7 @@ type AudienceSpecLeaf struct {
 	AvailableAudience int      `json:"available_audience"`
 }
 
-type AudienceSpecMap map[string]map[string]AudienceSpecLeaf
+type AudienceSpecMap map[string]map[string]map[string]AudienceSpecLeaf
 
 func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error) {
 	lockKey := redisKey(*s.cacheConfig, utils.AudienceSpecLockKey)
@@ -167,10 +167,13 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 	}
 
 	// Merge
-	if _, exists := current[req.Segment]; !exists {
-		current[req.Segment] = make(map[string]AudienceSpecLeaf)
+	if _, exists := current[req.Level1]; !exists {
+		current[req.Level1] = make(map[string]map[string]AudienceSpecLeaf)
 	}
-	current[req.Segment][req.Subsegment] = AudienceSpecLeaf{
+	if _, exists := current[req.Level1][req.Level2]; !exists {
+		current[req.Level1][req.Level2] = make(map[string]AudienceSpecLeaf)
+	}
+	current[req.Level1][req.Level2][req.Level3] = AudienceSpecLeaf{
 		Tags:              req.Tags,
 		AvailableAudience: req.AvailableAudience,
 	}
@@ -192,7 +195,7 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 	return &dto.BotUpdateAudienceSpecResponse{Message: "Audience spec updated"}, nil
 }
 
-// ResetAudienceSpec deletes the specified segment/subsegment from the audience spec
+// ResetAudienceSpec deletes the specified level1/level2/level3 from the audience spec
 func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.BotResetAudienceSpecRequest) (*dto.BotResetAudienceSpecResponse, error) {
 	lockKey := redisKey(*s.cacheConfig, utils.AudienceSpecLockKey)
 	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
@@ -216,22 +219,30 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
 	}
 
-	// Check if segment exists
-	if _, exists := current[req.Segment]; !exists {
-		return &dto.BotResetAudienceSpecResponse{Message: "Segment not found, nothing to reset"}, nil
+	// Check if level1 exists
+	lvl2Map, ok := current[req.Level1]
+	if !ok {
+		return &dto.BotResetAudienceSpecResponse{Message: "Level1 not found, nothing to reset"}, nil
+	}
+	// Check if level2 exists
+	lvl3Map, ok := lvl2Map[req.Level2]
+	if !ok {
+		return &dto.BotResetAudienceSpecResponse{Message: "Level2 not found, nothing to reset"}, nil
+	}
+	// Check if level3 exists
+	if _, ok := lvl3Map[req.Level3]; !ok {
+		return &dto.BotResetAudienceSpecResponse{Message: "Level3 not found, nothing to reset"}, nil
 	}
 
-	// Check if subsegment exists
-	if _, exists := current[req.Segment][req.Subsegment]; !exists {
-		return &dto.BotResetAudienceSpecResponse{Message: "Subsegment not found, nothing to reset"}, nil
+	// Delete the level3 leaf
+	delete(lvl3Map, req.Level3)
+	// If level3 map is now empty, delete level2
+	if len(lvl3Map) == 0 {
+		delete(lvl2Map, req.Level2)
 	}
-
-	// Delete the subsegment
-	delete(current[req.Segment], req.Subsegment)
-
-	// If the segment is now empty, delete it too
-	if len(current[req.Segment]) == 0 {
-		delete(current, req.Segment)
+	// If level2 map is now empty, delete level1
+	if len(lvl2Map) == 0 {
+		delete(current, req.Level1)
 	}
 
 	// Marshal and write atomically (tmp + rename)
