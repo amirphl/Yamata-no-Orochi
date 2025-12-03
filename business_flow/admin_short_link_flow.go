@@ -59,106 +59,112 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 		return nil, NewBusinessError("VALIDATION_ERROR", "scenario_name is required", nil)
 	}
 
-	reader := csv.NewReader(bufio.NewReader(csvReader))
-	reader.TrimLeadingSpace = true
-
-	header, err := reader.Read()
-	if err != nil {
-		return nil, NewBusinessError("CSV_READ_ERROR", "Failed to read CSV header", err)
-	}
-
-	colIndex := map[string]int{}
-	for i, h := range header {
-		colIndex[strings.ToLower(strings.TrimSpace(h))] = i
-	}
-
-	longIdx, ok := colIndex["long_link"]
-	if !ok {
-		return nil, NewBusinessError("CSV_HEADER_ERROR", "CSV must contain a 'long_link' column", nil)
-	}
-
+	// Determine new scenario id upfront for the response
 	lastScenarioID, err := f.repo.GetLastScenarioID(ctx)
 	if err != nil {
 		return nil, NewBusinessError("FETCH_SCENARIO_ID_FAILED", "Failed to determine next scenario id", err)
 	}
 	newScenarioID := lastScenarioID + 1
 
-	rows := make([]*models.ShortLink, 0, 256)
-	created := 0
-	skipped := 0
-	var seq uint64
-	// Determine starting UID sequence from the highest UID created after the cutoff
-	cutoff := time.Date(2025, 11, 10, 15, 45, 11, 401492000, time.UTC)
-	lastUID, err := f.repo.GetMaxUIDSince(ctx, cutoff)
-	if err != nil {
-		return nil, NewBusinessError("FETCH_MAX_UID_FAILED", "Failed to determine highest uid since cutoff", err)
+	// Buffer the CSV content to allow async processing after we return
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, csvReader); err != nil {
+		return nil, NewBusinessError("CSV_READ_ERROR", "Failed to read CSV", err)
 	}
-	if lastUID != "" {
-		n, err := decodeBase36(lastUID)
+
+	// Spawn background job with longer timeout
+	go func(data []byte, domain, scenario string, scenarioID uint) {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+
+		reader := csv.NewReader(bufio.NewReader(bytes.NewReader(data)))
+		reader.TrimLeadingSpace = true
+
+		header, err := reader.Read()
 		if err != nil {
-			return nil, NewBusinessError("INVALID_EXISTING_UID", "Found invalid uid in database", err)
+			return
 		}
-		seq = n + 1
-	} else {
-		seq = 0
-	}
-	for {
-		rec, err := reader.Read()
-		if err == io.EOF {
-			break
+		colIndex := map[string]int{}
+		for i, h := range header {
+			colIndex[strings.ToLower(strings.TrimSpace(h))] = i
 		}
+		longIdx, ok := colIndex["long_link"]
+		if !ok {
+			return
+		}
+
+		// Compute starting UID sequence
+		cutoff := time.Date(2025, 11, 10, 15, 45, 11, 401492000, time.UTC)
+		lastUID, err := f.repo.GetMaxUIDSince(bgCtx, cutoff)
 		if err != nil {
-			return nil, NewBusinessError("CSV_READ_ERROR", "Failed to read CSV row", err)
+			return
 		}
-		if longIdx >= len(rec) {
-			skipped++
-			continue
-		}
-		longLink := strings.TrimSpace(rec[longIdx])
-		if longLink == "" {
-			skipped++
-			continue
+		var seq uint64
+		if lastUID != "" {
+			n, err := decodeBase36(lastUID)
+			if err != nil {
+				return
+			}
+			seq = n + 1
+		} else {
+			seq = 0
 		}
 
-		uid, err := formatSequentialUID(seq)
-		if err != nil {
-			return nil, NewBusinessError("UID_SEQUENCE_EXHAUSTED", "No more UIDs available up to zzzzz", err)
+		batch := make([]*models.ShortLink, 0, 5000)
+		flush := func() {
+			if len(batch) == 0 {
+				return
+			}
+			_ = f.repo.SaveBatch(bgCtx, batch)
+			batch = batch[:0]
 		}
-		seq++
-		shortURL := fmt.Sprintf("%s/%s", shortLinkDomain, uid)
-		scenarioID := newScenarioID
-		rows = append(rows, &models.ShortLink{
-			UID:          uid,
-			CampaignID:   nil,
-			ClientID:     nil,
-			PhoneNumber:  nil,
-			ScenarioID:   &scenarioID,
-			ScenarioName: &scenarioName,
-			LongLink:     longLink,
-			ShortLink:    shortURL,
-		})
-		created++
-	}
+		for {
+			rec, err := reader.Read()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				break
+			}
+			if longIdx >= len(rec) {
+				continue
+			}
+			longLink := strings.TrimSpace(rec[longIdx])
+			if longLink == "" {
+				continue
+			}
 
-	if len(rows) == 0 {
-		return &dto.AdminCreateShortLinksResponse{
-			Message:    "No valid rows to create",
-			TotalRows:  created + skipped,
-			Created:    0,
-			Skipped:    skipped,
-			ScenarioID: newScenarioID,
-		}, nil
-	}
+			uid, err := formatSequentialUID(seq)
+			if err != nil {
+				break
+			}
+			seq++
+			shortURL := fmt.Sprintf("%s/%s", domain, uid)
+			sid := scenarioID
+			sn := scenario
+			batch = append(batch, &models.ShortLink{
+				UID:          uid,
+				CampaignID:   nil,
+				ClientID:     nil,
+				PhoneNumber:  nil,
+				ScenarioID:   &sid,
+				ScenarioName: &sn,
+				LongLink:     longLink,
+				ShortLink:    shortURL,
+			})
+			if len(batch) >= 5000 {
+				flush()
+			}
+		}
+		flush()
+	}(buf.Bytes(), shortLinkDomain, scenarioName, newScenarioID)
 
-	if err := f.repo.SaveBatch(ctx, rows); err != nil {
-		return nil, NewBusinessError("CREATE_SHORT_LINKS_FAILED", "Failed to create short links", err)
-	}
-
+	// Return immediately with accepted message and the scenario id
 	return &dto.AdminCreateShortLinksResponse{
-		Message:    "Short links created",
-		TotalRows:  created + skipped,
-		Created:    created,
-		Skipped:    skipped,
+		Message:    "Upload accepted; processing asynchronously",
+		TotalRows:  0,
+		Created:    0,
+		Skipped:    0,
 		ScenarioID: newScenarioID,
 	}, nil
 }
