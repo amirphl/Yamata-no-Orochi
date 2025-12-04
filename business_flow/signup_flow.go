@@ -132,7 +132,7 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 		customerID := int64(customer.ID)
 		message := fmt.Sprintf(s.messageConfig.SignupVerificationCodeTemplate, otpCode)
 		err := s.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, message, &customerID)
-		if err != nil {	
+		if err != nil {
 			errMsg := fmt.Sprintf("Failed to send SMS: %v", err)
 			_ = s.createAuditLog(context.Background(), customer, models.AuditActionOTPSMSFailed, errMsg, false, &errMsg, metadata)
 		}
@@ -342,6 +342,13 @@ func (s *SignupFlowImpl) validateSignupRequest(ctx context.Context, req *dto.Sig
 		}
 	}
 
+	// Require job and category for non-agency customers
+	if req.AccountType != models.AccountTypeMarketingAgency {
+		if req.Job == nil || *req.Job == "" || req.Category == nil || *req.Category == "" {
+			return ErrJobCategoryRequired
+		}
+	}
+
 	return nil
 }
 
@@ -392,6 +399,8 @@ func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequ
 		CompanyAddress:          req.CompanyAddress,
 		PostalCode:              req.PostalCode,
 		ShebaNumber:             req.ShebaNumber,
+		Job:                     req.Job,
+		Category:                req.Category,
 		RepresentativeFirstName: req.RepresentativeFirstName,
 		RepresentativeLastName:  req.RepresentativeLastName,
 		RepresentativeMobile:    req.RepresentativeMobile,
