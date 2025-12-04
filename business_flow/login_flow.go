@@ -171,7 +171,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 		}
 
 		// Send OTP via SMS
-		smsMessage := fmt.Sprintf(lf.messageConfig.PasswordResetVerificationCodeTemplate, otpCode, utils.OTPExpiry.Minutes())
+		smsMessage := fmt.Sprintf(lf.messageConfig.PasswordResetVerificationCodeTemplate, otpCode)
 		customerID := int64(customer.ID)
 		if err := lf.notificationSvc.SendSMS(txCtx, customer.RepresentativeMobile, smsMessage, &customerID); err != nil {
 			// Log SMS failure but don't fail the entire process
