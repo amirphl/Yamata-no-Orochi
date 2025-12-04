@@ -18,6 +18,7 @@ var (
 	ErrMobileAlreadyExists     = errors.New("mobile number already exists")
 	ErrNationalIDAlreadyExists = errors.New("national ID already exists")
 	ErrAgencyNotFound          = errors.New("agency not found")
+	ErrJobCategoryRequired     = errors.New("job and category are required for non-agency customers")
 	ErrAgencyInactive          = errors.New("agency is inactive")
 
 	// Company/Business account errors
