@@ -436,7 +436,7 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 // @Summary List Audience Spec
 // @Tags Campaigns
 // @Produce json
-// @Success 200 {object} dto.APIResponse{data=map[string]map[string]any}
+// @Success 200 {object} dto.APIResponse{data=map[string]map[string]map[string]any}
 // @Router /api/v1/campaigns/audience-spec [get]
 func (h *CampaignHandler) ListAudienceSpec(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
