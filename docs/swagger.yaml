@@ -649,6 +649,35 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.BotGenerateShortLinksRequest:
+    properties:
+      ad_link:
+        maxLength: 10000
+        type: string
+      campaign_id:
+        type: integer
+      phones:
+        items:
+          type: string
+        minItems: 1
+        type: array
+      short_link_domain:
+        type: string
+    required:
+    - ad_link
+    - campaign_id
+    - phones
+    - short_link_domain
+    type: object
+  dto.BotGenerateShortLinksResponse:
+    properties:
+      codes:
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+    type: object
   dto.BotGetCampaignResponse:
     properties:
       adlink:
@@ -724,15 +753,19 @@ definitions:
     type: object
   dto.BotResetAudienceSpecRequest:
     properties:
-      segment:
+      level1:
         maxLength: 255
         type: string
-      subsegment:
+      level2:
+        maxLength: 255
+        type: string
+      level3:
         maxLength: 255
         type: string
     required:
-    - segment
-    - subsegment
+    - level1
+    - level2
+    - level3
     type: object
   dto.BotResetAudienceSpecResponse:
     properties:
@@ -757,10 +790,13 @@ definitions:
       available_audience:
         minimum: 0
         type: integer
-      segment:
+      level1:
         maxLength: 255
         type: string
-      subsegment:
+      level2:
+        maxLength: 255
+        type: string
+      level3:
         maxLength: 255
         type: string
       tags:
@@ -770,8 +806,9 @@ definitions:
         type: array
     required:
     - available_audience
-    - segment
-    - subsegment
+    - level1
+    - level2
+    - level3
     - tags
     type: object
   dto.BotUpdateAudienceSpecResponse:
@@ -1007,6 +1044,8 @@ definitions:
       expected_coin_amount:
         type: string
       expires_at:
+        type: string
+      payment_url:
         type: string
       rate_source:
         type: string
@@ -1370,6 +1409,9 @@ definitions:
         - independent_company
         - marketing_agency
         type: string
+      category:
+        maxLength: 255
+        type: string
       company_address:
         maxLength: 255
         type: string
@@ -1384,6 +1426,11 @@ definitions:
         type: string
       email:
         description: Common fields (required for all types)
+        maxLength: 255
+        type: string
+      job:
+        description: Additional fields (mandatory for non-agency customers; enforced
+          in business logic)
         maxLength: 255
         type: string
       national_id:
@@ -2838,6 +2885,40 @@ paths:
       summary: Bot Create Short Links (Batch)
       tags:
       - Bot ShortLinks
+  /api/v1/bot/short-links/allocate:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Generate and create short links
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotGenerateShortLinksRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotGenerateShortLinksResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Allocate Short Links
+      tags:
+      - Bot ShortLinks
   /api/v1/bot/short-links/one:
     post:
       consumes:
@@ -3032,7 +3113,9 @@ paths:
             - properties:
                 data:
                   additionalProperties:
-                    additionalProperties: true
+                    additionalProperties:
+                      additionalProperties: true
+                      type: object
                     type: object
                   type: object
               type: object
