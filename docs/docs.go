@@ -2044,6 +2044,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/bot/short-links/allocate": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot ShortLinks"
+                ],
+                "summary": "Bot Allocate Short Links",
+                "parameters": [
+                    {
+                        "description": "Generate and create short links",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotGenerateShortLinksRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotGenerateShortLinksResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/bot/short-links/one": {
             "post": {
                 "consumes": [
@@ -2275,7 +2332,10 @@ const docTemplate = `{
                                             "type": "object",
                                             "additionalProperties": {
                                                 "type": "object",
-                                                "additionalProperties": true
+                                                "additionalProperties": {
+                                                    "type": "object",
+                                                    "additionalProperties": true
+                                                }
                                             }
                                         }
                                     }
@@ -4603,6 +4663,48 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.BotGenerateShortLinksRequest": {
+            "type": "object",
+            "required": [
+                "ad_link",
+                "campaign_id",
+                "phones",
+                "short_link_domain"
+            ],
+            "properties": {
+                "ad_link": {
+                    "type": "string",
+                    "maxLength": 10000
+                },
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "phones": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "short_link_domain": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotGenerateShortLinksResponse": {
+            "type": "object",
+            "properties": {
+                "codes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.BotGetCampaignResponse": {
             "type": "object",
             "properties": {
@@ -4715,15 +4817,20 @@ const docTemplate = `{
         "dto.BotResetAudienceSpecRequest": {
             "type": "object",
             "required": [
-                "segment",
-                "subsegment"
+                "level1",
+                "level2",
+                "level3"
             ],
             "properties": {
-                "segment": {
+                "level1": {
                     "type": "string",
                     "maxLength": 255
                 },
-                "subsegment": {
+                "level2": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level3": {
                     "type": "string",
                     "maxLength": 255
                 }
@@ -4761,8 +4868,9 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "available_audience",
-                "segment",
-                "subsegment",
+                "level1",
+                "level2",
+                "level3",
                 "tags"
             ],
             "properties": {
@@ -4770,11 +4878,15 @@ const docTemplate = `{
                     "type": "integer",
                     "minimum": 0
                 },
-                "segment": {
+                "level1": {
                     "type": "string",
                     "maxLength": 255
                 },
-                "subsegment": {
+                "level2": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level3": {
                     "type": "string",
                     "maxLength": 255
                 },
@@ -5119,6 +5231,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "expires_at": {
+                    "type": "string"
+                },
+                "payment_url": {
                     "type": "string"
                 },
                 "rate_source": {
@@ -5671,6 +5786,10 @@ const docTemplate = `{
                         "marketing_agency"
                     ]
                 },
+                "category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
                 "company_address": {
                     "type": "string",
                     "maxLength": 255
@@ -5689,6 +5808,11 @@ const docTemplate = `{
                 },
                 "email": {
                     "description": "Common fields (required for all types)",
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job": {
+                    "description": "Additional fields (mandatory for non-agency customers; enforced in business logic)",
                     "type": "string",
                     "maxLength": 255
                 },
