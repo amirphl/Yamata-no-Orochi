@@ -1,76 +1,66 @@
 import pandas as pd
-import re
 
 # --- config ---
-EXCEL_PATH = "Customer Segmentation.xlsx"          # <- change to your file path
-STAT_SHEET = "stat"
-TAGS_SHEET = "tags"
-OUTPUT_CSV = "stat_with_tags.csv"
+EXCEL_PATH = "Customer Segmentation.xlsx"  # input Excel path
+SHEET_NAME = "New Stat"                    # required sheet name
+OUTPUT_CSV = "stat_with_tags.csv"         # output CSV for review/debug
 
 # --- helpers ---
-PERSIAN_DIGITS = "۰۱۲۳۴۵۶۷۸۹"
-EN_DIGITS      = "0123456789"
-DIGIT_MAP = {ord(p): e for p, e in zip(PERSIAN_DIGITS, EN_DIGITS)}
 
-def to_int(val):
-    """Convert strings like '23,825,515' (or Persian digits) to int; keep NA if empty."""
-    if pd.isna(val):
-        return pd.NA
-    s = str(val).translate(DIGIT_MAP)
-    s = re.sub(r"[^\d]", "", s)  # strip commas, spaces, etc.
-    return int(s) if s else pd.NA
-
-def clean_str(s):
-    return s.strip() if isinstance(s, str) else s
+def clean_str(s: object) -> str:
+    if s is None or (isinstance(s, float) and pd.isna(s)):
+        return ""
+    return str(s).strip()
 
 # --- load ---
-stat = pd.read_excel(EXCEL_PATH, sheet_name=STAT_SHEET, dtype=str)
-tags = pd.read_excel(EXCEL_PATH, sheet_name=TAGS_SHEET, dtype=str)
+df = pd.read_excel(EXCEL_PATH, sheet_name=SHEET_NAME, dtype=str)
 
-# --- normalize key columns for safe matching ---
-# stat: category, job
-stat["category"] = stat["category"].map(clean_str)
-stat["job"] = stat["job"].map(clean_str)
+# Expected columns (case-sensitive as provided)
+# id	Src_number	Layer1_category	Layer2_category	Layer3_Category
 
-# tags: category, jobs -> rename to job; id as string for joining/aggregation
-tags = tags.rename(columns={"jobs": "job"})
-tags["category"] = tags["category"].map(clean_str)
-tags["job"] = tags["job"].map(clean_str)
-tags["id"] = tags["id"].map(lambda x: clean_str(str(x)) if pd.notna(x) else x)
+# Normalize/rename for internal use if necessary
+col_map = {
+    "id": "tag_id",
+    "Layer1_category": "level1",
+    "Layer2_category": "level2",
+    "Layer3_Category": "level3",
+}
 
-# --- aggregate tag ids per (category, job) ---
-# Some (category, job) may have multiple tag rows
-tag_map = (
-    tags.dropna(subset=["category", "job", "id"])
-        .groupby(["category", "job"], as_index=False)["id"]
-        .agg(lambda x: sorted(set(x)))   # de-dup + sort
-        .rename(columns={"id": "tag ids"})
+missing = [c for c in col_map.keys() if c not in df.columns]
+if missing:
+    raise SystemExit(f"Missing required columns in sheet '{SHEET_NAME}': {missing}")
+
+work = df[list(col_map.keys())].rename(columns=col_map).copy()
+work["tag_id"] = work["tag_id"].map(clean_str)
+work["level1"] = work["level1"].map(clean_str)
+work["level2"] = work["level2"].map(clean_str)
+work["level3"] = work["level3"].map(clean_str)
+
+# Fallback: if level3 empty, use level2
+work["level3_final"] = work.apply(
+    lambda r: r["level3"] if r["level3"] else r["level2"], axis=1
 )
 
-# --- merge into stat ---
-merged = stat.merge(tag_map, on=["category", "job"], how="left")
-
-# join lists of ids into a single string (e.g., "14522;14526")
-merged["tag ids"] = merged["tag ids"].apply(
-    lambda v: ";".join(v) if isinstance(v, list) else ""
+# Aggregate tag ids per (level1, level2, level3_final)
+# Skip empty tag ids
+agg = (
+    work.groupby(["level1", "level2", "level3_final"], as_index=False)["tag_id"]
+        .agg(lambda xs: sorted({clean_str(x) for x in xs if clean_str(x)}))
+        .rename(columns={"tag_id": "tags"})
 )
 
-# --- clean numeric columns (optional but recommended) ---
-# Adjust these names if your headers differ exactly:
-count_all_col = "audience_count_all"
-count_33_col  = "audience_count_33$"
+# Filter out groups that have no tag ids
+agg = agg[agg["tags"].map(lambda v: isinstance(v, list) and len(v) > 0)].copy()
 
-if count_all_col in merged.columns:
-    merged[count_all_col] = merged[count_all_col].map(to_int)
+# Constant available audience per instruction
+agg["available_audience"] = 10000
 
-if count_33_col in merged.columns:
-    merged[count_33_col] = merged[count_33_col].map(to_int)
+# Prepare output columns
+out = agg.rename(columns={"level3_final": "level3"})[[
+    "level1", "level2", "level3", "tags", "available_audience"
+]]
 
-# --- select & order output columns ---
-out_cols = ["category", "job", "tag ids", count_all_col, count_33_col]
-out = merged[out_cols]
-
-# --- save CSV (UTF-8 with BOM to play nice with Excel/Persian text) ---
+# Persist CSV (UTF-8 with BOM for Excel compatibility)
 out.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
 
-print(f"Done. Wrote {len(out)} rows to {OUTPUT_CSV}")
+print(f"Done. Wrote {len(out)} grouped rows to {OUTPUT_CSV}")
