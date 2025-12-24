@@ -52,7 +52,8 @@ type AdminLineNumberReportItem struct {
 // ActiveLineNumberItem is returned to customers
 // Only non-sensitive fields are exposed
 type ActiveLineNumberItem struct {
-	LineNumber string `json:"line_number"`
+	LineNumber  string  `json:"line_number"`
+	PriceFactor float64 `json:"price_factor"`
 }
 
 // ListActiveLineNumbersResponse wraps the active line numbers list for customers
