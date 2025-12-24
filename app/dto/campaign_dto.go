@@ -8,8 +8,9 @@ import (
 type CreateCampaignRequest struct {
 	CustomerID uint       `json:"-"`
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level1     *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	Tags       []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
@@ -23,6 +24,7 @@ type CreateCampaignRequest struct {
 // CreateCampaignResponse represents the response to create a new campaign
 type CreateCampaignResponse struct {
 	Message   string `json:"message"`
+	ID        uint   `json:"id"`
 	UUID      string `json:"uuid"`
 	Status    string `json:"status"`
 	CreatedAt string `json:"created_at"`
@@ -33,8 +35,9 @@ type UpdateCampaignRequest struct {
 	UUID       string     `json:"-"`
 	CustomerID uint       `json:"-"`
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level1     *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	Tags       []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
@@ -64,8 +67,9 @@ type GetCampaignResponse struct {
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
 	Title      *string    `json:"title,omitempty" validate:"omitempty"`
-	Segment    *string    `json:"segment,omitempty" validate:"omitempty"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Level1     *string    `json:"level1,omitempty" validate:"omitempty"`
+	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty"`
 	Tags       []string   `json:"tags,omitempty" validate:"omitempty"`
 	Sex        *string    `json:"sex,omitempty" validate:"omitempty"`
 	City       []string   `json:"city,omitempty" validate:"omitempty"`
@@ -80,8 +84,9 @@ type GetCampaignResponse struct {
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
 type CalculateCampaignCapacityRequest struct {
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level1     *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	Tags       []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
@@ -101,8 +106,9 @@ type CalculateCampaignCapacityResponse struct {
 // CalculateCampaignCostRequest represents the request to calculate the cost of an campaign
 type CalculateCampaignCostRequest struct {
 	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Segment    *string    `json:"segment,omitempty" validate:"omitempty,max=255"`
-	Subsegment []string   `json:"subsegment,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level1     *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
 	Tags       []string   `json:"tags,omitempty" validate:"omitempty"`
 	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
 	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
@@ -167,8 +173,9 @@ type AdminGetCampaignResponse struct {
 	CreatedAt             time.Time  `json:"created_at"`
 	UpdatedAt             *time.Time `json:"updated_at,omitempty"`
 	Title                 *string    `json:"title,omitempty" validate:"omitempty"`
-	Segment               *string    `json:"segment,omitempty" validate:"omitempty"`
-	Subsegment            []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Level1                *string    `json:"level1,omitempty" validate:"omitempty"`
+	Level2s               []string   `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s               []string   `json:"level3s,omitempty" validate:"omitempty"`
 	Tags                  []string   `json:"tags,omitempty" validate:"omitempty"`
 	Sex                   *string    `json:"sex,omitempty" validate:"omitempty"`
 	City                  []string   `json:"city,omitempty" validate:"omitempty"`
@@ -217,8 +224,9 @@ type BotGetCampaignResponse struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
 	Title        *string    `json:"title,omitempty" validate:"omitempty"`
-	Segment      *string    `json:"segment,omitempty" validate:"omitempty"`
-	Subsegment   []string   `json:"subsegment,omitempty" validate:"omitempty"`
+	Level1       *string    `json:"level1,omitempty" validate:"omitempty"`
+	Level2s      []string   `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s      []string   `json:"level3s,omitempty" validate:"omitempty"`
 	Tags         []string   `json:"tags,omitempty" validate:"omitempty"`
 	Sex          *string    `json:"sex,omitempty" validate:"omitempty"`
 	City         []string   `json:"city,omitempty" validate:"omitempty"`
@@ -242,9 +250,21 @@ type AudienceSpecItem struct {
 	AvailableAudience int      `json:"available_audience"`
 }
 
-type AudienceSpec map[string]map[string]map[string]AudienceSpecItem
+type AudienceSpecLevel2 struct {
+	Metadata map[string]any              `json:"metadata,omitempty"`
+	Items    map[string]AudienceSpecItem `json:"items,omitempty"`
+}
+
+type AudienceSpec map[string]map[string]AudienceSpecLevel2
 
 type ListAudienceSpecResponse struct {
 	Message string       `json:"message"`
 	Spec    AudienceSpec `json:"spec"`
+}
+
+type CampaignsSummaryResponse struct {
+	Message       string `json:"message"`
+	ApprovedCount int    `json:"approved_count"`
+	RunningCount  int    `json:"running_count"`
+	Total         int    `json:"total"`
 }
