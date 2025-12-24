@@ -22,6 +22,7 @@ type CampaignHandlerInterface interface {
 	CalculateCampaignCost(c fiber.Ctx) error
 	ListCampaigns(c fiber.Ctx) error
 	ListAudienceSpec(c fiber.Ctx) error
+	GetApprovedRunningSummary(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -105,13 +106,6 @@ func (h *CampaignHandler) CreateCampaign(c fiber.Ctx) error {
 	result, err := h.campaignFlow.CreateCampaign(h.createRequestContext(c, "/api/v1/campaigns"), &req, metadata)
 	if err != nil {
 		// Handle specific business errors
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
-		if businessflow.IsAccountInactive(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
-		}
-
 		log.Println("Campaign creation failed", err)
 		// Handle generic business errors
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Campaign creation failed", "CAMPAIGN_CREATION_FAILED", nil)
@@ -120,6 +114,7 @@ func (h *CampaignHandler) CreateCampaign(c fiber.Ctx) error {
 	// Successful campaign creation
 	return h.SuccessResponse(c, fiber.StatusCreated, "Campaign created successfully", fiber.Map{
 		"message":    result.Message,
+		"id":         result.ID,
 		"uuid":       result.UUID,
 		"status":     result.Status,
 		"created_at": result.CreatedAt,
@@ -179,65 +174,6 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 	result, err := h.campaignFlow.UpdateCampaign(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID), &req, metadata)
 	if err != nil {
 		// Handle specific business errors
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
-		if businessflow.IsAccountInactive(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
-		}
-		if businessflow.IsCampaignNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
-		}
-		if businessflow.IsCampaignAccessDenied(err) {
-			return h.ErrorResponse(c, fiber.StatusForbidden, "Access denied: campaign belongs to another customer", "CAMPAIGN_ACCESS_DENIED", nil)
-		}
-		if businessflow.IsCampaignUpdateNotAllowed(err) {
-			return h.ErrorResponse(c, fiber.StatusForbidden, "Campaign cannot be updated in current status", "CAMPAIGN_UPDATE_NOT_ALLOWED", nil)
-		}
-		if businessflow.IsScheduleTimeTooSoon(err) {
-			return h.ErrorResponse(c, fiber.StatusForbidden, "Schedule time is too soon", "SCHEDULE_TIME_TOO_SOON", nil)
-		}
-		if businessflow.IsInsufficientCampaignCapacity(err) {
-			return h.ErrorResponse(c, fiber.StatusForbidden, "Insufficient campaign capacity", "INSUFFICIENT_CAMPAIGN_CAPACITY", nil)
-		}
-
-		if businessflow.IsCampaignTitleRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign title is required", "CAMPAIGN_TITLE_REQUIRED", nil)
-		}
-		if businessflow.IsCampaignSegmentRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign segment is required", "CAMPAIGN_SEGMENT_REQUIRED", nil)
-		}
-		if businessflow.IsCampaignSubsegmentRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign subsegment is required", "CAMPAIGN_SUBSEGMENT_REQUIRED", nil)
-		}
-		if businessflow.IsCampaignTagsRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign tags is required", "CAMPAIGN_TAGS_REQUIRED", nil)
-		}
-		if businessflow.IsCampaignContentRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign content is required", "CAMPAIGN_CONTENT_REQUIRED", nil)
-		}
-		if businessflow.IsScheduleTimeNotPresent(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time is not present", "SCHEDULE_TIME_NOT_PRESENT", nil)
-		}
-		if businessflow.IsScheduleTimeTooSoon(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time is too soon", "SCHEDULE_TIME_TOO_SOON", nil)
-		}
-		if businessflow.IsCampaignLineNumberRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign line number is required", "CAMPAIGN_LINE_NUMBER_REQUIRED", nil)
-		}
-		if businessflow.IsCampaignBudgetRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign budget is required", "CAMPAIGN_BUDGET_REQUIRED", nil)
-		}
-		if businessflow.IsCampaignLineNumberRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign line number is required", "CAMPAIGN_LINE_NUMBER_REQUIRED", nil)
-		}
-		if businessflow.IsLineNumberNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number not found", "LINE_NUMBER_NOT_FOUND", nil)
-		}
-		if businessflow.IsLineNumberNotActive(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number is not active", "LINE_NUMBER_NOT_ACTIVE", nil)
-		}
-
 		log.Println("Campaign update failed", err)
 		// Handle generic business errors
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Campaign update failed", "CAMPAIGN_UPDATE_FAILED", nil)
@@ -325,15 +261,6 @@ func (h *CampaignHandler) CalculateCampaignCost(c fiber.Ctx) error {
 	// Call business logic with proper context
 	result, err := h.campaignFlow.CalculateCampaignCost(h.createRequestContext(c, "/api/v1/campaigns/calculate-cost"), &req, metadata)
 	if err != nil {
-		if businessflow.IsCampaignLineNumberRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign line number is required", "CAMPAIGN_LINE_NUMBER_REQUIRED", nil)
-		}
-		if businessflow.IsLineNumberNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number not found", "LINE_NUMBER_NOT_FOUND", nil)
-		}
-		if businessflow.IsLineNumberNotActive(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number is not active", "LINE_NUMBER_NOT_ACTIVE", nil)
-		}
 		log.Println("Campaign cost calculation failed", err)
 		// Handle generic business errors
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Campaign cost calculation failed", "COST_CALCULATION_FAILED", nil)
@@ -414,13 +341,6 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 	// Call business logic
 	result, err := h.campaignFlow.ListCampaigns(h.createRequestContext(c, "/api/v1/campaigns"), req, metadata)
 	if err != nil {
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
-		if businessflow.IsAccountInactive(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
-		}
-
 		log.Println("List campaigns failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list campaigns", "LIST_CAMPAIGNS_FAILED", nil)
 	}
@@ -449,6 +369,33 @@ func (h *CampaignHandler) ListAudienceSpec(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Audience spec retrieved successfully", fiber.Map{
 		"message": res.Message,
 		"spec":    res.Spec,
+	})
+}
+
+// GetApprovedRunningSummary returns counts of approved and running campaigns for the authenticated customer
+// @Summary Get campaigns summary
+// @Tags Campaigns
+// @Produce json
+// @Success 200 {object} dto.APIResponse{data=map[string]any}
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/summary [get]
+func (h *CampaignHandler) GetApprovedRunningSummary(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	res, err := h.campaignFlow.GetApprovedRunningSummary(h.createRequestContext(c, "/api/v1/campaigns/summary"), customerID)
+	if err != nil {
+		log.Println("Get campaigns summary failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get campaigns summary", "GET_CAMPAIGNS_SUMMARY_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, res.Message, fiber.Map{
+		"approved_count": res.ApprovedCount,
+		"running_count":  res.RunningCount,
+		"total":          res.Total,
 	})
 }
 
