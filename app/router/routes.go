@@ -53,6 +53,7 @@ type FiberRouter struct {
 	shortLinkHandler               handlers.ShortLinkHandlerInterface
 	shortLinkAdminHandler          handlers.ShortLinkAdminHandlerInterface
 	cryptoPaymentHandler           handlers.CryptoPaymentHandlerInterface
+	profileHandler                 handlers.ProfileHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -74,6 +75,7 @@ func NewFiberRouter(
 	shortLinkHandler handlers.ShortLinkHandlerInterface,
 	shortLinkAdminHandler handlers.ShortLinkAdminHandlerInterface,
 	cryptoPaymentHandler handlers.CryptoPaymentHandlerInterface,
+	profileHandler handlers.ProfileHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -110,6 +112,7 @@ func NewFiberRouter(
 		shortLinkHandler:               shortLinkHandler,
 		shortLinkAdminHandler:          shortLinkAdminHandler,
 		cryptoPaymentHandler:           cryptoPaymentHandler,
+		profileHandler:                 profileHandler,
 	}
 }
 
@@ -223,6 +226,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
 	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
 	campaigns.Get("/audience-spec", r.campaignHandler.ListAudienceSpec)
+	campaigns.Get("/summary", r.campaignHandler.GetApprovedRunningSummary)
 
 	// Admin campaigns listing and actions
 	adminCampaigns := api.Group("/admin/campaigns")
@@ -330,6 +334,9 @@ func (r *FiberRouter) SetupRoutes() {
 	agency.Get("/agency/discounts/active", r.agencyHandler.ListAgencyActiveDiscounts)
 	agency.Get("/agency/customers/:customer_id/discounts", r.agencyHandler.ListAgencyCustomerDiscounts)
 	agency.Post("/agency/discounts", r.agencyHandler.CreateAgencyDiscount)
+
+	// Profile route (protected)
+	api.Get("/profile", r.authMiddleware.Authenticate(), r.profileHandler.GetProfile)
 
 	// Public short-link redirect (no auth)
 	r.app.Get("/s/:uid", r.shortLinkHandler.Visit)
