@@ -67,8 +67,8 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context) (*dto.BotL
 			CreatedAt:    c.CreatedAt,
 			UpdatedAt:    c.UpdatedAt,
 			Title:        c.Spec.Title,
-			Segment:      c.Spec.Segment,
-			Subsegment:   c.Spec.Subsegment,
+			Level1:       c.Spec.Level1,
+			Level2s:      c.Spec.Level2s,
 			Tags:         c.Spec.Tags,
 			Sex:          c.Spec.Sex,
 			City:         c.Spec.City,
@@ -143,6 +143,14 @@ type AudienceSpecLeaf struct {
 
 type AudienceSpecMap map[string]map[string]map[string]AudienceSpecLeaf
 
+// v2 on-disk format structures (Level2 holds metadata and items)
+type audienceSpecLevel2File struct {
+	Metadata map[string]any              `json:"metadata,omitempty"`
+	Items    map[string]AudienceSpecLeaf `json:"items,omitempty"`
+}
+
+type audienceSpecFileV2 map[string]map[string]*audienceSpecLevel2File
+
 func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error) {
 	lockKey := redisKey(*s.cacheConfig, utils.AudienceSpecLockKey)
 	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
@@ -160,20 +168,29 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 		_ = s.rc.Del(context.Background(), lockKey).Err()
 	}()
 
-	// Read existing JSON file (if any)
-	current, err := readAudienceSpecFile(filePath)
+	// Read existing JSON file (if any) in v2 format
+	current, err := readAudienceSpecFileV2(filePath)
 	if err != nil {
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
 	}
 
-	// Merge
+	// Ensure maps
 	if _, exists := current[req.Level1]; !exists {
-		current[req.Level1] = make(map[string]map[string]AudienceSpecLeaf)
+		current[req.Level1] = make(map[string]*audienceSpecLevel2File)
 	}
 	if _, exists := current[req.Level1][req.Level2]; !exists {
-		current[req.Level1][req.Level2] = make(map[string]AudienceSpecLeaf)
+		current[req.Level1][req.Level2] = &audienceSpecLevel2File{Metadata: map[string]any{}, Items: map[string]AudienceSpecLeaf{}}
 	}
-	current[req.Level1][req.Level2][req.Level3] = AudienceSpecLeaf{
+	lvl2 := current[req.Level1][req.Level2]
+	if lvl2.Items == nil {
+		lvl2.Items = make(map[string]AudienceSpecLeaf)
+	}
+	// Optionally set/merge metadata if provided
+	if req.Metadata != nil {
+		lvl2.Metadata = req.Metadata
+	}
+	// Upsert leaf
+	lvl2.Items[req.Level3] = AudienceSpecLeaf{
 		Tags:              req.Tags,
 		AvailableAudience: req.AvailableAudience,
 	}
@@ -214,7 +231,7 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 	}()
 
 	// Read existing JSON file (if any)
-	current, err := readAudienceSpecFile(filePath)
+	current, err := readAudienceSpecFileV2(filePath)
 	if err != nil {
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
 	}
@@ -225,19 +242,19 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 		return &dto.BotResetAudienceSpecResponse{Message: "Level1 not found, nothing to reset"}, nil
 	}
 	// Check if level2 exists
-	lvl3Map, ok := lvl2Map[req.Level2]
-	if !ok {
+	lvl2, ok := lvl2Map[req.Level2]
+	if !ok || lvl2 == nil {
 		return &dto.BotResetAudienceSpecResponse{Message: "Level2 not found, nothing to reset"}, nil
 	}
 	// Check if level3 exists
-	if _, ok := lvl3Map[req.Level3]; !ok {
+	if _, ok := lvl2.Items[req.Level3]; !ok {
 		return &dto.BotResetAudienceSpecResponse{Message: "Level3 not found, nothing to reset"}, nil
 	}
 
 	// Delete the level3 leaf
-	delete(lvl3Map, req.Level3)
-	// If level3 map is now empty, delete level2
-	if len(lvl3Map) == 0 {
+	delete(lvl2.Items, req.Level3)
+	// If level3 map is now empty, delete level2 (metadata discarded)
+	if len(lvl2.Items) == 0 {
 		delete(lvl2Map, req.Level2)
 	}
 	// If level2 map is now empty, delete level1
@@ -262,23 +279,60 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 	return &dto.BotResetAudienceSpecResponse{Message: "Audience spec reset successfully"}, nil
 }
 
-func readAudienceSpecFile(path string) (AudienceSpecMap, error) {
+// readAudienceSpecFileV2 reads the on-disk spec and upgrades legacy format to v2 in-memory
+func readAudienceSpecFileV2(path string) (audienceSpecFileV2, error) {
 	bytes, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return make(AudienceSpecMap), nil
+			return make(audienceSpecFileV2), nil
 		}
 		return nil, err
 	}
-	var out AudienceSpecMap
 	if len(bytes) == 0 {
-		return make(AudienceSpecMap), nil
+		return make(audienceSpecFileV2), nil
 	}
-	if err := json.Unmarshal(bytes, &out); err != nil {
-		return nil, err
+	// Try v2
+	var v2 audienceSpecFileV2
+	if err := json.Unmarshal(bytes, &v2); err == nil && v2 != nil {
+		// Ensure inner maps are non-nil
+		for l1, l2map := range v2 {
+			if l2map == nil {
+				v2[l1] = make(map[string]*audienceSpecLevel2File)
+				continue
+			}
+			for l2, node := range l2map {
+				if node == nil {
+					l2map[l2] = &audienceSpecLevel2File{Metadata: map[string]any{}, Items: map[string]AudienceSpecLeaf{}}
+					continue
+				}
+				if node.Items == nil {
+					node.Items = make(map[string]AudienceSpecLeaf)
+				}
+				if node.Metadata == nil {
+					node.Metadata = make(map[string]any)
+				}
+			}
+		}
+		return v2, nil
 	}
-	if out == nil {
-		out = make(AudienceSpecMap)
+	// Legacy format: map[level1][level2][level3]leaf
+	var legacy AudienceSpecMap
+	if err := json.Unmarshal(bytes, &legacy); err != nil || legacy == nil {
+		// If unmarshal failed, return empty v2 but not an error to avoid breaking
+		return make(audienceSpecFileV2), nil
 	}
-	return out, nil
+	upgraded := make(audienceSpecFileV2)
+	for l1, l2 := range legacy {
+		if _, ok := upgraded[l1]; !ok {
+			upgraded[l1] = make(map[string]*audienceSpecLevel2File)
+		}
+		for l2k, l3 := range l2 {
+			node := &audienceSpecLevel2File{Metadata: map[string]any{}, Items: map[string]AudienceSpecLeaf{}}
+			for l3k, leaf := range l3 {
+				node.Items[l3k] = leaf
+			}
+			upgraded[l1][l2k] = node
+		}
+	}
+	return upgraded, nil
 }
