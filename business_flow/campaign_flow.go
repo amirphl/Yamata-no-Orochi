@@ -29,6 +29,7 @@ type CampaignFlow interface {
 	CalculateCampaignCost(ctx context.Context, req *dto.CalculateCampaignCostRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error)
 	ListCampaigns(ctx context.Context, req *dto.ListCampaignsRequest, metadata *ClientMetadata) (*dto.ListCampaignsResponse, error)
 	ListAudienceSpec(ctx context.Context) (*dto.ListAudienceSpecResponse, error)
+	GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error)
 }
 
 // CampaignFlowImpl implements the campaign business flow
@@ -117,6 +118,7 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 	// Build resp
 	resp := &dto.CreateCampaignResponse{
 		Message:   "Campaign created successfully",
+		ID:        campaign.ID,
 		UUID:      campaign.UUID.String(),
 		Status:    string(campaign.Status),
 		CreatedAt: campaign.CreatedAt.Format(time.RFC3339),
@@ -167,8 +169,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 	var (
 		title      = req.Title
-		segment    = req.Segment
-		subsegment = req.Subsegment
+		level1     = req.Level1
+		level2s    = req.Level2s
+		level3s    = req.Level3s
 		tags       = req.Tags
 		sex        = req.Sex
 		city       = req.City
@@ -181,11 +184,14 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Title == nil {
 		title = campaign.Spec.Title
 	}
-	if req.Segment == nil {
-		segment = campaign.Spec.Segment
+	if req.Level1 == nil {
+		level1 = campaign.Spec.Level1
 	}
-	if req.Subsegment == nil {
-		subsegment = campaign.Spec.Subsegment
+	if req.Level2s == nil {
+		level2s = campaign.Spec.Level2s
+	}
+	if req.Level3s == nil {
+		level3s = campaign.Spec.Level3s
 	}
 	if req.Tags == nil {
 		tags = campaign.Spec.Tags
@@ -214,8 +220,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 	capacity, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
 		Title:      title,
-		Segment:    segment,
-		Subsegment: subsegment,
+		Level1:     level1,
+		Level2s:    level2s,
+		Level3s:    level3s,
 		Tags:       tags,
 		Sex:        sex,
 		City:       city,
@@ -242,11 +249,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		}
 
 		if req.Finalize != nil && *req.Finalize {
-			// TODO: -------------------
 			// TODO: validate all required fields are present like line number, budget
 			// schedule time must be present and be in future
-			// title (len), sex (choice), segment (db, len), subsegment (db, len), tags (db, len), city (db, len), adlink (len), content (len), line number (db, len), budget (min, max)
-			// TODO: ------------------- Line number must be valid (db)
+			// title (len), sex (choice), level1 level2s level3s (db, len), tags (db, len), city (db, len), adlink (len), content (len), line number (db, len), budget (min, max)
 
 			// retrieve campaign again (last state)
 			campaign, err := getCampaign(txCtx, s.campaignRepo, req.UUID, req.CustomerID)
@@ -279,8 +284,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 			cost, err := s.CalculateCampaignCost(txCtx, &dto.CalculateCampaignCostRequest{
 				Title:      title,
-				Segment:    segment,
-				Subsegment: subsegment,
+				Level1:     level1,
+				Level2s:    level2s,
+				Level3s:    level3s,
 				Tags:       tags,
 				Sex:        sex,
 				City:       city,
@@ -435,14 +441,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 // CalculateCampaignCapacity handles the campaign capacity calculation process
 func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *dto.CalculateCampaignCapacityRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCapacityResponse, error) {
-	if req.Segment == nil {
-		return nil, NewBusinessError("SEGMENT_REQUIRED", "Segment is required", ErrCampaignSegmentRequired)
-	}
-	if req.Subsegment == nil {
-		return nil, NewBusinessError("SUBSEGMENT_REQUIRED", "Subsegment is required", ErrCampaignSubsegmentRequired)
-	}
-	if req.Tags == nil {
-		return nil, NewBusinessError("TAGS_REQUIRED", "Tags is required", ErrCampaignTagsRequired)
+	if err := s.validateCalculateCampaignCapacityRequest(req); err != nil {
+		return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", err)
 	}
 
 	// Fetch audience spec (from cache or file)
@@ -461,23 +461,57 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 		}
 	}
 
-	// Sum available audience where at least one tag matches across all levels
-	for _, lvl2 := range specResp.Spec {
-		for _, lvl3 := range lvl2 {
-			for _, item := range lvl3 {
-				if len(tagSet) == 0 {
-					capacity += uint64(item.AvailableAudience)
-					continue
+	// Sum available audience only for requested Level1/Level2/Level3 keys
+	// Respect provided tags: if tags set is empty, count all items; otherwise only items with matching tags.
+	if req.Level1 != nil {
+		l1k := *req.Level1
+		l1map, ok := specResp.Spec[l1k]
+		if ok {
+			// prepare lookups for requested level2s and level3s
+			level2Set := make(map[string]struct{}, len(req.Level2s))
+			for _, l2 := range req.Level2s {
+				if l2 != "" {
+					level2Set[l2] = struct{}{}
 				}
-				matched := false
-				for _, it := range item.Tags {
-					if _, ok := tagSet[it]; ok {
-						matched = true
-						break
+			}
+			level3Set := make(map[string]struct{}, len(req.Level3s))
+			for _, l3 := range req.Level3s {
+				if l3 != "" {
+					level3Set[l3] = struct{}{}
+				}
+			}
+
+			for l2k, node := range l1map {
+				// skip level2s not requested
+				if len(level2Set) > 0 {
+					if _, ok := level2Set[l2k]; !ok {
+						continue
 					}
 				}
-				if matched {
-					capacity += uint64(item.AvailableAudience)
+				if len(node.Items) == 0 && len(node.Metadata) == 0 {
+					continue
+				}
+				for l3k, item := range node.Items {
+					// skip level3s not requested
+					if len(level3Set) > 0 {
+						if _, ok := level3Set[l3k]; !ok {
+							continue
+						}
+					}
+					if len(tagSet) == 0 {
+						capacity += uint64(item.AvailableAudience)
+						continue
+					}
+					matched := false
+					for _, it := range item.Tags {
+						if _, ok := tagSet[it]; ok {
+							matched = true
+							break
+						}
+					}
+					if matched {
+						capacity += uint64(item.AvailableAudience)
+					}
 				}
 			}
 		}
@@ -515,8 +549,9 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	// Calculate campaign capacity (target audience size)
 	capacityResp, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
 		Title:      req.Title,
-		Segment:    req.Segment,
-		Subsegment: req.Subsegment,
+		Level1:     req.Level1,
+		Level2s:    req.Level2s,
+		Level3s:    req.Level3s,
 		Tags:       req.Tags,
 		Sex:        req.Sex,
 		City:       req.City,
@@ -578,10 +613,7 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	}
 
 	// Normalize pagination
-	page := req.Page
-	if page < 1 {
-		page = 1
-	}
+	page := max(1, req.Page)
 	limit := req.Limit
 	if limit <= 0 {
 		limit = 10
@@ -635,8 +667,9 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 			CreatedAt:  c.CreatedAt,
 			UpdatedAt:  c.UpdatedAt,
 			Title:      c.Spec.Title,
-			Segment:    c.Spec.Segment,
-			Subsegment: c.Spec.Subsegment,
+			Level1:     c.Spec.Level1,
+			Level2s:    c.Spec.Level2s,
+			Level3s:    c.Spec.Level3s,
 			Tags:       c.Spec.Tags,
 			Sex:        c.Spec.Sex,
 			City:       c.Spec.City,
@@ -669,14 +702,23 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 	if req.CustomerID == 0 {
 		return ErrCustomerNotFound
 	}
-	if req.Title != nil && *req.Title == "" {
+	if req.Title == nil || (req.Title != nil && *req.Title == "") {
 		return ErrCampaignTitleRequired
 	}
 	if req.Content != nil && *req.Content == "" {
 		return ErrCampaignContentRequired
 	}
-	if req.Segment != nil && *req.Segment == "" {
-		return ErrCampaignSegmentRequired
+	if req.Level1 == nil || (req.Level1 != nil && *req.Level1 == "") {
+		return ErrCampaignLevel1Required
+	}
+	if req.Level2s == nil || (req.Level2s != nil && len(req.Level2s) == 0) {
+		return ErrCampaignLevel2sRequired
+	}
+	if req.Level3s == nil || (req.Level3s != nil && len(req.Level3s) == 0) {
+		return ErrCampaignLevel3sRequired
+	}
+	if req.Tags == nil || (req.Tags != nil && len(req.Tags) == 0) {
+		return ErrCampaignTagsRequired
 	}
 	if req.LineNumber != nil && *req.LineNumber == "" {
 		return ErrCampaignLineNumberRequired
@@ -686,6 +728,9 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 	}
 	if req.Sex != nil && *req.Sex == "" {
 		return ErrCampaignSexRequired
+	}
+	if req.City != nil && len(req.City) == 0 {
+		return ErrCampaignCityRequired
 	}
 	if req.AdLink != nil && *req.AdLink == "" {
 		return ErrCampaignAdLinkRequired
@@ -705,9 +750,15 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 		}
 	}
 
-	if len(req.Subsegment) > 0 {
-		if slices.Contains(req.Subsegment, "") {
-			return ErrCampaignSubsegmentRequired
+	if len(req.Level2s) > 0 {
+		if slices.Contains(req.Level2s, "") {
+			return ErrCampaignLevel2sRequired
+		}
+	}
+
+	if len(req.Level3s) > 0 {
+		if slices.Contains(req.Level3s, "") {
+			return ErrCampaignLevel3sRequired
 		}
 	}
 
@@ -728,11 +779,14 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	if req.Title != nil && *req.Title != "" {
 		spec.Title = req.Title
 	}
-	if req.Segment != nil && *req.Segment != "" {
-		spec.Segment = req.Segment
+	if req.Level1 != nil && *req.Level1 != "" {
+		spec.Level1 = req.Level1
 	}
-	if len(req.Subsegment) > 0 {
-		spec.Subsegment = req.Subsegment
+	if len(req.Level2s) > 0 {
+		spec.Level2s = req.Level2s
+	}
+	if len(req.Level3s) > 0 {
+		spec.Level3s = req.Level3s
 	}
 	if len(req.Tags) > 0 {
 		spec.Tags = req.Tags
@@ -793,8 +847,8 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	}
 
 	// At least one field should be provided for update
-	hasUpdateFields := req.Title != nil || req.Segment != nil || len(req.Subsegment) > 0 || len(req.Tags) > 0 ||
-		req.Sex != nil || len(req.City) > 0 || req.AdLink != nil || req.Content != nil ||
+	hasUpdateFields := req.Title != nil || req.Level1 != nil || len(req.Level2s) > 0 || len(req.Level3s) > 0 ||
+		len(req.Tags) > 0 || req.Sex != nil || len(req.City) > 0 || req.AdLink != nil || req.Content != nil ||
 		req.ScheduleAt != nil || req.LineNumber != nil || req.Budget != nil
 
 	if !hasUpdateFields {
@@ -804,17 +858,56 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	return nil
 }
 
+// validateCalculateCampaignCapacityRequest validates the request
+func (s *CampaignFlowImpl) validateCalculateCampaignCapacityRequest(req *dto.CalculateCampaignCapacityRequest) error {
+	if req.Level1 == nil {
+		return ErrCampaignLevel1Required
+	}
+	if req.Level2s == nil {
+		return ErrCampaignLevel2sRequired
+	}
+	if len(req.Level2s) == 0 {
+		return ErrCampaignLevel2sRequired
+	}
+	if req.Level3s == nil {
+		return ErrCampaignLevel3sRequired
+	}
+	if len(req.Level3s) == 0 {
+		return ErrCampaignLevel3sRequired
+	}
+	if req.Tags == nil {
+		return ErrCampaignTagsRequired
+	}
+	if len(req.Tags) == 0 {
+		return ErrCampaignTagsRequired
+	}
+
+	return nil
+}
+
 func (s *CampaignFlowImpl) canFinalizeCampaign(campaign models.Campaign) error {
 	if campaign.Spec.Title == nil || *campaign.Spec.Title == "" {
 		return ErrCampaignTitleRequired
 	}
-	if campaign.Spec.Segment == nil || *campaign.Spec.Segment == "" {
-		return ErrCampaignSegmentRequired
+	if campaign.Spec.Level1 == nil || *campaign.Spec.Level1 == "" {
+		return ErrCampaignLevel1Required
 	}
-	if campaign.Spec.Subsegment == nil {
-		return ErrCampaignSubsegmentRequired
+	if campaign.Spec.Level2s == nil {
+		return ErrCampaignLevel2sRequired
+	}
+	if len(campaign.Spec.Level2s) == 0 {
+		return ErrCampaignLevel2sRequired
+	}
+	if campaign.Spec.Level3s == nil {
+		return ErrCampaignLevel3sRequired
+	}
+	if len(campaign.Spec.Level3s) == 0 {
+		return ErrCampaignLevel3sRequired
 	}
 	if campaign.Spec.Tags == nil {
+		return ErrCampaignTagsRequired
+	}
+	if len(campaign.Spec.Tags) == 0 {
 		return ErrCampaignTagsRequired
 	}
 	if campaign.Spec.Content == nil || *campaign.Spec.Content == "" {
@@ -844,11 +937,14 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Title != nil && *req.Title != "" {
 		spec.Title = req.Title
 	}
-	if req.Segment != nil && *req.Segment != "" {
-		spec.Segment = req.Segment
+	if req.Level1 != nil && *req.Level1 != "" {
+		spec.Level1 = req.Level1
 	}
-	if len(req.Subsegment) > 0 {
-		spec.Subsegment = req.Subsegment
+	if len(req.Level2s) > 0 {
+		spec.Level2s = req.Level2s
+	}
+	if len(req.Level3s) > 0 {
+		spec.Level3s = req.Level3s
 	}
 	if len(req.Tags) > 0 {
 		spec.Tags = req.Tags
@@ -907,45 +1003,82 @@ func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context) (*dto.ListAudie
 		}
 	}
 
-	// Read existing JSON file (if any)
-	current, err := readAudienceSpecFile(filePath)
+	// Read existing JSON file (if any) using v2 reader
+	current, err := readAudienceSpecFileV2(filePath)
 	if err != nil {
 		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
 	}
 
-	// Marshal and write atomically (tmp + rename)
-	bytes, err := json.MarshalIndent(current, "", "  ")
-	if err != nil {
-		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal merged spec", err)
-	}
-
-	// Update Redis cache
-	_ = s.rc.Set(ctx, cacheKey, bytes, 0).Err()
-
+	// Build DTO shape including level-2 metadata and only positive-availability items
 	out := make(dto.AudienceSpec)
-	for l1, l2 := range current {
-		for l2k, l3 := range l2 {
-			for l3k, item := range l3 {
-				if item.AvailableAudience > 0 {
-					if _, ok := out[l1]; !ok {
-						out[l1] = make(map[string]map[string]dto.AudienceSpecItem)
-					}
-					if _, ok := out[l1][l2k]; !ok {
-						out[l1][l2k] = make(map[string]dto.AudienceSpecItem)
-					}
-					out[l1][l2k][l3k] = dto.AudienceSpecItem{
-						Tags:              item.Tags,
-						AvailableAudience: item.AvailableAudience,
+	for l1, l2map := range current {
+		for l2k, node := range l2map {
+			if node == nil {
+				continue
+			}
+			// Collect items with AvailableAudience > 0
+			items := make(map[string]dto.AudienceSpecItem)
+			for l3k, leaf := range node.Items {
+				if leaf.AvailableAudience > 0 {
+					items[l3k] = dto.AudienceSpecItem{
+						Tags:              leaf.Tags,
+						AvailableAudience: leaf.AvailableAudience,
 					}
 				}
 			}
+			if len(items) == 0 && len(node.Metadata) == 0 {
+				// Skip empty level2 without items and metadata
+				continue
+			}
+			if _, ok := out[l1]; !ok {
+				out[l1] = make(map[string]dto.AudienceSpecLevel2)
+			}
+			out[l1][l2k] = dto.AudienceSpecLevel2{
+				Metadata: node.Metadata,
+				Items:    items,
+			}
 		}
+	}
+
+	// Cache DTO JSON
+	if bs, err := json.MarshalIndent(out, "", "  "); err == nil {
+		_ = s.rc.Set(ctx, cacheKey, bs, 0).Err()
 	}
 
 	return &dto.ListAudienceSpecResponse{
 		Message: "Audience spec retrieved",
 		Spec:    out,
 	}, nil
+}
+
+func (s *CampaignFlowImpl) GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error) {
+	if customerID == 0 {
+		return nil, NewBusinessError("CUSTOMER_ID_REQUIRED", "customer_id must be greater than 0", ErrCustomerNotFound)
+	}
+
+	// Build counts using repository Count with combined filters
+	custID := customerID
+	statusApproved := models.CampaignStatusApproved
+	statusRunning := models.CampaignStatusRunning
+
+	approvedCount64, err := s.campaignRepo.Count(ctx, models.CampaignFilter{CustomerID: &custID, Status: &statusApproved})
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_COUNT_FAILED", "Failed to count approved campaigns", err)
+	}
+	runningCount64, err := s.campaignRepo.Count(ctx, models.CampaignFilter{CustomerID: &custID, Status: &statusRunning})
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_COUNT_FAILED", "Failed to count running campaigns", err)
+	}
+
+	approved := int(approvedCount64)
+	running := int(runningCount64)
+	resp := &dto.CampaignsSummaryResponse{
+		Message:       "Campaigns summary retrieved",
+		ApprovedCount: approved,
+		RunningCount:  running,
+		Total:         approved + running,
+	}
+	return resp, nil
 }
 
 // calculateSMSParts calculates the number of SMS parts based on character count
