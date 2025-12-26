@@ -48,7 +48,9 @@ var (
 	ErrInsufficientCampaignCapacity = errors.New("insufficient campaign capacity")
 	ErrCampaignTitleRequired        = errors.New("campaign title is required")
 	ErrCampaignContentRequired      = errors.New("campaign content is required")
-	ErrCampaignSegmentRequired      = errors.New("campaign segment is required")
+	ErrCampaignLevel1Required       = errors.New("campaign level 1 is required")
+	ErrCampaignLevel2sRequired      = errors.New("at least one campaign level 2 is required")
+	ErrCampaignLevel3sRequired      = errors.New("at least one campaign level 3 is required")
 	ErrCampaignLineNumberRequired   = errors.New("campaign line number is required")
 	ErrCampaignLineNumberNotActive  = errors.New("campaign line number is not active")
 	ErrCampaignBudgetRequired       = errors.New("campaign budget is required")
@@ -57,7 +59,6 @@ var (
 	ErrScheduleTimeNotPresent       = errors.New("schedule time is not present")
 	ErrScheduleTimeTooSoon          = errors.New("schedule time is too soon")
 	ErrCampaignCityRequired         = errors.New("campaign city is required")
-	ErrCampaignSubsegmentRequired   = errors.New("campaign subsegment is required")
 	ErrCampaignTagsRequired         = errors.New("campaign tags is required")
 	ErrCampaignUpdateRequired       = errors.New("at least one field must be provided for update")
 	ErrCampaignUUIDRequired         = errors.New("campaign UUID is required")
@@ -250,8 +251,16 @@ func IsCampaignContentRequired(err error) bool {
 	return errors.Is(err, ErrCampaignContentRequired)
 }
 
-func IsCampaignSegmentRequired(err error) bool {
-	return errors.Is(err, ErrCampaignSegmentRequired)
+func IsCampaignLevel1Required(err error) bool {
+	return errors.Is(err, ErrCampaignLevel1Required)
+}
+
+func IsCampaignLevel2sRequired(err error) bool {
+	return errors.Is(err, ErrCampaignLevel2sRequired)
+}
+
+func IsCampaignLevel3sRequired(err error) bool {
+	return errors.Is(err, ErrCampaignLevel3sRequired)
 }
 
 func IsCampaignLineNumberRequired(err error) bool {
@@ -284,10 +293,6 @@ func IsScheduleTimeTooSoon(err error) bool {
 
 func IsCampaignCityRequired(err error) bool {
 	return errors.Is(err, ErrCampaignCityRequired)
-}
-
-func IsCampaignSubsegmentRequired(err error) bool {
-	return errors.Is(err, ErrCampaignSubsegmentRequired)
 }
 
 func IsCampaignTagsRequired(err error) bool {
