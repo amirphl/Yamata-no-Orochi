@@ -311,9 +311,9 @@ type SchedulerConfig struct {
 }
 
 type MessageConfig struct {
-	SignupVerificationCodeTemplate    string `json:"signup_verification_code_template"`
-	SigninVerificationCodeTemplate    string `json:"signin_verification_code_template"`
-	OTPResendVerificationCodeTemplate string `json:"otp_resend_verification_code_template"`
+	SignupVerificationCodeTemplate        string `json:"signup_verification_code_template"`
+	SigninVerificationCodeTemplate        string `json:"signin_verification_code_template"`
+	OTPResendVerificationCodeTemplate     string `json:"otp_resend_verification_code_template"`
 	PasswordResetVerificationCodeTemplate string `json:"password_reset_verification_code_template"`
 }
 
@@ -546,9 +546,9 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			},
 		},
 		Message: MessageConfig{
-			SignupVerificationCodeTemplate:    getEnvString("MESSAGE_SIGNUP_VERIFICATION_CODE_TEMPLATE", "Your verification code is %s"),
-			SigninVerificationCodeTemplate:    getEnvString("MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE", "Your verification code is %s"),
-			OTPResendVerificationCodeTemplate: getEnvString("MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE", "Your new verification code is: %s. Valid for %v minutes."),
+			SignupVerificationCodeTemplate:        getEnvString("MESSAGE_SIGNUP_VERIFICATION_CODE_TEMPLATE", "Your verification code is %s"),
+			SigninVerificationCodeTemplate:        getEnvString("MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE", "Your verification code is %s"),
+			OTPResendVerificationCodeTemplate:     getEnvString("MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE", "Your new verification code is: %s. Valid for %v minutes."),
 			PasswordResetVerificationCodeTemplate: getEnvString("MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE", "Your password reset code is: %s. This code will expire in %v minutes."),
 		},
 	}
