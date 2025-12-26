@@ -104,10 +104,10 @@ func (f *AdminLineNumberFlowImpl) UpdateBatch(ctx context.Context, req *dto.Admi
 		}
 
 		updates = append(updates, &models.LineNumber{
-			ID:          item.ID,
-			Priority:    item.Priority,
-			IsActive:    item.IsActive,
-			UpdatedAt:   utils.UTCNow(),
+			ID:        item.ID,
+			Priority:  item.Priority,
+			IsActive:  item.IsActive,
+			UpdatedAt: utils.UTCNow(),
 		})
 	}
 	// Persist
