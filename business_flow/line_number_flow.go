@@ -45,7 +45,8 @@ func (f *LineNumberFlowImpl) ListActiveLineNumbers(ctx context.Context, metadata
 	items := make([]dto.ActiveLineNumberItem, 0, len(rows))
 	for _, r := range rows {
 		items = append(items, dto.ActiveLineNumberItem{
-			LineNumber: r.LineNumber,
+			LineNumber:  r.LineNumber,
+			PriceFactor: r.PriceFactor,
 		})
 	}
 
