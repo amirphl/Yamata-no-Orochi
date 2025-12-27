@@ -2462,6 +2462,50 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/campaigns/summary": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get campaigns summary",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns/{uuid}": {
             "put": {
                 "description": "Update an existing campaign with the specified parameters",
@@ -3037,6 +3081,50 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/profile": {
+            "get": {
+                "description": "Retrieve the authenticated customer's profile and parent agency details (if exists)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Profile"
+                ],
+                "summary": "Get profile",
+                "responses": {
+                    "200": {
+                        "description": "Profile retrieved successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.GetProfileResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -3709,6 +3797,9 @@ const docTemplate = `{
             "properties": {
                 "line_number": {
                     "type": "string"
+                },
+                "price_factor": {
+                    "type": "number"
                 }
             }
         },
@@ -4179,6 +4270,21 @@ const docTemplate = `{
                 "id": {
                     "type": "integer"
                 },
+                "level1": {
+                    "type": "string"
+                },
+                "level2s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "line_number": {
                     "type": "string"
                 },
@@ -4186,9 +4292,6 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "scheduleat": {
-                    "type": "string"
-                },
-                "segment": {
                     "type": "string"
                 },
                 "segment_price_factor": {
@@ -4199,12 +4302,6 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
-                },
-                "subsegment": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -4483,6 +4580,32 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AgencyProfileDTO": {
+            "type": "object",
+            "properties": {
+                "account_type": {
+                    "type": "string"
+                },
+                "agency_referer_code": {
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AtipayRequest": {
             "type": "object",
             "properties": {
@@ -4732,6 +4855,21 @@ const docTemplate = `{
                 "id": {
                     "type": "integer"
                 },
+                "level1": {
+                    "type": "string"
+                },
+                "level2s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "line_number": {
                     "type": "string"
                 },
@@ -4741,20 +4879,11 @@ const docTemplate = `{
                 "scheduleat": {
                     "type": "string"
                 },
-                "segment": {
-                    "type": "string"
-                },
                 "sex": {
                     "type": "string"
                 },
                 "status": {
                     "type": "string"
-                },
-                "subsegment": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -4890,6 +5019,10 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 255
                 },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
                 "tags": {
                     "type": "array",
                     "minItems": 1,
@@ -4929,6 +5062,24 @@ const docTemplate = `{
                     "maxLength": 512,
                     "minLength": 1
                 },
+                "level1": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level2s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "line_number": {
                     "type": "string",
                     "maxLength": 255
@@ -4936,20 +5087,9 @@ const docTemplate = `{
                 "scheduleat": {
                     "type": "string"
                 },
-                "segment": {
-                    "type": "string",
-                    "maxLength": 255
-                },
                 "sex": {
                     "type": "string",
                     "maxLength": 255
-                },
-                "subsegment": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -4997,6 +5137,24 @@ const docTemplate = `{
                     "maxLength": 512,
                     "minLength": 1
                 },
+                "level1": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level2s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "line_number": {
                     "type": "string",
                     "maxLength": 255
@@ -5004,20 +5162,9 @@ const docTemplate = `{
                 "scheduleat": {
                     "type": "string"
                 },
-                "segment": {
-                    "type": "string",
-                    "maxLength": 255
-                },
                 "sex": {
                     "type": "string",
                     "maxLength": 255
-                },
-                "subsegment": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -5133,6 +5280,24 @@ const docTemplate = `{
                     "maxLength": 512,
                     "minLength": 1
                 },
+                "level1": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level2s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "line_number": {
                     "type": "string",
                     "maxLength": 255
@@ -5140,20 +5305,9 @@ const docTemplate = `{
                 "schedule_at": {
                     "type": "string"
                 },
-                "segment": {
-                    "type": "string",
-                    "maxLength": 255
-                },
                 "sex": {
                     "type": "string",
                     "maxLength": 255
-                },
-                "subsegment": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -5173,6 +5327,9 @@ const docTemplate = `{
             "properties": {
                 "created_at": {
                     "type": "string"
+                },
+                "id": {
+                    "type": "integer"
                 },
                 "message": {
                     "type": "string"
@@ -5397,13 +5554,25 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "level1": {
+                    "type": "string"
+                },
+                "level2s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "line_number": {
                     "type": "string"
                 },
                 "scheduleat": {
-                    "type": "string"
-                },
-                "segment": {
                     "type": "string"
                 },
                 "sex": {
@@ -5411,12 +5580,6 @@ const docTemplate = `{
                 },
                 "status": {
                     "type": "string"
-                },
-                "subsegment": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "tags": {
                     "type": "array",
@@ -5473,6 +5636,20 @@ const docTemplate = `{
                 },
                 "status_reason": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.GetProfileResponse": {
+            "type": "object",
+            "properties": {
+                "customer": {
+                    "$ref": "#/definitions/dto.ProfileDTO"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "parent_agency": {
+                    "$ref": "#/definitions/dto.AgencyProfileDTO"
                 }
             }
         },
@@ -5707,6 +5884,90 @@ const docTemplate = `{
                 },
                 "total_pages": {
                     "type": "integer"
+                }
+            }
+        },
+        "dto.ProfileDTO": {
+            "type": "object",
+            "properties": {
+                "account_type": {
+                    "type": "string"
+                },
+                "account_type_display_name": {
+                    "type": "string"
+                },
+                "agency_id": {
+                    "description": "Agency-specific/helpful fields",
+                    "type": "integer"
+                },
+                "agency_referer_code": {
+                    "type": "string"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "company_address": {
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "company_phone": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "is_active": {
+                    "type": "boolean"
+                },
+                "is_email_verified": {
+                    "type": "boolean"
+                },
+                "is_mobile_verified": {
+                    "type": "boolean"
+                },
+                "job": {
+                    "type": "string"
+                },
+                "last_login_at": {
+                    "type": "string"
+                },
+                "national_id": {
+                    "type": "string"
+                },
+                "parent_agency_name": {
+                    "type": "string"
+                },
+                "postal_code": {
+                    "type": "string"
+                },
+                "referrer_agency_id": {
+                    "type": "integer"
+                },
+                "representative_first_name": {
+                    "type": "string"
+                },
+                "representative_last_name": {
+                    "type": "string"
+                },
+                "representative_mobile": {
+                    "type": "string"
+                },
+                "sheba_number": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
                 }
             }
         },
@@ -6049,6 +6310,24 @@ const docTemplate = `{
                 "finalize": {
                     "type": "boolean"
                 },
+                "level1": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level2s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "line_number": {
                     "type": "string",
                     "maxLength": 255
@@ -6056,20 +6335,9 @@ const docTemplate = `{
                 "scheduleat": {
                     "type": "string"
                 },
-                "segment": {
-                    "type": "string",
-                    "maxLength": 255
-                },
                 "sex": {
                     "type": "string",
                     "maxLength": 255
-                },
-                "subsegment": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
                 },
                 "tags": {
                     "type": "array",
