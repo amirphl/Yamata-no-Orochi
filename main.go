@@ -540,6 +540,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	adminShortLinkDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo)
 	adminShortLinkClicksDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo)
 
+	// Profile flow
+	profileFlow := businessflow.NewProfileFlow(customerRepo)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
@@ -558,6 +561,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	shortLinkAdminHandler := handlers.NewShortLinkAdminHandler(adminShortLinkFlow, adminShortLinkDownloadFlow, adminShortLinkClicksDownloadFlow)
 
 	ticketHandler := handlers.NewTicketHandler(ticketFlow)
+
+	profileHandler := handlers.NewProfileHandler(profileFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
@@ -581,6 +586,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		shortLinkHandler,
 		shortLinkAdminHandler,
 		cryptoPaymentHandler,
+		profileHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
