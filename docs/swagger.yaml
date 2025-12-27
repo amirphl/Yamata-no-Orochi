@@ -12,6 +12,8 @@ definitions:
     properties:
       line_number:
         type: string
+      price_factor:
+        type: number
     type: object
   dto.AdminApproveCampaignRequest:
     properties:
@@ -324,13 +326,21 @@ definitions:
         type: string
       id:
         type: integer
+      level1:
+        type: string
+      level2s:
+        items:
+          type: string
+        type: array
+      level3s:
+        items:
+          type: string
+        type: array
       line_number:
         type: string
       line_number_price_factor:
         type: number
       scheduleat:
-        type: string
-      segment:
         type: string
       segment_price_factor:
         type: number
@@ -338,10 +348,6 @@ definitions:
         type: string
       status:
         type: string
-      subsegment:
-        items:
-          type: string
-        type: array
       tags:
         items:
           type: string
@@ -523,6 +529,23 @@ definitions:
       sum_total_sent:
         type: integer
     type: object
+  dto.AgencyProfileDTO:
+    properties:
+      account_type:
+        type: string
+      agency_referer_code:
+        type: string
+      company_name:
+        type: string
+      created_at:
+        type: string
+      display_name:
+        type: string
+      is_active:
+        type: boolean
+      updated_at:
+        type: string
+    type: object
   dto.AtipayRequest:
     properties:
       maskedPan:
@@ -696,22 +719,26 @@ definitions:
         type: string
       id:
         type: integer
+      level1:
+        type: string
+      level2s:
+        items:
+          type: string
+        type: array
+      level3s:
+        items:
+          type: string
+        type: array
       line_number:
         type: string
       num_audiences:
         type: integer
       scheduleat:
         type: string
-      segment:
-        type: string
       sex:
         type: string
       status:
         type: string
-      subsegment:
-        items:
-          type: string
-        type: array
       tags:
         items:
           type: string
@@ -799,6 +826,9 @@ definitions:
       level3:
         maxLength: 255
         type: string
+      metadata:
+        additionalProperties: {}
+        type: object
       tags:
         items:
           type: string
@@ -832,22 +862,27 @@ definitions:
         maxLength: 512
         minLength: 1
         type: string
+      level1:
+        maxLength: 255
+        type: string
+      level2s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      level3s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
       line_number:
         maxLength: 255
         type: string
       scheduleat:
         type: string
-      segment:
-        maxLength: 255
-        type: string
       sex:
         maxLength: 255
         type: string
-      subsegment:
-        items:
-          type: string
-        maxItems: 255
-        type: array
       tags:
         items:
           type: string
@@ -880,22 +915,27 @@ definitions:
         maxLength: 512
         minLength: 1
         type: string
+      level1:
+        maxLength: 255
+        type: string
+      level2s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      level3s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
       line_number:
         maxLength: 255
         type: string
       scheduleat:
         type: string
-      segment:
-        maxLength: 255
-        type: string
       sex:
         maxLength: 255
         type: string
-      subsegment:
-        items:
-          type: string
-        maxItems: 255
-        type: array
       tags:
         items:
           type: string
@@ -975,22 +1015,27 @@ definitions:
         maxLength: 512
         minLength: 1
         type: string
+      level1:
+        maxLength: 255
+        type: string
+      level2s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      level3s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
       line_number:
         maxLength: 255
         type: string
       schedule_at:
         type: string
-      segment:
-        maxLength: 255
-        type: string
       sex:
         maxLength: 255
         type: string
-      subsegment:
-        items:
-          type: string
-        maxItems: 255
-        type: array
       tags:
         items:
           type: string
@@ -1004,6 +1049,8 @@ definitions:
     properties:
       created_at:
         type: string
+      id:
+        type: integer
       message:
         type: string
       status:
@@ -1153,20 +1200,24 @@ definitions:
         type: string
       created_at:
         type: string
+      level1:
+        type: string
+      level2s:
+        items:
+          type: string
+        type: array
+      level3s:
+        items:
+          type: string
+        type: array
       line_number:
         type: string
       scheduleat:
-        type: string
-      segment:
         type: string
       sex:
         type: string
       status:
         type: string
-      subsegment:
-        items:
-          type: string
-        type: array
       tags:
         items:
           type: string
@@ -1204,6 +1255,15 @@ definitions:
         type: string
       status_reason:
         type: string
+    type: object
+  dto.GetProfileResponse:
+    properties:
+      customer:
+        $ref: '#/definitions/dto.ProfileDTO'
+      message:
+        type: string
+      parent_agency:
+        $ref: '#/definitions/dto.AgencyProfileDTO'
     type: object
   dto.GetWalletBalanceResponse:
     properties:
@@ -1360,6 +1420,62 @@ definitions:
         type: integer
       total_pages:
         type: integer
+    type: object
+  dto.ProfileDTO:
+    properties:
+      account_type:
+        type: string
+      account_type_display_name:
+        type: string
+      agency_id:
+        description: Agency-specific/helpful fields
+        type: integer
+      agency_referer_code:
+        type: string
+      category:
+        type: string
+      company_address:
+        type: string
+      company_name:
+        type: string
+      company_phone:
+        type: string
+      created_at:
+        type: string
+      email:
+        type: string
+      id:
+        type: integer
+      is_active:
+        type: boolean
+      is_email_verified:
+        type: boolean
+      is_mobile_verified:
+        type: boolean
+      job:
+        type: string
+      last_login_at:
+        type: string
+      national_id:
+        type: string
+      parent_agency_name:
+        type: string
+      postal_code:
+        type: string
+      referrer_agency_id:
+        type: integer
+      representative_first_name:
+        type: string
+      representative_last_name:
+        type: string
+      representative_mobile:
+        type: string
+      sheba_number:
+        type: string
+      updated_at:
+        type: string
+      uuid:
+        type: string
     type: object
   dto.ResetPasswordRequest:
     properties:
@@ -1605,22 +1721,27 @@ definitions:
         type: string
       finalize:
         type: boolean
+      level1:
+        maxLength: 255
+        type: string
+      level2s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      level3s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
       line_number:
         maxLength: 255
         type: string
       scheduleat:
         type: string
-      segment:
-        maxLength: 255
-        type: string
       sex:
         maxLength: 255
         type: string
-      subsegment:
-        items:
-          type: string
-        maxItems: 255
-        type: array
       tags:
         items:
           type: string
@@ -3194,6 +3315,32 @@ paths:
       summary: Calculate Campaign Cost
       tags:
       - Campaigns
+  /api/v1/campaigns/summary:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  additionalProperties: true
+                  type: object
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get campaigns summary
+      tags:
+      - Campaigns
   /api/v1/crypto/payments/{uuid}/status:
     get:
       consumes:
@@ -3513,6 +3660,33 @@ paths:
       summary: Get Transaction History
       tags:
       - Payments
+  /api/v1/profile:
+    get:
+      description: Retrieve the authenticated customer's profile and parent agency
+        details (if exists)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Profile retrieved successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.GetProfileResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get profile
+      tags:
+      - Profile
   /api/v1/reports/agency/customers:
     get:
       consumes:
