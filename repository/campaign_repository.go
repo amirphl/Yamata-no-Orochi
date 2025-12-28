@@ -245,8 +245,8 @@ func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.Campaign
 	if filter.Title != nil {
 		db = db.Where("spec->>'title' ILIKE ?", "%"+*filter.Title+"%")
 	}
-	if filter.Segment != nil {
-		db = db.Where("spec->>'segment' = ?", *filter.Segment)
+	if filter.Level1 != nil {
+		db = db.Where("spec->>'level1' = ?", *filter.Level1)
 	}
 	if filter.Sex != nil {
 		db = db.Where("spec->>'sex' = ?", *filter.Sex)
