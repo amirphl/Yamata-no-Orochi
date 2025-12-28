@@ -74,11 +74,12 @@ type CampaignSpec struct {
 	Title *string `json:"title,omitempty"`
 
 	// Target audience
-	Segment    *string  `json:"segment,omitempty"`
-	Subsegment []string `json:"subsegment,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Sex        *string  `json:"sex,omitempty"`
-	City       []string `json:"city,omitempty"`
+	Level1  *string  `json:"level1,omitempty"`
+	Level2s []string `json:"level2s,omitempty"`
+	Level3s []string `json:"level3s,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Sex     *string  `json:"sex,omitempty"`
+	City    []string `json:"city,omitempty"`
 
 	// Campaign content
 	AdLink  *string `json:"adlink,omitempty"`
@@ -198,7 +199,7 @@ type CampaignFilter struct {
 	CustomerID     *uint           `json:"customer_id,omitempty"`
 	Status         *CampaignStatus `json:"status,omitempty"`
 	Title          *string         `json:"title,omitempty"`
-	Segment        *string         `json:"segment,omitempty"`
+	Level1         *string         `json:"level1,omitempty"`
 	Sex            *string         `json:"sex,omitempty"`
 	City           *string         `json:"city,omitempty"`
 	LineNumber     *string         `json:"line_number,omitempty"`
