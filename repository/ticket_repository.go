@@ -134,4 +134,3 @@ func (r *TicketRepositoryImpl) Exists(ctx context.Context, filter models.TicketF
 	}
 	return c > 0, nil
 }
- 
