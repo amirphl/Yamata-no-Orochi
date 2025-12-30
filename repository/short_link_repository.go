@@ -226,12 +226,22 @@ func (r *ShortLinkRepositoryImpl) Exists(ctx context.Context, filter models.Shor
 
 func (r *ShortLinkRepositoryImpl) ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error) {
 	db := r.getDB(ctx)
-	query := db.Model(&models.ShortLink{}).
-		Select("short_links.*").
-		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id AND c.scenario_id = ?", scenarioID)
-	if orderBy != "" {
-		query = query.Order(orderBy)
-	}
+	query := db.Table("short_link_clicks").
+		Select(`DISTINCT ON (short_link_id)
+			short_link_id AS id,
+			uid,
+			campaign_id,
+			client_id,
+			scenario_id,
+			scenario_name,
+			phone_number,
+			long_link,
+			short_link,
+			short_link_created_at AS created_at,
+			short_link_updated_at AS updated_at`).
+		Where("scenario_id = ?", scenarioID).
+		Order("short_link_id")
+	query = applyOrder(query, orderBy, "id ASC")
 	var rows []*models.ShortLink
 	if err := query.Find(&rows).Error; err != nil {
 		return nil, err
@@ -241,23 +251,22 @@ func (r *ShortLinkRepositoryImpl) ListByScenarioWithClicks(ctx context.Context, 
 
 func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenario(ctx context.Context, scenarioID uint, orderBy string) ([]*ShortLinkWithClick, error) {
 	db := r.getDB(ctx)
-	q := db.Table("short_links").
-		Select(`short_links.id,
-			short_links.uid,
-			short_links.campaign_id,
-			short_links.client_id,
-			short_links.scenario_id,
-			short_links.phone_number,
-			short_links.long_link,
-			short_links.short_link,
-			short_links.created_at,
-			short_links.updated_at,
-			c.user_agent AS click_user_agent,
-			c.ip AS click_ip`).
-		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id AND c.scenario_id = ?", scenarioID)
-	if orderBy != "" {
-		q = q.Order(orderBy)
-	}
+	q := db.Table("short_link_clicks").
+		Select(`short_link_id AS id,
+			uid,
+			campaign_id,
+			client_id,
+			scenario_id,
+			scenario_name,
+			phone_number,
+			long_link,
+			short_link,
+			short_link_created_at AS created_at,
+			short_link_updated_at AS updated_at,
+			user_agent AS click_user_agent,
+			ip AS click_ip`).
+		Where("scenario_id = ?", scenarioID)
+	q = applyOrder(q, orderBy, "short_link_id ASC, id ASC")
 	var out []*ShortLinkWithClick
 	if err := q.Scan(&out).Error; err != nil {
 		return nil, err
@@ -267,24 +276,22 @@ func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenario(ctx context.Co
 
 func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioRange(ctx context.Context, scenarioFrom, scenarioTo uint, orderBy string) ([]*ShortLinkWithClick, error) {
 	db := r.getDB(ctx)
-	q := db.Table("short_links").
-		Select(`short_links.id,
-			short_links.uid,
-			short_links.campaign_id,
-			short_links.client_id,
-			short_links.scenario_id,
-			short_links.scenario_name,
-			short_links.phone_number,
-			short_links.long_link,
-			short_links.short_link,
-			short_links.created_at,
-			short_links.updated_at,
-			c.user_agent AS click_user_agent,
-			c.ip AS click_ip`).
-		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id AND c.scenario_id >= ? AND c.scenario_id < ?", scenarioFrom, scenarioTo)
-	if orderBy != "" {
-		q = q.Order(orderBy)
-	}
+	q := db.Table("short_link_clicks").
+		Select(`short_link_id AS id,
+			uid,
+			campaign_id,
+			client_id,
+			scenario_id,
+			scenario_name,
+			phone_number,
+			long_link,
+			short_link,
+			short_link_created_at AS created_at,
+			short_link_updated_at AS updated_at,
+			user_agent AS click_user_agent,
+			ip AS click_ip`).
+		Where("scenario_id >= ? AND scenario_id < ?", scenarioFrom, scenarioTo)
+	q = applyOrder(q, orderBy, "short_link_id ASC, id ASC")
 	var out []*ShortLinkWithClick
 	if err := q.Scan(&out).Error; err != nil {
 		return nil, err
@@ -294,25 +301,22 @@ func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioRange(ctx conte
 
 func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioNameRegex(ctx context.Context, pattern string, orderBy string) ([]*ShortLinkWithClick, error) {
 	db := r.getDB(ctx)
-	q := db.Table("short_links").
-		Select(`short_links.id,
-			short_links.uid,
-			short_links.campaign_id,
-			short_links.client_id,
-			short_links.scenario_id,
-			short_links.scenario_name,
-			short_links.phone_number,
-			short_links.long_link,
-			short_links.short_link,
-			short_links.created_at,
-			short_links.updated_at,
-			c.user_agent AS click_user_agent,
-			c.ip AS click_ip`).
-		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id").
-		Where("short_links.scenario_name ~ ?", pattern)
-	if orderBy != "" {
-		q = q.Order(orderBy)
-	}
+	q := db.Table("short_link_clicks").
+		Select(`short_link_id AS id,
+			uid,
+			campaign_id,
+			client_id,
+			scenario_id,
+			scenario_name,
+			phone_number,
+			long_link,
+			short_link,
+			short_link_created_at AS created_at,
+			short_link_updated_at AS updated_at,
+			user_agent AS click_user_agent,
+			ip AS click_ip`).
+		Where("scenario_name ~ ?", pattern)
+	q = applyOrder(q, orderBy, "scenario_id ASC, short_link_id ASC, id ASC")
 	var out []*ShortLinkWithClick
 	if err := q.Scan(&out).Error; err != nil {
 		return nil, err
@@ -322,30 +326,35 @@ func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioNameRegex(ctx c
 
 func (r *ShortLinkRepositoryImpl) ListWithClicksDetailsByScenarioNameLike(ctx context.Context, pattern string, orderBy string) ([]*ShortLinkWithClick, error) {
 	db := r.getDB(ctx)
-	q := db.Table("short_links").
-		Select(`short_links.id,
-			short_links.uid,
-			short_links.campaign_id,
-			short_links.client_id,
-			short_links.scenario_id,
-			short_links.scenario_name,
-			short_links.phone_number,
-			short_links.long_link,
-			short_links.short_link,
-			short_links.created_at,
-			short_links.updated_at,
-			c.user_agent AS click_user_agent,
-			c.ip AS click_ip`).
-		Joins("JOIN short_link_clicks c ON c.short_link_id = short_links.id").
-		Where("short_links.scenario_name LIKE ?", "%"+pattern+"%")
-	if orderBy != "" {
-		q = q.Order(orderBy)
-	}
+	q := db.Table("short_link_clicks").
+		Select(`short_link_id AS id,
+			uid,
+			campaign_id,
+			client_id,
+			scenario_id,
+			scenario_name,
+			phone_number,
+			long_link,
+			short_link,
+			short_link_created_at AS created_at,
+			short_link_updated_at AS updated_at,
+			user_agent AS click_user_agent,
+			ip AS click_ip`).
+		Where("scenario_name LIKE ?", "%"+pattern+"%")
+	q = applyOrder(q, orderBy, "scenario_id ASC, short_link_id ASC, id ASC")
 	var out []*ShortLinkWithClick
 	if err := q.Scan(&out).Error; err != nil {
 		return nil, err
 	}
 	return out, nil
+}
+
+// applyOrder applies a caller-provided order or falls back to a safe default
+func applyOrder(db *gorm.DB, orderBy, fallback string) *gorm.DB {
+	if strings.TrimSpace(orderBy) != "" {
+		return db.Order(orderBy)
+	}
+	return db.Order(fallback)
 }
 
 func (r *ShortLinkRepositoryImpl) GetLastScenarioID(ctx context.Context) (uint, error) {
