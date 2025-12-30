@@ -32,12 +32,26 @@ func (f *ShortLinkVisitFlowImpl) Visit(ctx context.Context, uid string, userAgen
 	if row == nil {
 		return "", ErrShortLinkNotFound
 	}
+
+	longLink := row.LongLink
+	shortLink := row.ShortLink
+	shortLinkCreatedAt := row.CreatedAt
+	shortLinkUpdatedAt := row.UpdatedAt
 	// Insert click row
 	if err := f.clickRepo.Save(ctx, &models.ShortLinkClick{
-		ShortLinkID: row.ID,
-		ScenarioID:  row.ScenarioID,
-		UserAgent:   userAgent,
-		IP:          ip,
+		ShortLinkID:        row.ID,
+		UID:                &row.UID,
+		CampaignID:         row.CampaignID,
+		ClientID:           row.ClientID,
+		ScenarioID:         row.ScenarioID,
+		ScenarioName:       row.ScenarioName,
+		PhoneNumber:        row.PhoneNumber,
+		LongLink:           &longLink,
+		ShortLink:          &shortLink,
+		ShortLinkCreatedAt: &shortLinkCreatedAt,
+		ShortLinkUpdatedAt: &shortLinkUpdatedAt,
+		UserAgent:          userAgent,
+		IP:                 ip,
 	}); err != nil {
 		return "", NewBusinessError("SHORT_LINK_TRACK_FAILED", "Failed to track short link click", err)
 	}
