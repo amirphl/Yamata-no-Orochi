@@ -7,8 +7,10 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -319,10 +321,12 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_id must be greater than 0", nil)
 	}
 
-	rows, err := f.repo.ListWithClicksDetailsByScenario(ctx, scenarioID, "short_links.id ASC, c.id ASC")
+	rows, err := f.repo.ListWithClicksDetailsByScenario(ctx, scenarioID, "short_link_id ASC, id ASC")
 	if err != nil {
 		return "", nil, NewBusinessError("FETCH_SHORT_LINKS_FAILED", "Failed to fetch short links with clicks", err)
 	}
+
+	records := buildClickRecords(rows, buildClickRecord)
 
 	buf := &bytes.Buffer{}
 	w := csv.NewWriter(buf)
@@ -352,46 +356,7 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 		return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV header", err)
 	}
 
-	for _, r := range rows {
-		campaignID := ""
-		if r.CampaignID != nil {
-			campaignID = strconv.FormatUint(uint64(*r.CampaignID), 10)
-		}
-		clientID := ""
-		if r.ClientID != nil {
-			clientID = strconv.FormatUint(uint64(*r.ClientID), 10)
-		}
-		scenario := ""
-		if r.ScenarioID != nil {
-			scenario = strconv.FormatUint(uint64(*r.ScenarioID), 10)
-		}
-		phone := ""
-		if r.PhoneNumber != nil {
-			phone = *r.PhoneNumber
-		}
-		ua := ""
-		if r.ClickUserAgent != nil {
-			ua = *r.ClickUserAgent
-		}
-		ip := ""
-		if r.ClickIP != nil {
-			ip = *r.ClickIP
-		}
-
-		record := []string{
-			strconv.FormatUint(uint64(r.ID), 10),
-			r.UID,
-			campaignID,
-			clientID,
-			scenario,
-			phone,
-			r.LongLink,
-			r.ShortLink,
-			r.CreatedAt.UTC().Format(time.RFC3339),
-			r.UpdatedAt.UTC().Format(time.RFC3339),
-			ua,
-			ip,
-		}
+	for _, record := range records {
 		if err := w.Write(record); err != nil {
 			return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV row", err)
 		}
@@ -413,10 +378,12 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSVRange(ctx contex
 		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_to must be greater than scenario_from", nil)
 	}
 
-	rows, err := f.repo.ListWithClicksDetailsByScenarioRange(ctx, scenarioFrom, scenarioTo, "short_links.id ASC, c.id ASC")
+	rows, err := f.repo.ListWithClicksDetailsByScenarioRange(ctx, scenarioFrom, scenarioTo, "short_link_id ASC, id ASC")
 	if err != nil {
 		return "", nil, NewBusinessError("FETCH_SHORT_LINKS_FAILED", "Failed to fetch short links with clicks by range", err)
 	}
+
+	records := buildClickRecords(rows, buildClickRecord)
 
 	buf := &bytes.Buffer{}
 	w := csv.NewWriter(buf)
@@ -446,46 +413,7 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSVRange(ctx contex
 		return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV header", err)
 	}
 
-	for _, r := range rows {
-		campaignID := ""
-		if r.CampaignID != nil {
-			campaignID = strconv.FormatUint(uint64(*r.CampaignID), 10)
-		}
-		clientID := ""
-		if r.ClientID != nil {
-			clientID = strconv.FormatUint(uint64(*r.ClientID), 10)
-		}
-		scenario := ""
-		if r.ScenarioID != nil {
-			scenario = strconv.FormatUint(uint64(*r.ScenarioID), 10)
-		}
-		phone := ""
-		if r.PhoneNumber != nil {
-			phone = *r.PhoneNumber
-		}
-		ua := ""
-		if r.ClickUserAgent != nil {
-			ua = *r.ClickUserAgent
-		}
-		ip := ""
-		if r.ClickIP != nil {
-			ip = *r.ClickIP
-		}
-
-		record := []string{
-			strconv.FormatUint(uint64(r.ID), 10),
-			r.UID,
-			campaignID,
-			clientID,
-			scenario,
-			phone,
-			r.LongLink,
-			r.ShortLink,
-			r.CreatedAt.UTC().Format(time.RFC3339),
-			r.UpdatedAt.UTC().Format(time.RFC3339),
-			ua,
-			ip,
-		}
+	for _, record := range records {
 		if err := w.Write(record); err != nil {
 			return "", nil, NewBusinessError("CSV_WRITE_ERROR", "Failed to write CSV row", err)
 		}
@@ -505,8 +433,8 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksExcelByScenarioName
 		return "", nil, NewBusinessError("VALIDATION_ERROR", "scenario_name_regex must not be empty", nil)
 	}
 
-	// rows, err := f.repo.ListWithClicksDetailsByScenarioNameRegex(ctx, pattern, "short_links.scenario_id ASC, short_links.id ASC")
-	rows, err := f.repo.ListWithClicksDetailsByScenarioNameLike(ctx, pattern, "short_links.scenario_id ASC, short_links.id ASC")
+	// rows, err := f.repo.ListWithClicksDetailsByScenarioNameRegex(ctx, pattern, "scenario_id ASC, short_link_id ASC, id ASC")
+	rows, err := f.repo.ListWithClicksDetailsByScenarioNameLike(ctx, pattern, "scenario_id ASC, short_link_id ASC, id ASC")
 	if err != nil {
 		return "", nil, NewBusinessError("FETCH_SHORT_LINKS_FAILED", "Failed to fetch short links by scenario name regex", err)
 	}
@@ -563,47 +491,10 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksExcelByScenarioName
 		_ = xl.SetSheetRow(name, "A1", &header)
 
 		rowsForScenario := byScenario[sid]
-		for ri, r := range rowsForScenario {
-			campaignID := ""
-			if r.CampaignID != nil {
-				campaignID = strconv.FormatUint(uint64(*r.CampaignID), 10)
-			}
-			clientID := ""
-			if r.ClientID != nil {
-				clientID = strconv.FormatUint(uint64(*r.ClientID), 10)
-			}
-			scenario := strconv.FormatUint(uint64(sid), 10)
-			phone := ""
-			if r.PhoneNumber != nil {
-				phone = *r.PhoneNumber
-			}
-			scName := ""
-			if r.ScenarioName != nil {
-				scName = *r.ScenarioName
-			}
-			ua := ""
-			if r.ClickUserAgent != nil {
-				ua = *r.ClickUserAgent
-			}
-			ip := ""
-			if r.ClickIP != nil {
-				ip = *r.ClickIP
-			}
-			record := []string{
-				strconv.FormatUint(uint64(r.ID), 10),
-				r.UID,
-				campaignID,
-				clientID,
-				scenario,
-				scName,
-				phone,
-				r.LongLink,
-				r.ShortLink,
-				r.CreatedAt.UTC().Format(time.RFC3339),
-				r.UpdatedAt.UTC().Format(time.RFC3339),
-				ua,
-				ip,
-			}
+		records := buildClickRecords(rowsForScenario, func(r *repository.ShortLinkWithClick) []string {
+			return buildClickRecordWithScenario(sid, nameByScenario[sid], r)
+		})
+		for ri, record := range records {
 			cellRef, _ := excelize.CoordinatesToCellName(1, ri+2)
 			_ = xl.SetSheetRow(name, cellRef, &record)
 		}
@@ -632,4 +523,92 @@ func truncateSheetName(name string) string {
 		return "Sheet"
 	}
 	return name
+}
+
+func buildClickRecords(rows []*repository.ShortLinkWithClick, builder func(*repository.ShortLinkWithClick) []string) [][]string {
+	out := make([][]string, len(rows))
+	workers := runtime.NumCPU()
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > len(rows) {
+		workers = len(rows)
+	}
+	chunk := (len(rows) + workers - 1) / workers
+
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		start := w * chunk
+		if start >= len(rows) {
+			break
+		}
+		end := start + chunk
+		if end > len(rows) {
+			end = len(rows)
+		}
+		wg.Add(1)
+		go func(s, e int) {
+			defer wg.Done()
+			for i := s; i < e; i++ {
+				out[i] = builder(rows[i])
+			}
+		}(start, end)
+	}
+	wg.Wait()
+	return out
+}
+
+func buildClickRecord(r *repository.ShortLinkWithClick) []string {
+	campaignID := ""
+	if r.CampaignID != nil {
+		campaignID = strconv.FormatUint(uint64(*r.CampaignID), 10)
+	}
+	clientID := ""
+	if r.ClientID != nil {
+		clientID = strconv.FormatUint(uint64(*r.ClientID), 10)
+	}
+	scenario := ""
+	if r.ScenarioID != nil {
+		scenario = strconv.FormatUint(uint64(*r.ScenarioID), 10)
+	}
+	phone := ""
+	if r.PhoneNumber != nil {
+		phone = *r.PhoneNumber
+	}
+	scName := ""
+	if r.ScenarioName != nil {
+		scName = *r.ScenarioName
+	}
+	ua := ""
+	if r.ClickUserAgent != nil {
+		ua = *r.ClickUserAgent
+	}
+	ip := ""
+	if r.ClickIP != nil {
+		ip = *r.ClickIP
+	}
+
+	return []string{
+		strconv.FormatUint(uint64(r.ID), 10),
+		r.UID,
+		campaignID,
+		clientID,
+		scenario,
+		scName,
+		phone,
+		r.LongLink,
+		r.ShortLink,
+		r.CreatedAt.UTC().Format(time.RFC3339),
+		r.UpdatedAt.UTC().Format(time.RFC3339),
+		ua,
+		ip,
+	}
+}
+
+func buildClickRecordWithScenario(sid uint, scenarioName string, r *repository.ShortLinkWithClick) []string {
+	// Reuse base builder but override scenario id/name to avoid nil checks
+	record := buildClickRecord(r)
+	record[4] = strconv.FormatUint(uint64(sid), 10)
+	record[5] = scenarioName
+	return record
 }
