@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
 
 	"gorm.io/gorm"
 
@@ -34,6 +35,8 @@ type CampaignScheduler struct {
 	tagRepo  repository.TagRepository
 	sentRepo repository.SentSMSRepository
 	pcRepo   repository.ProcessedCampaignRepository
+	jobRepo  repository.SMSStatusJobRepository
+	resRepo  repository.SMSStatusResultRepository
 	notifier NotificationSender
 	logger   *log.Logger
 	interval time.Duration
@@ -57,6 +60,8 @@ func NewCampaignScheduler(
 	tagRepo repository.TagRepository,
 	sentRepo repository.SentSMSRepository,
 	pcRepo repository.ProcessedCampaignRepository,
+	jobRepo repository.SMSStatusJobRepository,
+	resRepo repository.SMSStatusResultRepository,
 	notifier NotificationSender,
 	db *gorm.DB,
 	logger *log.Logger,
@@ -73,6 +78,8 @@ func NewCampaignScheduler(
 		tagRepo:     tagRepo,
 		sentRepo:    sentRepo,
 		pcRepo:      pcRepo,
+		jobRepo:     jobRepo,
+		resRepo:     resRepo,
 		notifier:    notifier,
 		db:          db,
 		interval:    interval,
@@ -141,6 +148,9 @@ func (s *CampaignScheduler) Start(parent context.Context) func() {
 		}
 	}()
 
+	// Start status job worker (runs every 10 minutes)
+	go s.startStatusJobWorker(ctx)
+
 	return cancel
 }
 
@@ -169,12 +179,12 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	pending := make([]dto.BotGetCampaignResponse, 0, len(ready))
 	for _, c := range ready {
 		if err := s.validateCampaign(c); err != nil {
-			s.logger.Printf("scheduler: validate campaign failed for id=%d: %v", c.ID, err)
+			s.logger.Printf("scheduler: validate campaign failed for campaign id=%d: %v", c.ID, err)
 			continue
 		}
 		pc, err := s.pcRepo.ByCampaignID(ctx, c.ID)
 		if err != nil {
-			s.logger.Printf("scheduler: check processed failed for id=%d: %v", c.ID, err)
+			s.logger.Printf("scheduler: check processed failed for campaign id=%d: %v", c.ID, err)
 			continue
 		}
 		if pc == nil {
@@ -228,7 +238,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 
 		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
 		var err error
-		phones, ids, codes, err = s.fetchAudiencePhones(txCtx, c)
+		phones, ids, codes, err = s.fetchAudiencePhones(txCtx, c, token)
 		if err != nil {
 			return err
 		}
@@ -245,7 +255,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	s.logger.Printf("scheduler: persisted processed campaign id=%d audiences=%d", pc.ID, len(ids))
 
 	// 12/13) Send batches; after each batch, save sent_sms and update LastAudienceID in SAME transaction
-	batchSize := 1000
+	batchSize := 200 // MUST BE LESS THAN 250
 	// Sender from campaign line number
 	if c.LineNumber == nil {
 		return fmt.Errorf("sender is nil")
@@ -257,21 +267,10 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 		end = min(end, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
-
-		// Generate sequential UIDs via bot API and persist short links centrally
-		var batchCodes []string
-		if c.AdLink != nil && *c.AdLink != "" {
-			var err error
-			batchCodes, err = s.allocateShortLinksViaAPI(ctx, token, c.ID, *c.AdLink, batchPhones)
-			if err != nil {
-				return fmt.Errorf("allocate short links: %w", err)
-			}
-		} else {
-			batchCodes = make([]string, len(batchPhones))
-		}
+		batchCodes := codes[start:end]
 
 		// Build per-recipient bodies by replacing short URL with unique 6-char code
-		items := make([]payamSMSItem, 0, len(batchPhones))
+		items := make([]PayamSMSItem, 0, len(batchPhones))
 		// Build SentSMS rows from response
 		rows := make([]*models.SentSMS, 0, len(batchPhones))
 		for i, p := range batchPhones {
@@ -280,7 +279,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 
 			trackingID := uuid.New().String()
 
-			items = append(items, payamSMSItem{
+			items = append(items, PayamSMSItem{
 				Recipient:  p,
 				Body:       body,
 				CustomerID: trackingID,
@@ -340,6 +339,17 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 					// Success (concise)
 					s.logger.Printf("scheduler: sent sms batch items=%d for campaign id=%d", len(items), c.ID)
 				}
+			}
+
+			// Schedule status check jobs for this batch
+			trackingIDs := make([]string, 0, len(rows))
+			for _, r := range rows {
+				if r.TrackingID != "" {
+					trackingIDs = append(trackingIDs, r.TrackingID)
+				}
+			}
+			if err := s.scheduleStatusCheckJobs(ctx, pc.ID, trackingIDs); err != nil {
+				s.logger.Printf("scheduler: failed to schedule status jobs for campaign id=%d: %v", c.ID, err)
 			}
 		}
 	}
@@ -538,32 +548,37 @@ func (s *CampaignScheduler) validateCampaign(c dto.BotGetCampaignResponse) error
 	return nil
 }
 
-func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse) ([]string, []int64, []string, error) {
-	var result []string
+func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string) ([]string, []int64, []string, error) {
+	var phones []string
 	var ids []int64
 
-	tagIDs := make([]uint, len(c.Tags))
+	adLink := ""
+	if c.AdLink != nil {
+		adLink = *c.AdLink
+	}
+
+	toExtract := make([]uint, len(c.Tags))
 	for i, tag := range c.Tags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		tagIDs[i] = uint(tagID)
+		toExtract[i] = uint(tagID)
 	}
-	tags, err := s.tagRepo.ListByIDs(ctx, tagIDs)
+	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	// create a pq int32 array from tags
-	tagIds := make(pq.Int32Array, len(tags))
+	tagIDs := make(pq.Int32Array, len(tags))
 	for i, tag := range tags {
-		tagIds[i] = int32(tag.ID)
+		tagIDs[i] = int32(tag.ID)
 	}
 
-	// NOTE: len(tagIds) <= len(c.Tags) because some tags may not be found or are inactive
+	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
 
 	filter := models.AudienceProfileFilter{
-		Tags:  &tagIds,
+		Tags:  &tagIDs,
 		Color: utils.ToPtr("white"),
 	}
 
@@ -578,16 +593,20 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 		if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
 			continue
 		}
-		result = append(result, *ap.PhoneNumber)
+		phones = append(phones, *ap.PhoneNumber)
 		ids = append(ids, int64(ap.ID))
-		if len(result) >= int(c.NumAudiences) {
+		if len(phones) >= int(c.NumAudiences) {
 			break
 		}
 	}
 
-	if len(result) >= int(c.NumAudiences) {
-		codes := make([]string, len(result))
-		return result, ids, codes, nil
+	if len(phones) >= int(c.NumAudiences) {
+		// Generate sequential UIDs via bot API and persist short links centrally
+		codes, err := s.allocateShortLinksViaAPI(ctx, token, c.ID, adLink, phones)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return phones, ids, codes, nil
 	}
 
 	filter.Color = utils.ToPtr("pink")
@@ -600,14 +619,19 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 		if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
 			continue
 		}
-		result = append(result, *ap.PhoneNumber)
+		phones = append(phones, *ap.PhoneNumber)
 		ids = append(ids, int64(ap.ID))
-		if len(result) >= int(c.NumAudiences) {
+		if len(phones) >= int(c.NumAudiences) {
 			break
 		}
 	}
-	codes := make([]string, len(result))
-	return result, ids, codes, nil
+
+	// Generate sequential UIDs via bot API and persist short links centrally
+	codes, err := s.allocateShortLinksViaAPI(ctx, token, c.ID, adLink, phones)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return phones, ids, codes, nil
 }
 
 func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code string) string {
@@ -624,13 +648,13 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 }
 
 // sendPayamSMSBatchWithBodies sends a batch using custom per-recipient bodies
-type payamSMSItem struct {
+type PayamSMSItem struct {
 	Recipient  string
 	Body       string
 	CustomerID string
 }
 
-func (s *CampaignScheduler) sendPayamSMSBatchWithBodies(ctx context.Context, sender string, items []payamSMSItem) ([]struct {
+func (s *CampaignScheduler) sendPayamSMSBatchWithBodies(ctx context.Context, sender string, items []PayamSMSItem) ([]struct {
 	CustomerID string  `json:"customerId"`
 	Mobile     string  `json:"mobile"`
 	ServerID   *string `json:"serverId"`
@@ -783,4 +807,255 @@ func (s *CampaignScheduler) allocateShortLinksViaAPI(ctx context.Context, token 
 		return nil, err
 	}
 	return out.Codes, nil
+}
+
+// scheduleStatusCheckJobs creates three status check jobs for the provided tracking IDs
+func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, customerIDs []string) error {
+	if len(customerIDs) == 0 {
+		return nil
+	}
+	corrID := uuid.NewString()
+	filtered := make([]string, 0, len(customerIDs))
+	for _, id := range customerIDs {
+		if strings.TrimSpace(id) != "" {
+			filtered = append(filtered, strings.TrimSpace(id))
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+
+	now := utils.UTCNow()
+	offsets := []time.Duration{5 * time.Minute, 1 * time.Hour, 3 * time.Hour}
+	jobs := make([]*models.SMSStatusJob, 0, len(offsets))
+	for _, off := range offsets {
+		jobs = append(jobs, &models.SMSStatusJob{
+			ProcessedCampaignID: processedCampaignID,
+			CorrelationID:       corrID,
+			CustomerIDs:         pq.StringArray(filtered),
+			RetryCount:          0,
+			ScheduledAt:         now.Add(off),
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		})
+	}
+	return s.jobRepo.SaveBatch(ctx, jobs)
+}
+
+// startStatusJobWorker polls and executes due SMS status jobs every 10 minutes
+func (s *CampaignScheduler) startStatusJobWorker(ctx context.Context) {
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+
+	// initial run
+	s.processStatusJobs(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.processStatusJobs(ctx)
+		}
+	}
+}
+
+func (s *CampaignScheduler) processStatusJobs(ctx context.Context) {
+	if s.jobRepo == nil || s.resRepo == nil {
+		return
+	}
+
+	now := utils.UTCNow()
+	jobs, err := s.jobRepo.ListDue(ctx, now, 100)
+	if err != nil {
+		s.logger.Printf("scheduler: list status jobs failed: %v", err)
+		return
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	token, err := s.getPayamSMSToken(ctx)
+	if err != nil {
+		s.logger.Printf("scheduler: payamsms token for status jobs failed: %v", err)
+		return
+	}
+
+	for _, job := range jobs {
+		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+
+		if err := s.handleStatusJob(jobCtx, job, token); err != nil {
+			s.logger.Printf("scheduler: handle status job id=%d failed: %v", job.ID, err)
+		}
+	}
+}
+
+func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMSStatusJob, token string) error {
+	results, err := s.fetchPayamSMSStatus(ctx, token, []string(job.CustomerIDs))
+	var stats map[string]any
+
+	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		now := utils.UTCNow()
+		if err != nil {
+			job.RetryCount++
+			msg := err.Error()
+			job.Error = &msg
+			job.ExecutedAt = &now
+			job.UpdatedAt = now
+			return s.jobRepo.Update(txCtx, job)
+		}
+
+		rows := make([]*models.SMSStatusResult, 0, len(results))
+		for _, r := range results {
+			tp := r.TotalParts
+			td := r.TotalDeliveredParts
+			tu := r.TotalUndeliveredParts
+			tu2 := r.TotalUnknownParts
+			status := r.Status
+			rows = append(rows, &models.SMSStatusResult{
+				JobID:                 job.ID,
+				ProcessedCampaignID:   job.ProcessedCampaignID,
+				CustomerID:            r.CustomerID,
+				ServerID:              r.ServerID,
+				TotalParts:            &tp,
+				TotalDeliveredParts:   &td,
+				TotalUndeliveredParts: &tu,
+				TotalUnknownParts:     &tu2,
+				Status:                &status,
+			})
+		}
+		if err := s.resRepo.SaveBatch(txCtx, rows); err != nil {
+			return err
+		}
+		if stats, err = s.updateProcessedCampaignStats(txCtx, job.ProcessedCampaignID); err != nil {
+			return err
+		}
+		job.ExecutedAt = &now
+		job.Error = nil
+		job.UpdatedAt = now
+		return s.jobRepo.Update(txCtx, job)
+	})
+	if err != nil {
+		return err
+	}
+
+	// Push statistics to bot API after transaction commits
+	if stats != nil {
+		if err := s.pushCampaignStatistics(ctx, job.ProcessedCampaignID, stats); err != nil {
+			s.logger.Printf("scheduler: failed to push campaign statistics processed_campaign_id=%d: %v", job.ProcessedCampaignID, err)
+		}
+	}
+	return nil
+}
+
+func (s *CampaignScheduler) updateProcessedCampaignStats(ctx context.Context, processedCampaignID uint) (map[string]any, error) {
+	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
+	if err != nil {
+		return nil, err
+	}
+	if pc == nil {
+		return nil, fmt.Errorf("processed campaign not found for campaign_id=%d", processedCampaignID)
+	}
+
+	agg, err := s.resRepo.AggregateByCampaign(ctx, processedCampaignID)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := map[string]any{
+		"totalSent":                       agg.TotalSent,
+		"aggregatedTotalParts":            agg.AggregatedTotalParts,
+		"aggregatedTotalDeliveredParts":   agg.AggregatedDeliveredParts,
+		"aggregatedTotalUnDeliveredParts": agg.AggregatedUndelivered,
+		"aggregatedTotalUnKnownParts":     agg.AggregatedUnknown,
+		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return nil, err
+	}
+	pc.Statistics = data
+	pc.UpdatedAt = utils.UTCNow()
+	if err := s.pcRepo.Update(ctx, pc); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+type PayamStatusResponse struct {
+	CustomerID            string  `json:"customerId"`
+	ServerID              *string `json:"serverId"`
+	TotalParts            int64   `json:"totalParts"`
+	TotalDeliveredParts   int64   `json:"totalDeliveredParts"`
+	TotalUndeliveredParts int64   `json:"totalUnDeliveredParts"`
+	TotalUnknownParts     int64   `json:"totalUnKnownParts"`
+	Status                string  `json:"status"`
+}
+
+func (s *CampaignScheduler) fetchPayamSMSStatus(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no ids provided")
+	}
+	baseURL := "https://www.payamsms.com/report/webservice/status"
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	q.Set("byCustomer", "false")
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" {
+			q.Add("ids", strings.TrimSpace(id))
+		}
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("payamsms status http status: %d", resp.StatusCode)
+	}
+
+	var out []PayamStatusResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (s *CampaignScheduler) pushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error {
+	token, err := s.loginBot(ctx)
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("%s/api/v1/bot/campaigns/%d/statistics", s.botCfg.APIDomain, processedCampaignID)
+	payload, _ := json.Marshal(dto.BotUpdateCampaignStatisticsRequest{Statistics: stats})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("push statistics http status: %d", resp.StatusCode)
+	}
+	return nil
 }
