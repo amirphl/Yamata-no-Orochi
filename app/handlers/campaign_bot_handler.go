@@ -20,6 +20,7 @@ type CampaignBotHandlerInterface interface {
 	ListReadyCampaigns(c fiber.Ctx) error
 	MoveCampaignToExecuted(c fiber.Ctx) error
 	MoveCampaignToRunning(c fiber.Ctx) error
+	UpdateCampaignStatistics(c fiber.Ctx) error
 }
 
 // CampaignBotHandler handles bot campaign-related HTTP requests
@@ -174,6 +175,41 @@ func (h *CampaignBotHandler) MoveCampaignToRunning(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to running", "MOVE_TO_RUNNING_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign moved to running", fiber.Map{"ok": true})
+}
+
+// UpdateCampaignStatistics updates statistics json for a campaign
+// @Summary Bot Update Campaign Statistics
+// @Tags Bot Campaigns
+// @Accept json
+// @Produce json
+// @Param id path int true "Campaign ID"
+// @Param request body dto.BotUpdateCampaignStatisticsRequest true "Statistics payload"
+// @Success 200 {object} dto.APIResponse{data=dto.BotUpdateCampaignStatisticsResponse}
+// @Failure 400 {object} dto.APIResponse
+// @Router /api/v1/bot/campaigns/{id}/statistics [post]
+func (h *CampaignBotHandler) UpdateCampaignStatistics(c fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign id", "INVALID_CAMPAIGN_ID", nil)
+	}
+	var req dto.BotUpdateCampaignStatisticsRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+	res, err := h.campaignFlow.UpdateCampaignStatistics(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/statistics"), uint(id), req.Statistics)
+	if err != nil {
+		log.Println("Update campaign statistics failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update campaign statistics", "UPDATE_CAMPAIGN_STATISTICS_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaign statistics updated", res)
 }
 
 func (h *CampaignBotHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
