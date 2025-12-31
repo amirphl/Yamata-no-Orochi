@@ -82,9 +82,9 @@ func NewFiberRouter(
 		AppName:      "Yamata no Orochi API",
 		ServerHeader: "Yamata-no-Orochi",
 		ErrorHandler: errorHandler,
-		BodyLimit:    50 * 1024 * 1024, // 50MB (raised to support large CSV uploads)
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		BodyLimit:    512 * 1024 * 1024, // 512MB to support large CSV uploads // TODO:
+		ReadTimeout:  5 * time.Minute,   // TODO:
+		WriteTimeout: 5 * time.Minute,   // TODO:
 		IdleTimeout:  60 * time.Second,
 		JSONEncoder:  json.Marshal,
 		JSONDecoder:  json.Unmarshal,
@@ -246,6 +246,7 @@ func (r *FiberRouter) SetupRoutes() {
 	botCampaigns.Post("/audience-spec/reset", r.campaignBotHandler.ResetAudienceSpec)
 	botCampaigns.Post("/:id/executed", r.campaignBotHandler.MoveCampaignToExecuted)
 	botCampaigns.Post("/:id/running", r.campaignBotHandler.MoveCampaignToRunning)
+	botCampaigns.Post("/:id/statistics", r.campaignBotHandler.UpdateCampaignStatistics)
 
 	// Bot short-links routes (protected)
 	botShortLinks := api.Group("/bot/short-links")
