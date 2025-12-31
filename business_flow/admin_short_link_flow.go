@@ -526,6 +526,9 @@ func truncateSheetName(name string) string {
 }
 
 func buildClickRecords(rows []*repository.ShortLinkWithClick, builder func(*repository.ShortLinkWithClick) []string) [][]string {
+	if len(rows) == 0 {
+		return [][]string{}
+	}
 	out := make([][]string, len(rows))
 	workers := runtime.NumCPU()
 	if workers < 1 {
