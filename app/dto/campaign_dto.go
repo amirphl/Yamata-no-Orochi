@@ -268,3 +268,12 @@ type CampaignsSummaryResponse struct {
 	RunningCount  int    `json:"running_count"`
 	Total         int    `json:"total"`
 }
+
+// BotUpdateCampaignStatisticsRequest carries aggregated stats for a campaign
+type BotUpdateCampaignStatisticsRequest struct {
+	Statistics map[string]any `json:"statistics" validate:"required"`
+}
+
+type BotUpdateCampaignStatisticsResponse struct {
+	Message string `json:"message"`
+}
