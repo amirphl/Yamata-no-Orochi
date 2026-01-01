@@ -353,6 +353,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	tagRepo := repository.NewTagRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
+	smsStatusJobRepo := repository.NewSMSStatusJobRepository(db)
+	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
@@ -591,7 +593,20 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
 		// Start campaign scheduler (every 1 minute)
-		sched := scheduler.NewCampaignScheduler(audienceProfileRepo, tagRepo, sentSMSRepo, processedCampaignRepo, notificationService, db, log.Default(), cfg.Scheduler.CampaignExecutionInterval, cfg.PayamSMS, cfg.Bot)
+		sched := scheduler.NewCampaignScheduler(
+			audienceProfileRepo,
+			tagRepo,
+			sentSMSRepo,
+			processedCampaignRepo,
+			smsStatusJobRepo,
+			smsStatusResultRepo,
+			notificationService,
+			db,
+			log.Default(),
+			cfg.Scheduler.CampaignExecutionInterval,
+			cfg.PayamSMS,
+			cfg.Bot,
+		)
 		stopScheduler := sched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopScheduler)
 	}
