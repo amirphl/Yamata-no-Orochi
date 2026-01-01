@@ -23,6 +23,7 @@ type BotCampaignFlow interface {
 	MoveCampaignToExecuted(ctx context.Context, campaignID uint) error
 	UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error)
 	ResetAudienceSpec(ctx context.Context, req *dto.BotResetAudienceSpecRequest) (*dto.BotResetAudienceSpecResponse, error)
+	UpdateCampaignStatistics(ctx context.Context, campaignID uint, statistics map[string]any) (*dto.BotUpdateCampaignStatisticsResponse, error)
 }
 
 type BotCampaignFlowImpl struct {
@@ -134,6 +135,31 @@ func (s *BotCampaignFlowImpl) MoveCampaignToExecuted(ctx context.Context, campai
 		return NewBusinessError("BOT_MOVE_CAMPAIGN_TO_EXECUTED_FAILED", "Failed to move campaign to executed", err)
 	}
 	return nil
+}
+
+// UpdateCampaignStatistics updates the statistics JSON field of a campaign
+func (s *BotCampaignFlowImpl) UpdateCampaignStatistics(ctx context.Context, campaignID uint, statistics map[string]any) (*dto.BotUpdateCampaignStatisticsResponse, error) {
+	if campaignID == 0 {
+		return nil, NewBusinessError("VALIDATION_ERROR", "campaign_id must be greater than 0", nil)
+	}
+	campaign, err := s.campaignRepo.ByID(ctx, campaignID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_FETCH_FAILED", "Failed to fetch campaign", err)
+	}
+	if campaign == nil {
+		return nil, ErrCampaignNotFound
+	}
+
+	data, err := json.Marshal(statistics)
+	if err != nil {
+		return nil, NewBusinessError("STATISTICS_MARSHAL_FAILED", "Failed to marshal statistics", err)
+	}
+
+	if err := s.campaignRepo.UpdateStatistics(ctx, campaignID, data); err != nil {
+		return nil, NewBusinessError("CAMPAIGN_STATISTICS_UPDATE_FAILED", "Failed to update campaign statistics", err)
+	}
+
+	return &dto.BotUpdateCampaignStatisticsResponse{Message: "Campaign statistics updated"}, nil
 }
 
 type AudienceSpecLeaf struct {
