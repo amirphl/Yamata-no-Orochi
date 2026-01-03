@@ -3,6 +3,27 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0058_add_statistics_to_sms_campaigns_down.sql...'
+\i migrations/0058_add_statistics_to_sms_campaigns_down.sql
+
+\echo 'Running 0057_add_statistics_to_processed_campaigns_down.sql...'
+\i migrations/0057_add_statistics_to_processed_campaigns_down.sql
+
+\echo 'Running 0056_create_sms_status_results_down.sql...'
+\i migrations/0056_create_sms_status_results_down.sql
+
+\echo 'Running 0055_create_sms_status_jobs_down.sql...'
+\i migrations/0055_create_sms_status_jobs_down.sql
+
+\echo 'Running 0054_add_indexes_to_short_link_clicks_down.sql...'
+\i migrations/0054_add_indexes_to_short_link_clicks_down.sql
+
+\echo 'Running 0053_denormalize_short_link_clicks_down.sql...'
+\i migrations/0053_denormalize_short_link_clicks_down.sql
+
+\echo 'Running 0052_add_indexes_to_short_links_down.sql...'
+\i migrations/0052_add_indexes_to_short_links_down.sql
+
 \echo 'Running 0051_add_job_category_to_customers_down.sql...'
 \i migrations/0051_add_job_category_to_customers_down.sql
 
