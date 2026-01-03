@@ -120,14 +120,15 @@ func (s *CampaignSpec) Scan(value any) error {
 
 // Campaign represents an campaign in the database
 type Campaign struct {
-	ID         uint           `gorm:"primaryKey" json:"id"`
-	UUID       uuid.UUID      `gorm:"type:uuid;not null;uniqueIndex:uk_sms_campaigns_uuid;index:idx_sms_campaigns_uuid" json:"uuid"`
-	CustomerID uint           `gorm:"not null;index:idx_sms_campaigns_customer_id" json:"customer_id"`
-	Status     CampaignStatus `gorm:"type:sms_campaign_status;not null;default:'initiated';index:idx_sms_campaigns_status" json:"status"`
-	CreatedAt  time.Time      `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sms_campaigns_created_at" json:"created_at"`
-	UpdatedAt  *time.Time     `gorm:"index:idx_sms_campaigns_updated_at" json:"updated_at,omitempty"`
-	Spec       CampaignSpec   `gorm:"type:jsonb;not null" json:"spec"`
-	Comment    *string        `gorm:"type:text" json:"comment,omitempty"`
+	ID         uint            `gorm:"primaryKey" json:"id"`
+	UUID       uuid.UUID       `gorm:"type:uuid;not null;uniqueIndex:uk_sms_campaigns_uuid;index:idx_sms_campaigns_uuid" json:"uuid"`
+	CustomerID uint            `gorm:"not null;index:idx_sms_campaigns_customer_id" json:"customer_id"`
+	Status     CampaignStatus  `gorm:"type:sms_campaign_status;not null;default:'initiated';index:idx_sms_campaigns_status" json:"status"`
+	CreatedAt  time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_sms_campaigns_created_at" json:"created_at"`
+	UpdatedAt  *time.Time      `gorm:"index:idx_sms_campaigns_updated_at" json:"updated_at,omitempty"`
+	Spec       CampaignSpec    `gorm:"type:jsonb;not null" json:"spec"`
+	Comment    *string         `gorm:"type:text" json:"comment,omitempty"`
+	Statistics json.RawMessage `gorm:"type:jsonb" json:"statistics,omitempty"`
 
 	// Number of targeted audiences
 	NumAudience *uint64 `gorm:"type:bigint" json:"num_audience,omitempty"`
