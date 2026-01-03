@@ -159,5 +159,26 @@
 \echo 'Running 0051_add_job_category_to_customers.sql...'
 \i migrations/0051_add_job_category_to_customers.sql
 
+\echo 'Running 0052_add_indexes_to_short_links.sql...'
+\i migrations/0052_add_indexes_to_short_links.sql
+
+\echo 'Running 0053_denormalize_short_link_clicks.sql...'
+\i migrations/0053_denormalize_short_link_clicks.sql
+
+\echo 'Running 0054_add_indexes_to_short_link_clicks.sql...'
+\i migrations/0054_add_indexes_to_short_link_clicks.sql
+
+\echo 'Running 0055_create_sms_status_jobs.sql...'
+\i migrations/0055_create_sms_status_jobs.sql
+
+\echo 'Running 0056_create_sms_status_results.sql...'
+\i migrations/0056_create_sms_status_results.sql
+
+\echo 'Running 0057_add_statistics_to_processed_campaigns.sql...'
+\i migrations/0057_add_statistics_to_processed_campaigns.sql
+
+\echo 'Running 0058_add_statistics_to_sms_campaigns.sql...'
+\i migrations/0058_add_statistics_to_sms_campaigns.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
