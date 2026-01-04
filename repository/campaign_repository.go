@@ -102,6 +102,16 @@ func (r *CampaignRepositoryImpl) Update(ctx context.Context, campaign models.Cam
 	return nil
 }
 
+func (r *CampaignRepositoryImpl) UpdateStatistics(ctx context.Context, id uint, stats json.RawMessage) error {
+	db := r.getDB(ctx)
+	return db.Model(&models.Campaign{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"statistics": stats,
+			"updated_at": utils.UTCNow(),
+		}).Error
+}
+
 // UpdateStatus updates only the status of an campaign
 func (r *CampaignRepositoryImpl) UpdateStatus(ctx context.Context, id uint, status models.CampaignStatus) error {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
