@@ -3,6 +3,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -121,6 +122,7 @@ type CampaignRepository interface {
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Campaign, error)
 	ByStatus(ctx context.Context, status models.CampaignStatus, limit, offset int) ([]*models.Campaign, error)
 	Update(ctx context.Context, campaign models.Campaign) error
+	UpdateStatistics(ctx context.Context, id uint, stats json.RawMessage) error
 	UpdateStatus(ctx context.Context, id uint, status models.CampaignStatus) error
 	CountByCustomerID(ctx context.Context, customerID uint) (int, error)
 	CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error)
@@ -286,6 +288,22 @@ type SentSMSRepository interface {
 	ByID(ctx context.Context, id uint) (*models.SentSMS, error)
 	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSMS, error)
 	UpdateProviderFieldsByTrackingIDs(ctx context.Context, updates []SentSMSProviderUpdate) error
+}
+
+// SMSStatusJobRepository defines operations for SMS status check jobs
+type SMSStatusJobRepository interface {
+	Repository[models.SMSStatusJob, any]
+	ByID(ctx context.Context, id uint) (*models.SMSStatusJob, error)
+	SaveBatch(ctx context.Context, jobs []*models.SMSStatusJob) error
+	ListDue(ctx context.Context, now time.Time, limit int) ([]*models.SMSStatusJob, error)
+	Update(ctx context.Context, job *models.SMSStatusJob) error
+}
+
+// SMSStatusResultRepository defines operations for SMS status check results
+type SMSStatusResultRepository interface {
+	Repository[models.SMSStatusResult, any]
+	SaveBatch(ctx context.Context, rows []*models.SMSStatusResult) error
+	AggregateByCampaign(ctx context.Context, campaignID uint) (*SMSStatusAggregates, error)
 }
 
 // TicketRepository defines operations for tickets
