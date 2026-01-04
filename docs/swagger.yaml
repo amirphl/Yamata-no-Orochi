@@ -846,6 +846,19 @@ definitions:
       message:
         type: string
     type: object
+  dto.BotUpdateCampaignStatisticsRequest:
+    properties:
+      statistics:
+        additionalProperties: {}
+        type: object
+    required:
+    - statistics
+    type: object
+  dto.BotUpdateCampaignStatisticsResponse:
+    properties:
+      message:
+        type: string
+    type: object
   dto.CalculateCampaignCapacityRequest:
     properties:
       adlink:
@@ -2893,6 +2906,41 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Bot Move Campaign to Running
+      tags:
+      - Bot Campaigns
+  /api/v1/bot/campaigns/{id}/statistics:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Campaign ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Statistics payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotUpdateCampaignStatisticsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotUpdateCampaignStatisticsResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Update Campaign Statistics
       tags:
       - Bot Campaigns
   /api/v1/bot/campaigns/audience-spec:

@@ -1987,6 +1987,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/bot/campaigns/{id}/statistics": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot Update Campaign Statistics",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Campaign ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Statistics payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotUpdateCampaignStatisticsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotUpdateCampaignStatisticsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/bot/short-links": {
             "post": {
                 "consumes": [
@@ -5033,6 +5091,26 @@ const docTemplate = `{
             }
         },
         "dto.BotUpdateAudienceSpecResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotUpdateCampaignStatisticsRequest": {
+            "type": "object",
+            "required": [
+                "statistics"
+            ],
+            "properties": {
+                "statistics": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
+        "dto.BotUpdateCampaignStatisticsResponse": {
             "type": "object",
             "properties": {
                 "message": {
