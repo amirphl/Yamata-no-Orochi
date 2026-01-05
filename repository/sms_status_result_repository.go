@@ -25,14 +25,14 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "processed_campaign_id"}, {Name: "customer_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
-			"job_id":                  clause.Expr("EXCLUDED.job_id"),
-			"server_id":               clause.Expr("EXCLUDED.server_id"),
-			"total_parts":             clause.Expr("EXCLUDED.total_parts"),
-			"total_delivered_parts":   clause.Expr("EXCLUDED.total_delivered_parts"),
-			"total_undelivered_parts": clause.Expr("EXCLUDED.total_undelivered_parts"),
-			"total_unknown_parts":     clause.Expr("EXCLUDED.total_unknown_parts"),
-			"status":                  clause.Expr("EXCLUDED.status"),
-			"created_at":              clause.Expr("LEAST(sms_status_results.created_at, EXCLUDED.created_at)"),
+			"job_id":                  clause.Expr{SQL: "EXCLUDED.job_id"},
+			"server_id":               clause.Expr{SQL: "EXCLUDED.server_id"},
+			"total_parts":             clause.Expr{SQL: "EXCLUDED.total_parts"},
+			"total_delivered_parts":   clause.Expr{SQL: "EXCLUDED.total_delivered_parts"},
+			"total_undelivered_parts": clause.Expr{SQL: "EXCLUDED.total_undelivered_parts"},
+			"total_unknown_parts":     clause.Expr{SQL: "EXCLUDED.total_unknown_parts"},
+			"status":                  clause.Expr{SQL: "EXCLUDED.status"},
+			"created_at":              clause.Expr{SQL: "LEAST(sms_status_results.created_at, EXCLUDED.created_at)"},
 		}),
 	}).Create(&rows).Error
 }
