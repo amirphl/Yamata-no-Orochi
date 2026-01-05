@@ -39,6 +39,9 @@ func (s *BotShortLinkFlowImpl) CreateShortLink(ctx context.Context, req *dto.Bot
 		return nil, NewBusinessError("VALIDATION_ERROR", "uid, long_link and short_link are required", nil)
 	}
 
+	lockShortLinkGen()
+	defer unlockShortLinkGen()
+
 	// read last scenario id from last short link from database and increment it
 	lastScenarioID, err := s.shortRepo.GetLastScenarioID(ctx)
 	if err != nil {
@@ -68,6 +71,9 @@ func (s *BotShortLinkFlowImpl) CreateShortLinks(ctx context.Context, req *dto.Bo
 	if req == nil || len(req.Items) == 0 {
 		return nil, NewBusinessError("VALIDATION_ERROR", "items must contain at least one element", nil)
 	}
+
+	lockShortLinkGen()
+	defer unlockShortLinkGen()
 
 	// read last scenario id from last short link from database and increment it
 	lastScenarioID, err := s.shortRepo.GetLastScenarioID(ctx)
@@ -123,6 +129,9 @@ func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, 
 	if shortLinkDomain == "" {
 		return nil, NewBusinessError("VALIDATION_ERROR", "short_link_domain is required", nil)
 	}
+
+	lockShortLinkGen()
+	defer unlockShortLinkGen()
 
 	// compute starting UID sequence
 	cutoff := time.Date(2025, 11, 10, 15, 45, 11, 401492000, time.UTC)
