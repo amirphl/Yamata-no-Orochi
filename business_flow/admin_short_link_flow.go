@@ -61,12 +61,15 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 		return nil, NewBusinessError("VALIDATION_ERROR", "scenario_name is required", nil)
 	}
 
-	// Determine new scenario id upfront for the response
+	// Determine new scenario id upfront for the response (with lock)
+	lockShortLinkGen()
 	lastScenarioID, err := f.repo.GetLastScenarioID(ctx)
 	if err != nil {
+		unlockShortLinkGen()
 		return nil, NewBusinessError("FETCH_SCENARIO_ID_FAILED", "Failed to determine next scenario id", err)
 	}
 	newScenarioID := lastScenarioID + 1
+	unlockShortLinkGen()
 
 	// Buffer the CSV content to allow async processing after we return
 	var buf bytes.Buffer
@@ -76,6 +79,9 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 
 	// Spawn background job with longer timeout
 	go func(data []byte, domain, scenario string, scenarioID uint) {
+		lockShortLinkGen()
+		defer unlockShortLinkGen()
+
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 
