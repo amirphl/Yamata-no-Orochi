@@ -181,6 +181,31 @@ func (r *CampaignRepositoryImpl) GetScheduledCampaigns(ctx context.Context, from
 	return r.ByFilter(ctx, filter, "schedule_at ASC", 0, 0)
 }
 
+// ClickCounts returns a map of campaign_id -> distinct short_link_click uids
+func (r *CampaignRepositoryImpl) ClickCounts(ctx context.Context, campaignIDs []uint) (map[uint]int64, error) {
+	out := make(map[uint]int64)
+	if len(campaignIDs) == 0 {
+		return out, nil
+	}
+	type row struct {
+		CampaignID uint
+		Clicks     int64
+	}
+	var rows []row
+	db := r.getDB(ctx)
+	if err := db.Table("short_link_clicks").
+		Select("campaign_id, COUNT(DISTINCT uid) AS clicks").
+		Where("campaign_id IN ?", campaignIDs).
+		Group("campaign_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.CampaignID] = r.Clicks
+	}
+	return out, nil
+}
+
 // ByFilter retrieves campaigns based on filter criteria
 func (r *CampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.CampaignFilter, orderBy string, limit, offset int) ([]*models.Campaign, error) {
 	db := r.getDB(ctx)
