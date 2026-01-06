@@ -62,23 +62,26 @@ type GetCampaignRequest struct {
 
 // GetCampaignResponse represents the campaign specification in responses
 type GetCampaignResponse struct {
-	UUID       string     `json:"uuid"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  *time.Time `json:"updated_at,omitempty"`
-	Title      *string    `json:"title,omitempty" validate:"omitempty"`
-	Level1     *string    `json:"level1,omitempty" validate:"omitempty"`
-	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty"`
-	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty"`
-	Tags       []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty"`
-	City       []string   `json:"city,omitempty" validate:"omitempty"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty"`
-	Content    *string    `json:"content,omitempty" validate:"omitempty"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Comment    *string    `json:"comment,omitempty" validate:"omitempty"`
+	UUID        string         `json:"uuid"`
+	Status      string         `json:"status"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   *time.Time     `json:"updated_at,omitempty"`
+	Title       *string        `json:"title,omitempty" validate:"omitempty"`
+	Level1      *string        `json:"level1,omitempty" validate:"omitempty"`
+	Level2s     []string       `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s     []string       `json:"level3s,omitempty" validate:"omitempty"`
+	Tags        []string       `json:"tags,omitempty" validate:"omitempty"`
+	Sex         *string        `json:"sex,omitempty" validate:"omitempty"`
+	City        []string       `json:"city,omitempty" validate:"omitempty"`
+	AdLink      *string        `json:"adlink,omitempty" validate:"omitempty"`
+	Content     *string        `json:"content,omitempty" validate:"omitempty"`
+	ScheduleAt  *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber  *string        `json:"line_number,omitempty" validate:"omitempty"`
+	Budget      *uint64        `json:"budget,omitempty" validate:"omitempty"`
+	Comment     *string        `json:"comment,omitempty" validate:"omitempty"`
+	Statistics  map[string]any `json:"statistics,omitempty"`
+	ClickRate   *float64       `json:"click_rate,omitempty"`
+	TotalClicks *int64         `json:"total_clicks,omitempty"`
 }
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
@@ -167,26 +170,29 @@ type AdminListCampaignsFilter struct {
 
 // AdminGetCampaignResponse represents the campaign specification in responses
 type AdminGetCampaignResponse struct {
-	ID                    uint       `json:"id"`
-	UUID                  string     `json:"uuid"`
-	Status                string     `json:"status"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             *time.Time `json:"updated_at,omitempty"`
-	Title                 *string    `json:"title,omitempty" validate:"omitempty"`
-	Level1                *string    `json:"level1,omitempty" validate:"omitempty"`
-	Level2s               []string   `json:"level2s,omitempty" validate:"omitempty"`
-	Level3s               []string   `json:"level3s,omitempty" validate:"omitempty"`
-	Tags                  []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex                   *string    `json:"sex,omitempty" validate:"omitempty"`
-	City                  []string   `json:"city,omitempty" validate:"omitempty"`
-	AdLink                *string    `json:"adlink,omitempty" validate:"omitempty"`
-	Content               *string    `json:"content,omitempty" validate:"omitempty"`
-	ScheduleAt            *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber            *string    `json:"line_number,omitempty" validate:"omitempty"`
-	Budget                *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Comment               *string    `json:"comment,omitempty" validate:"omitempty"`
-	SegmentPriceFactor    float64    `json:"segment_price_factor,omitempty"`
-	LineNumberPriceFactor float64    `json:"line_number_price_factor,omitempty"`
+	ID                    uint           `json:"id"`
+	UUID                  string         `json:"uuid"`
+	Status                string         `json:"status"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             *time.Time     `json:"updated_at,omitempty"`
+	Title                 *string        `json:"title,omitempty" validate:"omitempty"`
+	Level1                *string        `json:"level1,omitempty" validate:"omitempty"`
+	Level2s               []string       `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s               []string       `json:"level3s,omitempty" validate:"omitempty"`
+	Tags                  []string       `json:"tags,omitempty" validate:"omitempty"`
+	Sex                   *string        `json:"sex,omitempty" validate:"omitempty"`
+	City                  []string       `json:"city,omitempty" validate:"omitempty"`
+	AdLink                *string        `json:"adlink,omitempty" validate:"omitempty"`
+	Content               *string        `json:"content,omitempty" validate:"omitempty"`
+	ScheduleAt            *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber            *string        `json:"line_number,omitempty" validate:"omitempty"`
+	Budget                *uint64        `json:"budget,omitempty" validate:"omitempty"`
+	Comment               *string        `json:"comment,omitempty" validate:"omitempty"`
+	SegmentPriceFactor    float64        `json:"segment_price_factor,omitempty"`
+	LineNumberPriceFactor float64        `json:"line_number_price_factor,omitempty"`
+	Statistics            map[string]any `json:"statistics,omitempty"`
+	TotalClicks           *int64         `json:"total_clicks,omitempty"`
+	ClickRate             *float64       `json:"click_rate,omitempty"`
 }
 
 // AdminListCampaignsResponse represents a paginated list of campaigns
