@@ -26,6 +26,10 @@ type BalanceSnapshot struct {
 	CreditBalance uint64 `gorm:"not null" json:"credit_balance"` // Credit amount provisioned (not necessarily spendable)
 	TotalBalance  uint64 `gorm:"not null" json:"total_balance"`  // Calculated field (free + frozen + locked)
 
+	// Derived/ephemeral fields (not stored in DB) for balance map enrichment
+	AgencyShareWithTax *uint64 `gorm:"-" json:"agency_share_with_tax,omitempty"`
+	CampaignSpend      *uint64 `gorm:"-" json:"campaign_spend,omitempty"`
+
 	// Snapshot metadata
 	Reason      string          `gorm:"type:varchar(100);not null" json:"reason"` // e.g., "transaction_created", "daily_snapshot"
 	Description string          `gorm:"type:text" json:"description"`
@@ -64,6 +68,12 @@ func (bs *BalanceSnapshot) GetBalanceMap() (json.RawMessage, error) {
 		"locked": bs.LockedBalance,
 		"credit": bs.CreditBalance,
 		"total":  bs.TotalBalance,
+	}
+	if bs.AgencyShareWithTax != nil {
+		balanceMap["agency_share_with_tax"] = *bs.AgencyShareWithTax
+	}
+	if bs.CampaignSpend != nil {
+		balanceMap["campaign_spend"] = *bs.CampaignSpend
 	}
 	jsonData, err := json.Marshal(balanceMap)
 	if err != nil {
