@@ -658,27 +658,65 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		return nil, err
 	}
 
+	// Precompute click counts per campaign
+	campaignIDs := make([]uint, 0, len(rows))
+	for _, c := range rows {
+		campaignIDs = append(campaignIDs, c.ID)
+	}
+	clickCounts, err := s.campaignRepo.ClickCounts(ctx, campaignIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	// Map to response items
 	items := make([]dto.GetCampaignResponse, 0, len(rows))
 	for _, c := range rows {
+		var statsMap map[string]any
+		if len(c.Statistics) > 0 {
+			_ = json.Unmarshal(c.Statistics, &statsMap)
+		}
+		totalSent := float64(0)
+		if v, ok := statsMap["totalSent"]; ok {
+			switch n := v.(type) {
+			case float64:
+				totalSent = n
+			case int64:
+				totalSent = float64(n)
+			case json.Number:
+				if f, e := n.Float64(); e == nil {
+					totalSent = f
+				}
+			}
+		}
+		clicks := clickCounts[c.ID]
+		var clickRate *float64
+		if totalSent > 0 {
+			val := float64(clicks) / totalSent
+			clickRate = &val
+		}
+		totalClicks := clicks
+
 		items = append(items, dto.GetCampaignResponse{
-			UUID:       c.UUID.String(),
-			Status:     c.Status.String(),
-			CreatedAt:  c.CreatedAt,
-			UpdatedAt:  c.UpdatedAt,
-			Title:      c.Spec.Title,
-			Level1:     c.Spec.Level1,
-			Level2s:    c.Spec.Level2s,
-			Level3s:    c.Spec.Level3s,
-			Tags:       c.Spec.Tags,
-			Sex:        c.Spec.Sex,
-			City:       c.Spec.City,
-			AdLink:     c.Spec.AdLink,
-			Content:    c.Spec.Content,
-			ScheduleAt: c.Spec.ScheduleAt,
-			LineNumber: c.Spec.LineNumber,
-			Budget:     c.Spec.Budget,
-			Comment:    c.Comment,
+			UUID:        c.UUID.String(),
+			Status:      c.Status.String(),
+			CreatedAt:   c.CreatedAt,
+			UpdatedAt:   c.UpdatedAt,
+			Title:       c.Spec.Title,
+			Level1:      c.Spec.Level1,
+			Level2s:     c.Spec.Level2s,
+			Level3s:     c.Spec.Level3s,
+			Tags:        c.Spec.Tags,
+			Sex:         c.Spec.Sex,
+			City:        c.Spec.City,
+			AdLink:      c.Spec.AdLink,
+			Content:     c.Spec.Content,
+			ScheduleAt:  c.Spec.ScheduleAt,
+			LineNumber:  c.Spec.LineNumber,
+			Budget:      c.Spec.Budget,
+			Comment:     c.Comment,
+			Statistics:  statsMap,
+			ClickRate:   clickRate,
+			TotalClicks: &totalClicks,
 		})
 	}
 
