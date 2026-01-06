@@ -128,6 +128,7 @@ type CampaignRepository interface {
 	CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error)
 	GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.Campaign, error)
 	GetScheduledCampaigns(ctx context.Context, from, to time.Time) ([]*models.Campaign, error)
+	ClickCounts(ctx context.Context, campaignIDs []uint) (map[uint]int64, error)
 }
 
 // WalletRepository defines the interface for wallet data access
