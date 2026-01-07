@@ -93,26 +93,61 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 	if err != nil {
 		return nil, NewBusinessError("ADMIN_LIST_CAMPAIGNS_FAILED", "Failed to list campaigns", err)
 	}
+	// Click counts and stats
+	campaignIDs := make([]uint, 0, len(rows))
+	for _, c := range rows {
+		campaignIDs = append(campaignIDs, c.ID)
+	}
+	clickCounts, _ := s.campaignRepo.ClickCounts(ctx, campaignIDs)
+
 	items := make([]dto.AdminGetCampaignResponse, 0, len(rows))
 	for _, c := range rows {
+		var stats map[string]any
+		if len(c.Statistics) > 0 {
+			_ = json.Unmarshal(c.Statistics, &stats)
+		}
+		clicks := clickCounts[c.ID]
+		var clickRate *float64
+		totalSent := float64(0)
+		if v, ok := stats["totalSent"]; ok {
+			switch n := v.(type) {
+			case float64:
+				totalSent = n
+			case int64:
+				totalSent = float64(n)
+			case json.Number:
+				if f, e := n.Float64(); e == nil {
+					totalSent = f
+				}
+			}
+		}
+		if totalSent > 0 {
+			val := float64(clicks) / totalSent
+			clickRate = &val
+		}
+		totalClicks := clicks
+
 		items = append(items, dto.AdminGetCampaignResponse{
-			ID:         c.ID,
-			UUID:       c.UUID.String(),
-			Status:     c.Status.String(),
-			CreatedAt:  c.CreatedAt,
-			UpdatedAt:  c.UpdatedAt,
-			Title:      c.Spec.Title,
-			Level1:     c.Spec.Level1,
-			Level2s:    c.Spec.Level2s,
-			Tags:       c.Spec.Tags,
-			Sex:        c.Spec.Sex,
-			City:       c.Spec.City,
-			AdLink:     c.Spec.AdLink,
-			Content:    c.Spec.Content,
-			ScheduleAt: c.Spec.ScheduleAt,
-			LineNumber: c.Spec.LineNumber,
-			Budget:     c.Spec.Budget,
-			Comment:    c.Comment,
+			ID:          c.ID,
+			UUID:        c.UUID.String(),
+			Status:      c.Status.String(),
+			CreatedAt:   c.CreatedAt,
+			UpdatedAt:   c.UpdatedAt,
+			Title:       c.Spec.Title,
+			Level1:      c.Spec.Level1,
+			Level2s:     c.Spec.Level2s,
+			Tags:        c.Spec.Tags,
+			Sex:         c.Spec.Sex,
+			City:        c.Spec.City,
+			AdLink:      c.Spec.AdLink,
+			Content:     c.Spec.Content,
+			ScheduleAt:  c.Spec.ScheduleAt,
+			LineNumber:  c.Spec.LineNumber,
+			Budget:      c.Spec.Budget,
+			Comment:     c.Comment,
+			Statistics:  stats,
+			TotalClicks: &totalClicks,
+			ClickRate:   clickRate,
 		})
 	}
 
@@ -131,6 +166,32 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	if c == nil {
 		return nil, ErrCampaignNotFound
 	}
+	var stats map[string]any
+	if len(c.Statistics) > 0 {
+		_ = json.Unmarshal(c.Statistics, &stats)
+	}
+	clickCounts, _ := s.campaignRepo.ClickCounts(ctx, []uint{id})
+	clicks := clickCounts[id]
+	var clickRate *float64
+	totalSent := float64(0)
+	if v, ok := stats["totalSent"]; ok {
+		switch n := v.(type) {
+		case float64:
+			totalSent = n
+		case int64:
+			totalSent = float64(n)
+		case json.Number:
+			if f, e := n.Float64(); e == nil {
+				totalSent = f
+			}
+		}
+	}
+	if totalSent > 0 {
+		val := float64(clicks) / totalSent
+		clickRate = &val
+	}
+	totalClicks := clicks
+
 	resp := &dto.AdminGetCampaignResponse{
 		ID:         c.ID,
 		UUID:       c.UUID.String(),
@@ -151,6 +212,9 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 
 		SegmentPriceFactor:    -1, // TODO
 		LineNumberPriceFactor: -1, // TODO
+		Statistics:            stats,
+		TotalClicks:           &totalClicks,
+		ClickRate:             clickRate,
 	}
 	return resp, nil
 }
