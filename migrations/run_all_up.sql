@@ -180,5 +180,11 @@
 \echo 'Running 0058_add_statistics_to_sms_campaigns.sql...'
 \i migrations/0058_add_statistics_to_sms_campaigns.sql
 
+\echo 'Running 0059_add_campaign_and_agency_balances_to_balance_snapshots.sql...'
+\i migrations/0059_add_campaign_and_agency_balances_to_balance_snapshots.sql
+
+\echo 'Running 0060_add_new_transaction_types.sql...'
+\i migrations/0060_add_new_transaction_types.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
