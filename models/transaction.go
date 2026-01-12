@@ -12,16 +12,19 @@ import (
 type TransactionType string
 
 const (
-	TransactionTypeDeposit        TransactionType = "deposit"         // Wallet recharge via Atipay
-	TransactionTypeWithdrawal     TransactionType = "withdrawal"      //
-	TransactionTypeLaunchCampaign TransactionType = "launch_campaign" // Money spent on campaigns
-	TransactionTypeFreeze         TransactionType = "freeze"          // Reserve funds for pending transaction
-	TransactionTypeUnfreeze       TransactionType = "unfreeze"        // Release frozen funds
-	TransactionTypeLock           TransactionType = "lock"            // Lock funds (e.g., for disputes)
-	TransactionTypeUnlock         TransactionType = "unlock"          // Unlock funds
-	TransactionTypeRefund         TransactionType = "refund"          // Refund from failed/returned transaction
-	TransactionTypeFee            TransactionType = "fee"             // Service fees
-	TransactionTypeAdjustment     TransactionType = "adjustment"      // Manual balance adjustments
+	TransactionTypeDeposit                     TransactionType = "deposit"                         // Wallet recharge via Atipay
+	TransactionTypeWithdrawal                  TransactionType = "withdrawal"                      //
+	TransactionTypeFreeze                      TransactionType = "freeze"                          // Reserve funds for pending transaction
+	TransactionTypeUnfreeze                    TransactionType = "unfreeze"                        // Release frozen funds
+	TransactionTypeLock                        TransactionType = "lock"                            // Lock funds (e.g., for disputes)
+	TransactionTypeUnlock                      TransactionType = "unlock"                          // Unlock funds
+	TransactionTypeRefund                      TransactionType = "refund"                          // Refund from failed/returned transaction
+	TransactionTypeFee                         TransactionType = "fee"                             // Service fees
+	TransactionTypeAdjustment                  TransactionType = "adjustment"                      // Manual balance adjustments
+	TransactionTypeCredit                      TransactionType = "credit"                          // Credit provisioned to wallet
+	TransactionTypeDebit                       TransactionType = "debit"                           // Debit from wallet
+	TransactionTypeChargeAgencyShareWithTax    TransactionType = "charge_agency_share_with_tax"    // Charge Agency share including tax
+	TransactionTypeDischargeAgencyShareWithTax TransactionType = "discharge_agency_share_with_tax" // Discharge Agency share including tax
 )
 
 // TransactionStatus represents the current status of a transaction
