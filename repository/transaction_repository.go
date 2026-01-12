@@ -353,7 +353,7 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByCustomers(ctx c
 		Select("u.id as customer_id, u.representative_first_name as first_name, u.representative_last_name as last_name, u.company_name as company_name, COALESCE(SUM(t.amount),0) as agency_share_with_tax").
 		Joins("JOIN customers u ON u.id = (t.metadata->>'customer_id')::bigint").
 		Where("t.customer_id = ?", agencyID).
-		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_share_with_tax").
 		Group("u.id, u.representative_first_name, u.representative_last_name, u.company_name").
 		Order(order)
 
@@ -397,7 +397,7 @@ func (r *TransactionRepositoryImpl) AggregateAgencyTransactionsByDiscounts(ctx c
 		Joins("JOIN agency_discounts r ON r.id = (t.metadata->>'agency_discount_id')::bigint").
 		Where("t.customer_id = ?", agencyID).
 		Where("(t.metadata->>'customer_id')::bigint = ?", customerID).
-		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_share_with_tax").
 		Group("r.id, r.discount_rate, r.expires_at, r.created_at").
 		Order(order)
 
@@ -428,7 +428,7 @@ func (r *TransactionRepositoryImpl) AggregateCustomerTransactionsByDiscounts(ctx
 		Select("r.id as agency_discount_id, COALESCE(SUM(t.amount),0) as agency_share_with_tax, r.discount_rate as discount_rate, r.expires_at as expires_at, r.created_at as created_at").
 		Joins("JOIN agency_discounts r ON r.id = (t.metadata->>'agency_discount_id')::bigint").
 		Where("(t.metadata->>'customer_id')::bigint = ?", customerID).
-		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)").
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_share_with_tax").
 		Group("r.id, r.discount_rate, r.expires_at, r.created_at").
 		Order(order)
 
@@ -447,8 +447,8 @@ func (r *TransactionRepositoryImpl) AggregateCustomersShares(ctx context.Context
 		Table("transactions t").
 		Select("(t.metadata->>'customer_id')::bigint AS customer_id, SUM(t.amount) AS agency_total_share_with_tax").
 		Where("t.status = ?", models.TransactionStatusCompleted).
-		Where("t.type = ?", models.TransactionTypeLock).
-		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_locked_(agency_share_with_tax)")
+		Where("t.type = ?", models.TransactionTypeChargeAgencyShareWithTax).
+		Where("t.metadata->>'source' = ?", "payment_callback_increase_agency_share_with_tax")
 	if startDate != nil {
 		agSub = agSub.Where("t.created_at >= ?", *startDate)
 	}
