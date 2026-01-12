@@ -3,6 +3,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0060_add_new_transaction_types_down.sql...'
+\i migrations/0060_add_new_transaction_types_down.sql
+
+\echo 'Running 0059_add_campaign_and_agency_balances_to_balance_snapshots_down.sql...'
+\i migrations/0059_add_campaign_and_agency_balances_to_balance_snapshots_down.sql
+
 \echo 'Running 0058_add_statistics_to_sms_campaigns_down.sql...'
 \i migrations/0058_add_statistics_to_sms_campaigns_down.sql
 
