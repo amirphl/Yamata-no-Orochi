@@ -800,34 +800,36 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	if err != nil {
 		return err
 	}
-	newCustomerBalanceSnapshot := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: paymentRequest.CorrelationID,
-		WalletID:      paymentRequest.WalletID,
-		CustomerID:    paymentRequest.CustomerID,
-		FreeBalance:   newCustomerFreeBalance,
-		FrozenBalance: customerBalance.FrozenBalance,
-		LockedBalance: customerBalance.LockedBalance,
-		CreditBalance: newCustomerCreditBalance,
-		TotalBalance:  newCustomerFreeBalance + newCustomerCreditBalance + customerBalance.FrozenBalance + customerBalance.LockedBalance,
-		Reason:        "wallet_recharge",
-		Description:   fmt.Sprintf("Wallet recharged via Atipay (payment request %d)", paymentRequest.ID),
-		Metadata:      metadataJSON,
+	newCustomerBS := &models.BalanceSnapshot{
+		UUID:               uuid.New(),
+		CorrelationID:      paymentRequest.CorrelationID,
+		WalletID:           paymentRequest.WalletID,
+		CustomerID:         paymentRequest.CustomerID,
+		FreeBalance:        newCustomerFreeBalance,
+		FrozenBalance:      customerBalance.FrozenBalance,
+		LockedBalance:      customerBalance.LockedBalance,
+		CreditBalance:      newCustomerCreditBalance,
+		SpentOnCampaign:    customerBalance.SpentOnCampaign,
+		AgencyShareWithTax: customerBalance.AgencyShareWithTax,
+		TotalBalance:       newCustomerFreeBalance + newCustomerCreditBalance + customerBalance.FrozenBalance + customerBalance.LockedBalance + customerBalance.SpentOnCampaign + customerBalance.AgencyShareWithTax,
+		Reason:             "wallet_recharge",
+		Description:        fmt.Sprintf("Wallet recharged via Atipay (payment request %d)", paymentRequest.ID),
+		Metadata:           metadataJSON,
 	}
-	if err := p.balanceSnapshotRepo.Save(ctx, newCustomerBalanceSnapshot); err != nil {
+	if err := p.balanceSnapshotRepo.Save(ctx, newCustomerBS); err != nil {
 		return err
 	}
 
 	// Create transaction record for customer wallet
-	balanceBefore, err := customerBalance.GetBalanceMap()
+	customerBalanceBefore, err := customerBalance.GetBalanceMap()
 	if err != nil {
 		return err
 	}
-	balanceAfter, err := newCustomerBalanceSnapshot.GetBalanceMap()
+	customerBalanceAfter, err := newCustomerBS.GetBalanceMap()
 	if err != nil {
 		return err
 	}
-	customerTransaction := &models.Transaction{
+	customerDepositTx := &models.Transaction{
 		UUID:              uuid.New(),
 		CorrelationID:     paymentRequest.CorrelationID,
 		Type:              models.TransactionTypeDeposit,
@@ -836,8 +838,8 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		Currency:          utils.TomanCurrency,
 		WalletID:          paymentRequest.WalletID,
 		CustomerID:        paymentRequest.CustomerID,
-		BalanceBefore:     balanceBefore,
-		BalanceAfter:      balanceAfter,
+		BalanceBefore:     customerBalanceBefore,
+		BalanceAfter:      customerBalanceAfter,
 		ExternalReference: atipayRequest.ReferenceNumber,
 		ExternalTrace:     atipayRequest.TraceNumber,
 		ExternalRRN:       atipayRequest.RRN,
@@ -845,32 +847,34 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		Description:       fmt.Sprintf("Wallet recharge (payment request %d)", paymentRequest.ID),
 		Metadata:          metadataJSON,
 	}
-	if err := p.transactionRepo.Save(ctx, customerTransaction); err != nil {
+	if err := p.transactionRepo.Save(ctx, customerDepositTx); err != nil {
 		return err
 	}
 
-	newAgencyLockedBalance := agencyBalance.LockedBalance + agencyShareWithTax
-	metadata["source"] = "payment_callback_increase_agency_locked_(agency_share_with_tax)"
-	metadata["operation"] = "increase_agency_locked"
+	newAgencyShareWithTax := agencyBalance.AgencyShareWithTax + agencyShareWithTax
+	metadata["source"] = "payment_callback_increase_agency_share_with_tax"
+	metadata["operation"] = "increase_agency_share_with_tax"
 	metadataJSON, err = json.Marshal(metadata)
 	if err != nil {
 		return err
 	}
-	newAgencyBalanceSnapshot := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: paymentRequest.CorrelationID,
-		WalletID:      agencyWallet.ID,
-		CustomerID:    agencyWallet.CustomerID,
-		FreeBalance:   agencyBalance.FreeBalance,
-		FrozenBalance: agencyBalance.FrozenBalance,
-		LockedBalance: newAgencyLockedBalance,
-		CreditBalance: agencyBalance.CreditBalance,
-		TotalBalance:  agencyBalance.FreeBalance + agencyBalance.FrozenBalance + newAgencyLockedBalance + agencyBalance.CreditBalance,
-		Reason:        "agency_share_with_tax",
-		Description:   fmt.Sprintf("Agency share for payment request %d", paymentRequest.ID),
-		Metadata:      metadataJSON,
+	newAgencyBS := &models.BalanceSnapshot{
+		UUID:               uuid.New(),
+		CorrelationID:      paymentRequest.CorrelationID,
+		WalletID:           agencyWallet.ID,
+		CustomerID:         agencyWallet.CustomerID,
+		FreeBalance:        agencyBalance.FreeBalance,
+		FrozenBalance:      agencyBalance.FrozenBalance,
+		LockedBalance:      agencyBalance.LockedBalance,
+		CreditBalance:      agencyBalance.CreditBalance,
+		SpentOnCampaign:    agencyBalance.SpentOnCampaign,
+		AgencyShareWithTax: newAgencyShareWithTax,
+		TotalBalance:       agencyBalance.FreeBalance + agencyBalance.FrozenBalance + agencyBalance.LockedBalance + agencyBalance.CreditBalance + agencyBalance.SpentOnCampaign + newAgencyShareWithTax,
+		Reason:             "agency_share_with_tax",
+		Description:        fmt.Sprintf("Agency share for payment request %d", paymentRequest.ID),
+		Metadata:           metadataJSON,
 	}
-	if err := p.balanceSnapshotRepo.Save(ctx, newAgencyBalanceSnapshot); err != nil {
+	if err := p.balanceSnapshotRepo.Save(ctx, newAgencyBS); err != nil {
 		return err
 	}
 
@@ -879,14 +883,14 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	if err != nil {
 		return err
 	}
-	agencyBalanceAfter, err := newAgencyBalanceSnapshot.GetBalanceMap()
+	agencyBalanceAfter, err := newAgencyBS.GetBalanceMap()
 	if err != nil {
 		return err
 	}
-	agencyTransaction := &models.Transaction{
+	agencyChargeTx := &models.Transaction{
 		UUID:              uuid.New(),
 		CorrelationID:     paymentRequest.CorrelationID,
-		Type:              models.TransactionTypeLock,
+		Type:              models.TransactionTypeChargeAgencyShareWithTax,
 		Status:            models.TransactionStatusCompleted,
 		Amount:            agencyShareWithTax,
 		Currency:          utils.TomanCurrency,
@@ -901,7 +905,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		Description:       fmt.Sprintf("Agency share for payment request %d", paymentRequest.ID),
 		Metadata:          metadataJSON,
 	}
-	if err := p.transactionRepo.Save(ctx, agencyTransaction); err != nil {
+	if err := p.transactionRepo.Save(ctx, agencyChargeTx); err != nil {
 		return err
 	}
 
@@ -913,21 +917,23 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	if err != nil {
 		return err
 	}
-	newTaxBalanceSnapshot := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: paymentRequest.CorrelationID,
-		WalletID:      taxWallet.ID,
-		CustomerID:    taxWallet.CustomerID,
-		FreeBalance:   taxBalance.FreeBalance,
-		FrozenBalance: taxBalance.FrozenBalance,
-		LockedBalance: newTaxLockedBalance,
-		CreditBalance: taxBalance.CreditBalance,
-		TotalBalance:  taxBalance.FreeBalance + taxBalance.FrozenBalance + newTaxLockedBalance + taxBalance.CreditBalance,
-		Reason:        "tax_collection",
-		Description:   fmt.Sprintf("Tax collection for payment request %d", paymentRequest.ID),
-		Metadata:      metadataJSON,
+	newTaxBS := &models.BalanceSnapshot{
+		UUID:               uuid.New(),
+		CorrelationID:      paymentRequest.CorrelationID,
+		WalletID:           taxWallet.ID,
+		CustomerID:         taxWallet.CustomerID,
+		FreeBalance:        taxBalance.FreeBalance,
+		FrozenBalance:      taxBalance.FrozenBalance,
+		LockedBalance:      newTaxLockedBalance,
+		CreditBalance:      taxBalance.CreditBalance,
+		SpentOnCampaign:    taxBalance.SpentOnCampaign,
+		AgencyShareWithTax: taxBalance.AgencyShareWithTax,
+		TotalBalance:       taxBalance.FreeBalance + taxBalance.FrozenBalance + newTaxLockedBalance + taxBalance.CreditBalance + taxBalance.SpentOnCampaign + taxBalance.AgencyShareWithTax,
+		Reason:             "tax_collection",
+		Description:        fmt.Sprintf("Tax collection for payment request %d", paymentRequest.ID),
+		Metadata:           metadataJSON,
 	}
-	if err := p.balanceSnapshotRepo.Save(ctx, newTaxBalanceSnapshot); err != nil {
+	if err := p.balanceSnapshotRepo.Save(ctx, newTaxBS); err != nil {
 		return err
 	}
 
@@ -936,11 +942,11 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	if err != nil {
 		return err
 	}
-	taxBalanceAfter, err := newTaxBalanceSnapshot.GetBalanceMap()
+	taxBalanceAfter, err := newTaxBS.GetBalanceMap()
 	if err != nil {
 		return err
 	}
-	taxTransaction := &models.Transaction{
+	taxLockTx := &models.Transaction{
 		UUID:              uuid.New(),
 		CorrelationID:     paymentRequest.CorrelationID,
 		Type:              models.TransactionTypeLock,
@@ -958,7 +964,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		Description:       fmt.Sprintf("Tax collection for payment request %d", paymentRequest.ID),
 		Metadata:          metadataJSON,
 	}
-	if err := p.transactionRepo.Save(ctx, taxTransaction); err != nil {
+	if err := p.transactionRepo.Save(ctx, taxLockTx); err != nil {
 		return err
 	}
 
@@ -971,18 +977,20 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		return err
 	}
 	newSystemBalanceSnapshot := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: paymentRequest.CorrelationID,
-		WalletID:      systemWallet.ID,
-		CustomerID:    systemWallet.CustomerID,
-		FreeBalance:   systemBalance.FreeBalance,
-		FrozenBalance: systemBalance.FrozenBalance,
-		LockedBalance: newSystemLockedBalance,
-		CreditBalance: systemBalance.CreditBalance,
-		TotalBalance:  systemBalance.FreeBalance + systemBalance.FrozenBalance + newSystemLockedBalance + systemBalance.CreditBalance,
-		Reason:        "real_system_share",
-		Description:   fmt.Sprintf("System share for payment request %d", paymentRequest.ID),
-		Metadata:      metadataJSON,
+		UUID:               uuid.New(),
+		CorrelationID:      paymentRequest.CorrelationID,
+		WalletID:           systemWallet.ID,
+		CustomerID:         systemWallet.CustomerID,
+		FreeBalance:        systemBalance.FreeBalance,
+		FrozenBalance:      systemBalance.FrozenBalance,
+		LockedBalance:      newSystemLockedBalance,
+		CreditBalance:      systemBalance.CreditBalance,
+		SpentOnCampaign:    systemBalance.SpentOnCampaign,
+		AgencyShareWithTax: systemBalance.AgencyShareWithTax,
+		TotalBalance:       systemBalance.FreeBalance + systemBalance.FrozenBalance + newSystemLockedBalance + systemBalance.CreditBalance + systemBalance.SpentOnCampaign + systemBalance.AgencyShareWithTax,
+		Reason:             "real_system_share",
+		Description:        fmt.Sprintf("System share for payment request %d", paymentRequest.ID),
+		Metadata:           metadataJSON,
 	}
 	if err := p.balanceSnapshotRepo.Save(ctx, newSystemBalanceSnapshot); err != nil {
 		return err
@@ -997,7 +1005,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	if err != nil {
 		return err
 	}
-	systemTransaction := &models.Transaction{
+	systemLockTx := &models.Transaction{
 		UUID:              uuid.New(),
 		CorrelationID:     paymentRequest.CorrelationID,
 		Type:              models.TransactionTypeLock,
@@ -1015,7 +1023,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		Description:       fmt.Sprintf("Real system share for payment request %d", paymentRequest.ID),
 		Metadata:          metadataJSON,
 	}
-	if err := p.transactionRepo.Save(ctx, systemTransaction); err != nil {
+	if err := p.transactionRepo.Save(ctx, systemLockTx); err != nil {
 		return err
 	}
 
