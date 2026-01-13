@@ -1066,32 +1066,34 @@ func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *mode
 		"tx_hash":                   dep.TxHash,
 	}
 
-	// Update customer wallet
+	// Update customer balance
 	newCustomerFree := customerBalance.FreeBalance + real
 	newCustomerCredit := customerBalance.CreditBalance + customerCredit
 	metadataMap["source"] = "crypto_increase_customer_free_plus_credit"
 	metadataMap["operation"] = "increase_customer_free_plus_credit"
 	b, _ := json.Marshal(metadataMap)
 	newCustomerBS := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: cpr.CorrelationID,
-		WalletID:      cpr.WalletID,
-		CustomerID:    cpr.CustomerID,
-		FreeBalance:   newCustomerFree,
-		FrozenBalance: customerBalance.FrozenBalance,
-		LockedBalance: customerBalance.LockedBalance,
-		CreditBalance: newCustomerCredit,
-		TotalBalance:  newCustomerFree + newCustomerCredit + customerBalance.FrozenBalance + customerBalance.LockedBalance,
-		Reason:        "crypto_wallet_recharge",
-		Description:   fmt.Sprintf("Wallet recharged via crypto (request %d)", cpr.ID),
-		Metadata:      b,
+		UUID:               uuid.New(),
+		CorrelationID:      cpr.CorrelationID,
+		WalletID:           cpr.WalletID,
+		CustomerID:         cpr.CustomerID,
+		FreeBalance:        newCustomerFree,
+		FrozenBalance:      customerBalance.FrozenBalance,
+		LockedBalance:      customerBalance.LockedBalance,
+		CreditBalance:      newCustomerCredit,
+		SpentOnCampaign:    customerBalance.SpentOnCampaign,
+		AgencyShareWithTax: customerBalance.AgencyShareWithTax,
+		TotalBalance:       newCustomerFree + newCustomerCredit + customerBalance.FrozenBalance + customerBalance.LockedBalance + customerBalance.SpentOnCampaign + customerBalance.AgencyShareWithTax,
+		Reason:             "crypto_wallet_recharge",
+		Description:        fmt.Sprintf("Wallet recharged via crypto (request %d)", cpr.ID),
+		Metadata:           b,
 	}
 	if err := f.balanceSnapshotRepo.Save(ctx, newCustomerBS); err != nil {
 		return err
 	}
 	before, _ := customerBalance.GetBalanceMap()
 	after, _ := newCustomerBS.GetBalanceMap()
-	custTx := &models.Transaction{
+	customerDepositTx := &models.Transaction{
 		UUID:              uuid.New(),
 		CorrelationID:     cpr.CorrelationID,
 		Type:              models.TransactionTypeDeposit,
@@ -1109,38 +1111,40 @@ func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *mode
 		Description:       fmt.Sprintf("Crypto wallet recharge (request %d)", cpr.ID),
 		Metadata:          b,
 	}
-	if err := f.transactionRepo.Save(ctx, custTx); err != nil {
+	if err := f.transactionRepo.Save(ctx, customerDepositTx); err != nil {
 		return err
 	}
 
-	// Agency locked
-	newAgencyLocked := agencyBalance.LockedBalance + agencyShareWithTax
-	metadataMap["source"] = "crypto_increase_agency_locked_(agency_share_with_tax)"
-	metadataMap["operation"] = "increase_agency_locked"
+	// Update agency balance
+	newAgencyShareWithTax := agencyBalance.AgencyShareWithTax + agencyShareWithTax
+	metadataMap["source"] = "crypto_increase_agency_share_with_tax"
+	metadataMap["operation"] = "increase_agency_share_with_tax"
 	b, _ = json.Marshal(metadataMap)
 	agencyBS := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: cpr.CorrelationID,
-		WalletID:      agencyWallet.ID,
-		CustomerID:    agencyWallet.CustomerID,
-		FreeBalance:   agencyBalance.FreeBalance,
-		FrozenBalance: agencyBalance.FrozenBalance,
-		LockedBalance: newAgencyLocked,
-		CreditBalance: agencyBalance.CreditBalance,
-		TotalBalance:  agencyBalance.FreeBalance + agencyBalance.FrozenBalance + newAgencyLocked + agencyBalance.CreditBalance,
-		Reason:        "agency_share_with_tax",
-		Description:   fmt.Sprintf("Agency share for crypto request %d", cpr.ID),
-		Metadata:      b,
+		UUID:               uuid.New(),
+		CorrelationID:      cpr.CorrelationID,
+		WalletID:           agencyWallet.ID,
+		CustomerID:         agencyWallet.CustomerID,
+		FreeBalance:        agencyBalance.FreeBalance,
+		FrozenBalance:      agencyBalance.FrozenBalance,
+		LockedBalance:      agencyBalance.LockedBalance,
+		CreditBalance:      agencyBalance.CreditBalance,
+		SpentOnCampaign:    agencyBalance.SpentOnCampaign,
+		AgencyShareWithTax: newAgencyShareWithTax,
+		TotalBalance:       agencyBalance.FreeBalance + agencyBalance.FrozenBalance + agencyBalance.LockedBalance + agencyBalance.CreditBalance + agencyBalance.SpentOnCampaign + newAgencyShareWithTax,
+		Reason:             "agency_share_with_tax",
+		Description:        fmt.Sprintf("Agency share for crypto request %d", cpr.ID),
+		Metadata:           b,
 	}
 	if err := f.balanceSnapshotRepo.Save(ctx, agencyBS); err != nil {
 		return err
 	}
 	ab, _ := agencyBalance.GetBalanceMap()
 	aa, _ := agencyBS.GetBalanceMap()
-	agencyTx := &models.Transaction{
+	agencyChargeTx := &models.Transaction{
 		UUID:              uuid.New(),
 		CorrelationID:     cpr.CorrelationID,
-		Type:              models.TransactionTypeLock,
+		Type:              models.TransactionTypeChargeAgencyShareWithTax,
 		Status:            models.TransactionStatusCompleted,
 		Amount:            agencyShareWithTax,
 		Currency:          utils.TomanCurrency,
@@ -1155,7 +1159,7 @@ func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *mode
 		Description:       fmt.Sprintf("Agency share for crypto request %d", cpr.ID),
 		Metadata:          b,
 	}
-	if err := f.transactionRepo.Save(ctx, agencyTx); err != nil {
+	if err := f.transactionRepo.Save(ctx, agencyChargeTx); err != nil {
 		return err
 	}
 
@@ -1165,18 +1169,20 @@ func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *mode
 	metadataMap["operation"] = "increase_tax_locked"
 	b, _ = json.Marshal(metadataMap)
 	taxBS := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: cpr.CorrelationID,
-		WalletID:      taxWallet.ID,
-		CustomerID:    taxWallet.CustomerID,
-		FreeBalance:   taxBalance.FreeBalance,
-		FrozenBalance: taxBalance.FrozenBalance,
-		LockedBalance: newTaxLocked,
-		CreditBalance: taxBalance.CreditBalance,
-		TotalBalance:  taxBalance.FreeBalance + taxBalance.FrozenBalance + newTaxLocked + taxBalance.CreditBalance,
-		Reason:        "tax_collection",
-		Description:   fmt.Sprintf("Tax collection for crypto request %d", cpr.ID),
-		Metadata:      b,
+		UUID:               uuid.New(),
+		CorrelationID:      cpr.CorrelationID,
+		WalletID:           taxWallet.ID,
+		CustomerID:         taxWallet.CustomerID,
+		FreeBalance:        taxBalance.FreeBalance,
+		FrozenBalance:      taxBalance.FrozenBalance,
+		LockedBalance:      newTaxLocked,
+		CreditBalance:      taxBalance.CreditBalance,
+		SpentOnCampaign:    taxBalance.SpentOnCampaign,
+		AgencyShareWithTax: taxBalance.AgencyShareWithTax,
+		TotalBalance:       taxBalance.FreeBalance + taxBalance.FrozenBalance + newTaxLocked + taxBalance.CreditBalance + taxBalance.SpentOnCampaign + taxBalance.AgencyShareWithTax,
+		Reason:             "tax_collection",
+		Description:        fmt.Sprintf("Tax collection for crypto request %d", cpr.ID),
+		Metadata:           b,
 	}
 	if err := f.balanceSnapshotRepo.Save(ctx, taxBS); err != nil {
 		return err
@@ -1209,18 +1215,20 @@ func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *mode
 	metadataMap["operation"] = "increase_system_locked"
 	b, _ = json.Marshal(metadataMap)
 	sysBS := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: cpr.CorrelationID,
-		WalletID:      systemWallet.ID,
-		CustomerID:    systemWallet.CustomerID,
-		FreeBalance:   systemBalance.FreeBalance,
-		FrozenBalance: systemBalance.FrozenBalance,
-		LockedBalance: newSystemLocked,
-		CreditBalance: systemBalance.CreditBalance,
-		TotalBalance:  systemBalance.FreeBalance + systemBalance.FrozenBalance + newSystemLocked + systemBalance.CreditBalance,
-		Reason:        "real_system_share",
-		Description:   fmt.Sprintf("System share for crypto request %d", cpr.ID),
-		Metadata:      b,
+		UUID:               uuid.New(),
+		CorrelationID:      cpr.CorrelationID,
+		WalletID:           systemWallet.ID,
+		CustomerID:         systemWallet.CustomerID,
+		FreeBalance:        systemBalance.FreeBalance,
+		FrozenBalance:      systemBalance.FrozenBalance,
+		LockedBalance:      newSystemLocked,
+		CreditBalance:      systemBalance.CreditBalance,
+		SpentOnCampaign:    systemBalance.SpentOnCampaign,
+		AgencyShareWithTax: systemBalance.AgencyShareWithTax,
+		TotalBalance:       systemBalance.FreeBalance + systemBalance.FrozenBalance + newSystemLocked + systemBalance.CreditBalance + systemBalance.SpentOnCampaign + systemBalance.AgencyShareWithTax,
+		Reason:             "real_system_share",
+		Description:        fmt.Sprintf("System share for crypto request %d", cpr.ID),
+		Metadata:           b,
 	}
 	if err := f.balanceSnapshotRepo.Save(ctx, sysBS); err != nil {
 		return err
@@ -1273,223 +1281,3 @@ func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *mode
 	_ = createAuditLog(ctx, f.auditRepo, &cust, models.AuditActionWalletChargeCompleted, msg, true, nil, metadata)
 	return nil
 }
-
-// func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *models.CryptoPaymentRequest, dep *models.CryptoDeposit, metadata *ClientMetadata) error {
-// 	// decode metadata
-// 	var m map[string]any
-// 	if err := json.Unmarshal(cpr.Metadata, &m); err != nil {
-// 		return err
-// 	}
-// 	realWithTax := uint64(m["amount_with_tax"].(float64))
-// 	systemShareWithTax := uint64(m["system_share_with_tax"].(float64))
-// 	agencyShareWithTax := uint64(m["agency_share_with_tax"].(float64))
-// 	agencyDiscountID := uint(m["agency_discount_id"].(float64))
-// 	agencyID := uint(m["agency_id"].(float64))
-
-// 	// wallets & balances
-// 	agencyWallet, err := getWallet(ctx, f.walletRepo, agencyID)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	taxWallet, err := getTaxWallet(ctx, f.walletRepo, f.sysCfg)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	systemWallet, err := getSystemWallet(ctx, f.walletRepo, f.sysCfg)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	customerBalance, err := getLatestBalanceSnapshot(ctx, f.walletRepo, cpr.WalletID)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	agencyBalance, err := getLatestBalanceSnapshot(ctx, f.walletRepo, agencyWallet.ID)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	taxBalance, err := getLatestTaxWalletBalanceSnapshot(ctx, f.walletRepo, taxWallet.ID)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	systemBalance, err := getLatestSystemWalletBalanceSnapshot(ctx, f.walletRepo, systemWallet.ID)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	agencyDiscount, err := f.agencyDiscountRepo.ByID(ctx, agencyDiscountID)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	if agencyDiscount == nil {
-// 		return ErrAgencyDiscountNotFound
-// 	}
-
-// 	real := uint64(realWithTax * 10 / 11)
-// 	tax := realWithTax - real
-// 	realSystemShare := uint64(systemShareWithTax * 10 / 11)
-// 	taxSystemShare := systemShareWithTax - realSystemShare
-// 	realAgencyShare := uint64(agencyShareWithTax * 10 / 11)
-// 	taxAgencyShare := agencyShareWithTax - realAgencyShare
-// 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
-
-// 	metadataMap := map[string]any{
-// 		"customer_id":               cpr.CustomerID,
-// 		"agency_id":                 agencyID,
-// 		"agency_discount_id":        agencyDiscountID,
-// 		"source":                    "crypto_payment_callback",
-// 		"operation":                 "increase_balance",
-// 		"crypto_payment_request_id": cpr.ID,
-// 		"amount_with_tax":           realWithTax,
-// 		"amount":                    real,
-// 		"tax":                       tax,
-// 		"system_share_with_tax":     systemShareWithTax,
-// 		"system_share":              realSystemShare,
-// 		"system_share_tax":          taxSystemShare,
-// 		"agency_share_with_tax":     agencyShareWithTax,
-// 		"agency_share":              realAgencyShare,
-// 		"agency_share_tax":          taxAgencyShare,
-// 		"customer_credit":           customerCredit,
-// 		"tx_hash":                   dep.TxHash,
-// 	}
-
-// 	// Update customer wallet
-// 	newCustomerFree := customerBalance.FreeBalance + real
-// 	newCustomerCredit := customerBalance.CreditBalance + customerCredit
-// 	metadataMap["source"] = "crypto_increase_customer_free_plus_credit"
-// 	metadataMap["operation"] = "increase_customer_free_plus_credit"
-// 	b, _ := json.Marshal(metadataMap)
-// 	newCustomerBS := &models.BalanceSnapshot{
-// 		UUID:          uuid.New(),
-// 		CorrelationID: cpr.CorrelationID,
-// 		WalletID:      cpr.WalletID,
-// 		CustomerID:    cpr.CustomerID,
-// 		FreeBalance:   newCustomerFree,
-// 		FrozenBalance: customerBalance.FrozenBalance,
-// 		LockedBalance: customerBalance.LockedBalance,
-// 		CreditBalance: newCustomerCredit,
-// 		TotalBalance:  newCustomerFree + newCustomerCredit + customerBalance.FrozenBalance + customerBalance.LockedBalance,
-// 		Reason:        "crypto_wallet_recharge",
-// 		Description:   fmt.Sprintf("Wallet recharged via crypto (request %d)", cpr.ID),
-// 		Metadata:      b,
-// 	}
-// 	if err := f.balanceSnapshotRepo.Save(ctx, newCustomerBS); err != nil {
-// 		return err
-// 	}
-// 	before, _ := customerBalance.GetBalanceMap()
-// 	after, _ := newCustomerBS.GetBalanceMap()
-// 	custTx := &models.Transaction{
-// 		UUID: uuid.New(), CorrelationID: cpr.CorrelationID,
-// 		Type: models.TransactionTypeDeposit, Status: models.TransactionStatusCompleted,
-// 		Amount: real + customerCredit, Currency: utils.TomanCurrency,
-// 		WalletID: cpr.WalletID, CustomerID: cpr.CustomerID,
-// 		BalanceBefore: before, BalanceAfter: after,
-// 		ExternalReference: dep.TxHash, ExternalTrace: dep.TxHash, ExternalRRN: "", ExternalMaskedPAN: "",
-// 		Description: fmt.Sprintf("Crypto wallet recharge (request %d)", cpr.ID), Metadata: b,
-// 	}
-// 	if err := f.transactionRepo.Save(ctx, custTx); err != nil {
-// 		return err
-// 	}
-
-// 	// Agency locked
-// 	newAgencyLocked := agencyBalance.LockedBalance + agencyShareWithTax
-// 	metadataMap["source"] = "crypto_increase_agency_locked_(agency_share_with_tax)"
-// 	metadataMap["operation"] = "increase_agency_locked"
-// 	b, _ = json.Marshal(metadataMap)
-// 	agencyBS := &models.BalanceSnapshot{UUID: uuid.New(), CorrelationID: cpr.CorrelationID,
-// 		WalletID: agencyWallet.ID, CustomerID: agencyWallet.CustomerID,
-// 		FreeBalance: agencyBalance.FreeBalance, FrozenBalance: agencyBalance.FrozenBalance,
-// 		LockedBalance: newAgencyLocked, CreditBalance: agencyBalance.CreditBalance,
-// 		TotalBalance: agencyBalance.FreeBalance + agencyBalance.FrozenBalance + newAgencyLocked + agencyBalance.CreditBalance,
-// 		Reason:       "agency_share_with_tax", Description: fmt.Sprintf("Agency share for crypto request %d", cpr.ID), Metadata: b,
-// 	}
-// 	if err := f.balanceSnapshotRepo.Save(ctx, agencyBS); err != nil {
-// 		return err
-// 	}
-// 	ab, _ := agencyBalance.GetBalanceMap()
-// 	aa, _ := agencyBS.GetBalanceMap()
-// 	agencyTx := &models.Transaction{UUID: uuid.New(), CorrelationID: cpr.CorrelationID,
-// 		Type: models.TransactionTypeLock, Status: models.TransactionStatusCompleted,
-// 		Amount: agencyShareWithTax, Currency: utils.TomanCurrency,
-// 		WalletID: agencyWallet.ID, CustomerID: agencyWallet.CustomerID,
-// 		BalanceBefore: ab, BalanceAfter: aa, ExternalReference: dep.TxHash,
-// 		Description: fmt.Sprintf("Agency share for crypto request %d", cpr.ID), Metadata: b,
-// 	}
-// 	if err := f.transactionRepo.Save(ctx, agencyTx); err != nil {
-// 		return err
-// 	}
-
-// 	// Tax locked
-// 	newTaxLocked := taxBalance.LockedBalance + taxSystemShare
-// 	metadataMap["source"] = "crypto_increase_tax_locked_(tax_system_share)"
-// 	metadataMap["operation"] = "increase_tax_locked"
-// 	b, _ = json.Marshal(metadataMap)
-// 	taxBS := &models.BalanceSnapshot{UUID: uuid.New(), CorrelationID: cpr.CorrelationID,
-// 		WalletID: taxWallet.ID, CustomerID: taxWallet.CustomerID,
-// 		FreeBalance: taxBalance.FreeBalance, FrozenBalance: taxBalance.FrozenBalance,
-// 		LockedBalance: newTaxLocked, CreditBalance: taxBalance.CreditBalance,
-// 		TotalBalance: taxBalance.FreeBalance + taxBalance.FrozenBalance + newTaxLocked + taxBalance.CreditBalance,
-// 		Reason:       "tax_collection", Description: fmt.Sprintf("Tax collection for crypto request %d", cpr.ID), Metadata: b,
-// 	}
-// 	if err := f.balanceSnapshotRepo.Save(ctx, taxBS); err != nil {
-// 		return err
-// 	}
-// 	tbb, _ := taxBalance.GetBalanceMap()
-// 	tba, _ := taxBS.GetBalanceMap()
-// 	taxTx := &models.Transaction{UUID: uuid.New(), CorrelationID: cpr.CorrelationID,
-// 		Type: models.TransactionTypeLock, Status: models.TransactionStatusCompleted,
-// 		Amount: taxSystemShare, Currency: utils.TomanCurrency,
-// 		WalletID: taxWallet.ID, CustomerID: taxWallet.CustomerID,
-// 		BalanceBefore: tbb, BalanceAfter: tba, ExternalReference: dep.TxHash,
-// 		Description: fmt.Sprintf("Tax collection for crypto request %d", cpr.ID), Metadata: b,
-// 	}
-// 	if err := f.transactionRepo.Save(ctx, taxTx); err != nil {
-// 		return err
-// 	}
-
-// 	// System locked
-// 	newSystemLocked := systemBalance.LockedBalance + realSystemShare
-// 	metadataMap["source"] = "crypto_increase_system_locked_(real_system_share)"
-// 	metadataMap["operation"] = "increase_system_locked"
-// 	b, _ = json.Marshal(metadataMap)
-// 	sysBS := &models.BalanceSnapshot{UUID: uuid.New(), CorrelationID: cpr.CorrelationID,
-// 		WalletID: systemWallet.ID, CustomerID: systemWallet.CustomerID,
-// 		FreeBalance: systemBalance.FreeBalance, FrozenBalance: systemBalance.FrozenBalance,
-// 		LockedBalance: newSystemLocked, CreditBalance: systemBalance.CreditBalance,
-// 		TotalBalance: systemBalance.FreeBalance + systemBalance.FrozenBalance + newSystemLocked + systemBalance.CreditBalance,
-// 		Reason:       "real_system_share", Description: fmt.Sprintf("System share for crypto request %d", cpr.ID), Metadata: b,
-// 	}
-// 	if err := f.balanceSnapshotRepo.Save(ctx, sysBS); err != nil {
-// 		return err
-// 	}
-// 	sb, _ := systemBalance.GetBalanceMap()
-// 	sa, _ := sysBS.GetBalanceMap()
-// 	sysTx := &models.Transaction{UUID: uuid.New(), CorrelationID: cpr.CorrelationID,
-// 		Type: models.TransactionTypeLock, Status: models.TransactionStatusCompleted,
-// 		Amount: realSystemShare, Currency: utils.TomanCurrency,
-// 		WalletID: systemWallet.ID, CustomerID: systemWallet.CustomerID,
-// 		BalanceBefore: sb, BalanceAfter: sa, ExternalReference: dep.TxHash,
-// 		Description: fmt.Sprintf("Real system share for crypto request %d", cpr.ID), Metadata: b,
-// 	}
-// 	if err := f.transactionRepo.Save(ctx, sysTx); err != nil {
-// 		return err
-// 	}
-
-// 	// finalize request and deposit
-// 	now := utils.UTCNow()
-// 	dep.CreditedAt = &now
-// 	if err := f.cdRepo.Update(ctx, dep); err != nil {
-// 		return err
-// 	}
-// 	cpr.CreditedAt = &now
-// 	cpr.ConfirmedAt = dep.ConfirmedAt
-// 	cpr.DetectedAt = dep.DetectedAt
-// 	cpr.Status = models.CryptoPaymentStatusCredited
-// 	cpr.StatusReason = "crypto payment credited"
-// 	if err := f.cprRepo.Update(ctx, cpr); err != nil {
-// 		return err
-// 	}
-
-// 	msg := fmt.Sprintf("Crypto payment credited for request %d", cpr.ID)
-// 	cust := models.Customer{ID: cpr.CustomerID}
-// 	_ = createAuditLog(ctx, f.auditRepo, &cust, models.AuditActionWalletChargeCompleted, msg, true, nil, metadata)
-// 	return nil
-// }
