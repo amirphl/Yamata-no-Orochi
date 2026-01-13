@@ -75,16 +75,15 @@ type TransactionHistoryPaginationInfo struct {
 
 // TransactionTypeDisplay maps transaction types to human-readable operation names
 var TransactionTypeDisplay = map[models.TransactionType]string{
-	models.TransactionTypeDeposit:        "Wallet Recharge",
-	models.TransactionTypeWithdrawal:     "Wallet Withdrawal",
-	models.TransactionTypeLaunchCampaign: "Campaign Launch",
-	models.TransactionTypeFreeze:         "Fund Freeze",
-	models.TransactionTypeUnfreeze:       "Fund Unfreeze",
-	models.TransactionTypeLock:           "Fund Lock",
-	models.TransactionTypeUnlock:         "Fund Unlock",
-	models.TransactionTypeRefund:         "Refund",
-	models.TransactionTypeFee:            "Service Fee",
-	models.TransactionTypeAdjustment:     "Balance Adjustment",
+	models.TransactionTypeDeposit:    "Wallet Recharge",
+	models.TransactionTypeWithdrawal: "Wallet Withdrawal",
+	models.TransactionTypeFreeze:     "Fund Freeze",
+	models.TransactionTypeUnfreeze:   "Fund Unfreeze",
+	models.TransactionTypeLock:       "Fund Lock",
+	models.TransactionTypeUnlock:     "Fund Unlock",
+	models.TransactionTypeRefund:     "Refund",
+	models.TransactionTypeFee:        "Service Fee",
+	models.TransactionTypeAdjustment: "Balance Adjustment",
 }
 
 // TransactionStatusDisplay maps transaction statuses to human-readable status names
