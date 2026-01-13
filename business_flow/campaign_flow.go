@@ -357,20 +357,22 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			corrID := uuid.New()
 
 			newSnapshot := &models.BalanceSnapshot{
-				UUID:          uuid.New(),
-				CorrelationID: corrID,
-				WalletID:      wallet.ID,
-				CustomerID:    customer.ID,
-				FreeBalance:   newFreeBalance,
-				FrozenBalance: newFrozenBalance,
-				CreditBalance: newCreditBalance,
-				LockedBalance: latestBalance.LockedBalance,
-				TotalBalance:  newFreeBalance + newFrozenBalance + latestBalance.LockedBalance + newCreditBalance,
-				Reason:        "campaign_budget_reserved_waiting_for_approval",
-				Description:   fmt.Sprintf("Budget reserved for campaign %d", campaign.ID),
-				Metadata:      metaBytes,
-				CreatedAt:     utils.UTCNow(),
-				UpdatedAt:     utils.UTCNow(),
+				UUID:               uuid.New(),
+				CorrelationID:      corrID,
+				WalletID:           wallet.ID,
+				CustomerID:         customer.ID,
+				FreeBalance:        newFreeBalance,
+				FrozenBalance:      newFrozenBalance,
+				CreditBalance:      newCreditBalance,
+				LockedBalance:      latestBalance.LockedBalance,
+				SpentOnCampaign:    latestBalance.SpentOnCampaign,
+				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+				TotalBalance:       newFreeBalance + newFrozenBalance + newCreditBalance + latestBalance.LockedBalance + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+				Reason:             "campaign_budget_reserved_waiting_for_approval",
+				Description:        fmt.Sprintf("Budget reserved for campaign %d", campaign.ID),
+				Metadata:           metaBytes,
+				CreatedAt:          utils.UTCNow(),
+				UpdatedAt:          utils.UTCNow(),
 			}
 			if err := s.balanceSnapshotRepo.Save(txCtx, newSnapshot); err != nil {
 				return err
@@ -385,11 +387,11 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
-			transaction := &models.Transaction{
+			freezeTx := &models.Transaction{
 				UUID:          uuid.New(),
 				CorrelationID: corrID,
-				Type:          models.TransactionTypeLaunchCampaign,
-				Status:        models.TransactionStatusPending,
+				Type:          models.TransactionTypeFreeze,
+				Status:        models.TransactionStatusCompleted,
 				Amount:        cost.TotalCost,
 				Currency:      utils.TomanCurrency,
 				WalletID:      wallet.ID,
@@ -401,7 +403,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				CreatedAt:     utils.UTCNow(),
 				UpdatedAt:     utils.UTCNow(),
 			}
-			if err := s.transactionRepo.Save(txCtx, transaction); err != nil {
+			if err := s.transactionRepo.Save(txCtx, freezeTx); err != nil {
 				return err
 			}
 
@@ -696,27 +698,40 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		}
 		totalClicks := clicks
 
+		var linePriceFactor *float64
+		if c.Spec.LineNumber != nil {
+			lineNumber, err := s.lineNumberRepo.ByValue(ctx, *c.Spec.LineNumber)
+			if err != nil {
+				return nil, err
+			}
+			if lineNumber != nil {
+				linePriceFactor = &lineNumber.PriceFactor
+			}
+		}
+
 		items = append(items, dto.GetCampaignResponse{
-			UUID:        c.UUID.String(),
-			Status:      c.Status.String(),
-			CreatedAt:   c.CreatedAt,
-			UpdatedAt:   c.UpdatedAt,
-			Title:       c.Spec.Title,
-			Level1:      c.Spec.Level1,
-			Level2s:     c.Spec.Level2s,
-			Level3s:     c.Spec.Level3s,
-			Tags:        c.Spec.Tags,
-			Sex:         c.Spec.Sex,
-			City:        c.Spec.City,
-			AdLink:      c.Spec.AdLink,
-			Content:     c.Spec.Content,
-			ScheduleAt:  c.Spec.ScheduleAt,
-			LineNumber:  c.Spec.LineNumber,
-			Budget:      c.Spec.Budget,
-			Comment:     c.Comment,
-			Statistics:  statsMap,
-			ClickRate:   clickRate,
-			TotalClicks: &totalClicks,
+			UUID:            c.UUID.String(),
+			Status:          c.Status.String(),
+			CreatedAt:       c.CreatedAt,
+			UpdatedAt:       c.UpdatedAt,
+			Title:           c.Spec.Title,
+			Level1:          c.Spec.Level1,
+			Level2s:         c.Spec.Level2s,
+			Level3s:         c.Spec.Level3s,
+			Tags:            c.Spec.Tags,
+			Sex:             c.Spec.Sex,
+			City:            c.Spec.City,
+			AdLink:          c.Spec.AdLink,
+			Content:         c.Spec.Content,
+			ScheduleAt:      c.Spec.ScheduleAt,
+			LineNumber:      c.Spec.LineNumber,
+			LinePriceFactor: linePriceFactor,
+			Budget:          c.Spec.Budget,
+			NumAudience:     c.NumAudience,
+			Comment:         c.Comment,
+			Statistics:      statsMap,
+			ClickRate:       clickRate,
+			TotalClicks:     &totalClicks,
 		})
 	}
 
