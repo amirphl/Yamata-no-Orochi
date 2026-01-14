@@ -64,6 +64,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context) (*dto.BotL
 	for _, c := range readyCampaigns {
 		items = append(items, dto.BotGetCampaignResponse{
 			ID:           c.ID,
+			CustomerID:   c.CustomerID,
 			Status:       c.Status.String(),
 			CreatedAt:    c.CreatedAt,
 			UpdatedAt:    c.UpdatedAt,
