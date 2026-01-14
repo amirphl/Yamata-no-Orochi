@@ -255,8 +255,8 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 			CampaignID: &campaign.ID,
 			Source:     utils.ToPtr("campaign_update"),
 			Operation:  utils.ToPtr("reserve_budget"),
-			Type:       utils.ToPtr(models.TransactionTypeLaunchCampaign),
-			Status:     utils.ToPtr(models.TransactionStatusPending),
+			Type:       utils.ToPtr(models.TransactionTypeFreeze),
+			Status:     utils.ToPtr(models.TransactionStatusCompleted),
 		}, "id DESC", 0, 0)
 		if err != nil {
 			return err
@@ -294,23 +294,24 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		}
 		metaBytes, _ := json.Marshal(meta)
 
-		// Move from frozen to locked (spend reserved budget)
 		newFrozen := latestBalance.FrozenBalance - amount
-		newLocked := latestBalance.LockedBalance + amount
+		newSpentOnCampaign := latestBalance.SpentOnCampaign + amount
 
 		newSnap := &models.BalanceSnapshot{
-			UUID:          uuid.New(),
-			CorrelationID: freezeTx.CorrelationID,
-			WalletID:      wallet.ID,
-			CustomerID:    customer.ID,
-			FreeBalance:   latestBalance.FreeBalance,
-			FrozenBalance: newFrozen,
-			LockedBalance: newLocked,
-			CreditBalance: latestBalance.CreditBalance,
-			TotalBalance:  latestBalance.FreeBalance + newFrozen + newLocked + latestBalance.CreditBalance,
-			Reason:        "campaign_approved_budget_locked",
-			Description:   fmt.Sprintf("Budget locked for approved campaign %d", campaign.ID),
-			Metadata:      metaBytes,
+			UUID:               uuid.New(),
+			CorrelationID:      freezeTx.CorrelationID,
+			WalletID:           wallet.ID,
+			CustomerID:         customer.ID,
+			FreeBalance:        latestBalance.FreeBalance,
+			FrozenBalance:      newFrozen,
+			LockedBalance:      latestBalance.LockedBalance,
+			CreditBalance:      latestBalance.CreditBalance,
+			SpentOnCampaign:    newSpentOnCampaign,
+			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+			TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + latestBalance.CreditBalance + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
+			Reason:             "campaign_approved_budget_spent_on_campaign",
+			Description:        fmt.Sprintf("Budget spent on approved campaign %d", campaign.ID),
+			Metadata:           metaBytes,
 		}
 		if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
 			return err
@@ -325,10 +326,10 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 			return err
 		}
 
-		spendTx := &models.Transaction{
+		feeTx := &models.Transaction{
 			UUID:          uuid.New(),
 			CorrelationID: freezeTx.CorrelationID,
-			Type:          models.TransactionTypeLock,
+			Type:          models.TransactionTypeFee,
 			Status:        models.TransactionStatusCompleted,
 			Amount:        amount,
 			Currency:      utils.TomanCurrency,
@@ -339,7 +340,7 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 			Description:   fmt.Sprintf("Budget locked for approved campaign %d", campaign.ID),
 			Metadata:      metaBytes,
 		}
-		if err := s.transactionRepo.Save(txCtx, spendTx); err != nil {
+		if err := s.transactionRepo.Save(txCtx, feeTx); err != nil {
 			return err
 		}
 
@@ -405,8 +406,8 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 			CampaignID: &campaign.ID,
 			Source:     utils.ToPtr("campaign_update"),
 			Operation:  utils.ToPtr("reserve_budget"),
-			Type:       utils.ToPtr(models.TransactionTypeLaunchCampaign),
-			Status:     utils.ToPtr(models.TransactionStatusPending),
+			Type:       utils.ToPtr(models.TransactionTypeFreeze),
+			Status:     utils.ToPtr(models.TransactionStatusCompleted),
 		}, "id DESC", 0, 0)
 		if err != nil {
 			return err
@@ -446,18 +447,20 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		newCredit := latestBalance.CreditBalance + amount
 
 		newSnap := &models.BalanceSnapshot{
-			UUID:          uuid.New(),
-			CorrelationID: freezeTx.CorrelationID,
-			WalletID:      wallet.ID,
-			CustomerID:    customer.ID,
-			FreeBalance:   latestBalance.FreeBalance,
-			FrozenBalance: newFrozen,
-			LockedBalance: latestBalance.LockedBalance,
-			CreditBalance: newCredit,
-			TotalBalance:  latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit,
-			Reason:        "campaign_rejected_budget_refund",
-			Description:   fmt.Sprintf("Refund reserved budget for rejected campaign %d", campaign.ID),
-			Metadata:      metaBytes,
+			UUID:               uuid.New(),
+			CorrelationID:      freezeTx.CorrelationID,
+			WalletID:           wallet.ID,
+			CustomerID:         customer.ID,
+			FreeBalance:        latestBalance.FreeBalance,
+			FrozenBalance:      newFrozen,
+			LockedBalance:      latestBalance.LockedBalance,
+			CreditBalance:      newCredit,
+			SpentOnCampaign:    latestBalance.SpentOnCampaign,
+			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+			TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+			Reason:             "campaign_rejected_budget_refund",
+			Description:        fmt.Sprintf("Refund reserved budget for rejected campaign %d", campaign.ID),
+			Metadata:           metaBytes,
 		}
 		if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
 			return err
@@ -475,7 +478,7 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		refundTx := &models.Transaction{
 			UUID:          uuid.New(),
 			CorrelationID: freezeTx.CorrelationID,
-			Type:          models.TransactionTypeUnfreeze,
+			Type:          models.TransactionTypeRefund,
 			Status:        models.TransactionStatusCompleted,
 			Amount:        amount,
 			Currency:      utils.TomanCurrency,
