@@ -200,6 +200,7 @@ func (h *AgencyHandler) ListAgencyActiveDiscounts(c fiber.Ctx) error {
 		if businessflow.IsAgencyInactive(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Agency is inactive", "AGENCY_INACTIVE", nil)
 		}
+
 		log.Println("List active discounts failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list active discounts", "LIST_ACTIVE_DISCOUNTS_FAILED", nil)
 	}
@@ -250,6 +251,7 @@ func (h *AgencyHandler) ListAgencyCustomerDiscounts(c fiber.Ctx) error {
 		if businessflow.IsCustomerNotUnderAgency(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Customer is not under any agency", "CUSTOMER_NOT_UNDER_AGENCY", nil)
 		}
+
 		log.Println("List customer discounts failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list customer discounts", "LIST_CUSTOMER_DISCOUNTS_FAILED", nil)
 	}
@@ -282,6 +284,7 @@ func (h *AgencyHandler) ListAgencyCustomers(c fiber.Ctx) error {
 		if businessflow.IsAgencyInactive(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Agency is inactive", "AGENCY_INACTIVE", nil)
 		}
+
 		log.Println("List agency customers failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list agency customers", "LIST_AGENCY_CUSTOMERS_FAILED", nil)
 	}
