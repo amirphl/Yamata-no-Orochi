@@ -75,15 +75,19 @@ type TransactionHistoryPaginationInfo struct {
 
 // TransactionTypeDisplay maps transaction types to human-readable operation names
 var TransactionTypeDisplay = map[models.TransactionType]string{
-	models.TransactionTypeDeposit:    "Wallet Recharge",
-	models.TransactionTypeWithdrawal: "Wallet Withdrawal",
-	models.TransactionTypeFreeze:     "Fund Freeze",
-	models.TransactionTypeUnfreeze:   "Fund Unfreeze",
-	models.TransactionTypeLock:       "Fund Lock",
-	models.TransactionTypeUnlock:     "Fund Unlock",
-	models.TransactionTypeRefund:     "Refund",
-	models.TransactionTypeFee:        "Service Fee",
-	models.TransactionTypeAdjustment: "Balance Adjustment",
+	models.TransactionTypeDeposit:                     "Wallet Recharge",
+	models.TransactionTypeWithdrawal:                  "Wallet Withdrawal",
+	models.TransactionTypeFreeze:                      "Fund Freeze",
+	models.TransactionTypeUnfreeze:                    "Fund Unfreeze",
+	models.TransactionTypeLock:                        "Fund Lock",
+	models.TransactionTypeUnlock:                      "Fund Unlock",
+	models.TransactionTypeRefund:                      "Refund",
+	models.TransactionTypeFee:                         "Service Fee",
+	models.TransactionTypeAdjustment:                  "Balance Adjustment",
+	models.TransactionTypeCredit:                      "Wallet Credit",
+	models.TransactionTypeDebit:                       "Wallet Debit",
+	models.TransactionTypeChargeAgencyShareWithTax:    "Charge Agency Share with Tax",
+	models.TransactionTypeDischargeAgencyShareWithTax: "Discharge Agency Share with Tax",
 }
 
 // TransactionStatusDisplay maps transaction statuses to human-readable status names
@@ -102,15 +106,14 @@ type GetWalletBalanceRequest struct {
 
 // GetWalletBalanceResponse represents the response with user wallet balance information
 type GetWalletBalanceResponse struct {
-	Message             string `json:"message"`
-	Free                uint64 `json:"free"`
-	Locked              uint64 `json:"locked"`
-	Frozen              uint64 `json:"frozen"`
-	Credit              uint64 `json:"credit"`
-	Total               uint64 `json:"total"`
-	Currency            string `json:"currency"`
-	LastUpdated         string `json:"last_updated"`
-	PendingTransactions uint64 `json:"pending_transactions"`
-	MinimumBalance      uint64 `json:"minimum_balance"`
-	BalanceStatus       string `json:"balance_status"`
+	Message            string `json:"message"`
+	Free               uint64 `json:"free"`
+	Locked             uint64 `json:"locked"`
+	Frozen             uint64 `json:"frozen"`
+	Credit             uint64 `json:"credit"`
+	SpentOnCamapigns   uint64 `json:"spent_on_campaigns"`
+	AgencyShareWithTax uint64 `json:"agency_share_with_tax"`
+	Total              uint64 `json:"total"`
+	Currency           string `json:"currency"`
+	LastUpdated        string `json:"last_updated"`
 }
