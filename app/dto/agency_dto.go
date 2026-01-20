@@ -15,8 +15,8 @@ type AgencyCustomerReportRequest struct {
 }
 
 type AgencyCustomerReportItem struct {
-	FirstName               string `json:"first_name"`
-	LastName                string `json:"last_name"`
+	RepresentativeFirstName string `json:"representative_first_name"`
+	RepresentativeLastName  string `json:"representative_last_name"`
 	CompanyName             string `json:"company_name"`
 	TotalSent               uint64 `json:"total_sent"`
 	TotalAgencyShareWithTax uint64 `json:"total_agency_share_with_tax"`
@@ -39,12 +39,12 @@ type ListAgencyActiveDiscountsRequest struct {
 }
 
 type AgencyActiveDiscountItem struct {
-	CustomerID   uint      `json:"customer_id"`
-	FirstName    string    `json:"first_name"`
-	LastName     string    `json:"last_name"`
-	CompanyName  *string   `json:"company_name"`
-	DiscountRate float64   `json:"discount_rate"`
-	CreatedAt    time.Time `json:"created_at"`
+	CustomerID              uint      `json:"customer_id"`
+	RepresentativeFirstName string    `json:"representative_first_name"`
+	RepresentativeLastName  string    `json:"representative_last_name"`
+	CompanyName             *string   `json:"company_name"`
+	DiscountRate            float64   `json:"discount_rate"`
+	CreatedAt               time.Time `json:"created_at"`
 }
 
 type ListAgencyActiveDiscountsResponse struct {
@@ -87,12 +87,12 @@ type ListAgencyCustomersRequest struct {
 }
 
 type AgencyCustomerItem struct {
-	CustomerID  uint      `json:"customer_id"`
-	FirstName   string    `json:"first_name"`
-	LastName    string    `json:"last_name"`
-	CompanyName *string   `json:"company_name,omitempty" validate:"omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	IsActive    *bool     `json:"is_active"`
+	CustomerID              uint      `json:"customer_id"`
+	RepresentativeFirstName string    `json:"representative_first_name"`
+	RepresentativeLastName  string    `json:"representative_last_name"`
+	CompanyName             *string   `json:"company_name,omitempty" validate:"omitempty"`
+	CreatedAt               time.Time `json:"created_at"`
+	IsActive                *bool     `json:"is_active"`
 }
 
 type ListAgencyCustomersResponse struct {
