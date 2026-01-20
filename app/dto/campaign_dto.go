@@ -54,6 +54,16 @@ type UpdateCampaignResponse struct {
 	Message string `json:"message"`
 }
 
+type CancelCampaignRequest struct {
+	CampaignID uint   `json:"campaign_id" validate:"required"`
+	CustomerID uint   `json:"-"`
+	Comment    string `json:"comment,omitempty" validate:"omitempty,max=500"`
+}
+
+type CancelCampaignResponse struct {
+	Message string `json:"message"`
+}
+
 // GetCampaignRequest represents the request to get an existing campaign
 type GetCampaignRequest struct {
 	UUID       string `json:"-"`
@@ -135,7 +145,7 @@ type CalculateCampaignCostResponse struct {
 // ListCampaignsFilter represents filter criteria for listing campaigns in request layer
 type ListCampaignsFilter struct {
 	Title  *string `json:"title,omitempty" validate:"omitempty,max=255"`
-	Status *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected"`
+	Status *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected cancelled running executed"`
 }
 
 // ListCampaignsRequest represents a paginated list request for user's campaigns
