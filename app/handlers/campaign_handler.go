@@ -23,6 +23,7 @@ type CampaignHandlerInterface interface {
 	ListCampaigns(c fiber.Ctx) error
 	ListAudienceSpec(c fiber.Ctx) error
 	GetApprovedRunningSummary(c fiber.Ctx) error
+	CancelCampaign(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -183,6 +184,71 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign updated successfully", fiber.Map{
 		"message": result.Message,
 	})
+}
+
+// CancelCampaign handles customer-initiated campaign cancellation
+// @Summary Cancel Campaign
+// @Description Cancel a campaign that is waiting for approval and refund reserved budget
+// @Tags Campaigns
+// @Produce json
+// @Param id path int true "Campaign ID"
+// @Param request body dto.CancelCampaignRequest false "Optional comment"
+// @Success 200 {object} dto.APIResponse{data=dto.CancelCampaignResponse} "Campaign cancelled successfully"
+// @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 403 {object} dto.APIResponse "Forbidden - campaign access denied or status not cancellable"
+// @Failure 404 {object} dto.APIResponse "Campaign not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/{id}/cancel [post]
+func (h *CampaignHandler) CancelCampaign(c fiber.Ctx) error {
+	idStr := c.Params("id")
+	if idStr == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign ID is required", "MISSING_CAMPAIGN_ID", nil)
+	}
+	id64, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign ID", "INVALID_CAMPAIGN_ID", nil)
+	}
+
+	var req dto.CancelCampaignRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		// body optional; ignore empty body errors? better treat invalid JSON
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	req.CampaignID = uint(id64)
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID = customerID
+
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	result, err := h.campaignFlow.CancelCampaign(h.createRequestContext(c, "/api/v1/campaigns/"+idStr+"/cancel"), &req, metadata)
+	if err != nil {
+		log.Println("Cancel campaign failed", err)
+		// map known business errors
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		if businessflow.IsCampaignAccessDenied(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Campaign access denied", "CAMPAIGN_ACCESS_DENIED", nil)
+		}
+		if businessflow.IsCampaignNotWaitingForApproval(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Campaign cannot be cancelled in current status", "CAMPAIGN_CANCEL_NOT_ALLOWED", nil)
+		}
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Cancel campaign failed", "CANCEL_CAMPAIGN_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaign cancelled successfully", result)
 }
 
 // CalculateCampaignCapacity handles the campaign capacity calculation process
