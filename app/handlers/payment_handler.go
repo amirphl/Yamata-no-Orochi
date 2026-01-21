@@ -464,19 +464,7 @@ func (h *PaymentHandler) GetWalletBalance(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Wallet balance retrieval failed", "WALLET_BALANCE_RETRIEVAL_FAILED", nil)
 	}
 
-	return h.SuccessResponse(c, fiber.StatusOK, "Wallet balance retrieved successfully", fiber.Map{
-		"message":              result.Message,
-		"free":                 result.Free,
-		"locked":               result.Locked,
-		"frozen":               result.Frozen,
-		"credit":               result.Credit,
-		"total":                result.Total,
-		"currency":             result.Currency,
-		"last_updated":         result.LastUpdated,
-		"pending_transactions": result.PendingTransactions,
-		"minimum_balance":      result.MinimumBalance,
-		"balance_status":       result.BalanceStatus,
-	})
+	return h.SuccessResponse(c, fiber.StatusOK, "Wallet balance retrieved successfully", result)
 }
 
 // createRequestContext creates a context with request-scoped values for observability and timeout
