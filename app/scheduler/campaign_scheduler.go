@@ -3,10 +3,14 @@ package scheduler
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"bytes"
@@ -43,9 +47,18 @@ type CampaignScheduler struct {
 
 	db          *gorm.DB
 	payamSMSCfg config.PayamSMSConfig
+	adminCfg    config.AdminConfig
 	botCfg      config.BotConfig
 
 	logFile *os.File
+
+	audienceCache   map[uint]map[string]*AudienceSelection
+	audienceCacheMu sync.Mutex
+}
+
+type AudienceSelection struct {
+	IDs     map[int64]struct{}
+	Expired bool
 }
 
 // NotificationSender is a minimal interface extracted from NotificationService for SMS
@@ -74,17 +87,18 @@ func NewCampaignScheduler(
 	}
 
 	s := &CampaignScheduler{
-		audRepo:     audRepo,
-		tagRepo:     tagRepo,
-		sentRepo:    sentRepo,
-		pcRepo:      pcRepo,
-		jobRepo:     jobRepo,
-		resRepo:     resRepo,
-		notifier:    notifier,
-		db:          db,
-		interval:    interval,
-		payamSMSCfg: payamSMSCfg,
-		botCfg:      botCfg,
+		audRepo:       audRepo,
+		tagRepo:       tagRepo,
+		sentRepo:      sentRepo,
+		pcRepo:        pcRepo,
+		jobRepo:       jobRepo,
+		resRepo:       resRepo,
+		notifier:      notifier,
+		db:            db,
+		interval:      interval,
+		payamSMSCfg:   payamSMSCfg,
+		botCfg:        botCfg,
+		audienceCache: make(map[uint]map[string]*AudienceSelection),
 	}
 	if s.botCfg.APIDomain == "" {
 		s.botCfg.APIDomain = "https://jazebeh.ir"
@@ -143,7 +157,8 @@ func (s *CampaignScheduler) Start(parent context.Context) func() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				s.runOnce(ctx)
+				// TODO: This is not the correct way of context handling.
+				s.runOnce(context.Background())
 			}
 		}
 	}()
@@ -159,6 +174,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	token, err := s.loginBot(ctx)
 	if err != nil {
 		s.logger.Printf("scheduler: bot login failed: %v", err)
+		s.notifyAdmin(fmt.Sprintf("Scheduler bot login failed: %v", err))
 		return
 	}
 	// Success (concise)
@@ -168,6 +184,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	ready, err := s.listReadyCampaigns(ctx, token)
 	if err != nil {
 		s.logger.Printf("scheduler: list ready campaigns failed: %v", err)
+		s.notifyAdmin(fmt.Sprintf("Scheduler list ready campaigns failed: %v", err))
 		return
 	}
 	if len(ready) == 0 {
@@ -180,11 +197,13 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	for _, c := range ready {
 		if err := s.validateCampaign(c); err != nil {
 			s.logger.Printf("scheduler: validate campaign failed for campaign id=%d: %v", c.ID, err)
+			s.notifyAdmin(fmt.Sprintf("Scheduler validate campaign failed for id=%d: %v", c.ID, err))
 			continue
 		}
 		pc, err := s.pcRepo.ByCampaignID(ctx, c.ID)
 		if err != nil {
 			s.logger.Printf("scheduler: check processed failed for campaign id=%d: %v", c.ID, err)
+			s.notifyAdmin(fmt.Sprintf("Scheduler check processed failed for id=%d: %v", c.ID, err))
 			continue
 		}
 		if pc == nil {
@@ -202,6 +221,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 		go func() {
 			if err := s.processCampaign(ctx, token, c); err != nil {
 				s.logger.Printf("scheduler: process campaign id=%d failed: %v", c.ID, err)
+				s.notifyAdmin(fmt.Sprintf("Scheduler process campaign failed for id=%d: %v", c.ID, err))
 			}
 		}()
 	}
@@ -210,6 +230,12 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 }
 
 func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c dto.BotGetCampaignResponse) error {
+	// Sender from campaign line number
+	if c.LineNumber == nil {
+		return fmt.Errorf("sender is nil")
+	}
+	sender := *c.LineNumber
+
 	// 6) Mark running
 	if err := s.moveCampaignToRunning(ctx, token, c.ID); err != nil {
 		return fmt.Errorf("move to running: %w", err)
@@ -220,7 +246,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	var (
 		phones []string
 		ids    []int64
-		codes  []string
+		uids   []string
 		pc     *models.ProcessedCampaign
 	)
 	// 7) Save the campaign in the processed campaign table AND 8), 9), 10) Save the list of audiences in the processed campaign table
@@ -231,6 +257,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 			AudienceIDs:    pq.Int64Array{},
 			AudienceCodes:  []string{},
 			LastAudienceID: nil,
+			Statistics:     nil,
 		}
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
 			return err
@@ -238,13 +265,13 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 
 		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
 		var err error
-		phones, ids, codes, err = s.fetchAudiencePhones(txCtx, c, token)
+		phones, ids, uids, err = s.fetchAudiencePhones(txCtx, c, token)
 		if err != nil {
 			return err
 		}
 
 		pc.AudienceIDs = pq.Int64Array(ids)
-		pc.AudienceCodes = codes
+		pc.AudienceCodes = uids
 		if err := s.pcRepo.Update(txCtx, pc); err != nil {
 			return err
 		}
@@ -252,30 +279,26 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	}); err != nil {
 		return err
 	}
-	s.logger.Printf("scheduler: persisted processed campaign id=%d audiences=%d", pc.ID, len(ids))
+	s.logger.Printf("scheduler: persisted processed campaign id=%d num_audiences=%d", pc.ID, len(ids))
 
 	// 12/13) Send batches; after each batch, save sent_sms and update LastAudienceID in SAME transaction
 	batchSize := 200 // MUST BE LESS THAN 250
-	// Sender from campaign line number
-	if c.LineNumber == nil {
-		return fmt.Errorf("sender is nil")
-	}
-	sender := *c.LineNumber
 
 	for start := 0; start < len(phones); start += batchSize {
 		end := start + batchSize
 		end = min(end, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
-		batchCodes := codes[start:end]
+		batchUIDs := uids[start:end]
 
 		// Build per-recipient bodies by replacing short URL with unique 6-char code
 		items := make([]PayamSMSItem, 0, len(batchPhones))
 		// Build SentSMS rows from response
 		rows := make([]*models.SentSMS, 0, len(batchPhones))
+
 		for i, p := range batchPhones {
 			// 11) Build message
-			body := s.buildSMSBody(c, batchCodes[i])
+			body := s.buildSMSBody(c, batchUIDs[i])
 
 			trackingID := uuid.New().String()
 
@@ -307,8 +330,6 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 				return err
 			}
 
-			// TODO: Write jobs for updating delivery status
-
 			return nil
 		}); err != nil {
 			return err
@@ -317,6 +338,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 		// Sending via PayamSMS for this batch
 		respItems, err := s.sendPayamSMSBatchWithBodies(ctx, sender, items)
 		if err != nil {
+			s.logger.Printf("scheduler: payamsms send batch failed for campaign id=%d: %v", c.ID, err)
 			// TODO: handle error
 		} else {
 			// Map provider response back to our sent_sms rows by customerId (trackingID) using a batch update
@@ -334,7 +356,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 			}
 			if len(updates) > 0 {
 				if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, updates); updateErr != nil {
-					s.logger.Printf("scheduler: failed to batch update sent_sms provider fields: %v", updateErr)
+					s.logger.Printf("scheduler: failed to batch update sent_sms provider fields for campaign id=%d: %v", c.ID, updateErr)
 				} else {
 					// Success (concise)
 					s.logger.Printf("scheduler: sent sms batch items=%d for campaign id=%d", len(items), c.ID)
@@ -356,10 +378,19 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 
 	// 15) Mark executed
 	if err := s.moveCampaignToExecuted(ctx, token, c.ID); err != nil {
-		s.logger.Printf("scheduler: move executed failed for id=%d: %v", c.ID, err)
+		s.logger.Printf("scheduler: move executed failed for campaign id=%d: %v", c.ID, err)
 	}
 	s.logger.Printf("scheduler: campaign id=%d moved to executed", c.ID)
 	return nil
+}
+
+func (s *CampaignScheduler) notifyAdmin(message string) {
+	if s.notifier == nil || s.adminCfg.Mobile == "" {
+		return
+	}
+	go func(msg string) {
+		_ = s.notifier.SendSMS(context.Background(), s.adminCfg.Mobile, msg, nil)
+	}(message)
 }
 
 func (s *CampaignScheduler) loginBot(ctx context.Context) (string, error) {
@@ -549,9 +580,6 @@ func (s *CampaignScheduler) validateCampaign(c dto.BotGetCampaignResponse) error
 }
 
 func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string) ([]string, []int64, []string, error) {
-	var phones []string
-	var ids []int64
-
 	adLink := ""
 	if c.AdLink != nil {
 		adLink = *c.AdLink
@@ -577,54 +605,94 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 
 	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
 
-	filter := models.AudienceProfileFilter{
-		Tags:  &tagIDs,
-		Color: utils.ToPtr("white"),
+	const LIMIT = 10000000
+
+	tagsHash := hashTags(c.Tags)
+	selection := s.getOrCreateAudienceSelection(c.CustomerID, tagsHash)
+
+	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
+		phones := make([]string, 0, c.NumAudiences)
+		ids := make([]int64, 0, c.NumAudiences)
+
+		filter := models.AudienceProfileFilter{
+			Tags:  &tagIDs,
+			Color: utils.ToPtr("white"),
+		}
+
+		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", LIMIT, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		appendIfFresh := func(ap *models.AudienceProfile) {
+			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
+				return
+			}
+			if exclude != nil {
+				if _, ok := exclude[int64(ap.ID)]; ok {
+					return
+				}
+			}
+			phones = append(phones, *ap.PhoneNumber)
+			ids = append(ids, int64(ap.ID))
+		}
+
+		for _, ap := range whites {
+			if len(phones) >= int(c.NumAudiences) {
+				break
+			}
+			appendIfFresh(ap)
+		}
+
+		if len(phones) < int(c.NumAudiences) {
+			filter.Color = utils.ToPtr("pink")
+			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", LIMIT, 0)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, ap := range pinks {
+				if len(phones) >= int(c.NumAudiences) {
+					break
+				}
+				appendIfFresh(ap)
+			}
+		}
+
+		return phones, ids, nil
 	}
 
-	const MAX = 10000000
+	// First attempt excluding prior picks for this customer/tags
+	var exclude map[int64]struct{}
+	if selection != nil && selection.IDs != nil && !selection.Expired {
+		exclude = selection.IDs
+	}
 
-	whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", MAX, 0)
+	phones, ids, err := selectAudiences(exclude)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	for _, ap := range whites {
-		if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
-			continue
-		}
-		phones = append(phones, *ap.PhoneNumber)
-		ids = append(ids, int64(ap.ID))
-		if len(phones) >= int(c.NumAudiences) {
-			break
-		}
-	}
-
-	if len(phones) >= int(c.NumAudiences) {
-		// Generate sequential UIDs via bot API and persist short links centrally
-		codes, err := s.allocateShortLinksViaAPI(ctx, token, c.ID, adLink, phones)
+	if len(phones) < int(c.NumAudiences) {
+		// Not enough fresh; expire cache and retry from scratch
+		s.expireAudienceSelection(c.CustomerID, tagsHash)
+		selection = s.resetAudienceSelection(c.CustomerID, tagsHash)
+		phones, ids, err = selectAudiences(nil)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		return phones, ids, codes, nil
 	}
 
-	filter.Color = utils.ToPtr("pink")
-	pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", MAX, 0)
-	if err != nil {
-		return nil, nil, nil, err
+	// Update cache with newly used IDs
+	if selection == nil {
+		selection = s.getOrCreateAudienceSelection(c.CustomerID, tagsHash)
 	}
-
-	for _, ap := range pinks {
-		if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
-			continue
-		}
-		phones = append(phones, *ap.PhoneNumber)
-		ids = append(ids, int64(ap.ID))
-		if len(phones) >= int(c.NumAudiences) {
-			break
-		}
+	if selection.IDs == nil {
+		selection.IDs = make(map[int64]struct{})
 	}
+	for _, id := range ids {
+		selection.IDs[id] = struct{}{}
+	}
+	selection.Expired = false
 
 	// Generate sequential UIDs via bot API and persist short links centrally
 	codes, err := s.allocateShortLinksViaAPI(ctx, token, c.ID, adLink, phones)
@@ -632,6 +700,64 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 		return nil, nil, nil, err
 	}
 	return phones, ids, codes, nil
+}
+
+func hashTags(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	cp := make([]string, len(tags))
+	copy(cp, tags)
+	sort.Strings(cp)
+	h := sha1.Sum([]byte(strings.Join(cp, ",")))
+	return hex.EncodeToString(h[:])
+}
+
+func (s *CampaignScheduler) getOrCreateAudienceSelection(customerID uint, hash string) *AudienceSelection {
+	s.audienceCacheMu.Lock()
+	defer s.audienceCacheMu.Unlock()
+	if s.audienceCache == nil {
+		s.audienceCache = make(map[uint]map[string]*AudienceSelection)
+	}
+	if _, ok := s.audienceCache[customerID]; !ok {
+		s.audienceCache[customerID] = make(map[string]*AudienceSelection)
+	}
+	if sel, ok := s.audienceCache[customerID][hash]; ok {
+		return sel
+	}
+	sel := &AudienceSelection{
+		IDs:     make(map[int64]struct{}),
+		Expired: false,
+	}
+	s.audienceCache[customerID][hash] = sel
+	return sel
+}
+
+func (s *CampaignScheduler) expireAudienceSelection(customerID uint, hash string) {
+	s.audienceCacheMu.Lock()
+	defer s.audienceCacheMu.Unlock()
+	if cust, ok := s.audienceCache[customerID]; ok {
+		if sel, ok := cust[hash]; ok {
+			sel.Expired = true
+		}
+	}
+}
+
+func (s *CampaignScheduler) resetAudienceSelection(customerID uint, hash string) *AudienceSelection {
+	s.audienceCacheMu.Lock()
+	defer s.audienceCacheMu.Unlock()
+	if s.audienceCache == nil {
+		s.audienceCache = make(map[uint]map[string]*AudienceSelection)
+	}
+	if _, ok := s.audienceCache[customerID]; !ok {
+		s.audienceCache[customerID] = make(map[string]*AudienceSelection)
+	}
+	sel := &AudienceSelection{
+		IDs:     make(map[int64]struct{}),
+		Expired: false,
+	}
+	s.audienceCache[customerID][hash] = sel
+	return sel
 }
 
 func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code string) string {
@@ -826,7 +952,7 @@ func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, process
 	}
 
 	now := utils.UTCNow()
-	offsets := []time.Duration{5 * time.Minute, 1 * time.Hour, 3 * time.Hour}
+	offsets := []time.Duration{5 * time.Minute, 30 * time.Minute, 1 * time.Hour, 3 * time.Hour}
 	jobs := make([]*models.SMSStatusJob, 0, len(offsets))
 	for _, off := range offsets {
 		jobs = append(jobs, &models.SMSStatusJob{
