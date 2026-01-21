@@ -46,6 +46,7 @@ type FiberRouter struct {
 	campaignAdminHandler           handlers.CampaignAdminHandlerInterface
 	lineNumberHandler              handlers.LineNumberHandlerInterface
 	lineNumberAdminHandler         handlers.LineNumberAdminHandlerInterface
+	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface
 	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
 	campaignBotHandler             handlers.CampaignBotHandlerInterface
 	ticketHandler                  handlers.TicketHandlerInterface
@@ -68,6 +69,7 @@ func NewFiberRouter(
 	campaignAdminHandler handlers.CampaignAdminHandlerInterface,
 	lineNumberHandler handlers.LineNumberHandlerInterface,
 	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
+	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface,
 	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
 	campaignBotHandler handlers.CampaignBotHandlerInterface,
 	ticketHandler handlers.TicketHandlerInterface,
@@ -93,17 +95,18 @@ func NewFiberRouter(
 	})
 
 	return &FiberRouter{
-		app:                    app,
-		authHandler:            authHandler,
-		campaignHandler:        campaignHandler,
-		paymentHandler:         paymentHandler,
-		agencyHandler:          agencyHandler,
-		authMiddleware:         authMiddleware,
-		authAdminHandler:       authAdminHandler,
-		authBotHandler:         authBotHandler,
-		campaignAdminHandler:   campaignAdminHandler,
-		lineNumberHandler:      lineNumberHandler,
-		lineNumberAdminHandler: lineNumberAdminHandler,
+		app:                            app,
+		authHandler:                    authHandler,
+		campaignHandler:                campaignHandler,
+		paymentHandler:                 paymentHandler,
+		agencyHandler:                  agencyHandler,
+		authMiddleware:                 authMiddleware,
+		authAdminHandler:               authAdminHandler,
+		authBotHandler:                 authBotHandler,
+		campaignAdminHandler:           campaignAdminHandler,
+		lineNumberHandler:              lineNumberHandler,
+		lineNumberAdminHandler:         lineNumberAdminHandler,
+		segmentPriceFactorAdminHandler: segmentPriceFactorAdminHandler,
 
 		adminCustomerManagementHandler: adminCustomerManagemetHandler,
 		campaignBotHandler:             campaignBotHandler,
@@ -227,6 +230,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
 	campaigns.Get("/audience-spec", r.campaignHandler.ListAudienceSpec)
 	campaigns.Get("/summary", r.campaignHandler.GetApprovedRunningSummary)
+	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
 
 	// Admin campaigns listing and actions
 	adminCampaigns := api.Group("/admin/campaigns")
@@ -236,6 +240,14 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
 	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
 	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
+
+	// Admin segment price factors
+	adminSegmentPF := api.Group("/admin/segment-price-factors")
+	adminSegmentPF.Use(r.authMiddleware.AdminAuthenticate())
+	adminSegmentPF.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminSegmentPF.Post("/", r.segmentPriceFactorAdminHandler.CreateSegmentPriceFactor)
+	adminSegmentPF.Get("/", r.segmentPriceFactorAdminHandler.ListSegmentPriceFactors)
+	adminSegmentPF.Get("/level3-options", r.segmentPriceFactorAdminHandler.ListLevel3Options)
 
 	// Bot campaigns routes (protected)
 	botCampaigns := api.Group("/bot/campaigns")
