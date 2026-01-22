@@ -173,20 +173,36 @@ func (a *AgencyFlowImpl) GetAgencyCustomerReport(ctx context.Context, req *dto.A
 		return nil, err
 	}
 
+	customerIDs := make([]uint, 0, len(rows))
+	seen := make(map[uint]struct{})
+	for _, row := range rows {
+		if _, ok := seen[row.CustomerID]; ok {
+			continue
+		}
+		seen[row.CustomerID] = struct{}{}
+		customerIDs = append(customerIDs, row.CustomerID)
+	}
+
+	totalSentByCustomer, err := a.campaignRepo.AggregateTotalSentByCustomerIDs(ctx, customerIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	totalShare := uint64(0)
 	totalSent := uint64(0)
 	for _, item := range rows {
 		totalShare += item.AgencyShareWithTax
-		totalSent += 0 // TODO: implement sent count
+		totalSent += totalSentByCustomer[item.CustomerID]
 	}
 
 	items := make([]dto.AgencyCustomerReportItem, 0)
 	for _, item := range rows {
+		customerTotalSent := totalSentByCustomer[item.CustomerID]
 		items = append(items, dto.AgencyCustomerReportItem{
-			FirstName:               item.FirstName,
-			LastName:                item.LastName,
+			RepresentativeFirstName: item.RepresentativeFirstName,
+			RepresentativeLastName:  item.RepresentativeLastName,
 			CompanyName:             item.CompanyName,
-			TotalSent:               totalSent,
+			TotalSent:               customerTotalSent,
 			TotalAgencyShareWithTax: item.AgencyShareWithTax,
 		})
 	}
@@ -226,12 +242,12 @@ func (a *AgencyFlowImpl) ListAgencyActiveDiscounts(ctx context.Context, req *dto
 	items := make([]dto.AgencyActiveDiscountItem, 0, len(rows))
 	for _, v := range rows {
 		items = append(items, dto.AgencyActiveDiscountItem{
-			CustomerID:   v.CustomerID,
-			FirstName:    v.FirstName,
-			LastName:     v.LastName,
-			CompanyName:  v.CompanyName,
-			DiscountRate: v.DiscountRate,
-			CreatedAt:    v.CreatedAt,
+			CustomerID:              v.CustomerID,
+			RepresentativeFirstName: v.RepresentativeFirstName,
+			RepresentativeLastName:  v.RepresentativeLastName,
+			CompanyName:             v.CompanyName,
+			DiscountRate:            v.DiscountRate,
+			CreatedAt:               v.CreatedAt,
 		})
 	}
 
@@ -279,13 +295,20 @@ func (a *AgencyFlowImpl) ListAgencyCustomerDiscounts(ctx context.Context, req *d
 		return nil, err
 	}
 
+	totalSentByCustomer, err := a.campaignRepo.AggregateTotalSentByCustomerIDs(ctx, []uint{customerID})
+	if err != nil {
+		return nil, err
+	}
+
+	customerTotalSent := totalSentByCustomer[customerID]
+
 	items := make([]dto.AgencyCustomerDiscountItem, 0, len(rows))
 	for _, v := range rows {
 		items = append(items, dto.AgencyCustomerDiscountItem{
 			DiscountRate:       v.DiscountRate,
 			CreatedAt:          v.CreatedAt,
 			ExpiresAt:          v.ExpiresAt,
-			TotalSent:          0, // TODO: placeholder as requested
+			TotalSent:          customerTotalSent, // TODO:
 			AgencyShareWithTax: v.AgencyShareWithTax,
 		})
 	}
@@ -318,12 +341,12 @@ func (a *AgencyFlowImpl) ListAgencyCustomers(ctx context.Context, req *dto.ListA
 	items := make([]dto.AgencyCustomerItem, 0, len(rows))
 	for _, c := range rows {
 		items = append(items, dto.AgencyCustomerItem{
-			CustomerID:  c.ID,
-			FirstName:   c.RepresentativeFirstName,
-			LastName:    c.RepresentativeLastName,
-			CompanyName: c.CompanyName,
-			CreatedAt:   c.CreatedAt,
-			IsActive:    c.IsActive,
+			CustomerID:              c.ID,
+			RepresentativeFirstName: c.RepresentativeFirstName,
+			RepresentativeLastName:  c.RepresentativeLastName,
+			CompanyName:             c.CompanyName,
+			CreatedAt:               c.CreatedAt,
+			IsActive:                c.IsActive,
 		})
 	}
 
