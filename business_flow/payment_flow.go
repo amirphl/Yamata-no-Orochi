@@ -1343,17 +1343,16 @@ func (p *PaymentFlowImpl) GetWalletBalance(ctx context.Context, req *dto.GetWall
 	}
 
 	resp := &dto.GetWalletBalanceResponse{
-		Message:             "Wallet balance retrieved successfully",
-		Free:                latestSnapshot.FreeBalance,
-		Locked:              latestSnapshot.LockedBalance,
-		Frozen:              latestSnapshot.FrozenBalance,
-		Credit:              latestSnapshot.CreditBalance,
-		Total:               latestSnapshot.TotalBalance,
-		Currency:            utils.TomanCurrency,
-		LastUpdated:         latestSnapshot.CreatedAt.Format(time.RFC3339),
-		PendingTransactions: 0,
-		MinimumBalance:      0,
-		BalanceStatus:       "active",
+		Message:            "Wallet balance retrieved successfully",
+		Free:               latestSnapshot.FreeBalance,
+		Locked:             latestSnapshot.LockedBalance,
+		Frozen:             latestSnapshot.FrozenBalance,
+		Credit:             latestSnapshot.CreditBalance,
+		SpentOnCamapigns:   latestSnapshot.SpentOnCampaign,
+		AgencyShareWithTax: latestSnapshot.AgencyShareWithTax,
+		Total:              latestSnapshot.TotalBalance,
+		Currency:           utils.TomanCurrency,
+		LastUpdated:        latestSnapshot.CreatedAt.Format(time.RFC3339),
 	}
 
 	return resp, nil
