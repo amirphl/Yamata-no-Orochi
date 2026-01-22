@@ -126,6 +126,10 @@ var (
 	ErrLineNumberNotFound      = errors.New("line number not found")
 	ErrLineNumberNotActive     = errors.New("line number is not active")
 
+	// Segment price factor errors
+	ErrLevel3Required             = errors.New("level3 is required")
+	ErrSegmentPriceFactorNotFound = errors.New("segment price factor not found")
+
 	// Ticket related errors
 	ErrTicketNotFound = errors.New("ticket not found")
 
@@ -513,6 +517,14 @@ func IsLineNumberNotFound(err error) bool {
 
 func IsLineNumberNotActive(err error) bool {
 	return errors.Is(err, ErrLineNumberNotActive)
+}
+
+func IsLevel3Required(err error) bool {
+	return errors.Is(err, ErrLevel3Required)
+}
+
+func IsSegmentPriceFactorNotFound(err error) bool {
+	return errors.Is(err, ErrSegmentPriceFactorNotFound)
 }
 
 func IsTicketNotFound(err error) bool {
