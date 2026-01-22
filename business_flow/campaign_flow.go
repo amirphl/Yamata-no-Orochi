@@ -30,6 +30,7 @@ type CampaignFlow interface {
 	ListCampaigns(ctx context.Context, req *dto.ListCampaignsRequest, metadata *ClientMetadata) (*dto.ListCampaignsResponse, error)
 	ListAudienceSpec(ctx context.Context) (*dto.ListAudienceSpecResponse, error)
 	GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error)
+	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
 }
 
 // CampaignFlowImpl implements the campaign business flow
@@ -41,6 +42,7 @@ type CampaignFlowImpl struct {
 	transactionRepo     repository.TransactionRepository
 	auditRepo           repository.AuditLogRepository
 	lineNumberRepo      repository.LineNumberRepository
+	segmentPriceRepo    repository.SegmentPriceFactorRepository
 	notifier            services.NotificationService
 	adminConfig         config.AdminConfig
 	cacheConfig         *config.CacheConfig
@@ -57,6 +59,7 @@ func NewCampaignFlow(
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
 	lineNumberRepo repository.LineNumberRepository,
+	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -71,6 +74,7 @@ func NewCampaignFlow(
 		transactionRepo:     transactionRepo,
 		auditRepo:           auditRepo,
 		lineNumberRepo:      lineNumberRepo,
+		segmentPriceRepo:    segmentPriceRepo,
 		notifier:            notifier,
 		adminConfig:         adminConfig,
 		cacheConfig:         cacheConfig,
@@ -325,14 +329,16 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return ErrInsufficientFunds
 			}
 
-			newCreditBalance := uint64(0)
-			newFreeBalance := uint64(0)
-			if latestBalance.CreditBalance <= cost.TotalCost {
-				newCreditBalance = 0
-				newFreeBalance = latestBalance.FreeBalance - (cost.TotalCost - latestBalance.CreditBalance)
+			newFreeBalance := latestBalance.FreeBalance
+			newCreditBalance := latestBalance.CreditBalance
+			remaining := cost.TotalCost
+
+			if remaining <= newFreeBalance {
+				newFreeBalance -= remaining
 			} else {
-				newCreditBalance = latestBalance.CreditBalance - cost.TotalCost
-				newFreeBalance = latestBalance.FreeBalance
+				remaining -= newFreeBalance
+				newFreeBalance = 0
+				newCreditBalance -= remaining
 			}
 			newFrozenBalance := latestBalance.FrozenBalance + cost.TotalCost
 
@@ -441,6 +447,147 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	return resp, nil
 }
 
+// CancelCampaign allows a customer to cancel their own campaign waiting for approval and refunds the reserved budget.
+func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error) {
+	if req == nil || req.CampaignID == 0 {
+		return nil, NewBusinessError("CANCEL_CAMPAIGN_VALIDATION_FAILED", "campaign_id is required", ErrCampaignNotFound)
+	}
+
+	var campaign *models.Campaign
+
+	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		var err error
+		campaign, err = s.campaignRepo.ByID(txCtx, req.CampaignID)
+		if err != nil {
+			return err
+		}
+		if campaign == nil {
+			return ErrCampaignNotFound
+		}
+		if campaign.CustomerID != req.CustomerID {
+			return ErrCampaignAccessDenied
+		}
+		if campaign.Status != models.CampaignStatusWaitingForApproval {
+			return ErrCampaignNotWaitingForApproval
+		}
+
+		customer, err := getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
+		if err != nil {
+			return err
+		}
+
+		freezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+			CustomerID: &campaign.CustomerID,
+			CampaignID: &campaign.ID,
+			Source:     utils.ToPtr("campaign_update"),
+			Operation:  utils.ToPtr("reserve_budget"),
+			Type:       utils.ToPtr(models.TransactionTypeFreeze),
+			Status:     utils.ToPtr(models.TransactionStatusCompleted),
+		}, "id DESC", 0, 0)
+		if err != nil {
+			return err
+		}
+		if len(freezeTxs) == 0 {
+			return ErrFreezeTransactionNotFound
+		}
+		if len(freezeTxs) > 1 {
+			return ErrMultipleFreezeTransactionsFound
+		}
+		freezeTx := freezeTxs[0]
+
+		wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
+		if err != nil {
+			return err
+		}
+		latestBalance, err := getLatestBalanceSnapshot(txCtx, s.walletRepo, wallet.ID)
+		if err != nil {
+			return err
+		}
+
+		amount := freezeTx.Amount
+		if latestBalance.FrozenBalance < amount {
+			return ErrInsufficientFunds
+		}
+
+		meta := map[string]any{
+			"source":      "campaign_cancel",
+			"operation":   "cancel_campaign_refund_frozen",
+			"campaign_id": campaign.ID,
+			"comment":     req.Comment,
+		}
+		metaBytes, _ := json.Marshal(meta)
+
+		newFrozen := latestBalance.FrozenBalance - amount
+		newCredit := latestBalance.CreditBalance + amount
+
+		newSnap := &models.BalanceSnapshot{
+			UUID:               uuid.New(),
+			CorrelationID:      freezeTx.CorrelationID,
+			WalletID:           wallet.ID,
+			CustomerID:         customer.ID,
+			FreeBalance:        latestBalance.FreeBalance,
+			FrozenBalance:      newFrozen,
+			LockedBalance:      latestBalance.LockedBalance,
+			CreditBalance:      newCredit,
+			SpentOnCampaign:    latestBalance.SpentOnCampaign,
+			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+			TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+			Reason:             "campaign_cancelled_budget_refund",
+			Description:        fmt.Sprintf("Refund reserved budget for cancelled campaign %d", campaign.ID),
+			Metadata:           metaBytes,
+		}
+		if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+			return err
+		}
+
+		beforeMap, err := latestBalance.GetBalanceMap()
+		if err != nil {
+			return err
+		}
+		afterMap, err := newSnap.GetBalanceMap()
+		if err != nil {
+			return err
+		}
+
+		refundTx := &models.Transaction{
+			UUID:          uuid.New(),
+			CorrelationID: freezeTx.CorrelationID,
+			Type:          models.TransactionTypeRefund,
+			Status:        models.TransactionStatusCompleted,
+			Amount:        amount,
+			Currency:      utils.TomanCurrency,
+			WalletID:      wallet.ID,
+			CustomerID:    customer.ID,
+			BalanceBefore: beforeMap,
+			BalanceAfter:  afterMap,
+			Description:   fmt.Sprintf("Refund reserved budget for cancelled campaign %d", campaign.ID),
+			Metadata:      metaBytes,
+		}
+		if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+			return err
+		}
+
+		campaign.Status = models.CampaignStatusCancelled
+		if strings.TrimSpace(req.Comment) != "" {
+			comment := strings.TrimSpace(req.Comment)
+			campaign.Comment = &comment
+		}
+		campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+		if err := s.campaignRepo.Update(txCtx, *campaign); err != nil {
+			return err
+		}
+		return nil
+	})
+
+	if err != nil {
+		return nil, NewBusinessError("CANCEL_CAMPAIGN_FAILED", "Failed to cancel campaign", err)
+	}
+
+	return &dto.CancelCampaignResponse{
+		Message: "Campaign cancelled successfully",
+	}, nil
+}
+
 // CalculateCampaignCapacity handles the campaign capacity calculation process
 func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *dto.CalculateCampaignCapacityRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCapacityResponse, error) {
 	if err := s.validateCalculateCampaignCapacityRequest(req); err != nil {
@@ -535,18 +682,32 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	}
 
 	// Pricing constants
-	basePrice := uint64(150) // 600
+	basePrice := uint64(600)
 	lineFactor, err := s.fetchLineNumberPriceFactor(ctx, *req.LineNumber)
 	if err != nil {
 		return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
 	}
-	segmentFactor := float64(1)
+	segmentPriceFactor := float64(1)
+	if len(req.Level3s) > 0 {
+		factors, err := s.segmentPriceRepo.LatestByLevel3s(ctx, req.Level3s)
+		if err != nil {
+			return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch segment price factors", err)
+		}
+		maxFactor := float64(0)
+		for _, l3 := range req.Level3s {
+			if f, ok := factors[l3]; ok && f > maxFactor {
+				maxFactor = f
+			}
+		}
+		if maxFactor == 0 {
+			s.notifyMissingSegmentPriceFactor(req.Level3s)
+			return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_NOT_FOUND", "Segment price factor not found for provided level3 options", ErrSegmentPriceFactorNotFound)
+		}
+		segmentPriceFactor = maxFactor
+	}
 
 	// Calculate price per message
-	pricePerMsg := uint64(200*numPages) + basePrice*uint64(float64(lineFactor)*segmentFactor)
-
-	// TODO: Fix it
-	pricePerMsg = 2
+	pricePerMsg := uint64(200*numPages) + basePrice*uint64(float64(lineFactor)*segmentPriceFactor)
 
 	// Calculate campaign capacity (target audience size)
 	capacityResp, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
@@ -597,6 +758,17 @@ func (s *CampaignFlowImpl) fetchLineNumberPriceFactor(ctx context.Context, lineN
 	}
 
 	return ln.PriceFactor, nil
+}
+
+func (s *CampaignFlowImpl) notifyMissingSegmentPriceFactor(level3s []string) {
+	mobile := strings.TrimSpace(s.adminConfig.Mobile)
+	if mobile == "" || s.notifier == nil {
+		return
+	}
+	msg := fmt.Sprintf("Segment price factor missing for level3: %s", strings.Join(level3s, ","))
+	go func() {
+		_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
+	}()
 }
 
 // ListCampaigns retrieves user's campaigns with pagination, ordering and filters
