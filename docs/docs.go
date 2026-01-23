@@ -852,6 +852,138 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/segment-price-factors": {
+            "get": {
+                "description": "List the latest price factor per level3",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Segment Price Factors"
+                ],
+                "summary": "List Segment Price Factors (Admin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminListSegmentPriceFactorsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "List failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create or update a price factor for a given level3; latest entry wins",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Segment Price Factors"
+                ],
+                "summary": "Create/Update Segment Price Factor (Admin)",
+                "parameters": [
+                    {
+                        "description": "Segment price factor payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminCreateSegmentPriceFactorRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminCreateSegmentPriceFactorResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Creation failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/segment-price-factors/level3-options": {
+            "get": {
+                "description": "Retrieve distinct level3 values with available audience from audience spec",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Segment Price Factors"
+                ],
+                "summary": "List Level3 Options (Admin)",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminListLevel3OptionsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "List failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/short-links/download": {
             "post": {
                 "consumes": [
@@ -2564,6 +2696,85 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/campaigns/{id}/cancel": {
+            "post": {
+                "description": "Cancel a campaign that is waiting for approval and refund reserved budget",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Cancel Campaign",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Campaign ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Optional comment",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.CancelCampaignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Campaign cancelled successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CancelCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - campaign access denied or status not cancellable",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns/{uuid}": {
             "put": {
                 "description": "Update an existing campaign with the specified parameters",
@@ -3992,6 +4203,29 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminCreateSegmentPriceFactorRequest": {
+            "type": "object",
+            "required": [
+                "level3",
+                "price_factor"
+            ],
+            "properties": {
+                "level3": {
+                    "type": "string"
+                },
+                "price_factor": {
+                    "type": "number"
+                }
+            }
+        },
+        "dto.AdminCreateSegmentPriceFactorResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminCreateShortLinksResponse": {
             "type": "object",
             "properties": {
@@ -4316,6 +4550,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "click_rate": {
+                    "type": "number"
+                },
                 "comment": {
                     "type": "string"
                 },
@@ -4358,6 +4595,10 @@ const docTemplate = `{
                 "sex": {
                     "type": "string"
                 },
+                "statistics": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
                 "status": {
                     "type": "string"
                 },
@@ -4369,6 +4610,9 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "total_clicks": {
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -4436,6 +4680,34 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminListLevel3OptionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminListSegmentPriceFactorsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminSegmentPriceFactorItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminListTicketsResponse": {
             "type": "object",
             "properties": {
@@ -4471,6 +4743,20 @@ const docTemplate = `{
             "properties": {
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.AdminSegmentPriceFactorItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "level3": {
+                    "type": "string"
+                },
+                "price_factor": {
+                    "type": "number"
                 }
             }
         },
@@ -4547,10 +4833,10 @@ const docTemplate = `{
                 "discount_rate": {
                     "type": "number"
                 },
-                "first_name": {
+                "representative_first_name": {
                     "type": "string"
                 },
-                "last_name": {
+                "representative_last_name": {
                     "type": "string"
                 }
             }
@@ -4587,13 +4873,13 @@ const docTemplate = `{
                 "customer_id": {
                     "type": "integer"
                 },
-                "first_name": {
-                    "type": "string"
-                },
                 "is_active": {
                     "type": "boolean"
                 },
-                "last_name": {
+                "representative_first_name": {
+                    "type": "string"
+                },
+                "representative_last_name": {
                     "type": "string"
                 }
             }
@@ -4604,10 +4890,10 @@ const docTemplate = `{
                 "company_name": {
                     "type": "string"
                 },
-                "first_name": {
+                "representative_first_name": {
                     "type": "string"
                 },
-                "last_name": {
+                "representative_last_name": {
                     "type": "string"
                 },
                 "total_agency_share_with_tax": {
@@ -4909,6 +5195,9 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
                 },
                 "id": {
                     "type": "integer"
@@ -5273,6 +5562,29 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.CancelCampaignRequest": {
+            "type": "object",
+            "required": [
+                "campaign_id"
+            ],
+            "properties": {
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "comment": {
+                    "type": "string",
+                    "maxLength": 500
+                }
+            }
+        },
+        "dto.CancelCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.ChargeWalletRequest": {
             "type": "object",
             "required": [
@@ -5623,6 +5935,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "click_rate": {
+                    "type": "number"
+                },
                 "comment": {
                     "type": "string"
                 },
@@ -5650,11 +5965,21 @@ const docTemplate = `{
                 "line_number": {
                     "type": "string"
                 },
+                "line_price_factor": {
+                    "type": "number"
+                },
+                "num_audience": {
+                    "type": "integer"
+                },
                 "scheduleat": {
                     "type": "string"
                 },
                 "sex": {
                     "type": "string"
+                },
+                "statistics": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "status": {
                     "type": "string"
@@ -5667,6 +5992,9 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "total_clicks": {
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -5734,8 +6062,8 @@ const docTemplate = `{
         "dto.GetWalletBalanceResponse": {
             "type": "object",
             "properties": {
-                "balance_status": {
-                    "type": "string"
+                "agency_share_with_tax": {
+                    "type": "integer"
                 },
                 "credit": {
                     "type": "integer"
@@ -5758,10 +6086,7 @@ const docTemplate = `{
                 "message": {
                     "type": "string"
                 },
-                "minimum_balance": {
-                    "type": "integer"
-                },
-                "pending_transactions": {
+                "spent_on_campaigns": {
                     "type": "integer"
                 },
                 "total": {
