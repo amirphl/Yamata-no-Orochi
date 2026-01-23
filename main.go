@@ -358,6 +358,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	ticketRepo := repository.NewTicketRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
+	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
 	// Crypto payment repositories
 	cryptoPaymentRequestRepo := repository.NewCryptoPaymentRequestRepository(db)
 	cryptoDepositRepo := repository.NewCryptoDepositRepository(db)
@@ -425,6 +426,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		transactionRepo,
 		auditRepo,
 		lineNumberRepo,
+		segmentPriceFactorRepo,
 		db,
 		rc,
 		notificationService,
@@ -545,6 +547,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	// Profile flow
 	profileFlow := businessflow.NewProfileFlow(customerRepo)
 
+	segmentPriceFactorFlow := businessflow.NewSegmentPriceFactorFlow(segmentPriceFactorRepo)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
@@ -566,6 +570,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	profileHandler := handlers.NewProfileHandler(profileFlow)
 
+	segmentPriceFactorAdminHandler := handlers.NewSegmentPriceFactorAdminHandler(segmentPriceFactorFlow)
+
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
 
@@ -581,6 +587,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		campaignAdminHandler,
 		lineNumberHandler,
 		lineNumberAdminHandler,
+		segmentPriceFactorAdminHandler,
 		adminCustomerManagementHandler,
 		campaignBotHandler,
 		ticketHandler,
