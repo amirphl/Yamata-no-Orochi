@@ -104,6 +104,21 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.AdminCreateSegmentPriceFactorRequest:
+    properties:
+      level3:
+        type: string
+      price_factor:
+        type: number
+    required:
+    - level3
+    - price_factor
+    type: object
+  dto.AdminCreateSegmentPriceFactorResponse:
+    properties:
+      message:
+        type: string
+    type: object
   dto.AdminCreateShortLinksResponse:
     properties:
       created:
@@ -318,6 +333,8 @@ definitions:
         items:
           type: string
         type: array
+      click_rate:
+        type: number
       comment:
         type: string
       content:
@@ -346,6 +363,9 @@ definitions:
         type: number
       sex:
         type: string
+      statistics:
+        additionalProperties: {}
+        type: object
       status:
         type: string
       tags:
@@ -354,6 +374,8 @@ definitions:
         type: array
       title:
         type: string
+      total_clicks:
+        type: integer
       updated_at:
         type: string
       uuid:
@@ -397,6 +419,24 @@ definitions:
       total_sent:
         type: integer
     type: object
+  dto.AdminListLevel3OptionsResponse:
+    properties:
+      items:
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+    type: object
+  dto.AdminListSegmentPriceFactorsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminSegmentPriceFactorItem'
+        type: array
+      message:
+        type: string
+    type: object
   dto.AdminListTicketsResponse:
     properties:
       groups:
@@ -421,6 +461,15 @@ definitions:
     properties:
       message:
         type: string
+    type: object
+  dto.AdminSegmentPriceFactorItem:
+    properties:
+      created_at:
+        type: string
+      level3:
+        type: string
+      price_factor:
+        type: number
     type: object
   dto.AdminSetCustomerActiveStatusRequest:
     properties:
@@ -470,9 +519,9 @@ definitions:
         type: integer
       discount_rate:
         type: number
-      first_name:
+      representative_first_name:
         type: string
-      last_name:
+      representative_last_name:
         type: string
     type: object
   dto.AgencyCustomerDiscountItem:
@@ -496,20 +545,20 @@ definitions:
         type: string
       customer_id:
         type: integer
-      first_name:
-        type: string
       is_active:
         type: boolean
-      last_name:
+      representative_first_name:
+        type: string
+      representative_last_name:
         type: string
     type: object
   dto.AgencyCustomerReportItem:
     properties:
       company_name:
         type: string
-      first_name:
+      representative_first_name:
         type: string
-      last_name:
+      representative_last_name:
         type: string
       total_agency_share_with_tax:
         type: integer
@@ -717,6 +766,8 @@ definitions:
         type: string
       created_at:
         type: string
+      customer_id:
+        type: integer
       id:
         type: integer
       level1:
@@ -968,6 +1019,21 @@ definitions:
       total_cost:
         type: integer
     type: object
+  dto.CancelCampaignRequest:
+    properties:
+      campaign_id:
+        type: integer
+      comment:
+        maxLength: 500
+        type: string
+    required:
+    - campaign_id
+    type: object
+  dto.CancelCampaignResponse:
+    properties:
+      message:
+        type: string
+    type: object
   dto.ChargeWalletRequest:
     properties:
       amount:
@@ -1207,6 +1273,8 @@ definitions:
         items:
           type: string
         type: array
+      click_rate:
+        type: number
       comment:
         type: string
       content:
@@ -1225,10 +1293,17 @@ definitions:
         type: array
       line_number:
         type: string
+      line_price_factor:
+        type: number
+      num_audience:
+        type: integer
       scheduleat:
         type: string
       sex:
         type: string
+      statistics:
+        additionalProperties: {}
+        type: object
       status:
         type: string
       tags:
@@ -1237,6 +1312,8 @@ definitions:
         type: array
       title:
         type: string
+      total_clicks:
+        type: integer
       updated_at:
         type: string
       uuid:
@@ -1280,8 +1357,8 @@ definitions:
     type: object
   dto.GetWalletBalanceResponse:
     properties:
-      balance_status:
-        type: string
+      agency_share_with_tax:
+        type: integer
       credit:
         type: integer
       currency:
@@ -1296,9 +1373,7 @@ definitions:
         type: integer
       message:
         type: string
-      minimum_balance:
-        type: integer
-      pending_transactions:
+      spent_on_campaigns:
         type: integer
       total:
         type: integer
@@ -2283,6 +2358,86 @@ paths:
       summary: Line Numbers Report (Admin)
       tags:
       - Admin Line Numbers
+  /api/v1/admin/segment-price-factors:
+    get:
+      description: List the latest price factor per level3
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListSegmentPriceFactorsResponse'
+              type: object
+        "500":
+          description: List failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List Segment Price Factors (Admin)
+      tags:
+      - Admin Segment Price Factors
+    post:
+      consumes:
+      - application/json
+      description: Create or update a price factor for a given level3; latest entry
+        wins
+      parameters:
+      - description: Segment price factor payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminCreateSegmentPriceFactorRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCreateSegmentPriceFactorResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Creation failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Create/Update Segment Price Factor (Admin)
+      tags:
+      - Admin Segment Price Factors
+  /api/v1/admin/segment-price-factors/level3-options:
+    get:
+      description: Retrieve distinct level3 values with available audience from audience
+        spec
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListLevel3OptionsResponse'
+              type: object
+        "500":
+          description: List failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List Level3 Options (Admin)
+      tags:
+      - Admin Segment Price Factors
   /api/v1/admin/short-links/download:
     post:
       consumes:
@@ -3215,6 +3370,56 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Create Campaign
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{id}/cancel:
+    post:
+      description: Cancel a campaign that is waiting for approval and refund reserved
+        budget
+      parameters:
+      - description: Campaign ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Optional comment
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.CancelCampaignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Campaign cancelled successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CancelCampaignResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden - campaign access denied or status not cancellable
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Cancel Campaign
       tags:
       - Campaigns
   /api/v1/campaigns/{uuid}:
