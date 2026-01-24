@@ -186,5 +186,11 @@
 \echo 'Running 0060_add_new_transaction_types.sql...'
 \i migrations/0060_add_new_transaction_types.sql
 
+\echo 'Running 0061_create_segment_price_factors.sql...'
+\i migrations/0061_create_segment_price_factors.sql
+
+\echo 'Running 0062_add_cancelled_status_to_sms_campaigns.sql...'
+\i migrations/0062_add_cancelled_status_to_sms_campaigns.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
