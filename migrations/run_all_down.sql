@@ -3,6 +3,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0062_add_cancelled_status_to_sms_campaigns_down.sql...'
+\i migrations/0062_add_cancelled_status_to_sms_campaigns_down.sql
+
+\echo 'Running 0061_create_segment_price_factors_down.sql...'
+\i migrations/0061_create_segment_price_factors_down.sql
+
 \echo 'Running 0060_add_new_transaction_types_down.sql...'
 \i migrations/0060_add_new_transaction_types_down.sql
 
