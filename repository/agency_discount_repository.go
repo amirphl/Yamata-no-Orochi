@@ -24,17 +24,17 @@ func NewAgencyDiscountRepository(db *gorm.DB) AgencyDiscountRepository {
 
 // AgencyDiscountWithCustomer is a projection row joining discount and customer info
 type AgencyDiscountWithCustomer struct {
-	DiscountID   uint       `gorm:"column:discount_id"`
-	DiscountUUID string     `gorm:"column:discount_uuid"`
-	AgencyID     uint       `gorm:"column:agency_id"`
-	CustomerID   uint       `gorm:"column:customer_id"`
-	CustomerUUID string     `gorm:"column:customer_uuid"`
-	FirstName    string     `gorm:"column:first_name"`
-	LastName     string     `gorm:"column:last_name"`
-	CompanyName  *string    `gorm:"column:company_name"`
-	DiscountRate float64    `gorm:"column:discount_rate"`
-	CreatedAt    time.Time  `gorm:"column:created_at"`
-	ExpiresAt    *time.Time `gorm:"column:expires_at"`
+	DiscountID              uint       `gorm:"column:discount_id"`
+	DiscountUUID            string     `gorm:"column:discount_uuid"`
+	AgencyID                uint       `gorm:"column:agency_id"`
+	CustomerID              uint       `gorm:"column:customer_id"`
+	CustomerUUID            string     `gorm:"column:customer_uuid"`
+	RepresentativeFirstName string     `gorm:"column:representative_first_name"`
+	RepresentativeLastName  string     `gorm:"column:representative_last_name"`
+	CompanyName             *string    `gorm:"column:company_name"`
+	DiscountRate            float64    `gorm:"column:discount_rate"`
+	CreatedAt               time.Time  `gorm:"column:created_at"`
+	ExpiresAt               *time.Time `gorm:"column:expires_at"`
 }
 
 func (r *AgencyDiscountRepositoryImpl) ByID(ctx context.Context, id uint) (*models.AgencyDiscount, error) {
@@ -134,8 +134,8 @@ func (r *AgencyDiscountRepositoryImpl) ListActiveDiscountsWithCustomer(ctx conte
 			ad.agency_id AS agency_id,
 			ad.customer_id AS customer_id,
 			c.uuid::text AS customer_uuid,
-			c.representative_first_name AS first_name,
-			c.representative_last_name AS last_name,
+			c.representative_first_name AS representative_first_name,
+			c.representative_last_name AS representative_last_name,
 			c.company_name AS company_name,
 			ad.discount_rate AS discount_rate,
 			ad.created_at AS created_at,
