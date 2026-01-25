@@ -22,6 +22,7 @@ const (
 	CampaignStatusRunning            CampaignStatus = "running"
 	CampaignStatusExecuted           CampaignStatus = "executed"
 	CampaignStatusRejected           CampaignStatus = "rejected"
+	CampaignStatusCancelled          CampaignStatus = "cancelled"
 )
 
 // String returns the string representation of the status
@@ -34,7 +35,8 @@ func (s CampaignStatus) Valid() bool {
 	switch s {
 	case CampaignStatusInitiated, CampaignStatusInProgress,
 		CampaignStatusWaitingForApproval, CampaignStatusApproved,
-		CampaignStatusRejected, CampaignStatusRunning, CampaignStatusExecuted:
+		CampaignStatusRejected, CampaignStatusCancelled,
+		CampaignStatusRunning, CampaignStatusExecuted:
 		return true
 	default:
 		return false
@@ -187,7 +189,8 @@ func (c *Campaign) CanTransitionTo(newStatus CampaignStatus) bool {
 			newStatus == CampaignStatusRejected
 	case CampaignStatusWaitingForApproval:
 		return newStatus == CampaignStatusApproved ||
-			newStatus == CampaignStatusRejected
+			newStatus == CampaignStatusRejected ||
+			newStatus == CampaignStatusCancelled
 	default:
 		return false
 	}
