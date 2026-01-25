@@ -69,6 +69,13 @@ def main():
     df["tags_list"] = df["tags"].map(parse_tags)
     df["available_audience"] = df["available_audience"].map(lambda x: int(clean_str(x) or "10000"))
 
+    # optional level2 metadata columns produced by main.py
+    for col in ("level2_one_line", "level2_inclusion", "level2_exclusion"):
+        if col in df.columns:
+            df[col] = df[col].map(clean_str)
+        else:
+            df[col] = ""
+
     # Filter invalid rows
     df = df[(df["level1"] != "") & (df["level2"] != "") & (df["level3"] != "")].copy()
 
@@ -95,8 +102,19 @@ def main():
             "tags": [str(t) for t in tags],
             "available_audience": int(row["available_audience"]),
         }
+        # attach level2 metadata when available
+        level2_meta = {
+            "one_line": clean_str(row.get("level2_one_line", "")),
+            "inclusion": clean_str(row.get("level2_inclusion", "")),
+            "exclusion": clean_str(row.get("level2_exclusion", "")),
+        }
+        # only include a metadata object if any field is non-empty
+        if any(level2_meta.values()):
+            payload["metadata"] = level2_meta
 
         try:
+            print(payload)
+            print("----")
             resp = session.post(
                 API_URL,
                 json=payload,
