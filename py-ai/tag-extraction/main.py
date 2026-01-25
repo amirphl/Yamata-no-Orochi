@@ -52,13 +52,91 @@ agg = (
 # Filter out groups that have no tag ids
 agg = agg[agg["tags"].map(lambda v: isinstance(v, list) and len(v) > 0)].copy()
 
-# Constant available audience per instruction
-agg["available_audience"] = 10000
+# Load audience stats (layer counts)
+try:
+    stats_df = pd.read_excel(EXCEL_PATH, sheet_name="layersStat", dtype=str)
+except Exception:
+    stats_df = None
 
-# Prepare output columns
+available = None
+if stats_df is not None:
+    stat_cols = {
+        "layer1_category": "level1",
+        "layer2_category": "level2",
+        "layer3_category": "level3",
+        "distinct_users": "distinct_users",
+        "calculated_at": "calculated_at",
+    }
+    missing_stats = [c for c in stat_cols.keys() if c not in stats_df.columns]
+    if not missing_stats:
+        stats = stats_df[list(stat_cols.keys())].rename(columns=stat_cols).copy()
+        stats["level1"] = stats["level1"].map(clean_str)
+        stats["level2"] = stats["level2"].map(clean_str)
+        stats["level3"] = stats["level3"].map(clean_str)
+        stats["distinct_users"] = pd.to_numeric(stats["distinct_users"], errors="coerce").fillna(0).astype(int)
+        stats["calculated_at"] = pd.to_datetime(stats["calculated_at"], errors="coerce")
+        # Keep the latest calculated row per level combo
+        stats = (
+            stats.sort_values(["level1", "level2", "level3", "calculated_at"])
+            .groupby(["level1", "level2", "level3"], as_index=False)
+            .tail(1)
+        )
+        available = stats[["level1", "level2", "level3", "distinct_users"]]
+
+# Prepare output columns and attach available audience from stats if present
 out = agg.rename(columns={"level3_final": "level3"})[[
-    "level1", "level2", "level3", "tags", "available_audience"
+    "level1", "level2", "level3", "tags"
 ]]
+
+if available is not None:
+    out = out.merge(available, how="left", on=["level1", "level2", "level3"])
+    out = out.rename(columns={"distinct_users": "available_audience"})
+    out["available_audience"] = out["available_audience"].fillna(0).astype(int)
+else:
+    out["available_audience"] = 0
+
+# --- Attach level2 metadata from definitions sheet (if present) ---
+try:
+    defs = pd.read_excel(EXCEL_PATH, sheet_name="definitions", dtype=str)
+except Exception:
+    defs = None
+
+if defs is not None:
+    # Expected Persian columns: 'شناسه فارسی', 'توضیح یک خطی', 'شمول', 'عدم شمول'
+    # Normalize column names to exact strings as they appear in sheet
+    keys = [c for c in defs.columns]
+    if "شناسه فارسی" in keys:
+        meta_map = {}
+        for _, r in defs.iterrows():
+            key = clean_str(r.get("شناسه فارسی"))
+            if not key:
+                continue
+            meta_map[key] = {
+                "one_line": clean_str(r.get("توضیح یک خطی")),
+                "inclusion": clean_str(r.get("شمول")),
+                "exclusion": clean_str(r.get("عدم شمول")),
+            }
+
+        # Map metadata into out DataFrame columns
+        def lookup_meta(l2: str, field: str) -> str:
+            if not l2:
+                return ""
+            m = meta_map.get(l2)
+            return m.get(field, "") if isinstance(m, dict) else ""
+
+        out["level2_one_line"] = out["level2"].map(lambda v: lookup_meta(v, "one_line"))
+        out["level2_inclusion"] = out["level2"].map(lambda v: lookup_meta(v, "inclusion"))
+        out["level2_exclusion"] = out["level2"].map(lambda v: lookup_meta(v, "exclusion"))
+    else:
+        # definitions sheet missing expected key column; add empty metadata columns
+        out["level2_one_line"] = ""
+        out["level2_inclusion"] = ""
+        out["level2_exclusion"] = ""
+else:
+    # definitions sheet not found; create empty metadata columns
+    out["level2_one_line"] = ""
+    out["level2_inclusion"] = ""
+    out["level2_exclusion"] = ""
 
 # Persist CSV (UTF-8 with BOM for Excel compatibility)
 out.to_csv(OUTPUT_CSV, index=False, encoding="utf-8-sig")
