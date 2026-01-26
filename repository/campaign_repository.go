@@ -206,6 +206,37 @@ func (r *CampaignRepositoryImpl) ClickCounts(ctx context.Context, campaignIDs []
 	return out, nil
 }
 
+// AggregateTotalSentByCustomerIDs sums the totalSent statistic across all campaigns for the given customers.
+// It returns a map keyed by customer_id with the aggregated totalSent value (0 when missing).
+func (r *CampaignRepositoryImpl) AggregateTotalSentByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]uint64, error) {
+	results := make(map[uint]uint64)
+	if len(customerIDs) == 0 {
+		return results, nil
+	}
+
+	type row struct {
+		CustomerID uint   `json:"customer_id"`
+		TotalSent  uint64 `json:"total_sent"`
+	}
+
+	db := r.getDB(ctx)
+	var rows []row
+	err := db.Table("sms_campaigns").
+		Select("customer_id, COALESCE(SUM((statistics->>'totalSent')::bigint), 0) AS total_sent").
+		Where("customer_id IN ?", customerIDs).
+		Group("customer_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		results[row.CustomerID] = row.TotalSent
+	}
+
+	return results, nil
+}
+
 // ByFilter retrieves campaigns based on filter criteria
 func (r *CampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.CampaignFilter, orderBy string, limit, offset int) ([]*models.Campaign, error) {
 	db := r.getDB(ctx)
