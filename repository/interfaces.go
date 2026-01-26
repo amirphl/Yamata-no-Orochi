@@ -129,6 +129,7 @@ type CampaignRepository interface {
 	GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.Campaign, error)
 	GetScheduledCampaigns(ctx context.Context, from, to time.Time) ([]*models.Campaign, error)
 	ClickCounts(ctx context.Context, campaignIDs []uint) (map[uint]int64, error)
+	AggregateTotalSentByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]uint64, error)
 }
 
 // WalletRepository defines the interface for wallet data access
@@ -256,6 +257,13 @@ type AgencyDiscountRepository interface {
 	GetActiveDiscount(ctx context.Context, agencyID, customerID uint) (*models.AgencyDiscount, error)
 	ListActiveDiscountsWithCustomer(ctx context.Context, agencyID uint, nameLike, orderBy string) ([]*AgencyDiscountWithCustomer, error)
 	ExpireActiveByAgencyAndCustomer(ctx context.Context, agencyID, customerID uint, expiredAt time.Time) error
+}
+
+// SegmentPriceFactorRepository defines operations for segment price factors
+type SegmentPriceFactorRepository interface {
+	Repository[models.SegmentPriceFactor, models.SegmentPriceFactorFilter]
+	ListLatestByLevel3(ctx context.Context) ([]*models.SegmentPriceFactor, error)
+	LatestByLevel3s(ctx context.Context, level3s []string) (map[string]float64, error)
 }
 
 // TagRepository defines operations for tags
