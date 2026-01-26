@@ -21,6 +21,29 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 	if len(rows) == 0 {
 		return nil
 	}
+
+	// Deduplicate by conflict key to avoid ON CONFLICT hitting same row twice in one statement
+	type aggKey struct {
+		pcID       uint
+		customerID string
+	}
+	seen := make(map[aggKey]struct{}, len(rows))
+	deduped := make([]*models.SMSStatusResult, 0, len(rows))
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+		key := aggKey{pcID: row.ProcessedCampaignID, customerID: row.CustomerID}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, row)
+	}
+	if len(deduped) == 0 {
+		return nil
+	}
+
 	db := r.getDB(ctx)
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "processed_campaign_id"}, {Name: "customer_id"}},
@@ -34,7 +57,7 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 			"status":                  clause.Expr{SQL: "EXCLUDED.status"},
 			"created_at":              clause.Expr{SQL: "LEAST(sms_status_results.created_at, EXCLUDED.created_at)"},
 		}),
-	}).Create(&rows).Error
+	}).Create(&deduped).Error
 }
 
 // ByFilter: no filter fields, just order/limit/offset
@@ -83,7 +106,7 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 			COALESCE(SUM(total_delivered_parts),0) AS aggregated_delivered_parts,
 			COALESCE(SUM(total_undelivered_parts),0) AS aggregated_undelivered,
 			COALESCE(SUM(total_unknown_parts),0) AS aggregated_unknown`).
-		Where("campaign_id = ?", campaignID).
+		Where("processed_campaign_id = ?", campaignID).
 		Scan(&agg).Error; err != nil {
 		return nil, err
 	}
