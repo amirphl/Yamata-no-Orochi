@@ -57,7 +57,7 @@ type UpdateCampaignResponse struct {
 type CancelCampaignRequest struct {
 	CampaignID uint   `json:"campaign_id" validate:"required"`
 	CustomerID uint   `json:"-"`
-	Comment    string `json:"comment,omitempty" validate:"omitempty,max=500"`
+	Comment    *string `json:"comment,omitempty" validate:"omitempty,max=500"`
 }
 
 type CancelCampaignResponse struct {
@@ -72,6 +72,7 @@ type GetCampaignRequest struct {
 
 // GetCampaignResponse represents the campaign specification in responses
 type GetCampaignResponse struct {
+	ID              uint           `json:"id"`
 	UUID            string         `json:"uuid"`
 	Status          string         `json:"status"`
 	CreatedAt       time.Time      `json:"created_at"`
