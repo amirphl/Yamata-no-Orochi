@@ -568,8 +568,8 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 		}
 
 		campaign.Status = models.CampaignStatusCancelled
-		if strings.TrimSpace(req.Comment) != "" {
-			comment := strings.TrimSpace(req.Comment)
+		if req.Comment != nil && strings.TrimSpace(*req.Comment) != "" {
+			comment := strings.TrimSpace(*req.Comment)
 			campaign.Comment = &comment
 		}
 		campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
@@ -682,7 +682,7 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	}
 
 	// Pricing constants
-	basePrice := uint64(600)
+	basePrice := uint64(200)
 	lineFactor, err := s.fetchLineNumberPriceFactor(ctx, *req.LineNumber)
 	if err != nil {
 		return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
@@ -882,6 +882,7 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		}
 
 		items = append(items, dto.GetCampaignResponse{
+			ID:              c.ID,
 			UUID:            c.UUID.String(),
 			Status:          c.Status.String(),
 			CreatedAt:       c.CreatedAt,
