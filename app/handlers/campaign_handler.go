@@ -211,10 +211,6 @@ func (h *CampaignHandler) CancelCampaign(c fiber.Ctx) error {
 	}
 
 	var req dto.CancelCampaignRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		// body optional; ignore empty body errors? better treat invalid JSON
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
-	}
 	req.CampaignID = uint(id64)
 
 	customerID, ok := c.Locals("customer_id").(uint)
