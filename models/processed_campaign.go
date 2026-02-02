@@ -21,6 +21,8 @@ type ProcessedCampaign struct {
 	AudienceCodes  pq.StringArray  `gorm:"type:text[];not null" json:"audience_codes"`
 	LastAudienceID *int64          `json:"last_audience_id,omitempty"`
 	Statistics     json.RawMessage `gorm:"type:jsonb;not null;default:'{}'" json:"statistics"`
+	// Reference to the audience selection snapshot used when preparing this campaign
+	AudienceSelectionID *uint `gorm:"index:idx_processed_campaigns_audience_selection_id" json:"audience_selection_id,omitempty"`
 
 	CreatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"created_at"`
 	UpdatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"updated_at"`
