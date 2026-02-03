@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0063_create_audience_selection_cache_down.sql...'
+\i migrations/0063_create_audience_selection_cache_down.sql
+
 \echo 'Running 0062_add_cancelled_status_to_sms_campaigns_down.sql...'
 \i migrations/0062_add_cancelled_status_to_sms_campaigns_down.sql
 
