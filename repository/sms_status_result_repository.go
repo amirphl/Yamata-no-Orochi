@@ -96,7 +96,9 @@ type SMSStatusAggregates struct {
 	AggregatedUnknown        int64
 }
 
-func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context, campaignID uint) (*SMSStatusAggregates, error) {
+func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SMSStatusAggregates, error) {
+	// TODO: Aggregate on status too.
+	// TODO: Query optimization: maintain a summary table updated on insert instead of aggregating on the fly.
 	db := r.getDB(ctx)
 	var agg SMSStatusAggregates
 	if err := db.Table("sms_status_results").
@@ -106,7 +108,7 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 			COALESCE(SUM(total_delivered_parts),0) AS aggregated_delivered_parts,
 			COALESCE(SUM(total_undelivered_parts),0) AS aggregated_undelivered,
 			COALESCE(SUM(total_unknown_parts),0) AS aggregated_unknown`).
-		Where("processed_campaign_id = ?", campaignID).
+		Where("processed_campaign_id = ?", processedCampaignID).
 		Scan(&agg).Error; err != nil {
 		return nil, err
 	}
