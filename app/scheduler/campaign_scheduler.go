@@ -5,24 +5,18 @@ import (
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
-	"bytes"
-	"encoding/json"
-	"net/http"
-	"net/url"
-
 	"gorm.io/gorm"
-
-	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/config"
@@ -45,20 +39,15 @@ type CampaignScheduler struct {
 	logger   *log.Logger
 	interval time.Duration
 
-	db          *gorm.DB
-	payamSMSCfg config.PayamSMSConfig
-	adminCfg    config.AdminConfig
-	botCfg      config.BotConfig
+	db       *gorm.DB
+	adminCfg config.AdminConfig
+
+	botClient BotClient
+	smsClient PayamSMSClient
 
 	logFile *os.File
 
-	audienceCache   map[uint]map[string]*AudienceSelection
-	audienceCacheMu sync.Mutex
-}
-
-type AudienceSelection struct {
-	IDs     map[int64]struct{}
-	Expired bool
+	audienceCache *AudienceCache
 }
 
 // NotificationSender is a minimal interface extracted from NotificationService for SMS
@@ -81,9 +70,14 @@ func NewCampaignScheduler(
 	interval time.Duration,
 	payamSMSCfg config.PayamSMSConfig,
 	botCfg config.BotConfig,
+	adminCfg config.AdminConfig,
 ) *CampaignScheduler {
 	if interval <= 0 {
 		interval = time.Minute
+	}
+
+	if botCfg.APIDomain == "" {
+		botCfg.APIDomain = defaultBotAPIDomain
 	}
 
 	s := &CampaignScheduler{
@@ -94,14 +88,13 @@ func NewCampaignScheduler(
 		jobRepo:       jobRepo,
 		resRepo:       resRepo,
 		notifier:      notifier,
+		logger:        logger,
 		db:            db,
 		interval:      interval,
-		payamSMSCfg:   payamSMSCfg,
-		botCfg:        botCfg,
-		audienceCache: make(map[uint]map[string]*AudienceSelection),
-	}
-	if s.botCfg.APIDomain == "" {
-		s.botCfg.APIDomain = "https://jazebeh.ir"
+		adminCfg:      adminCfg,
+		botClient:     newHTTPBotClient(botCfg),
+		smsClient:     newHTTPPayamSMSClient(payamSMSCfg),
+		audienceCache: NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
 	}
 
 	// Initialize scheduler-specific logger (to stdout and persistent file)
@@ -150,7 +143,7 @@ func (s *CampaignScheduler) Start(parent context.Context) func() {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		s.runOnce(ctx)
+		s.runOnce(context.Background())
 
 		for {
 			select {
@@ -171,7 +164,7 @@ func (s *CampaignScheduler) Start(parent context.Context) func() {
 
 func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	// 2) Login to bot API and get access token
-	token, err := s.loginBot(ctx)
+	token, err := s.botClient.Login(ctx)
 	if err != nil {
 		s.logger.Printf("scheduler: bot login failed: %v", err)
 		s.notifyAdmin(fmt.Sprintf("Scheduler bot login failed: %v", err))
@@ -181,7 +174,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	s.logger.Printf("scheduler: bot login succeeded")
 
 	// 3) Get ready campaigns
-	ready, err := s.listReadyCampaigns(ctx, token)
+	ready, err := s.botClient.ListReadyCampaigns(ctx, token)
 	if err != nil {
 		s.logger.Printf("scheduler: list ready campaigns failed: %v", err)
 		s.notifyAdmin(fmt.Sprintf("Scheduler list ready campaigns failed: %v", err))
@@ -208,12 +201,14 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 		}
 		if pc == nil {
 			pending = append(pending, c)
+		} else {
+			s.logger.Printf("scheduler: campaign id=%d already processed, skipping", c.ID)
 		}
 	}
 	if len(pending) == 0 {
 		return
 	}
-	s.logger.Printf("scheduler: %d campaigns pending processing", len(pending))
+	s.logger.Printf("scheduler: %d campaigns pending processing...", len(pending))
 
 	// 5) Spawn goroutines per campaign
 	for _, camp := range pending {
@@ -221,7 +216,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 		go func() {
 			if err := s.processCampaign(ctx, token, c); err != nil {
 				s.logger.Printf("scheduler: process campaign id=%d failed: %v", c.ID, err)
-				s.notifyAdmin(fmt.Sprintf("Scheduler process campaign failed for id=%d: %v", c.ID, err))
+				s.notifyAdmin(fmt.Sprintf("Scheduler process campaign failed for campaign id=%d: %v", c.ID, err))
 			}
 		}()
 	}
@@ -237,7 +232,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	sender := *c.LineNumber
 
 	// 6) Mark running
-	if err := s.moveCampaignToRunning(ctx, token, c.ID); err != nil {
+	if err := s.botClient.MoveCampaignToRunning(ctx, token, c.ID); err != nil {
 		return fmt.Errorf("move to running: %w", err)
 	}
 	s.logger.Printf("scheduler: campaign id=%d moved to running", c.ID)
@@ -252,29 +247,37 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	// 7) Save the campaign in the processed campaign table AND 8), 9), 10) Save the list of audiences in the processed campaign table
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
-			CampaignID:     c.ID,
-			CampaignJSON:   func() json.RawMessage { b, _ := json.Marshal(c); return b }(),
-			AudienceIDs:    pq.Int64Array{},
-			AudienceCodes:  []string{},
-			LastAudienceID: nil,
-			Statistics:     nil,
+			CampaignID:          c.ID,
+			CampaignJSON:        func() json.RawMessage { b, _ := json.Marshal(c); return b }(),
+			AudienceIDs:         pq.Int64Array{},
+			AudienceCodes:       []string{},
+			LastAudienceID:      nil,
+			AudienceSelectionID: nil,
+			Statistics:          nil,
 		}
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
 			return err
 		}
+		s.logger.Printf("scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
 
 		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
 		var err error
-		phones, ids, uids, err = s.fetchAudiencePhones(txCtx, c, token)
+		correlationID := uuid.NewString()
+		phones, ids, uids, selectionID, err := s.fetchAudiencePhones(txCtx, c, token, correlationID)
 		if err != nil {
 			return err
 		}
+		s.logger.Printf("scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
 
 		pc.AudienceIDs = pq.Int64Array(ids)
 		pc.AudienceCodes = uids
+		pc.AudienceSelectionID = utils.ToPtr(selectionID)
+		pc.UpdatedAt = utils.UTCNow()
 		if err := s.pcRepo.Update(txCtx, pc); err != nil {
 			return err
 		}
+		s.logger.Printf("scheduler: updated processed campaign id=%d with audience ids", pc.ID)
+
 		return nil
 	}); err != nil {
 		return err
@@ -282,7 +285,8 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 	s.logger.Printf("scheduler: persisted processed campaign id=%d num_audiences=%d", pc.ID, len(ids))
 
 	// 12/13) Send batches; after each batch, save sent_sms and update LastAudienceID in SAME transaction
-	batchSize := 200 // MUST BE LESS THAN 250
+	// NOTE: MUST BE LESS THAN 250
+	batchSize := 200
 
 	for start := 0; start < len(phones); start += batchSize {
 		end := start + batchSize
@@ -305,7 +309,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 			items = append(items, PayamSMSItem{
 				Recipient:  p,
 				Body:       body,
-				CustomerID: trackingID,
+				trackingID: trackingID,
 			})
 
 			rows = append(rows, &models.SentSMS{
@@ -324,8 +328,9 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 					return err
 				}
 			}
-			last := batchIDs[len(batchIDs)-1]
-			pc.LastAudienceID = &last
+			lastBatchID := batchIDs[len(batchIDs)-1]
+			pc.LastAudienceID = &lastBatchID
+			pc.UpdatedAt = utils.UTCNow()
 			if err := s.pcRepo.Update(txCtx, pc); err != nil {
 				return err
 			}
@@ -336,30 +341,29 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 		}
 
 		// Sending via PayamSMS for this batch
-		respItems, err := s.sendPayamSMSBatchWithBodies(ctx, sender, items)
+		respItems, err := s.smsClient.SendBatchWithBodies(ctx, sender, items)
 		if err != nil {
 			s.logger.Printf("scheduler: payamsms send batch failed for campaign id=%d: %v", c.ID, err)
-			// TODO: handle error
+			// TODO: How to handle this error? Retry sending? Skip to next batch?
 		} else {
 			// Map provider response back to our sent_sms rows by customerId (trackingID) using a batch update
 			updates := make([]repository.SentSMSProviderUpdate, 0, len(respItems))
 			for _, r := range respItems {
-				if r.CustomerID == "" {
+				if r.TrackingID == "" {
 					continue
 				}
 				updates = append(updates, repository.SentSMSProviderUpdate{
-					TrackingID:  r.CustomerID,
+					TrackingID:  r.TrackingID,
 					ServerID:    r.ServerID,
 					ErrorCode:   r.ErrorCode,
 					Description: r.Desc,
 				})
 			}
 			if len(updates) > 0 {
+				// TODO: Start tx here if needed?
 				if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, updates); updateErr != nil {
 					s.logger.Printf("scheduler: failed to batch update sent_sms provider fields for campaign id=%d: %v", c.ID, updateErr)
-				} else {
-					// Success (concise)
-					s.logger.Printf("scheduler: sent sms batch items=%d for campaign id=%d", len(items), c.ID)
+					// NOTE: Error silent here; not returning to avoid blocking further processing
 				}
 			}
 
@@ -376,11 +380,15 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 		}
 	}
 
+	s.logger.Printf("scheduler: campaign id=%d all batches sent", c.ID)
+
 	// 15) Mark executed
-	if err := s.moveCampaignToExecuted(ctx, token, c.ID); err != nil {
+	if err := s.botClient.MoveCampaignToExecuted(ctx, token, c.ID); err != nil {
 		s.logger.Printf("scheduler: move executed failed for campaign id=%d: %v", c.ID, err)
+		return err
 	}
 	s.logger.Printf("scheduler: campaign id=%d moved to executed", c.ID)
+
 	return nil
 }
 
@@ -391,175 +399,6 @@ func (s *CampaignScheduler) notifyAdmin(message string) {
 	go func(msg string) {
 		_ = s.notifier.SendSMS(context.Background(), s.adminCfg.Mobile, msg, nil)
 	}(message)
-}
-
-func (s *CampaignScheduler) loginBot(ctx context.Context) (string, error) {
-	if s.botCfg.Username == "" || s.botCfg.Password == "" {
-		return "", fmt.Errorf("bot credentials not configured")
-	}
-	url := s.botCfg.APIDomain + "/api/v1/bot/auth/login"
-	reqBody := dto.BotLoginRequest{
-		Username: s.botCfg.Username,
-		Password: s.botCfg.Password,
-	}
-	payload, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("bot login http status: %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	// Now try to decode into the expected struct
-	var apiResp dto.APIResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return "", fmt.Errorf("failed to decode JSON into APIResponse: %w", err)
-	}
-
-	// Check if the API call was successful
-	if !apiResp.Success {
-		return "", fmt.Errorf("bot login failed: %v", apiResp.Message)
-	}
-
-	// Convert the Data field to JSON again to parse into BotLoginResponse
-	dataBytes, err := json.Marshal(apiResp.Data)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal APIResponse data: %w", err)
-	}
-
-	var botLoginResp dto.BotLoginResponse
-	if err := json.Unmarshal(dataBytes, &botLoginResp); err != nil {
-		return "", fmt.Errorf("failed to decode JSON into BotLoginResponse: %w", err)
-	}
-
-	if botLoginResp.Session.AccessToken == "" {
-		return "", fmt.Errorf("empty bot access token")
-	}
-
-	return botLoginResp.Session.AccessToken, nil
-}
-
-func (s *CampaignScheduler) listReadyCampaigns(ctx context.Context, token string) ([]dto.BotGetCampaignResponse, error) {
-	url := s.botCfg.APIDomain + "/api/v1/bot/campaigns/ready"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("ready campaigns http status: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %w", err)
-	}
-
-	var apiResp dto.APIResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return nil, fmt.Errorf("failed to decode JSON into APIResponse: %w", err)
-	}
-
-	// Check if the API call was successful
-	if !apiResp.Success {
-		return nil, fmt.Errorf("list ready campaigns failed: %v", apiResp.Message)
-	}
-
-	// Convert the Data field to JSON again to parse into BotListCampaignsResponse
-	dataBytes, err := json.Marshal(apiResp.Data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal APIResponse data: %w", err)
-	}
-
-	var listCampaignsResp dto.BotListCampaignsResponse
-	if err := json.Unmarshal(dataBytes, &listCampaignsResp); err != nil {
-		return nil, fmt.Errorf("failed to decode JSON into BotListCampaignsResponse: %w", err)
-	}
-
-	return listCampaignsResp.Items, nil
-}
-
-func (s *CampaignScheduler) moveCampaignToRunning(ctx context.Context, token string, id uint) error {
-	url := s.botCfg.APIDomain + "/api/v1/bot/campaigns/" + strconv.FormatUint(uint64(id), 10) + "/running"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("move to running http status: %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func (s *CampaignScheduler) moveCampaignToExecuted(ctx context.Context, token string, id uint) error {
-	url := s.botCfg.APIDomain + "/api/v1/bot/campaigns/" + strconv.FormatUint(uint64(id), 10) + "/executed"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("move to executed http status: %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func (s *CampaignScheduler) createShortLinksViaAPI(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error {
-	url := s.botCfg.APIDomain + "/api/v1/bot/short-links"
-	payload, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("create short-links http status: %d", resp.StatusCode)
-	}
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body: %w", err)
-	}
-	var apiResp dto.APIResponse
-	if err := json.Unmarshal(body, &apiResp); err != nil {
-		return fmt.Errorf("failed to decode JSON into APIResponse: %w", err)
-	}
-	if !apiResp.Success {
-		return fmt.Errorf("create short-links failed: %v", apiResp.Message)
-	}
-	return nil
 }
 
 func (s *CampaignScheduler) validateCampaign(c dto.BotGetCampaignResponse) error {
@@ -576,10 +415,13 @@ func (s *CampaignScheduler) validateCampaign(c dto.BotGetCampaignResponse) error
 	if c.UpdatedAt.After(utils.UTCNow()) {
 		return fmt.Errorf("campaign updated_at is after now")
 	}
+	if c.LineNumber == nil || *c.LineNumber == "" {
+		return fmt.Errorf("campaign line number (sender) is empty")
+	}
 	return nil
 }
 
-func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string) ([]string, []int64, []string, error) {
+func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string, correlationID string) ([]string, []int64, []string, uint, error) {
 	adLink := ""
 	if c.AdLink != nil {
 		adLink = *c.AdLink
@@ -589,13 +431,13 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 	for i, tag := range c.Tags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, 0, err
 		}
 		toExtract[i] = uint(tagID)
 	}
 	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 	// create a pq int32 array from tags
 	tagIDs := make(pq.Int32Array, len(tags))
@@ -608,7 +450,10 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 	const LIMIT = 10000000
 
 	tagsHash := hashTags(c.Tags)
-	selection := s.getOrCreateAudienceSelection(c.CustomerID, tagsHash)
+	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
 
 	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
 		phones := make([]string, 0, c.NumAudiences)
@@ -645,7 +490,10 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 		}
 
 		if len(phones) < int(c.NumAudiences) {
-			filter.Color = utils.ToPtr("pink")
+			filter := models.AudienceProfileFilter{
+				Tags:  &tagIDs,
+				Color: utils.ToPtr("pink"),
+			}
 			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", LIMIT, 0)
 			if err != nil {
 				return nil, nil, err
@@ -663,101 +511,42 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 
 	// First attempt excluding prior picks for this customer/tags
 	var exclude map[int64]struct{}
-	if selection != nil && selection.IDs != nil && !selection.Expired {
+	if selection != nil && selection.IDs != nil {
 		exclude = selection.IDs
 	}
 
 	phones, ids, err := selectAudiences(exclude)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
 
+	resetUsed := false
 	if len(phones) < int(c.NumAudiences) {
-		// Not enough fresh; expire cache and retry from scratch
-		s.expireAudienceSelection(c.CustomerID, tagsHash)
-		selection = s.resetAudienceSelection(c.CustomerID, tagsHash)
+		// Not enough fresh; retry from scratch without exclusions
+		resetUsed = true
 		phones, ids, err = selectAudiences(nil)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, 0, err
 		}
 	}
 
-	// Update cache with newly used IDs
-	if selection == nil {
-		selection = s.getOrCreateAudienceSelection(c.CustomerID, tagsHash)
+	// Persist selection history with correlation id and merged audience IDs
+	var sel *AudienceSelection
+	if resetUsed {
+		sel, err = s.audienceCache.SaveSnapshot(ctx, c.CustomerID, tagsHash, correlationID, ids)
+	} else {
+		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
 	}
-	if selection.IDs == nil {
-		selection.IDs = make(map[int64]struct{})
+	if err != nil {
+		return nil, nil, nil, 0, err
 	}
-	for _, id := range ids {
-		selection.IDs[id] = struct{}{}
-	}
-	selection.Expired = false
 
 	// Generate sequential UIDs via bot API and persist short links centrally
-	codes, err := s.allocateShortLinksViaAPI(ctx, token, c.ID, adLink, phones)
+	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, adLink, phones)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, 0, err
 	}
-	return phones, ids, codes, nil
-}
-
-func hashTags(tags []string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	cp := make([]string, len(tags))
-	copy(cp, tags)
-	sort.Strings(cp)
-	h := sha1.Sum([]byte(strings.Join(cp, ",")))
-	return hex.EncodeToString(h[:])
-}
-
-func (s *CampaignScheduler) getOrCreateAudienceSelection(customerID uint, hash string) *AudienceSelection {
-	s.audienceCacheMu.Lock()
-	defer s.audienceCacheMu.Unlock()
-	if s.audienceCache == nil {
-		s.audienceCache = make(map[uint]map[string]*AudienceSelection)
-	}
-	if _, ok := s.audienceCache[customerID]; !ok {
-		s.audienceCache[customerID] = make(map[string]*AudienceSelection)
-	}
-	if sel, ok := s.audienceCache[customerID][hash]; ok {
-		return sel
-	}
-	sel := &AudienceSelection{
-		IDs:     make(map[int64]struct{}),
-		Expired: false,
-	}
-	s.audienceCache[customerID][hash] = sel
-	return sel
-}
-
-func (s *CampaignScheduler) expireAudienceSelection(customerID uint, hash string) {
-	s.audienceCacheMu.Lock()
-	defer s.audienceCacheMu.Unlock()
-	if cust, ok := s.audienceCache[customerID]; ok {
-		if sel, ok := cust[hash]; ok {
-			sel.Expired = true
-		}
-	}
-}
-
-func (s *CampaignScheduler) resetAudienceSelection(customerID uint, hash string) *AudienceSelection {
-	s.audienceCacheMu.Lock()
-	defer s.audienceCacheMu.Unlock()
-	if s.audienceCache == nil {
-		s.audienceCache = make(map[uint]map[string]*AudienceSelection)
-	}
-	if _, ok := s.audienceCache[customerID]; !ok {
-		s.audienceCache[customerID] = make(map[string]*AudienceSelection)
-	}
-	sel := &AudienceSelection{
-		IDs:     make(map[int64]struct{}),
-		Expired: false,
-	}
-	s.audienceCache[customerID][hash] = sel
-	return sel
+	return phones, ids, codes, sel.ID, nil
 }
 
 func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code string) string {
@@ -773,176 +562,25 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 	return strings.ReplaceAll(content, "🔗", "") + "\n" + "لغو۱۱"
 }
 
-// sendPayamSMSBatchWithBodies sends a batch using custom per-recipient bodies
-type PayamSMSItem struct {
-	Recipient  string
-	Body       string
-	CustomerID string
-}
-
-func (s *CampaignScheduler) sendPayamSMSBatchWithBodies(ctx context.Context, sender string, items []PayamSMSItem) ([]struct {
-	CustomerID string  `json:"customerId"`
-	Mobile     string  `json:"mobile"`
-	ServerID   *string `json:"serverId"`
-	ErrorCode  *string `json:"errorCode"`
-	Desc       *string `json:"description"`
-}, error) {
-	if len(items) == 0 {
-		return nil, nil
+func hashTags(tags []string) string {
+	if len(tags) == 0 {
+		return ""
 	}
-	payload := struct {
-		Sender   string `json:"sender"`
-		SMSItems []any  `json:"smsItems"`
-	}{
-		Sender:   sender,
-		SMSItems: make([]any, 0, len(items)),
-	}
-	sendDate, err := utils.TehranNow()
-	if err != nil {
-		return nil, err
-	}
-	sendDate = sendDate.Add(time.Minute)
-
-	for _, it := range items {
-		payload.SMSItems = append(payload.SMSItems, map[string]any{
-			"recipient":  it.Recipient,
-			"body":       it.Body,
-			"customerId": it.CustomerID,
-			"sendDate":   sendDate.Format("2006-01-02 15:04:05"),
-		})
-	}
-	b, _ := json.Marshal(payload)
-	token, err := s.getPayamSMSToken(ctx)
-	if err != nil {
-		return nil, err
-	}
-	url := "https://www.payamsms.com/panel/webservice/sendMultipleWithSrc"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json; charset=utf-8")
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("payamsms sendMultiple http status: %d", resp.StatusCode)
-	}
-	var out []struct {
-		CustomerID string  `json:"customerId"`
-		Mobile     string  `json:"mobile"`
-		ServerID   *string `json:"serverId"`
-		ErrorCode  *string `json:"errorCode"`
-		Desc       *string `json:"description"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// getPayamSMSToken fetches OAuth token using env-configured credentials
-func (s *CampaignScheduler) getPayamSMSToken(ctx context.Context) (string, error) {
-	tokenURL := s.payamSMSCfg.TokenURL
-	if tokenURL == "" {
-		tokenURL = "https://www.payamsms.com/auth/oauth/token"
-	}
-	systemName := s.payamSMSCfg.SystemName
-	username := s.payamSMSCfg.Username
-	password := s.payamSMSCfg.Password
-	scope := s.payamSMSCfg.Scope
-	grantType := s.payamSMSCfg.GrantType
-	rootToken := s.payamSMSCfg.RootAccessToken
-	if scope == "" {
-		scope = "webservice"
-	}
-	if grantType == "" {
-		grantType = "password"
-	}
-
-	url := fmt.Sprintf("%s?systemName=%s&username=%s&password=%s&scope=%s&grant_type=%s", tokenURL, systemName, username, password, scope, grantType)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-	if err != nil {
-		return "", err
-	}
-	if rootToken != "" {
-		req.Header.Set("Authorization", "Basic "+rootToken)
-	}
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("payamsms token http status: %d", resp.StatusCode)
-	}
-	var out struct {
-		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
-	}
-	if out.AccessToken == "" {
-		return "", fmt.Errorf("empty access_token")
-	}
-	return out.AccessToken, nil
-}
-
-func (s *CampaignScheduler) allocateShortLinksViaAPI(ctx context.Context, token string, campaignID uint, adLink string, phones []string) ([]string, error) {
-	payload := dto.BotGenerateShortLinksRequest{
-		CampaignID:      campaignID,
-		AdLink:          adLink,
-		Phones:          phones,
-		ShortLinkDomain: "https://jo1n.ir/",
-	}
-	b, _ := json.Marshal(payload)
-	url := s.botCfg.APIDomain + "/api/v1/bot/short-links/allocate"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("allocate short-links http status: %d", resp.StatusCode)
-	}
-	var apiResp dto.APIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, err
-	}
-	if !apiResp.Success {
-		return nil, fmt.Errorf("allocate short-links failed: %v", apiResp.Message)
-	}
-	dataBytes, err := json.Marshal(apiResp.Data)
-	if err != nil {
-		return nil, err
-	}
-	var out dto.BotGenerateShortLinksResponse
-	if err := json.Unmarshal(dataBytes, &out); err != nil {
-		return nil, err
-	}
-	return out.Codes, nil
+	cp := make([]string, len(tags))
+	copy(cp, tags)
+	sort.Strings(cp)
+	h := sha1.Sum([]byte(strings.Join(cp, ",")))
+	return hex.EncodeToString(h[:])
 }
 
 // scheduleStatusCheckJobs creates three status check jobs for the provided tracking IDs
-func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, customerIDs []string) error {
-	if len(customerIDs) == 0 {
+func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, trackingIDs []string) error {
+	if len(trackingIDs) == 0 {
 		return nil
 	}
 	corrID := uuid.NewString()
-	filtered := make([]string, 0, len(customerIDs))
-	for _, id := range customerIDs {
+	filtered := make([]string, 0, len(trackingIDs))
+	for _, id := range trackingIDs {
 		if strings.TrimSpace(id) != "" {
 			filtered = append(filtered, strings.TrimSpace(id))
 		}
@@ -952,7 +590,7 @@ func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, process
 	}
 
 	now := utils.UTCNow()
-	offsets := []time.Duration{5 * time.Minute, 30 * time.Minute, 1 * time.Hour, 3 * time.Hour}
+	offsets := []time.Duration{5 * time.Minute, 15 * time.Minute, 1 * time.Hour, 50 * time.Hour}
 	jobs := make([]*models.SMSStatusJob, 0, len(offsets))
 	for _, off := range offsets {
 		jobs = append(jobs, &models.SMSStatusJob{
@@ -970,7 +608,7 @@ func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, process
 
 // startStatusJobWorker polls and executes due SMS status jobs every 10 minutes
 func (s *CampaignScheduler) startStatusJobWorker(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	// initial run
@@ -987,10 +625,6 @@ func (s *CampaignScheduler) startStatusJobWorker(ctx context.Context) {
 }
 
 func (s *CampaignScheduler) processStatusJobs(ctx context.Context) {
-	if s.jobRepo == nil || s.resRepo == nil {
-		return
-	}
-
 	now := utils.UTCNow()
 	jobs, err := s.jobRepo.ListDue(ctx, now, 100)
 	if err != nil {
@@ -1001,24 +635,26 @@ func (s *CampaignScheduler) processStatusJobs(ctx context.Context) {
 		return
 	}
 
-	token, err := s.getPayamSMSToken(ctx)
+	token, err := s.smsClient.GetToken(ctx)
 	if err != nil {
 		s.logger.Printf("scheduler: payamsms token for status jobs failed: %v", err)
 		return
 	}
 
+	// TODO: What about parallel execution with limited concurrency?
 	for _, job := range jobs {
-		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-
+		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // #TODO: adjust timeout as needed
 		if err := s.handleStatusJob(jobCtx, job, token); err != nil {
 			s.logger.Printf("scheduler: handle status job id=%d failed: %v", job.ID, err)
+		} else {
+			s.logger.Printf("scheduler: handle status job id=%d succeeded", job.ID)
 		}
+		cancel()
 	}
 }
 
 func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMSStatusJob, token string) error {
-	results, err := s.fetchPayamSMSStatus(ctx, token, []string(job.CustomerIDs))
+	results, err := s.smsClient.FetchStatus(ctx, token, []string(job.CustomerIDs))
 	var stats map[string]any
 
 	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
@@ -1042,7 +678,7 @@ func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMS
 			rows = append(rows, &models.SMSStatusResult{
 				JobID:                 job.ID,
 				ProcessedCampaignID:   job.ProcessedCampaignID,
-				CustomerID:            r.CustomerID,
+				CustomerID:            r.TrackingID,
 				ServerID:              r.ServerID,
 				TotalParts:            &tp,
 				TotalDeliveredParts:   &td,
@@ -1068,23 +704,23 @@ func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMS
 
 	// Push statistics to bot API after transaction commits
 	if stats != nil {
-		if err := s.pushCampaignStatistics(ctx, job.ProcessedCampaignID, stats); err != nil {
-			s.logger.Printf("scheduler: failed to push campaign statistics processed_campaign_id=%d: %v", job.ProcessedCampaignID, err)
+		if err := s.botClient.PushCampaignStatistics(ctx, job.ProcessedCampaignID, stats); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func (s *CampaignScheduler) updateProcessedCampaignStats(ctx context.Context, processedCampaignID uint) (map[string]any, error) {
-	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
+func (s *CampaignScheduler) updateProcessedCampaignStats(txCtx context.Context, processedCampaignID uint) (map[string]any, error) {
+	pc, err := s.pcRepo.ByID(txCtx, processedCampaignID)
 	if err != nil {
 		return nil, err
 	}
 	if pc == nil {
-		return nil, fmt.Errorf("processed campaign not found for campaign_id=%d", processedCampaignID)
+		return nil, fmt.Errorf("processed campaign not found for processed_campaign_id=%d", processedCampaignID)
 	}
 
-	agg, err := s.resRepo.AggregateByCampaign(ctx, processedCampaignID)
+	agg, err := s.resRepo.AggregateByCampaign(txCtx, processedCampaignID)
 	if err != nil {
 		return nil, err
 	}
@@ -1103,85 +739,8 @@ func (s *CampaignScheduler) updateProcessedCampaignStats(ctx context.Context, pr
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(ctx, pc); err != nil {
+	if err := s.pcRepo.Update(txCtx, pc); err != nil {
 		return nil, err
 	}
 	return stats, nil
-}
-
-type PayamStatusResponse struct {
-	CustomerID            string  `json:"customerId"`
-	ServerID              *string `json:"serverId"`
-	TotalParts            int64   `json:"totalParts"`
-	TotalDeliveredParts   int64   `json:"totalDeliveredParts"`
-	TotalUndeliveredParts int64   `json:"totalUnDeliveredParts"`
-	TotalUnknownParts     int64   `json:"totalUnKnownParts"`
-	Status                string  `json:"status"`
-}
-
-func (s *CampaignScheduler) fetchPayamSMSStatus(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error) {
-	if len(ids) == 0 {
-		return nil, fmt.Errorf("no ids provided")
-	}
-	baseURL := "https://www.payamsms.com/report/webservice/status"
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return nil, err
-	}
-	q := u.Query()
-	q.Set("byCustomer", "false")
-	for _, id := range ids {
-		if strings.TrimSpace(id) != "" {
-			q.Add("ids", strings.TrimSpace(id))
-		}
-	}
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("payamsms status http status: %d", resp.StatusCode)
-	}
-
-	var out []PayamStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (s *CampaignScheduler) pushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error {
-	token, err := s.loginBot(ctx)
-	if err != nil {
-		return err
-	}
-	url := fmt.Sprintf("%s/api/v1/bot/campaigns/%d/statistics", s.botCfg.APIDomain, processedCampaignID)
-	payload, _ := json.Marshal(dto.BotUpdateCampaignStatisticsRequest{Statistics: stats})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("push statistics http status: %d", resp.StatusCode)
-	}
-	return nil
 }
