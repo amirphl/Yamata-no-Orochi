@@ -613,6 +613,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			cfg.Scheduler.CampaignExecutionInterval,
 			cfg.PayamSMS,
 			cfg.Bot,
+			cfg.Admin,
 		)
 		stopScheduler := sched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopScheduler)
