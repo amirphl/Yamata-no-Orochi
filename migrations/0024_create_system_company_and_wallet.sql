@@ -1,5 +1,5 @@
 -- Migration: 0024_create_system_company_and_wallet.sql
--- Description: Create system company customer (referrer code 'jaazebeh.ir'), its system wallet, and initial balance snapshot
+-- Description: Create system company customer (referrer code 'jazebeh.ir'), its system wallet, and initial balance snapshot
 
 -- UP MIGRATION
 BEGIN;
@@ -31,7 +31,7 @@ INSERT INTO customers (
     false,
     false,
     true,
-    'jaazebeh.ir',
+    'jazebeh.ir',
     NULL,
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP
