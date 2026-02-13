@@ -19,7 +19,7 @@ import (
 type BotShortLinkFlow interface {
 	CreateShortLink(ctx context.Context, req *dto.BotCreateShortLinkRequest) (*dto.BotCreateShortLinkResponse, error)
 	CreateShortLinks(ctx context.Context, req *dto.BotCreateShortLinksRequest) (*dto.BotCreateShortLinksResponse, error)
-	GenerateAndCreateShortLinks(ctx context.Context, campaignID uint, adLink string, phones []string, shortLinkDomain string) ([]string, error)
+	GenerateAndCreateShortLinks(ctx context.Context, campaignID uint, adLink *string, phones []string, shortLinkDomain string) ([]string, error)
 }
 
 type BotShortLinkFlowImpl struct {
@@ -117,10 +117,14 @@ func (s *BotShortLinkFlowImpl) CreateShortLinks(ctx context.Context, req *dto.Bo
 
 // GenerateAndCreateShortLinks generates sequential UIDs centrally and creates short links for phones
 // Returns codes in the same order as phones.
-func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, campaignID uint, adLink string, phones []string, shortLinkDomain string) ([]string, error) {
-	adLink = strings.TrimSpace(adLink)
-	if adLink == "" {
-		return nil, NewBusinessError("VALIDATION_ERROR", "adLink is required", nil)
+func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, campaignID uint, adLink *string, phones []string, shortLinkDomain string) ([]string, error) {
+	// adLink = strings.TrimSpace(adLink)
+	// if adLink == "" {
+	// 	return nil, NewBusinessError("VALIDATION_ERROR", "adLink is required", nil)
+	// }
+	longLink := ""
+	if adLink != nil {
+		longLink = *adLink
 	}
 	if len(phones) == 0 {
 		return []string{}, nil
@@ -174,7 +178,7 @@ func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, 
 			ClientID:    nil,
 			ScenarioID:  &newScenarioID,
 			PhoneNumber: &p,
-			LongLink:    adLink,
+			LongLink:    longLink,
 			ShortLink:   shortURL,
 		})
 	}
