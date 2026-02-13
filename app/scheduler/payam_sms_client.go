@@ -168,7 +168,7 @@ func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trac
 		return nil, err
 	}
 	q := u.Query()
-	q.Set("byCustomer", "false")
+	q.Set("byCustomer", "true")
 	for _, trackingID := range trackingIDs {
 		if strings.TrimSpace(trackingID) != "" {
 			q.Add("ids", strings.TrimSpace(trackingID))
