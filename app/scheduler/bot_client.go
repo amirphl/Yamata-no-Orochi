@@ -21,7 +21,7 @@ type BotClient interface {
 	ListReadyCampaigns(ctx context.Context, token string) ([]dto.BotGetCampaignResponse, error)
 	MoveCampaignToRunning(ctx context.Context, token string, id uint) error
 	MoveCampaignToExecuted(ctx context.Context, token string, id uint) error
-	AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink string, phones []string) ([]string, error)
+	AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error)
 	PushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error
 	CreateShortLinks(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error
 }
@@ -177,7 +177,7 @@ func (c *httpBotClient) MoveCampaignToExecuted(ctx context.Context, token string
 	return nil
 }
 
-func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink string, phones []string) ([]string, error) {
+func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error) {
 	payload := dto.BotGenerateShortLinksRequest{
 		CampaignID:      campaignID,
 		AdLink:          adLink,
@@ -218,12 +218,12 @@ func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, ca
 	return out.Codes, nil
 }
 
-func (c *httpBotClient) PushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error {
+func (c *httpBotClient) PushCampaignStatistics(ctx context.Context, campaignID uint, stats map[string]any) error {
 	token, err := c.Login(ctx)
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("%s/api/v1/bot/campaigns/%d/statistics", c.cfg.APIDomain, processedCampaignID)
+	url := fmt.Sprintf("%s/api/v1/bot/campaigns/%d/statistics", c.cfg.APIDomain, campaignID)
 	payload, _ := json.Marshal(dto.BotUpdateCampaignStatisticsRequest{Statistics: stats})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
