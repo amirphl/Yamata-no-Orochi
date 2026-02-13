@@ -262,8 +262,9 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 
 		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
 		var err error
+		var selectionID uint
 		correlationID := uuid.NewString()
-		phones, ids, uids, selectionID, err := s.fetchAudiencePhones(txCtx, c, token, correlationID)
+		phones, ids, uids, selectionID, err = s.fetchAudiencePhones(txCtx, c, token, correlationID)
 		if err != nil {
 			return err
 		}
@@ -422,11 +423,6 @@ func (s *CampaignScheduler) validateCampaign(c dto.BotGetCampaignResponse) error
 }
 
 func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string, correlationID string) ([]string, []int64, []string, uint, error) {
-	adLink := ""
-	if c.AdLink != nil {
-		adLink = *c.AdLink
-	}
-
 	toExtract := make([]uint, len(c.Tags))
 	for i, tag := range c.Tags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
@@ -542,7 +538,7 @@ func (s *CampaignScheduler) fetchAudiencePhones(ctx context.Context, c dto.BotGe
 	}
 
 	// Generate sequential UIDs via bot API and persist short links centrally
-	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, adLink, phones)
+	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
@@ -669,16 +665,20 @@ func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMS
 		}
 
 		rows := make([]*models.SMSStatusResult, 0, len(results))
-		for _, r := range results {
+		for idx, r := range results {
 			tp := r.TotalParts
 			td := r.TotalDeliveredParts
 			tu := r.TotalUndeliveredParts
 			tu2 := r.TotalUnknownParts
 			status := r.Status
+			trackingID := ""
+			if idx < len(job.CustomerIDs) {
+				trackingID = job.CustomerIDs[idx]
+			}
 			rows = append(rows, &models.SMSStatusResult{
 				JobID:                 job.ID,
 				ProcessedCampaignID:   job.ProcessedCampaignID,
-				CustomerID:            r.TrackingID,
+				CustomerID:            trackingID,
 				ServerID:              r.ServerID,
 				TotalParts:            &tp,
 				TotalDeliveredParts:   &td,
@@ -704,7 +704,14 @@ func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMS
 
 	// Push statistics to bot API after transaction commits
 	if stats != nil {
-		if err := s.botClient.PushCampaignStatistics(ctx, job.ProcessedCampaignID, stats); err != nil {
+		pc, err := s.pcRepo.ByID(ctx, job.ProcessedCampaignID)
+		if err != nil {
+			return err
+		}
+		if pc == nil {
+			return fmt.Errorf("processed campaign not found for processed campaign id=%d", job.ProcessedCampaignID)
+		}
+		if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
 			return err
 		}
 	}
@@ -726,7 +733,7 @@ func (s *CampaignScheduler) updateProcessedCampaignStats(txCtx context.Context, 
 	}
 
 	stats := map[string]any{
-		"totalSent":                       agg.TotalSent,
+		"aggregatedTotalSent":             agg.AggregatedTotalSent,
 		"aggregatedTotalParts":            agg.AggregatedTotalParts,
 		"aggregatedTotalDeliveredParts":   agg.AggregatedDeliveredParts,
 		"aggregatedTotalUnDeliveredParts": agg.AggregatedUndelivered,
