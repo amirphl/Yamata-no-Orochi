@@ -312,7 +312,7 @@ type SMSStatusJobRepository interface {
 type SMSStatusResultRepository interface {
 	Repository[models.SMSStatusResult, any]
 	SaveBatch(ctx context.Context, rows []*models.SMSStatusResult) error
-	AggregateByCampaign(ctx context.Context, campaignID uint) (*SMSStatusAggregates, error)
+	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SMSStatusAggregates, error)
 }
 
 // TicketRepository defines operations for tickets
