@@ -103,7 +103,7 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 	var agg SMSStatusAggregates
 	if err := db.Table("sms_status_results").
 		Select(`
-			COALESCE(SUM(total_sent),0) AS aggregated_total_sent,
+			COUNT(*) AS aggregated_total_sent,
 			COALESCE(SUM(total_parts),0) AS aggregated_total_parts,
 			COALESCE(SUM(total_delivered_parts),0) AS aggregated_delivered_parts,
 			COALESCE(SUM(total_undelivered_parts),0) AS aggregated_undelivered,
