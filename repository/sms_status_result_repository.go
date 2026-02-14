@@ -89,7 +89,7 @@ func (r *SMSStatusResultRepositoryImpl) Count(ctx context.Context, _ any) (int64
 }
 
 type SMSStatusAggregates struct {
-	TotalSent                int64
+	AggregatedTotalSent      int64
 	AggregatedTotalParts     int64
 	AggregatedDeliveredParts int64
 	AggregatedUndelivered    int64
@@ -103,7 +103,7 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 	var agg SMSStatusAggregates
 	if err := db.Table("sms_status_results").
 		Select(`
-			COUNT(*) AS total_sent,
+			COALESCE(SUM(total_sent),0) AS aggregated_total_sent,
 			COALESCE(SUM(total_parts),0) AS aggregated_total_parts,
 			COALESCE(SUM(total_delivered_parts),0) AS aggregated_delivered_parts,
 			COALESCE(SUM(total_undelivered_parts),0) AS aggregated_undelivered,
