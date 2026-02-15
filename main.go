@@ -654,7 +654,7 @@ func ensureSystemAndTaxEntities(db *gorm.DB, cfg *config.ProductionConfig) error
 			"Account",
 			cfg.System.SystemUserEmail,
 			cfg.System.SystemUserMobile,
-			"jaazebeh.ir",
+			"jazebeh.ir",
 			cfg.System.SystemShebaNumber,
 		); err != nil {
 			return err
@@ -671,7 +671,7 @@ func ensureSystemAndTaxEntities(db *gorm.DB, cfg *config.ProductionConfig) error
 			"Collector",
 			cfg.System.TaxUserEmail,
 			cfg.System.TaxUserMobile,
-			"tax.jaazebeh.ir",
+			"tax.jazebeh.ir",
 			"",
 		); err != nil {
 			return err
