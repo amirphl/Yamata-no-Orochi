@@ -18,7 +18,7 @@ var (
 	ErrMobileAlreadyExists     = errors.New("mobile number already exists")
 	ErrNationalIDAlreadyExists = errors.New("national ID already exists")
 	ErrAgencyNotFound          = errors.New("agency not found")
-	ErrJobCategoryRequired     = errors.New("job and category are required for non-agency customers")
+	ErrJobCategoryRequired     = errors.New("job and category are required for marketing agencies")
 	ErrAgencyInactive          = errors.New("agency is inactive")
 
 	// Company/Business account errors
@@ -56,6 +56,8 @@ var (
 	ErrCampaignBudgetRequired       = errors.New("campaign budget is required")
 	ErrCampaignSexRequired          = errors.New("campaign sex is required")
 	ErrCampaignAdLinkRequired       = errors.New("campaign ad link is required")
+	ErrInvalidShortLinkDomain       = errors.New("invalid short link domain")
+	ErrAgencyCategoryJobRequired    = errors.New("category and job are required for marketing agencies")
 	ErrScheduleTimeNotPresent       = errors.New("schedule time is not present")
 	ErrScheduleTimeTooSoon          = errors.New("schedule time is too soon")
 	ErrCampaignCityRequired         = errors.New("campaign city is required")
