@@ -50,6 +50,12 @@ type CampaignFlowImpl struct {
 	db                  *gorm.DB
 }
 
+const (
+	defaultShortLinkDomain = "jo1n.ir"
+)
+
+var allowedShortLinkDomains = []string{defaultShortLinkDomain, "joinsahel.ir"}
+
 // NewCampaignFlow creates a new campaign flow instance
 func NewCampaignFlow(
 	campaignRepo repository.CampaignRepository,
@@ -95,6 +101,13 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 		return nil, NewBusinessError("CUSTOMER_LOOKUP_FAILED", "Failed to lookup customer", err)
 	}
 
+	// category, job, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job)
+	// if err != nil {
+	// 	// return nil, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
+	// }
+	// req.Category = category
+	// req.Job = job
+
 	// Use transaction for atomicity
 	var campaign *models.Campaign
 
@@ -133,6 +146,8 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 
 // UpdateCampaign handles the campaign update process
 func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCampaignRequest, metadata *ClientMetadata) (*dto.UpdateCampaignResponse, error) {
+	// req.Job = utils.ToPtr("dddd")
+	// req.Category = utils.ToPtr("ddddd")
 	// Validate business rules
 	if err := s.validateUpdateCampaignRequest(req); err != nil {
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
@@ -184,6 +199,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		scheduleAt = req.ScheduleAt
 		lineNumber = req.LineNumber
 		budget     = req.Budget
+		// category   = req.Category
+		// job        = req.Job
 	)
 	if req.Title == nil {
 		title = campaign.Spec.Title
@@ -221,6 +238,21 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Budget == nil {
 		budget = campaign.Spec.Budget
 	}
+	// if req.Category == nil {
+	// 	category = campaign.Spec.Category
+	// }
+	// if req.Job == nil {
+	// 	job = campaign.Spec.Job
+	// }
+
+	// sanitizedCategory, sanitizedJob, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, category, job)
+	// if err != nil {
+	// 	return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
+	// }
+	// category = sanitizedCategory
+	// job = sanitizedJob
+	// req.Category = sanitizedCategory
+	// req.Job = sanitizedJob
 
 	capacity, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
 		Title:      title,
@@ -235,6 +267,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		ScheduleAt: scheduleAt,
 		LineNumber: lineNumber,
 		Budget:     budget,
+		// Category:   category,
+		// Job:        job,
 	}, metadata)
 	if err != nil {
 		return nil, NewBusinessError("CAPACITY_CALCULATION_FAILED", "Failed to calculate campaign capacity", err)
@@ -299,6 +333,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				ScheduleAt: scheduleAt,
 				LineNumber: lineNumber,
 				Budget:     budget,
+				// Category:   category,
+				// Job:        job,
+				CustomerID: req.CustomerID,
 			}, metadata)
 			if err != nil {
 				return err
@@ -735,6 +772,14 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	}
 
 	total := pricePerMsg * numTargetAudience
+
+	if req.CustomerID != 0 {
+		customer, err := getCustomer(ctx, s.customerRepo, req.CustomerID)
+		if err == nil && customer.RepresentativeMobile == s.adminConfig.Mobile {
+			total = 0
+		}
+	}
+
 	response := &dto.CalculateCampaignCostResponse{
 		Message:           "Campaign cost calculated successfully",
 		TotalCost:         total,
@@ -850,7 +895,7 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 			_ = json.Unmarshal(c.Statistics, &statsMap)
 		}
 		totalSent := float64(0)
-		if v, ok := statsMap["totalSent"]; ok {
+		if v, ok := statsMap["aggregatedTotalSent"]; ok {
 			switch n := v.(type) {
 			case float64:
 				totalSent = n
@@ -896,6 +941,9 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 			City:            c.Spec.City,
 			AdLink:          c.Spec.AdLink,
 			Content:         c.Spec.Content,
+			// ShortLinkDomain: c.Spec.ShortLinkDomain,
+			// Category:        c.Spec.Category,
+			// Job:             c.Spec.Job,
 			ScheduleAt:      c.Spec.ScheduleAt,
 			LineNumber:      c.Spec.LineNumber,
 			LinePriceFactor: linePriceFactor,
@@ -961,6 +1009,12 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 	if req.AdLink != nil && *req.AdLink == "" {
 		return ErrCampaignAdLinkRequired
 	}
+	// if req.Category != nil && strings.TrimSpace(*req.Category) == "" {
+	// 	return ErrAgencyCategoryJobRequired
+	// }
+	// if req.Job != nil && strings.TrimSpace(*req.Job) == "" {
+	// 	return ErrAgencyCategoryJobRequired
+	// }
 
 	// Validate schedule time must be at least 10 minutes in the future
 	scheduleTime := req.ScheduleAt
@@ -994,11 +1048,20 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 		}
 	}
 
+	// if _, err := sanitizeShortLinkDomain(req.ShortLinkDomain); err != nil {
+	// 	return err
+	// }
+
 	return nil
 }
 
 // createCampaign creates the campaign in the database
 func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCampaignRequest, customer *models.Customer) (*models.Campaign, error) {
+	// shortLinkDomain, err := sanitizeShortLinkDomain(req.ShortLinkDomain)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
 	// Build campaign spec
 	spec := models.CampaignSpec{}
 
@@ -1029,6 +1092,13 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	if req.Content != nil && *req.Content != "" {
 		spec.Content = req.Content
 	}
+	// if req.Category != nil && *req.Category != "" {
+	// 	spec.Category = req.Category
+	// }
+	// if req.Job != nil && *req.Job != "" {
+	// 	spec.Job = req.Job
+	// }
+	// spec.ShortLinkDomain = &shortLinkDomain
 	if req.ScheduleAt != nil {
 		spec.ScheduleAt = req.ScheduleAt
 	}
@@ -1076,10 +1146,24 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	hasUpdateFields := req.Title != nil || req.Level1 != nil || len(req.Level2s) > 0 || len(req.Level3s) > 0 ||
 		len(req.Tags) > 0 || req.Sex != nil || len(req.City) > 0 || req.AdLink != nil || req.Content != nil ||
 		req.ScheduleAt != nil || req.LineNumber != nil || req.Budget != nil
+		// || req.ShortLinkDomain != nil ||
+		// req.Category != nil || req.Job != nil
 
 	if !hasUpdateFields {
 		return ErrCampaignUpdateRequired
 	}
+
+	// if req.Category != nil && strings.TrimSpace(*req.Category) == "" {
+	// 	return ErrAgencyCategoryJobRequired
+	// }
+	// if req.Job != nil && strings.TrimSpace(*req.Job) == "" {
+	// 	return ErrAgencyCategoryJobRequired
+	// }
+	// if req.ShortLinkDomain != nil {
+	// 	if _, err := sanitizeShortLinkDomain(req.ShortLinkDomain); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	return nil
 }
@@ -1187,6 +1271,19 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Content != nil && *req.Content != "" {
 		spec.Content = req.Content
 	}
+	// if req.Category != nil && *req.Category != "" {
+	// 	spec.Category = req.Category
+	// }
+	// if req.Job != nil && *req.Job != "" {
+	// 	spec.Job = req.Job
+	// }
+	// if req.ShortLinkDomain != nil {
+	// 	domain, err := sanitizeShortLinkDomain(req.ShortLinkDomain)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	spec.ShortLinkDomain = &domain
+	// }
 	if req.ScheduleAt != nil {
 		spec.ScheduleAt = req.ScheduleAt
 	}
@@ -1196,6 +1293,10 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Budget != nil && *req.Budget != 0 {
 		spec.Budget = req.Budget
 	}
+	// if spec.ShortLinkDomain == nil {
+	// 	def := defaultShortLinkDomain
+	// 	spec.ShortLinkDomain = &def
+	// }
 
 	// Update the campaign spec
 	existingCampaign.Spec = spec
@@ -1353,6 +1454,46 @@ func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
 		}
 	}
 	return count
+}
+
+func sanitizeShortLinkDomain(domain *string) (string, error) {
+	if domain == nil {
+		return defaultShortLinkDomain, nil
+	}
+	trimmed := strings.TrimSpace(*domain)
+	if trimmed == "" {
+		return "", ErrInvalidShortLinkDomain
+	}
+	if !slices.Contains(allowedShortLinkDomains, trimmed) {
+		return "", ErrInvalidShortLinkDomain
+	}
+	return trimmed, nil
+}
+
+func sanitizeCategoryAndJob(accountType string, category, job *string) (*string, *string, error) {
+	var sanitizedCategory, sanitizedJob *string
+	if category != nil {
+		cat := strings.TrimSpace(*category)
+		if cat == "" {
+			return nil, nil, ErrAgencyCategoryJobRequired
+		}
+		sanitizedCategory = &cat
+	}
+	if job != nil {
+		j := strings.TrimSpace(*job)
+		if j == "" {
+			return nil, nil, ErrAgencyCategoryJobRequired
+		}
+		sanitizedJob = &j
+	}
+
+	if accountType == models.AccountTypeMarketingAgency {
+		if sanitizedCategory == nil || sanitizedJob == nil {
+			return nil, nil, ErrAgencyCategoryJobRequired
+		}
+	}
+
+	return sanitizedCategory, sanitizedJob, nil
 }
 
 // createAuditLog creates an audit log entry for the campaign operation
