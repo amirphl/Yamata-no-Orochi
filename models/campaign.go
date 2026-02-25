@@ -90,6 +90,11 @@ type CampaignSpec struct {
 	// Scheduling and configuration
 	ScheduleAt *time.Time `json:"schedule_at,omitempty"`
 	LineNumber *string    `json:"line_number,omitempty"`
+	// Short link domain for generated URLs
+	ShortLinkDomain *string `json:"short_link_domain,omitempty"`
+	// Agency metadata
+	Category *string `json:"category,omitempty"`
+	Job      *string `json:"job,omitempty"`
 
 	// Budget
 	Budget *uint64 `json:"budget,omitempty"`
