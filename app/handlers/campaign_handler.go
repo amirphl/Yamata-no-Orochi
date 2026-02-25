@@ -300,6 +300,7 @@ func (h *CampaignHandler) CalculateCampaignCapacity(c fiber.Ctx) error {
 // @Param request body dto.CalculateCampaignCostRequest true "Campaign parameters for cost calculation"
 // @Success 200 {object} dto.APIResponse{data=dto.CalculateCampaignCostResponse} "Cost calculated successfully"
 // @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized - customer not found or inactive"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/campaigns/calculate-cost [post]
 func (h *CampaignHandler) CalculateCampaignCost(c fiber.Ctx) error {
@@ -319,6 +320,13 @@ func (h *CampaignHandler) CalculateCampaignCost(c fiber.Ctx) error {
 
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+
+	// Get authenticated customer ID from context
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID = customerID
 
 	// Call business logic with proper context
 	result, err := h.campaignFlow.CalculateCampaignCost(h.createRequestContext(c, "/api/v1/campaigns/calculate-cost"), &req, metadata)
