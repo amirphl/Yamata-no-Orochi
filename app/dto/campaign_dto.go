@@ -17,7 +17,7 @@ type CreateCampaignRequest struct {
 	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
 	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
 	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category        *string    `json:"category,omitempty" validate:"omitempty,max=255"`
+	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
 	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
 	ScheduleAt      *time.Time `json:"schedule_at,omitempty"`
 	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
@@ -47,7 +47,7 @@ type UpdateCampaignRequest struct {
 	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
 	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
 	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category        *string    `json:"category,omitempty" validate:"omitempty,max=255"`
+	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
 	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
 	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
 	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
@@ -93,7 +93,7 @@ type GetCampaignResponse struct {
 	AdLink          *string        `json:"adlink,omitempty" validate:"omitempty"`
 	Content         *string        `json:"content,omitempty" validate:"omitempty"`
 	ShortLinkDomain *string        `json:"short_link_domain,omitempty" validate:"omitempty"`
-	Category        *string        `json:"category,omitempty" validate:"omitempty"`
+	Category        *string        `json:"job_category,omitempty" validate:"omitempty"`
 	Job             *string        `json:"job,omitempty" validate:"omitempty"`
 	ScheduleAt      *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
 	LineNumber      *string        `json:"line_number,omitempty" validate:"omitempty"`
@@ -108,20 +108,21 @@ type GetCampaignResponse struct {
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
 type CalculateCampaignCapacityRequest struct {
-	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1     *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags       []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Category   *string    `json:"category,omitempty" validate:"omitempty,max=255"`
-	Job        *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	Title           *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1          *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s         []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s         []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags            []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex             *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City            []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	Budget          *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
 }
 
 // CalculateCampaignCapacityResponse represents the response to calculate the capacity of an campaign
@@ -132,21 +133,22 @@ type CalculateCampaignCapacityResponse struct {
 
 // CalculateCampaignCostRequest represents the request to calculate the cost of an campaign
 type CalculateCampaignCostRequest struct {
-	Title      *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1     *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s    []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s    []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags       []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex        *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City       []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink     *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content    *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
-	ScheduleAt *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	Budget     *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Category   *string    `json:"category,omitempty" validate:"omitempty,max=255"`
-	Job        *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	CustomerID uint       `json:"-"`
+	Title           *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1          *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s         []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s         []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags            []string   `json:"tags,omitempty" validate:"omitempty"`
+	Sex             *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City            []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	Budget          *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	CustomerID      uint       `json:"-"`
 }
 
 // CalculateCampaignCostResponse represents the response to calculate the cost of an campaign
@@ -212,7 +214,7 @@ type AdminGetCampaignResponse struct {
 	AdLink                *string        `json:"adlink,omitempty" validate:"omitempty"`
 	Content               *string        `json:"content,omitempty" validate:"omitempty"`
 	ShortLinkDomain       *string        `json:"short_link_domain,omitempty" validate:"omitempty"`
-	Category              *string        `json:"category,omitempty" validate:"omitempty"`
+	Category              *string        `json:"job_category,omitempty" validate:"omitempty"`
 	Job                   *string        `json:"job,omitempty" validate:"omitempty"`
 	ScheduleAt            *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
 	LineNumber            *string        `json:"line_number,omitempty" validate:"omitempty"`
@@ -270,7 +272,7 @@ type BotGetCampaignResponse struct {
 	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty"`
 	Content         *string    `json:"content,omitempty" validate:"omitempty"`
 	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty"`
-	Category        *string    `json:"category,omitempty" validate:"omitempty"`
+	Category        *string    `json:"job_category,omitempty" validate:"omitempty"`
 	Job             *string    `json:"job,omitempty" validate:"omitempty"`
 	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
 	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty"`
