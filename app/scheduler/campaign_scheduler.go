@@ -551,7 +551,7 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 		content = *c.Content
 	}
 	if c.AdLink != nil && *c.AdLink != "" {
-		shortened := "https://jo1n.ir/s/" + code
+		shortened := "jo1n.ir/" + code
 		return strings.ReplaceAll(content, "🔗", shortened) + "\n" + "لغو۱۱"
 
 	}
