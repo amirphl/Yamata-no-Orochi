@@ -37,7 +37,7 @@ func (r *SMSStatusJobRepositoryImpl) ListDue(ctx context.Context, now time.Time,
 	}
 	db := r.getDB(ctx)
 	var rows []*models.SMSStatusJob
-	if err := db.Where("scheduled_at <= ? AND retry_count < ? AND executed_at == NULL", now, 3).
+	if err := db.Where("scheduled_at <= ? AND retry_count < ? AND executed_at IS NULL", now, 3).
 		Order("scheduled_at ASC, id ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
