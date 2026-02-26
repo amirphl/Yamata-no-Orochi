@@ -155,7 +155,7 @@ func (h *ShortLinkAdminHandler) DownloadWithClicksByScenarioRange(c fiber.Ctx) e
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksCSVRange(h.createRequestContext(c, "/api/v1/admin/short-links/download-with-clicks-range"), req.ScenarioFrom, req.ScenarioTo)
+	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksCSVRange(h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download-with-clicks-range", 120*time.Second), req.ScenarioFrom, req.ScenarioTo)
 	if err != nil {
 		log.Println("Admin download short links with clicks range failed:", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate CSV", "DOWNLOAD_FAILED", nil)
