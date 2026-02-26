@@ -572,14 +572,14 @@ func (p *PaymentFlowImpl) validateCallbackRequest(callback *dto.AtipayRequest) e
 	if callback.ReservationNumber == "" {
 		return ErrReservationNumberRequired
 	}
-	if callback.ReferenceNumber == "" {
-		return ErrReferenceNumberRequired
-	}
 	if callback.Status == "" {
 		return ErrStatusRequired
 	}
 	if callback.State == "" {
 		return ErrStateRequired
+	}
+	if mapping := p.getPaymentStatusMapping(callback.Status, callback.State); mapping.Success && callback.ReferenceNumber == "" {
+		return ErrReferenceNumberRequired
 	}
 	return nil
 }
