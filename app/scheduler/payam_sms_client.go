@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -189,7 +190,12 @@ func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trac
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("payamsms status http status: %d", resp.StatusCode)
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		body := strings.TrimSpace(string(bodyBytes))
+		if readErr != nil {
+			body = fmt.Sprintf("unable to read response body: %v", readErr)
+		}
+		return nil, fmt.Errorf("payamsms status http status: %d, body: %s", resp.StatusCode, body)
 	}
 
 	var out []PayamStatusResponse
