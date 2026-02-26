@@ -182,7 +182,7 @@ func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, ca
 		CampaignID:      campaignID,
 		AdLink:          adLink,
 		Phones:          phones,
-		ShortLinkDomain: "https://jo1n.ir/",
+		ShortLinkDomain: "jo1n.ir/",
 	}
 	b, _ := json.Marshal(payload)
 	url := c.cfg.APIDomain + "/api/v1/bot/short-links/allocate"
