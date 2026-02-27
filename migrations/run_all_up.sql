@@ -195,5 +195,8 @@
 \echo 'Running 0063_create_audience_selection_cache.sql...'
 \i migrations/0063_create_audience_selection_cache.sql
 
+\echo 'Running 0064_create_sequence_counters.sql...'
+\i migrations/0064_create_sequence_counters.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
