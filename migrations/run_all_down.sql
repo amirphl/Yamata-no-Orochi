@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0064_create_sequence_counters_down.sql...'
+\i migrations/0064_create_sequence_counters_down.sql
+
 \echo 'Running 0063_create_audience_selection_cache_down.sql...'
 \i migrations/0063_create_audience_selection_cache_down.sql
 
