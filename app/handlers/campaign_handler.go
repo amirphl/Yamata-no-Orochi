@@ -176,6 +176,14 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 	if err != nil {
 		// Handle specific business errors
 		log.Println("Campaign update failed", err)
+
+		if businessflow.IsScheduleTimeNotPresent(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid schedule time", "INVALID_SCHEDULE_TIME", nil)
+		}
+		if businessflow.IsScheduleTimeTooSoon(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time must be at least 10 minutes in the future", "SCHEDULE_TIME_TOO_SOON", nil)
+		}
+
 		// Handle generic business errors
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Campaign update failed", "CAMPAIGN_UPDATE_FAILED", nil)
 	}
