@@ -34,12 +34,19 @@ type TicketItem struct {
 	Content        string `json:"content"`
 	CreatedAt      string `json:"created_at"`
 	RepliedByAdmin *bool  `json:"replied_by_admin"`
+	Attachments    []TicketAttachment `json:"attachments,omitempty"`
 	// Admin-only fields (populated in admin listings only)
 	CustomerFirstName *string `json:"customer_first_name,omitempty"`
 	CustomerLastName  *string `json:"customer_last_name,omitempty"`
 	CompanyName       *string `json:"company_name,omitempty"`
 	PhoneNumber       *string `json:"phone_number,omitempty"`
 	AgencyName        *string `json:"agency_name,omitempty"`
+}
+
+// TicketAttachment represents a downloadable attachment for a ticket.
+type TicketAttachment struct {
+	Index int    `json:"index"`
+	Name  string `json:"name"`
 }
 
 // TicketGroup groups tickets by correlation_id
