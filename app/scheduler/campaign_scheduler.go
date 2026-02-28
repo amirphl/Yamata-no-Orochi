@@ -6,9 +6,11 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/config"
@@ -287,7 +290,7 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 
 	// 12/13) Send batches; after each batch, save sent_sms and update LastAudienceID in SAME transaction
 	// NOTE: MUST BE LESS THAN 250
-	batchSize := 200
+	batchSize := 100
 
 	for start := 0; start < len(phones); start += batchSize {
 		end := start + batchSize
@@ -300,12 +303,16 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 		items := make([]PayamSMSItem, 0, len(batchPhones))
 		// Build SentSMS rows from response
 		rows := make([]*models.SentSMS, 0, len(batchPhones))
+		trackingIDs, err := s.allocateTrackingIDs(ctx, len(batchPhones))
+		if err != nil {
+			return err
+		}
 
 		for i, p := range batchPhones {
 			// 11) Build message
 			body := s.buildSMSBody(c, batchUIDs[i])
 
-			trackingID := uuid.New().String()
+			trackingID := trackingIDs[i]
 
 			items = append(items, PayamSMSItem{
 				Recipient:  p,
@@ -556,6 +563,80 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 
 	}
 	return strings.ReplaceAll(content, "🔗", "") + "\n" + "لغو۱۱"
+}
+
+const (
+	trackingCounterName   = "sms_tracking_id"
+	trackingCounterHexLen = 64
+	trackingCounterBits   = 32 * 8
+)
+
+func (s *CampaignScheduler) allocateTrackingIDs(ctx context.Context, count int) ([]string, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+
+	var ids []string
+	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		db := s.db.WithContext(txCtx)
+		if tx, ok := txCtx.Value(repository.TxContextKey).(*gorm.DB); ok && tx != nil {
+			db = tx.WithContext(txCtx)
+		}
+
+		var counter models.SequenceCounter
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
+			First(&counter, "name = ?", trackingCounterName).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			now := utils.UTCNow()
+			counter = models.SequenceCounter{
+				Name:      trackingCounterName,
+				LastValue: strings.Repeat("0", trackingCounterHexLen),
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if err := db.Create(&counter).Error; err != nil {
+				return err
+			}
+		}
+
+		last := strings.TrimSpace(counter.LastValue)
+		if last == "" {
+			last = strings.Repeat("0", trackingCounterHexLen)
+		}
+		if len(last) > trackingCounterHexLen {
+			return fmt.Errorf("tracking counter exceeds %d hex chars", trackingCounterHexLen)
+		}
+		last = strings.Repeat("0", trackingCounterHexLen-len(last)) + strings.ToLower(last)
+		base := new(big.Int)
+		if _, ok := base.SetString(last, 16); !ok {
+			return fmt.Errorf("invalid tracking counter value")
+		}
+
+		ids = make([]string, count)
+		for i := 0; i < count; i++ {
+			base.Add(base, big.NewInt(1))
+			if base.BitLen() > trackingCounterBits {
+				return fmt.Errorf("tracking counter overflow")
+			}
+			ids[i] = fmt.Sprintf("%0*x", trackingCounterHexLen, base)
+		}
+
+		counter.LastValue = ids[len(ids)-1]
+		counter.UpdatedAt = utils.UTCNow()
+		return db.Model(&models.SequenceCounter{}).
+			Where("name = ?", counter.Name).
+			Updates(map[string]any{
+				"last_value": counter.LastValue,
+				"updated_at": counter.UpdatedAt,
+			}).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return ids, nil
 }
 
 func hashTags(tags []string) string {
