@@ -109,7 +109,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		clicks := clickCounts[c.ID]
 		var clickRate *float64
 		totalSent := float64(0)
-		if v, ok := stats["totalSent"]; ok {
+		if v, ok := stats["aggregatedTotalSent"]; ok {
 			switch n := v.(type) {
 			case float64:
 				totalSent = n
@@ -128,26 +128,29 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		totalClicks := clicks
 
 		items = append(items, dto.AdminGetCampaignResponse{
-			ID:          c.ID,
-			UUID:        c.UUID.String(),
-			Status:      c.Status.String(),
-			CreatedAt:   c.CreatedAt,
-			UpdatedAt:   c.UpdatedAt,
-			Title:       c.Spec.Title,
-			Level1:      c.Spec.Level1,
-			Level2s:     c.Spec.Level2s,
-			Tags:        c.Spec.Tags,
-			Sex:         c.Spec.Sex,
-			City:        c.Spec.City,
-			AdLink:      c.Spec.AdLink,
-			Content:     c.Spec.Content,
-			ScheduleAt:  c.Spec.ScheduleAt,
-			LineNumber:  c.Spec.LineNumber,
-			Budget:      c.Spec.Budget,
-			Comment:     c.Comment,
-			Statistics:  stats,
-			TotalClicks: &totalClicks,
-			ClickRate:   clickRate,
+			ID:              c.ID,
+			UUID:            c.UUID.String(),
+			Status:          c.Status.String(),
+			CreatedAt:       c.CreatedAt,
+			UpdatedAt:       c.UpdatedAt,
+			Title:           c.Spec.Title,
+			Level1:          c.Spec.Level1,
+			Level2s:         c.Spec.Level2s,
+			Tags:            c.Spec.Tags,
+			Sex:             c.Spec.Sex,
+			City:            c.Spec.City,
+			AdLink:          c.Spec.AdLink,
+			Content:         c.Spec.Content,
+			Category:        c.Spec.Category,
+			Job:             c.Spec.Job,
+			ShortLinkDomain: c.Spec.ShortLinkDomain,
+			ScheduleAt:      c.Spec.ScheduleAt,
+			LineNumber:      c.Spec.LineNumber,
+			Budget:          c.Spec.Budget,
+			Comment:         c.Comment,
+			Statistics:      stats,
+			TotalClicks:     &totalClicks,
+			ClickRate:       clickRate,
 		})
 	}
 
@@ -174,7 +177,7 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	clicks := clickCounts[id]
 	var clickRate *float64
 	totalSent := float64(0)
-	if v, ok := stats["totalSent"]; ok {
+	if v, ok := stats["aggregatedTotalSent"]; ok {
 		switch n := v.(type) {
 		case float64:
 			totalSent = n
@@ -193,23 +196,25 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	totalClicks := clicks
 
 	resp := &dto.AdminGetCampaignResponse{
-		ID:         c.ID,
-		UUID:       c.UUID.String(),
-		Status:     c.Status.String(),
-		CreatedAt:  c.CreatedAt,
-		UpdatedAt:  c.UpdatedAt,
-		Title:      c.Spec.Title,
-		Level1:     c.Spec.Level1,
-		Level2s:    c.Spec.Level2s,
-		Sex:        c.Spec.Sex,
-		City:       c.Spec.City,
-		AdLink:     c.Spec.AdLink,
-		Content:    c.Spec.Content,
-		ScheduleAt: c.Spec.ScheduleAt,
-		LineNumber: c.Spec.LineNumber,
-		Budget:     c.Spec.Budget,
-		Comment:    c.Comment,
-
+		ID:                    c.ID,
+		UUID:                  c.UUID.String(),
+		Status:                c.Status.String(),
+		CreatedAt:             c.CreatedAt,
+		UpdatedAt:             c.UpdatedAt,
+		Title:                 c.Spec.Title,
+		Level1:                c.Spec.Level1,
+		Level2s:               c.Spec.Level2s,
+		Sex:                   c.Spec.Sex,
+		City:                  c.Spec.City,
+		AdLink:                c.Spec.AdLink,
+		Content:               c.Spec.Content,
+		Category:              c.Spec.Category,
+		Job:                   c.Spec.Job,
+		ShortLinkDomain:       c.Spec.ShortLinkDomain,
+		ScheduleAt:            c.Spec.ScheduleAt,
+		LineNumber:            c.Spec.LineNumber,
+		Budget:                c.Spec.Budget,
+		Comment:               c.Comment,
 		SegmentPriceFactor:    -1, // TODO
 		LineNumberPriceFactor: -1, // TODO
 		Statistics:            stats,
