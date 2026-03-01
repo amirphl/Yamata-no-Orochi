@@ -25,6 +25,7 @@ type TicketHandlerInterface interface {
 	Create(c fiber.Ctx) error
 	CreateResponse(c fiber.Ctx) error
 	List(c fiber.Ctx) error
+	DownloadAttachment(c fiber.Ctx) error
 	AdminCreateResponse(c fiber.Ctx) error
 	AdminList(c fiber.Ctx) error
 }
@@ -323,6 +324,68 @@ func (h *TicketHandler) List(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, "Tickets retrieved successfully", result)
+}
+
+// DownloadAttachment Ticket
+// @Description Download a specific attachment from a customer's ticket.
+// @Tags Tickets
+// @Produce application/octet-stream
+// @Param ticket_id path integer true "Ticket ID"
+// @Param file_index path integer true "Attachment index"
+// @Success 200 {string} string "Attachment file"
+// @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized - customer not found or inactive"
+// @Failure 403 {object} dto.APIResponse "Forbidden - ticket does not belong to customer"
+// @Failure 404 {object} dto.APIResponse "Ticket or attachment not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/tickets/{ticket_id}/attachments/{file_index} [get]
+func (h *TicketHandler) DownloadAttachment(c fiber.Ctx) error {
+	ticketID, err := strconv.ParseUint(c.Params("ticket_id"), 10, 64)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid ticket ID", "INVALID_TICKET_ID", err.Error())
+	}
+	fileIndex, err := strconv.Atoi(c.Params("file_index"))
+	if err != nil || fileIndex < 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid file index", "INVALID_FILE_INDEX", nil)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	filename, contentType, data, err := h.flow.DownloadTicketAttachment(
+		h.createRequestContext(c, "/api/v1/tickets/{ticket_id}/attachments/{file_index}"),
+		customerID,
+		uint(ticketID),
+		fileIndex,
+	)
+	if err != nil {
+		if businessflow.IsCustomerNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+		if businessflow.IsTicketNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Ticket not found", "TICKET_NOT_FOUND", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "FORBIDDEN":
+				return h.ErrorResponse(c, fiber.StatusForbidden, "You can only download your own ticket attachments", be.Code, be.Error())
+			case "ATTACHMENT_NOT_FOUND":
+				return h.ErrorResponse(c, fiber.StatusNotFound, "Attachment not found", be.Code, nil)
+			case "INVALID_ATTACHMENT_PATH":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid attachment path", be.Code, nil)
+			}
+		}
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to download attachment", "DOWNLOAD_ATTACHMENT_FAILED", nil)
+	}
+
+	c.Set("Content-Disposition", "attachment; filename="+filename)
+	c.Set("Content-Type", contentType)
+	return c.Send(data)
 }
 
 // AdminCreateResponse Create Admin Response Ticket
