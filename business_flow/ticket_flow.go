@@ -28,6 +28,7 @@ type TicketFlow interface {
 	ListTickets(ctx context.Context, req *dto.ListTicketsRequest, metadata *ClientMetadata) (*dto.ListTicketsResponse, error)
 	AdminCreateResponseTicket(ctx context.Context, req *dto.AdminCreateResponseTicketRequest, metadata *ClientMetadata) (*dto.AdminCreateResponseTicketResponse, error)
 	AdminListTickets(ctx context.Context, req *dto.AdminListTicketsRequest, metadata *ClientMetadata) (*dto.AdminListTicketsResponse, error)
+	DownloadTicketAttachment(ctx context.Context, customerID, ticketID uint, fileIndex int) (string, string, []byte, error)
 }
 
 // TicketFlowImpl implements TicketFlow
@@ -249,13 +250,23 @@ func (f *TicketFlowImpl) ListTickets(ctx context.Context, req *dto.ListTicketsRe
 			groupsMap[cid] = []dto.TicketItem{}
 			order = append(order, cid)
 		}
-		groupsMap[cid] = append(groupsMap[cid], dto.TicketItem{
+		item := dto.TicketItem{
 			ID:             r.ID,
 			Title:          r.Title,
 			Content:        r.Content,
 			RepliedByAdmin: r.RepliedByAdmin,
 			CreatedAt:      r.CreatedAt.Format(time.RFC3339),
-		})
+		}
+		if len(r.Files) > 0 {
+			item.Attachments = make([]dto.TicketAttachment, 0, len(r.Files))
+			for idx, fpath := range r.Files {
+				item.Attachments = append(item.Attachments, dto.TicketAttachment{
+					Index: idx,
+					Name:  filepath.Base(fpath),
+				})
+			}
+		}
+		groupsMap[cid] = append(groupsMap[cid], item)
 	}
 
 	groups := make([]dto.TicketGroup, 0, len(order))
@@ -406,6 +417,15 @@ func (f *TicketFlowImpl) AdminListTickets(ctx context.Context, req *dto.AdminLis
 			RepliedByAdmin: r.RepliedByAdmin,
 			CreatedAt:      r.CreatedAt.Format(time.RFC3339),
 		}
+		if len(r.Files) > 0 {
+			item.Attachments = make([]dto.TicketAttachment, 0, len(r.Files))
+			for idx, fpath := range r.Files {
+				item.Attachments = append(item.Attachments, dto.TicketAttachment{
+					Index: idx,
+					Name:  filepath.Base(fpath),
+				})
+			}
+		}
 		if c := customers[r.CustomerID]; c != nil {
 			fn := c.RepresentativeFirstName
 			ln := c.RepresentativeLastName
@@ -432,6 +452,56 @@ func (f *TicketFlowImpl) AdminListTickets(ctx context.Context, req *dto.AdminLis
 		Message: "Admin tickets retrieved successfully",
 		Groups:  groups,
 	}, nil
+}
+
+// DownloadTicketAttachment returns a ticket attachment for the owning customer.
+func (f *TicketFlowImpl) DownloadTicketAttachment(ctx context.Context, customerID, ticketID uint, fileIndex int) (string, string, []byte, error) {
+	if fileIndex < 0 {
+		return "", "", nil, NewBusinessError("ATTACHMENT_NOT_FOUND", "attachment not found", nil)
+	}
+
+	// Validate customer
+	customer, err := getCustomer(ctx, f.customerRepo, customerID)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	// Fetch ticket
+	ticket, err := f.ticketRepo.ByID(ctx, ticketID)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if ticket == nil {
+		return "", "", nil, ErrTicketNotFound
+	}
+	if ticket.CustomerID != customer.ID {
+		return "", "", nil, NewBusinessError("FORBIDDEN", "You can only download your own ticket attachments", nil)
+	}
+
+	if len(ticket.Files) == 0 || fileIndex >= len(ticket.Files) {
+		return "", "", nil, NewBusinessError("ATTACHMENT_NOT_FOUND", "attachment not found", nil)
+	}
+
+	cleanPath, err := sanitizeTicketAttachmentPath(ticket.Files[fileIndex])
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	data, err := os.ReadFile(cleanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", "", nil, NewBusinessError("ATTACHMENT_NOT_FOUND", "attachment not found", err)
+		}
+		return "", "", nil, err
+	}
+
+	filename := filepath.Base(cleanPath)
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	return filename, contentType, data, nil
 }
 
 // saveFileToDisk downloads a file from a URL and stores it under data/uploads/tickets/YYYY-MM-DD/
@@ -499,6 +569,24 @@ func (f *TicketFlowImpl) saveFileToDisk(ctx context.Context, urlStr string, orig
 
 	// Return relative path (from data/)
 	return filepath.ToSlash(filepath.Join("data", "uploads", "tickets", dateDir, fname)), nil
+}
+
+func sanitizeTicketAttachmentPath(storedPath string) (string, error) {
+	cleaned := strings.TrimSpace(storedPath)
+	if cleaned == "" {
+		return "", NewBusinessError("ATTACHMENT_NOT_FOUND", "attachment path missing", nil)
+	}
+	cleaned = filepath.ToSlash(filepath.Clean(filepath.FromSlash(cleaned)))
+	if filepath.IsAbs(cleaned) {
+		return "", NewBusinessError("INVALID_ATTACHMENT_PATH", "invalid attachment path", nil)
+	}
+
+	base := filepath.ToSlash(filepath.Clean(filepath.Join("data", "uploads", "tickets")))
+	if cleaned != base && !strings.HasPrefix(cleaned, base+"/") {
+		return "", NewBusinessError("INVALID_ATTACHMENT_PATH", "invalid attachment path", nil)
+	}
+
+	return filepath.FromSlash(cleaned), nil
 }
 
 func truncate(s string, max int) string {
