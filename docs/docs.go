@@ -2643,6 +2643,12 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.APIResponse"
                         }
                     },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal server error",
                         "schema": {
@@ -3957,6 +3963,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/tickets/{ticket_id}/attachments/{file_index}": {
+            "get": {
+                "description": "Download a specific attachment from a customer's ticket.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Tickets"
+                ],
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Ticket ID",
+                        "name": "ticket_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Attachment index",
+                        "name": "file_index",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Attachment file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - ticket does not belong to customer",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Ticket or attachment not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/wallet/balance": {
             "get": {
                 "description": "Retrieve the current wallet balance and financial information for the authenticated user",
@@ -4565,6 +4636,12 @@ const docTemplate = `{
                 "id": {
                     "type": "integer"
                 },
+                "job": {
+                    "type": "string"
+                },
+                "job_category": {
+                    "type": "string"
+                },
                 "level1": {
                     "type": "string"
                 },
@@ -4593,6 +4670,9 @@ const docTemplate = `{
                     "type": "number"
                 },
                 "sex": {
+                    "type": "string"
+                },
+                "short_link_domain": {
                     "type": "string"
                 },
                 "statistics": {
@@ -5133,7 +5213,6 @@ const docTemplate = `{
         "dto.BotGenerateShortLinksRequest": {
             "type": "object",
             "required": [
-                "ad_link",
                 "campaign_id",
                 "phones",
                 "short_link_domain"
@@ -5202,6 +5281,12 @@ const docTemplate = `{
                 "id": {
                     "type": "integer"
                 },
+                "job": {
+                    "type": "string"
+                },
+                "job_category": {
+                    "type": "string"
+                },
                 "level1": {
                     "type": "string"
                 },
@@ -5227,6 +5312,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sex": {
+                    "type": "string"
+                },
+                "short_link_domain": {
                     "type": "string"
                 },
                 "status": {
@@ -5429,6 +5517,14 @@ const docTemplate = `{
                     "maxLength": 512,
                     "minLength": 1
                 },
+                "job": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job_category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
                 "level1": {
                     "type": "string",
                     "maxLength": 255
@@ -5455,6 +5551,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sex": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "short_link_domain": {
                     "type": "string",
                     "maxLength": 255
                 },
@@ -5504,6 +5604,14 @@ const docTemplate = `{
                     "maxLength": 512,
                     "minLength": 1
                 },
+                "job": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job_category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
                 "level1": {
                     "type": "string",
                     "maxLength": 255
@@ -5530,6 +5638,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sex": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "short_link_domain": {
                     "type": "string",
                     "maxLength": 255
                 },
@@ -5670,6 +5782,14 @@ const docTemplate = `{
                     "maxLength": 512,
                     "minLength": 1
                 },
+                "job": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job_category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
                 "level1": {
                     "type": "string",
                     "maxLength": 255
@@ -5696,6 +5816,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sex": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "short_link_domain": {
                     "type": "string",
                     "maxLength": 255
                 },
@@ -5947,6 +6071,15 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "id": {
+                    "type": "integer"
+                },
+                "job": {
+                    "type": "string"
+                },
+                "job_category": {
+                    "type": "string"
+                },
                 "level1": {
                     "type": "string"
                 },
@@ -5975,6 +6108,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sex": {
+                    "type": "string"
+                },
+                "short_link_domain": {
                     "type": "string"
                 },
                 "statistics": {
@@ -6535,6 +6671,17 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.TicketAttachment": {
+            "type": "object",
+            "properties": {
+                "index": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.TicketGroup": {
             "type": "object",
             "properties": {
@@ -6554,6 +6701,12 @@ const docTemplate = `{
             "properties": {
                 "agency_name": {
                     "type": "string"
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.TicketAttachment"
+                    }
                 },
                 "company_name": {
                     "type": "string"
@@ -6713,6 +6866,14 @@ const docTemplate = `{
                 "finalize": {
                     "type": "boolean"
                 },
+                "job": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job_category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
                 "level1": {
                     "type": "string",
                     "maxLength": 255
@@ -6739,6 +6900,10 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "sex": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "short_link_domain": {
                     "type": "string",
                     "maxLength": 255
                 },
