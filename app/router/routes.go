@@ -307,6 +307,7 @@ func (r *FiberRouter) SetupRoutes() {
 	tickets.Post("/", r.ticketHandler.Create)
 	tickets.Post("/reply", r.ticketHandler.CreateResponse)
 	tickets.Get("/", r.ticketHandler.List)
+	tickets.Get("/:ticket_id/attachments/:file_index", r.ticketHandler.DownloadAttachment)
 
 	// Admin tickets (reply)
 	adminTickets := api.Group("/admin/tickets")
