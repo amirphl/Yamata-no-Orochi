@@ -343,6 +343,10 @@ definitions:
         type: string
       id:
         type: integer
+      job:
+        type: string
+      job_category:
+        type: string
       level1:
         type: string
       level2s:
@@ -362,6 +366,8 @@ definitions:
       segment_price_factor:
         type: number
       sex:
+        type: string
+      short_link_domain:
         type: string
       statistics:
         additionalProperties: {}
@@ -736,7 +742,6 @@ definitions:
       short_link_domain:
         type: string
     required:
-    - ad_link
     - campaign_id
     - phones
     - short_link_domain
@@ -770,6 +775,10 @@ definitions:
         type: integer
       id:
         type: integer
+      job:
+        type: string
+      job_category:
+        type: string
       level1:
         type: string
       level2s:
@@ -787,6 +796,8 @@ definitions:
       scheduleat:
         type: string
       sex:
+        type: string
+      short_link_domain:
         type: string
       status:
         type: string
@@ -926,6 +937,12 @@ definitions:
         maxLength: 512
         minLength: 1
         type: string
+      job:
+        maxLength: 255
+        type: string
+      job_category:
+        maxLength: 255
+        type: string
       level1:
         maxLength: 255
         type: string
@@ -945,6 +962,9 @@ definitions:
       scheduleat:
         type: string
       sex:
+        maxLength: 255
+        type: string
+      short_link_domain:
         maxLength: 255
         type: string
       tags:
@@ -979,6 +999,12 @@ definitions:
         maxLength: 512
         minLength: 1
         type: string
+      job:
+        maxLength: 255
+        type: string
+      job_category:
+        maxLength: 255
+        type: string
       level1:
         maxLength: 255
         type: string
@@ -998,6 +1024,9 @@ definitions:
       scheduleat:
         type: string
       sex:
+        maxLength: 255
+        type: string
+      short_link_domain:
         maxLength: 255
         type: string
       tags:
@@ -1094,6 +1123,12 @@ definitions:
         maxLength: 512
         minLength: 1
         type: string
+      job:
+        maxLength: 255
+        type: string
+      job_category:
+        maxLength: 255
+        type: string
       level1:
         maxLength: 255
         type: string
@@ -1113,6 +1148,9 @@ definitions:
       schedule_at:
         type: string
       sex:
+        maxLength: 255
+        type: string
+      short_link_domain:
         maxLength: 255
         type: string
       tags:
@@ -1281,6 +1319,12 @@ definitions:
         type: string
       created_at:
         type: string
+      id:
+        type: integer
+      job:
+        type: string
+      job_category:
+        type: string
       level1:
         type: string
       level2s:
@@ -1300,6 +1344,8 @@ definitions:
       scheduleat:
         type: string
       sex:
+        type: string
+      short_link_domain:
         type: string
       statistics:
         additionalProperties: {}
@@ -1685,6 +1731,13 @@ definitions:
         description: Mobile number (masked for security)
         type: string
     type: object
+  dto.TicketAttachment:
+    properties:
+      index:
+        type: integer
+      name:
+        type: string
+    type: object
   dto.TicketGroup:
     properties:
       correlation_id:
@@ -1698,6 +1751,10 @@ definitions:
     properties:
       agency_name:
         type: string
+      attachments:
+        items:
+          $ref: '#/definitions/dto.TicketAttachment'
+        type: array
       company_name:
         type: string
       content:
@@ -1809,6 +1866,12 @@ definitions:
         type: string
       finalize:
         type: boolean
+      job:
+        maxLength: 255
+        type: string
+      job_category:
+        maxLength: 255
+        type: string
       level1:
         maxLength: 255
         type: string
@@ -1828,6 +1891,9 @@ definitions:
       scheduleat:
         type: string
       sex:
+        maxLength: 255
+        type: string
+      short_link_domain:
         maxLength: 255
         type: string
       tags:
@@ -3561,6 +3627,10 @@ paths:
           description: Validation error or invalid request
           schema:
             $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
         "500":
           description: Internal server error
           schema:
@@ -4213,6 +4283,49 @@ paths:
             $ref: '#/definitions/dto.APIResponse'
         "401":
           description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      tags:
+      - Tickets
+  /api/v1/tickets/{ticket_id}/attachments/{file_index}:
+    get:
+      description: Download a specific attachment from a customer's ticket.
+      parameters:
+      - description: Ticket ID
+        in: path
+        name: ticket_id
+        required: true
+        type: integer
+      - description: Attachment index
+        in: path
+        name: file_index
+        required: true
+        type: integer
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Attachment file
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden - ticket does not belong to customer
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Ticket or attachment not found
           schema:
             $ref: '#/definitions/dto.APIResponse'
         "500":
