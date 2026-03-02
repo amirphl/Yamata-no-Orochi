@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -176,6 +177,9 @@ func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trac
 		}
 	}
 	u.RawQuery = q.Encode()
+
+	// Log a curl command for manual retries when the API fails.
+	log.Printf("payamsms status curl: curl -X GET %q -H %q", u.String(), "Authorization: Bearer "+token)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
