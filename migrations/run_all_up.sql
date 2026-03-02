@@ -198,5 +198,8 @@
 \echo 'Running 0064_create_sequence_counters.sql...'
 \i migrations/0064_create_sequence_counters.sql
 
+\echo 'Running 0065_change_sent_sms_tracking_id_type.sql...'
+\i migrations/0065_change_sent_sms_tracking_id_type.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
