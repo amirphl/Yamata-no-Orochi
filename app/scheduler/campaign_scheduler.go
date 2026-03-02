@@ -567,8 +567,8 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 
 const (
 	trackingCounterName   = "sms_tracking_id"
-	trackingCounterHexLen = 64
-	trackingCounterBits   = 32 * 8
+	trackingCounterHexLen = 16
+	trackingCounterBits   = 16 * 4
 )
 
 func (s *CampaignScheduler) allocateTrackingIDs(ctx context.Context, count int) ([]string, error) {
@@ -814,6 +814,7 @@ func (s *CampaignScheduler) updateProcessedCampaignStats(txCtx context.Context, 
 	}
 
 	stats := map[string]any{
+		"aggregatedTotalRecords":          agg.AggregatedTotalRecords,
 		"aggregatedTotalSent":             agg.AggregatedTotalSent,
 		"aggregatedTotalParts":            agg.AggregatedTotalParts,
 		"aggregatedTotalDeliveredParts":   agg.AggregatedDeliveredParts,
