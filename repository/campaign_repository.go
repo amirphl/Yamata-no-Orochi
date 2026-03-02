@@ -196,6 +196,15 @@ func (r *CampaignRepositoryImpl) ClickCounts(ctx context.Context, campaignIDs []
 	if err := db.Table("short_link_clicks").
 		Select("campaign_id, COUNT(DISTINCT uid) AS clicks").
 		Where("campaign_id IN ?", campaignIDs).
+		Where("COALESCE(ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
+		Where(`NOT (
+			COALESCE(user_agent, '') ~ 'Chrome'
+			AND COALESCE(user_agent, '') !~ '(Edg|OPR|Opera)'
+			AND (
+				COALESCE(user_agent, '') ~* 'X11; Linux|Linux'
+				AND COALESCE(user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
+			)
+		)`).
 		Group("campaign_id").
 		Scan(&rows).Error; err != nil {
 		return nil, err
