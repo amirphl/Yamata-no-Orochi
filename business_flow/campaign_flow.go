@@ -919,23 +919,23 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		if len(c.Statistics) > 0 {
 			_ = json.Unmarshal(c.Statistics, &statsMap)
 		}
-		totalSent := float64(0)
+		aggregatedTotalSent := float64(0)
 		if v, ok := statsMap["aggregatedTotalSent"]; ok {
 			switch n := v.(type) {
 			case float64:
-				totalSent = n
+				aggregatedTotalSent = n
 			case int64:
-				totalSent = float64(n)
+				aggregatedTotalSent = float64(n)
 			case json.Number:
 				if f, e := n.Float64(); e == nil {
-					totalSent = f
+					aggregatedTotalSent = f
 				}
 			}
 		}
 		clicks := clickCounts[c.ID]
 		var clickRate *float64
-		if totalSent > 0 {
-			val := float64(clicks) / totalSent
+		if aggregatedTotalSent > 0 {
+			val := float64(clicks) / aggregatedTotalSent
 			clickRate = &val
 		}
 		totalClicks := clicks
