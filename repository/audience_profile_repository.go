@@ -71,7 +71,8 @@ func (r *AudienceProfileRepositoryImpl) ByFilter(ctx context.Context, filter mod
 	query := r.applyFilter(db.Model(&models.AudienceProfile{}), filter)
 
 	if orderBy == "" {
-		query = query.Order("id ASC")
+		// Deterministic shuffle before limit/offset without loading all rows.
+		query = query.Order("md5(COALESCE(uid, id::text))")
 	} else {
 		query = query.Order(orderBy)
 	}
