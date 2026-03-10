@@ -494,6 +494,9 @@ func (h *CampaignHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint 
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel) // Store cancel function for cleanup
+	if customerID, ok := c.Locals("customer_id").(uint); ok && customerID != 0 {
+		ctx = context.WithValue(ctx, utils.CustomerIDKey, customerID)
+	}
 
 	return ctx
 }
