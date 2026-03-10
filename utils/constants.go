@@ -13,6 +13,7 @@ const (
 	EndpointKey   ContextKey = "Endpoint"
 	TimeoutKey    ContextKey = "Timeout"
 	CancelFuncKey ContextKey = "Cancel-Func"
+	CustomerIDKey ContextKey = "Customer-ID"
 )
 
 // Token and session time constants
