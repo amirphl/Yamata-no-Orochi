@@ -241,7 +241,40 @@ type AtipayConfig struct {
 }
 
 type AdminConfig struct {
-	Mobile string `json:"admin_mobile"`
+	Mobiles []string `json:"admin_mobile"`
+}
+
+func (c AdminConfig) ActiveMobiles() []string {
+	if len(c.Mobiles) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(c.Mobiles))
+	seen := make(map[string]struct{}, len(c.Mobiles))
+	for _, mobile := range c.Mobiles {
+		trimmed := strings.TrimSpace(mobile)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
+}
+
+func (c AdminConfig) HasMobile(mobile string) bool {
+	trimmed := strings.TrimSpace(mobile)
+	if trimmed == "" {
+		return false
+	}
+	for _, adminMobile := range c.ActiveMobiles() {
+		if adminMobile == trimmed {
+			return true
+		}
+	}
+	return false
 }
 
 type BotConfig struct {
@@ -486,7 +519,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Terminal: getEnvString("ATIPAY_TERMINAL", ""),
 		},
 		Admin: AdminConfig{
-			Mobile: getEnvString("ADMIN_MOBILE", ""),
+			Mobiles: getEnvStringSlice("ADMIN_MOBILE", []string{}),
 		},
 		System: SystemConfig{
 			SystemUserUUID:    getEnvString("SYSTEM_USER_UUID", ""),
