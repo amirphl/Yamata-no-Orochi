@@ -128,7 +128,8 @@ type CampaignRepository interface {
 	CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error)
 	GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.Campaign, error)
 	GetScheduledCampaigns(ctx context.Context, from, to time.Time) ([]*models.Campaign, error)
-	ClickCounts(ctx context.Context, campaignIDs []uint) (map[uint]int64, error)
+	AggregateClickCountsByCampaignIDs(ctx context.Context, campaignIDs []uint) (map[uint]int64, error)
+	AggregateClickCountsByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]int64, error)
 	AggregateTotalSentByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]uint64, error)
 }
 
