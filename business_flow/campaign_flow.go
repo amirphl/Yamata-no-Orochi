@@ -1418,13 +1418,13 @@ func (s *CampaignFlowImpl) shouldHideTestAudience(ctx context.Context) bool {
 	}
 	customerID, ok := ctx.Value(utils.CustomerIDKey).(uint)
 	if !ok || customerID == 0 {
-		return false
+		return true
 	}
 	customer, err := getCustomer(ctx, s.customerRepo, customerID)
 	if err != nil {
-		return false
+		return true
 	}
-	return s.adminConfig.HasMobile(customer.RepresentativeMobile)
+	return !s.adminConfig.HasMobile(customer.RepresentativeMobile)
 }
 
 func filterAudienceSpecLayer(spec dto.AudienceSpec, layer1 string) dto.AudienceSpec {
