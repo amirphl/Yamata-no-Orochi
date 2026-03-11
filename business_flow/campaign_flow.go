@@ -453,14 +453,16 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
-			// Notify admin about new campaign awaiting approval
-			if s.notifier != nil && s.adminConfig.Mobile != "" {
+			// Notify admins about new campaign awaiting approval
+			if s.notifier != nil {
 				subject := campaign.UUID.String()
 				if campaign.Spec.Title != nil {
 					subject = *campaign.Spec.Title
 				}
 				msg := fmt.Sprintf("New campaign pending approval:\n%s", subject)
-				_ = s.notifier.SendSMS(txCtx, s.adminConfig.Mobile, msg, nil)
+				for _, mobile := range s.adminConfig.ActiveMobiles() {
+					_ = s.notifier.SendSMS(txCtx, mobile, msg, nil)
+				}
 				// TODO: Resend?
 			}
 		}
@@ -778,7 +780,7 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 
 	if req.CustomerID != 0 {
 		customer, err := getCustomer(ctx, s.customerRepo, req.CustomerID)
-		if err == nil && customer.RepresentativeMobile == s.adminConfig.Mobile {
+		if err == nil && s.adminConfig.HasMobile(customer.RepresentativeMobile) {
 			total = 0
 		}
 	}
@@ -831,13 +833,14 @@ func (s *CampaignFlowImpl) fetchSegmentPriceFactor(ctx context.Context, level3s 
 }
 
 func (s *CampaignFlowImpl) notifyMissingSegmentPriceFactor(level3s []string) {
-	mobile := strings.TrimSpace(s.adminConfig.Mobile)
-	if mobile == "" || s.notifier == nil {
+	if s.notifier == nil {
 		return
 	}
 	msg := fmt.Sprintf("Segment price factor missing for level3: %s", strings.Join(level3s, ","))
 	go func() {
-		_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
+		for _, mobile := range s.adminConfig.ActiveMobiles() {
+			_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
+		}
 	}()
 }
 
@@ -907,7 +910,7 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	for _, c := range rows {
 		campaignIDs = append(campaignIDs, c.ID)
 	}
-	clickCounts, err := s.campaignRepo.ClickCounts(ctx, campaignIDs)
+	clickCounts, err := s.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, campaignIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -1342,11 +1345,15 @@ func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context) (*dto.ListAudie
 
 	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
 	filePath := audienceSpecFilePath()
+	hideTestLayer := s.shouldHideTestAudience(ctx)
 
 	// try redis first
 	if bs, err := s.rc.Get(ctx, cacheKey).Bytes(); err == nil && len(bs) > 0 {
 		var out dto.AudienceSpec
 		if err := json.Unmarshal(bs, &out); err == nil {
+			if hideTestLayer {
+				out = filterAudienceSpecLayer(out, "L1-test")
+			}
 			return &dto.ListAudienceSpecResponse{
 				Message: "Audience spec retrieved from cache",
 				Spec:    out,
@@ -1395,11 +1402,43 @@ func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context) (*dto.ListAudie
 	if bs, err := json.MarshalIndent(out, "", "  "); err == nil {
 		_ = s.rc.Set(ctx, cacheKey, bs, 0).Err()
 	}
+	if hideTestLayer {
+		out = filterAudienceSpecLayer(out, "L1-test")
+	}
 
 	return &dto.ListAudienceSpecResponse{
 		Message: "Audience spec retrieved",
 		Spec:    out,
 	}, nil
+}
+
+func (s *CampaignFlowImpl) shouldHideTestAudience(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	customerID, ok := ctx.Value(utils.CustomerIDKey).(uint)
+	if !ok || customerID == 0 {
+		return false
+	}
+	customer, err := getCustomer(ctx, s.customerRepo, customerID)
+	if err != nil {
+		return false
+	}
+	return s.adminConfig.HasMobile(customer.RepresentativeMobile)
+}
+
+func filterAudienceSpecLayer(spec dto.AudienceSpec, layer1 string) dto.AudienceSpec {
+	if len(spec) == 0 {
+		return spec
+	}
+	out := make(dto.AudienceSpec, len(spec))
+	for l1, l2map := range spec {
+		if l1 == layer1 {
+			continue
+		}
+		out[l1] = l2map
+	}
+	return out
 }
 
 func (s *CampaignFlowImpl) GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error) {
