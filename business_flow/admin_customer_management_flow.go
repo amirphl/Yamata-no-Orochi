@@ -3,6 +3,7 @@ package businessflow
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -68,9 +69,28 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomersShares(ctx context.Context
 		return nil, err
 	}
 
+	customerIDs := make([]uint, 0, len(rows))
+	for _, r := range rows {
+		customerIDs = append(customerIDs, r.CustomerID)
+	}
+	totalSentByCustomer, err := f.campaignRepo.AggregateTotalSentByCustomerIDs(ctx, customerIDs)
+	if err != nil {
+		return nil, err
+	}
+	clickCountsByCustomer, err := f.campaignRepo.AggregateClickCountsByCustomerIDs(ctx, customerIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	items := make([]dto.AdminCustomersSharesItem, 0, len(rows))
 	var sumAgency, sumSystem, sumTax, sumTotalSent uint64
 	for _, r := range rows {
+		totalSent := totalSentByCustomer[r.CustomerID]
+		clicks := clickCountsByCustomer[r.CustomerID]
+		clickRate := .0
+		if totalSent > 0 {
+			clickRate = float64(clicks) / float64(totalSent)
+		}
 		items = append(items, dto.AdminCustomersSharesItem{
 			CustomerID:         r.CustomerID,
 			FirstName:          r.FirstName,
@@ -83,13 +103,13 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomersShares(ctx context.Context
 			AgencyShareWithTax: r.AgencyShareWithTax,
 			SystemShare:        r.SystemShare,
 			TaxShare:           r.TaxShare,
-			TotalSent:          0,  // TODO
-			ClickRate:          -1, // TODO
+			TotalSent:          totalSent,
+			ClickRate:          clickRate,
 		})
 		sumAgency += r.AgencyShareWithTax
 		sumSystem += r.SystemShare
 		sumTax += r.TaxShare
-		sumTotalSent += 0 // TODO
+		sumTotalSent += totalSent
 	}
 
 	return &dto.AdminCustomersSharesResponse{
@@ -117,21 +137,76 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 		return nil, NewBusinessError("GET_ADMIN_CUSTOMER_CAMPAIGNS_FAILED", "Failed to get customer campaigns", err)
 	}
 
+	campaignIDs := make([]uint, 0, len(campaigns))
+	for _, c := range campaigns {
+		campaignIDs = append(campaignIDs, c.ID)
+	}
+	clickCounts, err := f.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, campaignIDs)
+	if err != nil {
+		return nil, NewBusinessError("GET_ADMIN_CUSTOMER_CAMPAIGNS_FAILED", "Failed to get campaign clicks", err)
+	}
+
 	resp := &dto.AdminCustomerWithCampaignsResponse{
 		Message:   "Customer details retrieved successfully",
 		Customer:  toAdminCustomerDetailDTO(*cust),
 		Campaigns: make([]dto.AdminCustomerCampaignItem, 0, len(campaigns)),
 	}
 	for _, c := range campaigns {
+		var stats map[string]any
+		if len(c.Statistics) > 0 {
+			_ = json.Unmarshal(c.Statistics, &stats)
+		}
+		totalSent := uint64(0)
+		totalDelivered := uint64(0)
+		if v, ok := stats["aggregatedTotalSent"]; ok {
+			switch n := v.(type) {
+			case float64:
+				if n > 0 {
+					totalSent = uint64(n)
+				}
+			case int64:
+				if n > 0 {
+					totalSent = uint64(n)
+				}
+			case json.Number:
+				if f, e := n.Float64(); e == nil && f > 0 {
+					totalSent = uint64(f)
+				}
+			}
+		}
+		if v, ok := stats["aggregatedTotalDeliveredParts"]; ok {
+			switch n := v.(type) {
+			case float64:
+				if n > 0 {
+					totalDelivered = uint64(n)
+				}
+			case int64:
+				if n > 0 {
+					totalDelivered = uint64(n)
+				}
+			case json.Number:
+				if f, e := n.Float64(); e == nil && f > 0 {
+					totalDelivered = uint64(f)
+				}
+			}
+		}
+		clicks := clickCounts[c.ID]
+		clickRate := 0.0
+		if totalSent > 0 {
+			clickRate = float64(clicks) / float64(totalSent)
+		}
 		resp.Campaigns = append(resp.Campaigns, dto.AdminCustomerCampaignItem{
 			CampaignID:     c.ID,
 			Title:          c.Spec.Title,
 			CreatedAt:      c.CreatedAt,
 			ScheduleAt:     c.Spec.ScheduleAt,
 			Status:         c.Status.String(),
-			TotalSent:      0,  // TODO
-			TotalDelivered: 0,  // TODO
-			ClickRate:      -1, // TODO
+			LineNumber:     c.Spec.LineNumber,
+			Level3s:        c.Spec.Level3s,
+			NumAudience:    c.NumAudience,
+			TotalSent:      totalSent,
+			TotalDelivered: totalDelivered,
+			ClickRate:      clickRate,
 		})
 	}
 	return resp, nil
