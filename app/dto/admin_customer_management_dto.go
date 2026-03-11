@@ -70,6 +70,9 @@ type AdminCustomerCampaignItem struct {
 	CreatedAt      time.Time  `json:"created_at"`
 	ScheduleAt     *time.Time `json:"schedule_at,omitempty"`
 	Status         string     `json:"status"`
+	LineNumber     *string    `json:"line_number,omitempty"`
+	Level3s        []string   `json:"level3s,omitempty"`
+	NumAudience    *uint64    `json:"num_audience,omitempty"`
 	TotalSent      uint64     `json:"total_sent"`
 	TotalDelivered uint64     `json:"total_delivered"`
 	ClickRate      float64    `json:"click_rate"`
