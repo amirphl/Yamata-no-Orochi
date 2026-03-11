@@ -34,6 +34,8 @@ type AdminCampaignFlowImpl struct {
 	balanceSnapshotRepo repository.BalanceSnapshotRepository
 	transactionRepo     repository.TransactionRepository
 	auditRepo           repository.AuditLogRepository
+	lineNumberRepo      repository.LineNumberRepository
+	segmentPriceRepo    repository.SegmentPriceFactorRepository
 	notifier            services.NotificationService
 	adminConfig         config.AdminConfig
 	db                  *gorm.DB
@@ -47,6 +49,8 @@ func NewAdminCampaignFlow(
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
+	lineNumberRepo repository.LineNumberRepository,
+	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	db *gorm.DB,
 	notifier services.NotificationService,
 	adminConfig config.AdminConfig,
@@ -58,6 +62,8 @@ func NewAdminCampaignFlow(
 		balanceSnapshotRepo: balanceSnapshotRepo,
 		transactionRepo:     transactionRepo,
 		auditRepo:           auditRepo,
+		lineNumberRepo:      lineNumberRepo,
+		segmentPriceRepo:    segmentPriceRepo,
 		notifier:            notifier,
 		adminConfig:         adminConfig,
 		db:                  db,
@@ -98,7 +104,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 	for _, c := range rows {
 		campaignIDs = append(campaignIDs, c.ID)
 	}
-	clickCounts, _ := s.campaignRepo.ClickCounts(ctx, campaignIDs)
+	clickCounts, _ := s.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, campaignIDs)
 
 	items := make([]dto.AdminGetCampaignResponse, 0, len(rows))
 	for _, c := range rows {
@@ -136,14 +142,15 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			Title:           c.Spec.Title,
 			Level1:          c.Spec.Level1,
 			Level2s:         c.Spec.Level2s,
+			Level3s:         c.Spec.Level3s,
 			Tags:            c.Spec.Tags,
 			Sex:             c.Spec.Sex,
 			City:            c.Spec.City,
 			AdLink:          c.Spec.AdLink,
 			Content:         c.Spec.Content,
+			ShortLinkDomain: c.Spec.ShortLinkDomain,
 			Category:        c.Spec.Category,
 			Job:             c.Spec.Job,
-			ShortLinkDomain: c.Spec.ShortLinkDomain,
 			ScheduleAt:      c.Spec.ScheduleAt,
 			LineNumber:      c.Spec.LineNumber,
 			Budget:          c.Spec.Budget,
@@ -173,7 +180,7 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	if len(c.Statistics) > 0 {
 		_ = json.Unmarshal(c.Statistics, &stats)
 	}
-	clickCounts, _ := s.campaignRepo.ClickCounts(ctx, []uint{id})
+	clickCounts, _ := s.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, []uint{id})
 	clicks := clickCounts[id]
 	var clickRate *float64
 	totalSent := float64(0)
@@ -194,6 +201,42 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		clickRate = &val
 	}
 	totalClicks := clicks
+	metaSegment, metaLine, err := s.readCampaignPriceFactorsFromMetadata(ctx, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	segmentPriceFactor := float64(-1)
+	if metaSegment != nil {
+		segmentPriceFactor = *metaSegment
+	}
+	// else if len(c.Spec.Level3s) > 0 {
+	// 	factors, err := s.segmentPriceRepo.LatestByLevel3s(ctx, c.Spec.Level3s)
+	// 	if err != nil {
+	// 		return nil, NewBusinessError("ADMIN_GET_CAMPAIGN_FAILED", "Failed to get segment price factor", err)
+	// 	}
+	// 	maxFactor := float64(0)
+	// 	for _, l3 := range c.Spec.Level3s {
+	// 		if f, ok := factors[l3]; ok && f > maxFactor {
+	// 			maxFactor = f
+	// 		}
+	// 	}
+	// 	if maxFactor > 0 {
+	// 		segmentPriceFactor = maxFactor
+	// 	}
+	// }
+	lineNumberPriceFactor := float64(-1)
+	if metaLine != nil {
+		lineNumberPriceFactor = *metaLine
+	}
+	// else if c.Spec.LineNumber != nil {
+	// 	lineNumber, err := s.lineNumberRepo.ByValue(ctx, *c.Spec.LineNumber)
+	// 	if err != nil {
+	// 		return nil, NewBusinessError("ADMIN_GET_CAMPAIGN_FAILED", "Failed to get line number price factor", err)
+	// 	}
+	// 	if lineNumber != nil {
+	// 		lineNumberPriceFactor = lineNumber.PriceFactor
+	// 	}
+	// }
 
 	resp := &dto.AdminGetCampaignResponse{
 		ID:                    c.ID,
@@ -204,24 +247,66 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		Title:                 c.Spec.Title,
 		Level1:                c.Spec.Level1,
 		Level2s:               c.Spec.Level2s,
+		Level3s:               c.Spec.Level3s,
+		Tags:                  c.Spec.Tags,
 		Sex:                   c.Spec.Sex,
 		City:                  c.Spec.City,
 		AdLink:                c.Spec.AdLink,
 		Content:               c.Spec.Content,
+		ShortLinkDomain:       c.Spec.ShortLinkDomain,
 		Category:              c.Spec.Category,
 		Job:                   c.Spec.Job,
-		ShortLinkDomain:       c.Spec.ShortLinkDomain,
 		ScheduleAt:            c.Spec.ScheduleAt,
 		LineNumber:            c.Spec.LineNumber,
 		Budget:                c.Spec.Budget,
 		Comment:               c.Comment,
-		SegmentPriceFactor:    -1, // TODO
-		LineNumberPriceFactor: -1, // TODO
+		SegmentPriceFactor:    segmentPriceFactor,
+		LineNumberPriceFactor: lineNumberPriceFactor,
 		Statistics:            stats,
 		TotalClicks:           &totalClicks,
 		ClickRate:             clickRate,
 	}
 	return resp, nil
+}
+
+func (s *AdminCampaignFlowImpl) readCampaignPriceFactorsFromMetadata(ctx context.Context, campaignID uint) (*float64, *float64, error) {
+	source := "campaign_update"
+	operation := "reserve_budget"
+	txs, err := s.transactionRepo.ByFilter(ctx, models.TransactionFilter{
+		CampaignID: &campaignID,
+		Source:     &source,
+		Operation:  &operation,
+	}, "id DESC", 1, 0)
+	if err != nil {
+		return nil, nil, NewBusinessError("ADMIN_GET_CAMPAIGN_FAILED", "Failed to get campaign metadata", err)
+	}
+	if len(txs) == 0 || len(txs[0].Metadata) == 0 {
+		return nil, nil, nil
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
+		return nil, nil, nil
+	}
+
+	segmentPriceFactor := parseMetadataFloat(meta["segment_price_factor"])
+	lineNumberPriceFactor := parseMetadataFloat(meta["line_number_price_factor"])
+	return segmentPriceFactor, lineNumberPriceFactor, nil
+}
+
+func parseMetadataFloat(value any) *float64 {
+	switch v := value.(type) {
+	case float64:
+		return &v
+	case int64:
+		f := float64(v)
+		return &f
+	case json.Number:
+		if f, err := v.Float64(); err == nil {
+			return &f
+		}
+	}
+	return nil
 }
 
 // ApproveCampaign approves a campaign: ensure schedule_at > now, change status to approved, and reduce frozen to locked spend
