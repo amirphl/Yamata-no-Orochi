@@ -182,7 +182,7 @@ func (r *CampaignRepositoryImpl) GetScheduledCampaigns(ctx context.Context, from
 }
 
 // ClickCounts returns a map of campaign_id -> distinct short_link_click uids
-func (r *CampaignRepositoryImpl) ClickCounts(ctx context.Context, campaignIDs []uint) (map[uint]int64, error) {
+func (r *CampaignRepositoryImpl) AggregateClickCountsByCampaignIDs(ctx context.Context, campaignIDs []uint) (map[uint]int64, error) {
 	out := make(map[uint]int64)
 	if len(campaignIDs) == 0 {
 		return out, nil
@@ -215,6 +215,42 @@ func (r *CampaignRepositoryImpl) ClickCounts(ctx context.Context, campaignIDs []
 	return out, nil
 }
 
+// AggregateClickCountsByCustomerIDs returns a map of customer_id -> distinct short_link_click uids.
+func (r *CampaignRepositoryImpl) AggregateClickCountsByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]int64, error) {
+	out := make(map[uint]int64)
+	if len(customerIDs) == 0 {
+		return out, nil
+	}
+
+	type row struct {
+		CustomerID uint
+		Clicks     int64
+	}
+	var rows []row
+	db := r.getDB(ctx)
+	if err := db.Table("short_link_clicks sc").
+		Select("c.customer_id, COUNT(DISTINCT sc.uid) AS clicks").
+		Joins("JOIN sms_campaigns c ON c.id = sc.campaign_id").
+		Where("c.customer_id IN ?", customerIDs).
+		Where("COALESCE(sc.ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
+		Where(`NOT (
+			COALESCE(sc.user_agent, '') ~ 'Chrome'
+			AND COALESCE(sc.user_agent, '') !~ '(Edg|OPR|Opera)'
+			AND (
+				COALESCE(sc.user_agent, '') ~* 'X11; Linux|Linux'
+				AND COALESCE(sc.user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
+			)
+		)`).
+		Group("c.customer_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.CustomerID] = r.Clicks
+	}
+	return out, nil
+}
+
 // AggregateTotalSentByCustomerIDs sums the totalSent statistic across all campaigns for the given customers.
 // It returns a map keyed by customer_id with the aggregated totalSent value (0 when missing).
 func (r *CampaignRepositoryImpl) AggregateTotalSentByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]uint64, error) {
@@ -231,7 +267,13 @@ func (r *CampaignRepositoryImpl) AggregateTotalSentByCustomerIDs(ctx context.Con
 	db := r.getDB(ctx)
 	var rows []row
 	err := db.Table("sms_campaigns").
-		Select("customer_id, COALESCE(SUM((statistics->>'totalSent')::bigint), 0) AS total_sent").
+		Select(`customer_id, COALESCE(SUM(
+			COALESCE(
+				NULLIF(statistics->>'aggregatedTotalSent', '')::bigint,
+				NULLIF(statistics->>'totalSent', '')::bigint,
+				0
+			)
+		), 0) AS total_sent`).
 		Where("customer_id IN ?", customerIDs).
 		Group("customer_id").
 		Scan(&rows).Error
