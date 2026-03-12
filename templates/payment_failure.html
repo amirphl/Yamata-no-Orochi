@@ -61,6 +61,11 @@
         .redirect-button:hover {
             background: #0056b3;
         }
+        .redirect-note {
+            margin-top: 12px;
+            color: #6c757d;
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -80,8 +85,26 @@
             <p><strong>Masked PAN:</strong> {{.MaskedPAN}}</p>
             <p><strong>Processed At:</strong> {{.ProcessedAt}}</p>
         </div>
-        
-        <a href="/" class="redirect-button">Return to Home</a>
+
+        <a href="/dashboard/wallet" class="redirect-button">Return to Wallet</a>
+        <div class="redirect-note">Redirecting to wallet in <span id="countdown">10</span> seconds...</div>
     </div>
+    <script>
+        (function () {
+            var remaining = 10;
+            var el = document.getElementById("countdown");
+            var timer = setInterval(function () {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    clearInterval(timer);
+                    window.location.href = "/dashboard/wallet";
+                    return;
+                }
+                if (el) {
+                    el.textContent = String(remaining);
+                }
+            }, 1000);
+        })();
+    </script>
 </body>
 </html> 

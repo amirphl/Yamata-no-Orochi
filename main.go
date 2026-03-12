@@ -521,6 +521,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		balanceSnapshotRepo,
 		transactionRepo,
 		auditRepo,
+		lineNumberRepo,
+		segmentPriceFactorRepo,
 		db,
 		notificationService,
 		cfg.Admin,
