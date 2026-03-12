@@ -207,10 +207,12 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 	msg := fmt.Sprintf("Signup completed successfully for customer %d", customer.ID)
 	_ = s.createAuditLog(ctx, &customer, models.AuditActionSignupCompleted, msg, true, nil, metadata)
 
-	// Notify admin
-	if s.notificationSvc != nil && s.adminConfig.Mobile != "" {
+	// Notify admins
+	if s.notificationSvc != nil {
 		adminMsg := fmt.Sprintf("New user verified: %s %s", customer.RepresentativeFirstName, customer.RepresentativeLastName)
-		_ = s.notificationSvc.SendSMS(ctx, s.adminConfig.Mobile, adminMsg, utils.ToPtr(int64(customer.ID)))
+		for _, mobile := range s.adminConfig.ActiveMobiles() {
+			_ = s.notificationSvc.SendSMS(ctx, mobile, adminMsg, utils.ToPtr(int64(customer.ID)))
+		}
 	}
 
 	return &dto.OTPVerificationResponse{
