@@ -102,10 +102,12 @@ func (f *TicketFlowImpl) CreateTicket(ctx context.Context, req *dto.CreateTicket
 		return nil, err
 	}
 
-	// Notify admin via SMS (best-effort)
-	if f.notifier != nil && f.adminCfg.Mobile != "" {
+	// Notify admins via SMS (best-effort)
+	if f.notifier != nil {
 		msg := fmt.Sprintf("New ticket: %s (customer %d)", truncate(req.Title, 50), customer.ID)
-		_ = f.notifier.SendSMS(ctx, f.adminCfg.Mobile, msg, nil)
+		for _, mobile := range f.adminCfg.ActiveMobiles() {
+			_ = f.notifier.SendSMS(ctx, mobile, msg, nil)
+		}
 	}
 
 	return &dto.CreateTicketResponse{
@@ -173,8 +175,8 @@ func (f *TicketFlowImpl) CreateResponseTicket(ctx context.Context, req *dto.Crea
 		return nil, err
 	}
 
-	// Send SMS notification to admin
-	if f.notifier != nil && f.adminCfg.Mobile != "" {
+	// Send SMS notification to admins
+	if f.notifier != nil {
 		// translate to en
 		msg := fmt.Sprintf("New response to ticket %d from customer %s %s\nTitle: %s\nContent: %s",
 			orig.ID,
@@ -184,7 +186,9 @@ func (f *TicketFlowImpl) CreateResponseTicket(ctx context.Context, req *dto.Crea
 			truncate(req.Content, 50),
 		)
 		go func() {
-			_ = f.notifier.SendSMS(context.Background(), f.adminCfg.Mobile, msg, nil)
+			for _, mobile := range f.adminCfg.ActiveMobiles() {
+				_ = f.notifier.SendSMS(context.Background(), mobile, msg, nil)
+			}
 		}()
 	}
 
