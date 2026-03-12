@@ -401,11 +401,13 @@ func (s *CampaignScheduler) processCampaign(ctx context.Context, token string, c
 }
 
 func (s *CampaignScheduler) notifyAdmin(message string) {
-	if s.notifier == nil || s.adminCfg.Mobile == "" {
+	if s.notifier == nil {
 		return
 	}
 	go func(msg string) {
-		_ = s.notifier.SendSMS(context.Background(), s.adminCfg.Mobile, msg, nil)
+		for _, mobile := range s.adminCfg.ActiveMobiles() {
+			_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
+		}
 	}(message)
 }
 
