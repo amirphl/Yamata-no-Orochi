@@ -17,6 +17,7 @@ var (
 	ErrEmailAlreadyExists      = errors.New("email already exists")
 	ErrMobileAlreadyExists     = errors.New("mobile number already exists")
 	ErrNationalIDAlreadyExists = errors.New("national ID already exists")
+	ErrNationalIDRequired      = errors.New("national ID is required")
 	ErrAgencyNotFound          = errors.New("agency not found")
 	ErrJobCategoryRequired     = errors.New("job and category are required for marketing agencies")
 	ErrAgencyInactive          = errors.New("agency is inactive")
@@ -211,6 +212,10 @@ func IsMobileAlreadyExists(err error) bool {
 
 func IsNationalIDAlreadyExists(err error) bool {
 	return errors.Is(err, ErrNationalIDAlreadyExists)
+}
+
+func IsNationalIDRequired(err error) bool {
+	return errors.Is(err, ErrNationalIDRequired)
 }
 
 func IsAgencyNotFound(err error) bool {
