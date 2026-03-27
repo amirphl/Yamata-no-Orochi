@@ -319,6 +319,19 @@ func (s *SignupFlowImpl) validateSignupRequest(ctx context.Context, req *dto.Sig
 		}
 	}
 
+	// National ID requirement for individual accounts
+	if req.AccountType == models.AccountTypeIndividual {
+		if req.NationalID == nil || *req.NationalID == "" {
+			return ErrNationalIDRequired
+		}
+
+		if existingCustomer, err := s.customerRepo.ByNationalID(ctx, *req.NationalID); err != nil {
+			return err
+		} else if existingCustomer != nil {
+			return ErrNationalIDAlreadyExists
+		}
+	}
+
 	// Sheba requirement for marketing_agency
 	if req.AccountType == models.AccountTypeMarketingAgency {
 		shebaNumber, err := ValidateShebaNumber(req.ShebaNumber)
