@@ -24,6 +24,8 @@ import (
 // LoginFlow handles user authentication and password reset operations
 type LoginFlow interface {
 	Login(ctx context.Context, request *dto.LoginRequest, metadata *ClientMetadata) (*dto.LoginResponse, error)
+	RequestLoginOTP(ctx context.Context, request *dto.LoginOTPRequest, metadata *ClientMetadata) (*dto.LoginOTPResponse, error)
+	VerifyLoginOTP(ctx context.Context, request *dto.LoginOTPVerifyRequest, metadata *ClientMetadata) (*dto.LoginOTPVerifyResponse, error)
 	ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, metadata *ClientMetadata) (*dto.ForgetPasswordResponse, error)
 	ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, metadata *ClientMetadata) (*dto.ResetPasswordResponse, error)
 }
@@ -37,6 +39,7 @@ type LoginFlowImpl struct {
 	tokenService    services.TokenService
 	notificationSvc services.NotificationService
 	messageConfig   config.MessageConfig
+	adminConfig     config.AdminConfig
 	db              *gorm.DB
 	rc              *redis.Client
 }
@@ -50,6 +53,7 @@ func NewLoginFlow(
 	tokenService services.TokenService,
 	notificationSvc services.NotificationService,
 	messageConfig config.MessageConfig,
+	adminConfig config.AdminConfig,
 	db *gorm.DB,
 	rc *redis.Client,
 ) LoginFlow {
@@ -61,6 +65,7 @@ func NewLoginFlow(
 		tokenService:    tokenService,
 		notificationSvc: notificationSvc,
 		messageConfig:   messageConfig,
+		adminConfig:     adminConfig,
 		db:              db,
 		rc:              rc,
 	}
@@ -132,6 +137,146 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 
 	msg := fmt.Sprintf("User logged in successfully for identifier %s", req.Identifier)
 	_ = lf.createAuditLog(ctx, customer, models.AuditActionLoginSuccess, msg, true, nil, metadata)
+
+	return resp, nil
+}
+
+// RequestLoginOTP generates an OTP for login and sends it via SMS.
+func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPRequest, metadata *ClientMetadata) (*dto.LoginOTPResponse, error) {
+	if err := lf.validateLoginOTPRequest(req); err != nil {
+		return nil, NewBusinessError("LOGIN_OTP_VALIDATION_FAILED", "Login OTP validation failed", err)
+	}
+	if lf.rc == nil {
+		return nil, NewBusinessError("LOGIN_OTP_CACHE_UNAVAILABLE", "Cache not available", ErrCacheNotAvailable)
+	}
+
+	customer, err := lf.findCustomerByIdentifier(ctx, req.Identifier)
+	if err != nil {
+		return nil, err
+	}
+	if customer == nil {
+		return nil, ErrCustomerNotFound
+	}
+	if !utils.IsTrue(customer.IsActive) {
+		return nil, ErrAccountInactive
+	}
+
+	key := fmt.Sprintf("login:otp:%d", customer.ID)
+	if val, err := lf.rc.Get(ctx, key).Result(); err == nil && val != "" {
+		ttl := lf.rc.TTL(ctx, key).Val()
+		expiresAt := utils.UTCNowAdd(utils.OTPExpiry)
+		if ttl > 0 {
+			expiresAt = utils.UTCNowAdd(ttl)
+		}
+		return &dto.LoginOTPResponse{
+			Message:     "OTP already generated and sent",
+			CustomerID:  customer.ID,
+			MaskedPhone: dto.MaskPhoneNumber(customer.RepresentativeMobile),
+			OTPSent:     true,
+			AlreadySent: true,
+			OTPExpiry:   expiresAt,
+		}, nil
+	} else if err != nil && err != redis.Nil {
+		return nil, err
+	}
+
+	otpCode, err := generateOTP()
+	if err != nil {
+		return nil, err
+	}
+
+	expiresAt := utils.UTCNowAdd(utils.OTPExpiry)
+	if err := lf.rc.Set(ctx, key, otpCode, utils.OTPExpiry).Err(); err != nil {
+		return nil, err
+	}
+
+	message := fmt.Sprintf(lf.messageConfig.SigninVerificationCodeTemplate, otpCode)
+	customerID := int64(customer.ID)
+	if err := lf.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, message, &customerID); err != nil {
+		_ = lf.rc.Del(ctx, key).Err()
+		return nil, err
+	}
+
+	return &dto.LoginOTPResponse{
+		Message:     "OTP sent successfully",
+		CustomerID:  customer.ID,
+		MaskedPhone: dto.MaskPhoneNumber(customer.RepresentativeMobile),
+		OTPSent:     true,
+		AlreadySent: false,
+		OTPExpiry:   expiresAt,
+	}, nil
+}
+
+// VerifyLoginOTP verifies a login OTP and issues tokens.
+func (lf *LoginFlowImpl) VerifyLoginOTP(ctx context.Context, req *dto.LoginOTPVerifyRequest, metadata *ClientMetadata) (*dto.LoginOTPVerifyResponse, error) {
+	if err := lf.validateVerifyLoginOTPRequest(req); err != nil {
+		return nil, NewBusinessError("LOGIN_OTP_VALIDATION_FAILED", "Login OTP validation failed", err)
+	}
+
+	var customer models.Customer
+	var resp *dto.LoginOTPVerifyResponse
+	var newlyVerified bool
+
+	err := repository.WithTransaction(ctx, lf.db, func(txCtx context.Context) error {
+		existing, err := lf.customerRepo.ByID(txCtx, req.CustomerID)
+		if err != nil {
+			return err
+		}
+		if existing == nil {
+			return ErrCustomerNotFound
+		}
+		if !utils.IsTrue(existing.IsActive) {
+			return ErrAccountInactive
+		}
+		customer = *existing
+
+		if err := lf.verifyLoginOTP(txCtx, req.CustomerID, req.OTPCode); err != nil {
+			return err
+		}
+
+		// If not verified yet, mark mobile verified and run post-verification logic.
+		if !utils.IsTrue(customer.IsMobileVerified) {
+			if err := lf.completeSignupAfterLogin(txCtx, &customer); err != nil {
+				return err
+			}
+			newlyVerified = true
+			updated, err := lf.customerRepo.ByID(txCtx, customer.ID)
+			if err != nil {
+				return err
+			}
+			if updated != nil {
+				customer = *updated
+			}
+		}
+
+		session, err := lf.createSession(txCtx, customer.ID, metadata)
+		if err != nil {
+			return err
+		}
+
+		resp = &dto.LoginOTPVerifyResponse{
+			Customer: ToAuthCustomerDTO(customer),
+			Session:  ToCustomerSessionDTO(*session),
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		errMsg := fmt.Sprintf("Login OTP verification failed for customer %d: %s", req.CustomerID, err.Error())
+		if customer.ID != 0 {
+			_ = lf.createAuditLog(ctx, &customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
+		}
+		return nil, NewBusinessError("LOGIN_OTP_VERIFY_FAILED", "Login OTP verification failed", err)
+	}
+
+	if newlyVerified {
+		msg := fmt.Sprintf("Signup completed successfully for customer %d", customer.ID)
+		_ = lf.createAuditLog(ctx, &customer, models.AuditActionSignupCompleted, msg, true, nil, metadata)
+	}
+
+	msg := fmt.Sprintf("User logged in successfully via OTP for customer %d", customer.ID)
+	_ = lf.createAuditLog(ctx, &customer, models.AuditActionLoginSuccess, msg, true, nil, metadata)
 
 	return resp, nil
 }
@@ -377,6 +522,25 @@ func (lf *LoginFlowImpl) generateAndSavePasswordResetOTP(ctx context.Context, cu
 	return otpCode, expiresAt, nil
 }
 
+func (lf *LoginFlowImpl) verifyLoginOTP(ctx context.Context, customerID uint, otpCode string) error {
+	if lf.rc == nil {
+		return ErrCacheNotAvailable
+	}
+	key := fmt.Sprintf("login:otp:%d", customerID)
+	val, err := lf.rc.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return ErrNoValidOTPFound
+	}
+	if err != nil {
+		return err
+	}
+	if val != otpCode {
+		return ErrInvalidOTPCode
+	}
+	// Do not delete OTP; let it expire naturally.
+	return nil
+}
+
 // verifyPasswordResetOTP checks the OTP from Redis and consumes it on success
 func (lf *LoginFlowImpl) verifyPasswordResetOTP(ctx context.Context, customerID uint, otpCode string) error {
 	if lf.rc == nil {
@@ -486,10 +650,44 @@ func (lf *LoginFlowImpl) validateLoginRequest(request *dto.LoginRequest) error {
 	return nil
 }
 
+func (lf *LoginFlowImpl) validateLoginOTPRequest(request *dto.LoginOTPRequest) error {
+	if request.Identifier == "" {
+		return ErrCustomerNotFound
+	}
+	return nil
+}
+
+func (lf *LoginFlowImpl) validateVerifyLoginOTPRequest(request *dto.LoginOTPVerifyRequest) error {
+	if request.CustomerID == 0 {
+		return ErrCustomerNotFound
+	}
+	if len(request.OTPCode) != 6 {
+		return ErrInvalidOTPCode
+	}
+	return nil
+}
+
 func (lf *LoginFlowImpl) validateForgotPasswordRequest(request *dto.ForgotPasswordRequest) error {
 	// Validate identifier is not empty
 	if request.Identifier == "" {
 		return ErrCustomerNotFound
+	}
+
+	return nil
+}
+
+func (lf *LoginFlowImpl) completeSignupAfterLogin(ctx context.Context, customer *models.Customer) error {
+	isMobileVerified := utils.ToPtr(true)
+	mobileVerifiedAt := utils.UTCNowPtr()
+	if err := lf.customerRepo.UpdateVerificationStatus(ctx, customer.ID, isMobileVerified, nil, mobileVerifiedAt, nil); err != nil {
+		return err
+	}
+
+	if lf.notificationSvc != nil {
+		adminMsg := fmt.Sprintf("New user verified: %s %s", customer.RepresentativeFirstName, customer.RepresentativeLastName)
+		for _, mobile := range lf.adminConfig.ActiveMobiles() {
+			_ = lf.notificationSvc.SendSMS(ctx, mobile, adminMsg, utils.ToPtr(int64(customer.ID)))
+		}
 	}
 
 	return nil
