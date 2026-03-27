@@ -25,3 +25,14 @@ type AdminListLevel3OptionsResponse struct {
 	Message string   `json:"message"`
 	Items   []string `json:"items"`
 }
+
+type SegmentPriceFactorItem struct {
+	Level3      string  `json:"level3"`
+	PriceFactor float64 `json:"price_factor"`
+	CreatedAt   string  `json:"created_at"`
+}
+
+type ListLatestSegmentPriceFactorsResponse struct {
+	Message string                   `json:"message"`
+	Items   []SegmentPriceFactorItem `json:"items"`
+}
