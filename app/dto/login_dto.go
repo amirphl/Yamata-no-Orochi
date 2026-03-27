@@ -17,6 +17,29 @@ type LoginResponse struct {
 	Session  CustomerSessionDTO
 }
 
+type LoginOTPRequest struct {
+	Identifier string `json:"identifier" validate:"required,min=3,max=255" example:"user@example.com or +989123456789"`
+}
+
+type LoginOTPResponse struct {
+	Message     string    `json:"message"`
+	CustomerID  uint      `json:"customer_id"`
+	MaskedPhone string    `json:"masked_phone"`
+	OTPSent     bool      `json:"otp_sent"`
+	AlreadySent bool      `json:"already_sent"`
+	OTPExpiry   time.Time `json:"otp_expiry"`
+}
+
+type LoginOTPVerifyRequest struct {
+	CustomerID uint   `json:"customer_id" validate:"required" example:"1"`
+	OTPCode    string `json:"otp_code" validate:"required,len=6,numeric" example:"123456"`
+}
+
+type LoginOTPVerifyResponse struct {
+	Customer AuthCustomerDTO
+	Session  CustomerSessionDTO
+}
+
 // ForgotPasswordRequest represents the request to initiate password reset
 type ForgotPasswordRequest struct {
 	Identifier string `json:"identifier" validate:"required,min=3,max=255" example:"user@example.com or +989123456789"`
