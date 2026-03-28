@@ -414,6 +414,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		tokenService,
 		notificationService,
 		cfg.Message,
+		cfg.Admin,
 		db,
 		rc,
 	)
@@ -526,6 +527,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		db,
 		notificationService,
 		cfg.Admin,
+		cfg.Message,
 	)
 
 	lineNumberFlow := businessflow.NewLineNumberFlow(lineNumberRepo)
@@ -573,6 +575,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	profileHandler := handlers.NewProfileHandler(profileFlow)
 
 	segmentPriceFactorAdminHandler := handlers.NewSegmentPriceFactorAdminHandler(segmentPriceFactorFlow)
+	segmentPriceFactorHandler := handlers.NewSegmentPriceFactorHandler(segmentPriceFactorFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
@@ -590,6 +593,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberHandler,
 		lineNumberAdminHandler,
 		segmentPriceFactorAdminHandler,
+		segmentPriceFactorHandler,
 		adminCustomerManagementHandler,
 		campaignBotHandler,
 		ticketHandler,
