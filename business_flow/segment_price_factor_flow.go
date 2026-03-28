@@ -17,6 +17,7 @@ type SegmentPriceFactorFlow interface {
 	AdminCreateSegmentPriceFactor(ctx context.Context, req *dto.AdminCreateSegmentPriceFactorRequest) (*dto.AdminCreateSegmentPriceFactorResponse, error)
 	AdminListSegmentPriceFactors(ctx context.Context) (*dto.AdminListSegmentPriceFactorsResponse, error)
 	AdminListLevel3Options(ctx context.Context) (*dto.AdminListLevel3OptionsResponse, error)
+	ListLatestSegmentPriceFactors(ctx context.Context) (*dto.ListLatestSegmentPriceFactorsResponse, error)
 }
 
 type SegmentPriceFactorFlowImpl struct {
@@ -59,23 +60,26 @@ func (f *SegmentPriceFactorFlowImpl) AdminListSegmentPriceFactors(ctx context.Co
 		return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_LIST_FAILED", "Failed to list segment price factors", err)
 	}
 
-	items := make([]dto.AdminSegmentPriceFactorItem, 0, len(rows))
-	for _, r := range rows {
-		items = append(items, dto.AdminSegmentPriceFactorItem{
-			Level3:      r.Level3,
-			PriceFactor: r.PriceFactor,
-			CreatedAt:   r.CreatedAt.Format(time.RFC3339),
-		})
-	}
-
-	// Sort by level3 for deterministic output
-	sort.Slice(items, func(i, j int) bool {
-		return strings.Compare(items[i].Level3, items[j].Level3) < 0
-	})
+	items := mapSegmentPriceFactorRows(rows)
 
 	return &dto.AdminListSegmentPriceFactorsResponse{
 		Message: "Segment price factors retrieved successfully",
-		Items:   items,
+		Items:   items.AdminItems,
+	}, nil
+}
+
+// ListLatestSegmentPriceFactors returns the latest price factor per level3 for authenticated users.
+func (f *SegmentPriceFactorFlowImpl) ListLatestSegmentPriceFactors(ctx context.Context) (*dto.ListLatestSegmentPriceFactorsResponse, error) {
+	rows, err := f.segmentPriceFactorRepo.ListLatestByLevel3(ctx)
+	if err != nil {
+		return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_LIST_FAILED", "Failed to list segment price factors", err)
+	}
+
+	items := mapSegmentPriceFactorRows(rows)
+
+	return &dto.ListLatestSegmentPriceFactorsResponse{
+		Message: "Segment price factors retrieved successfully",
+		Items:   items.PublicItems,
 	}, nil
 }
 
@@ -111,4 +115,40 @@ func (f *SegmentPriceFactorFlowImpl) AdminListLevel3Options(ctx context.Context)
 		Message: "Level3 options retrieved successfully",
 		Items:   items,
 	}, nil
+}
+
+type segmentPriceFactorMappedItems struct {
+	AdminItems  []dto.AdminSegmentPriceFactorItem
+	PublicItems []dto.SegmentPriceFactorItem
+}
+
+func mapSegmentPriceFactorRows(rows []*models.SegmentPriceFactor) segmentPriceFactorMappedItems {
+	adminItems := make([]dto.AdminSegmentPriceFactorItem, 0, len(rows))
+	publicItems := make([]dto.SegmentPriceFactorItem, 0, len(rows))
+	for _, r := range rows {
+		createdAt := r.CreatedAt.Format(time.RFC3339)
+		adminItems = append(adminItems, dto.AdminSegmentPriceFactorItem{
+			Level3:      r.Level3,
+			PriceFactor: r.PriceFactor,
+			CreatedAt:   createdAt,
+		})
+		publicItems = append(publicItems, dto.SegmentPriceFactorItem{
+			Level3:      r.Level3,
+			PriceFactor: r.PriceFactor,
+			CreatedAt:   createdAt,
+		})
+	}
+
+	// Sort by level3 for deterministic output
+	sort.Slice(adminItems, func(i, j int) bool {
+		return strings.Compare(adminItems[i].Level3, adminItems[j].Level3) < 0
+	})
+	sort.Slice(publicItems, func(i, j int) bool {
+		return strings.Compare(publicItems[i].Level3, publicItems[j].Level3) < 0
+	})
+
+	return segmentPriceFactorMappedItems{
+		AdminItems:  adminItems,
+		PublicItems: publicItems,
+	}
 }
