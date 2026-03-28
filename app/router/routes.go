@@ -47,6 +47,7 @@ type FiberRouter struct {
 	lineNumberHandler              handlers.LineNumberHandlerInterface
 	lineNumberAdminHandler         handlers.LineNumberAdminHandlerInterface
 	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface
+	segmentPriceFactorHandler      handlers.SegmentPriceFactorHandlerInterface
 	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
 	campaignBotHandler             handlers.CampaignBotHandlerInterface
 	ticketHandler                  handlers.TicketHandlerInterface
@@ -70,6 +71,7 @@ func NewFiberRouter(
 	lineNumberHandler handlers.LineNumberHandlerInterface,
 	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
 	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface,
+	segmentPriceFactorHandler handlers.SegmentPriceFactorHandlerInterface,
 	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
 	campaignBotHandler handlers.CampaignBotHandlerInterface,
 	ticketHandler handlers.TicketHandlerInterface,
@@ -107,6 +109,7 @@ func NewFiberRouter(
 		lineNumberHandler:              lineNumberHandler,
 		lineNumberAdminHandler:         lineNumberAdminHandler,
 		segmentPriceFactorAdminHandler: segmentPriceFactorAdminHandler,
+		segmentPriceFactorHandler:      segmentPriceFactorHandler,
 
 		adminCustomerManagementHandler: adminCustomerManagemetHandler,
 		campaignBotHandler:             campaignBotHandler,
@@ -196,6 +199,8 @@ func (r *FiberRouter) SetupRoutes() {
 	auth.Post("/verify", r.authHandler.VerifyOTP)
 	auth.Post("/resend-otp", r.authHandler.ResendOTP)
 	auth.Post("/login", r.authHandler.Login)
+	auth.Post("/login/otp", r.authHandler.RequestLoginOTP)
+	auth.Post("/login/otp/verify", r.authHandler.VerifyLoginOTP)
 	auth.Post("/forgot-password", r.authHandler.ForgotPassword)
 	auth.Post("/reset", r.authHandler.ResetPassword)
 
@@ -291,6 +296,11 @@ func (r *FiberRouter) SetupRoutes() {
 	lineNumbers := api.Group("/line-numbers")
 	lineNumbers.Use(r.authMiddleware.Authenticate()) // Require authentication
 	lineNumbers.Get("/active", r.lineNumberHandler.ListActive)
+
+	// Segment price factors (authenticated)
+	segmentPriceFactors := api.Group("/segment-price-factors")
+	segmentPriceFactors.Use(r.authMiddleware.Authenticate())
+	segmentPriceFactors.Get("/", r.segmentPriceFactorHandler.ListLatest)
 
 	// Admin line numbers protected routes
 	adminLineNumbers := api.Group("/admin/line-numbers")
