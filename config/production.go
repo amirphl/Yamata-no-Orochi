@@ -348,6 +348,7 @@ type MessageConfig struct {
 	SigninVerificationCodeTemplate        string `json:"signin_verification_code_template"`
 	OTPResendVerificationCodeTemplate     string `json:"otp_resend_verification_code_template"`
 	PasswordResetVerificationCodeTemplate string `json:"password_reset_verification_code_template"`
+	CampaignRejectedTemplate              string `json:"campaign_rejected_template"`
 }
 
 // LoadProductionConfig loads and validates configuration from environment variables
@@ -583,6 +584,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			SigninVerificationCodeTemplate:        getEnvString("MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE", "Your verification code is %s"),
 			OTPResendVerificationCodeTemplate:     getEnvString("MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE", "Your new verification code is: %s. Valid for %v minutes."),
 			PasswordResetVerificationCodeTemplate: getEnvString("MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE", "Your password reset code is: %s. This code will expire in %v minutes."),
+			CampaignRejectedTemplate:              getEnvString("MESSAGE_CAMPAIGN_REJECTED_TEMPLATE", "Your campaign has been rejected."),
 		},
 	}
 
