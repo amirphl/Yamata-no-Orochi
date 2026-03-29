@@ -38,6 +38,7 @@ type AdminCampaignFlowImpl struct {
 	segmentPriceRepo    repository.SegmentPriceFactorRepository
 	notifier            services.NotificationService
 	adminConfig         config.AdminConfig
+	messageConfig       config.MessageConfig
 	db                  *gorm.DB
 }
 
@@ -54,6 +55,7 @@ func NewAdminCampaignFlow(
 	db *gorm.DB,
 	notifier services.NotificationService,
 	adminConfig config.AdminConfig,
+	messageConfig config.MessageConfig,
 ) AdminCampaignFlow {
 	return &AdminCampaignFlowImpl{
 		campaignRepo:        campaignRepo,
@@ -66,6 +68,7 @@ func NewAdminCampaignFlow(
 		segmentPriceRepo:    segmentPriceRepo,
 		notifier:            notifier,
 		adminConfig:         adminConfig,
+		messageConfig:       messageConfig,
 		db:                  db,
 	}
 }
@@ -602,11 +605,21 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 			title = *campaign.Spec.Title
 		}
 		customerMobile := normalizeIranMobile(customer.RepresentativeMobile)
-		msgCustomer := fmt.Sprintf("Your campaign '%s' has been rejected.", title)
+		msgCustomer := strings.TrimSpace(s.messageConfig.CampaignRejectedTemplate)
+		if msgCustomer == "" {
+			msgCustomer = "Your campaign '%s' has been rejected."
+		}
+		if strings.Contains(msgCustomer, "%") {
+			msgCustomer = fmt.Sprintf(msgCustomer, title)
+		}
 		id64 := int64(customer.ID)
 		smsCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		_ = s.notifier.SendSMS(smsCtx, customerMobile, msgCustomer, &id64)
+		adminMsg := fmt.Sprintf("Campaign rejected:\n%s", title)
+		for _, mobile := range s.adminConfig.ActiveMobiles() {
+			_ = s.notifier.SendSMS(smsCtx, mobile, adminMsg, nil)
+		}
 	}
 
 	return &dto.AdminRejectCampaignResponse{
