@@ -201,5 +201,8 @@
 \echo 'Running 0065_change_sent_sms_tracking_id_type.sql...'
 \i migrations/0065_change_sent_sms_tracking_id_type.sql
 
+\echo 'Running 0066_allow_empty_audit_log_ip_address.sql...'
+\i migrations/0066_allow_empty_audit_log_ip_address.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
