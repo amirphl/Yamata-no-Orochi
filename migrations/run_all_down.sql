@@ -3,11 +3,14 @@
 
 \echo 'Starting database rollback...'
 
-\echo 'Running 0064_create_sequence_counters_down.sql...'
-\i migrations/0064_create_sequence_counters_down.sql
+\echo 'Running 0066_allow_empty_audit_log_ip_address_down.sql...'
+\i migrations/0066_allow_empty_audit_log_ip_address_down.sql
 
 \echo 'Running 0065_change_sent_sms_tracking_id_type_down.sql...'
 \i migrations/0065_change_sent_sms_tracking_id_type_down.sql
+
+\echo 'Running 0064_create_sequence_counters_down.sql...'
+\i migrations/0064_create_sequence_counters_down.sql
 
 \echo 'Running 0063_create_audience_selection_cache_down.sql...'
 \i migrations/0063_create_audience_selection_cache_down.sql
