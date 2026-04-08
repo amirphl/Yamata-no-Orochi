@@ -56,6 +56,8 @@ type FiberRouter struct {
 	shortLinkAdminHandler          handlers.ShortLinkAdminHandlerInterface
 	cryptoPaymentHandler           handlers.CryptoPaymentHandlerInterface
 	profileHandler                 handlers.ProfileHandlerInterface
+	multimediaHandler              handlers.MultimediaHandlerInterface
+	platformSettingsHandler        handlers.PlatformSettingsHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -80,6 +82,8 @@ func NewFiberRouter(
 	shortLinkAdminHandler handlers.ShortLinkAdminHandlerInterface,
 	cryptoPaymentHandler handlers.CryptoPaymentHandlerInterface,
 	profileHandler handlers.ProfileHandlerInterface,
+	multimediaHandler handlers.MultimediaHandlerInterface,
+	platformSettingsHandler handlers.PlatformSettingsHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -119,6 +123,8 @@ func NewFiberRouter(
 		shortLinkAdminHandler:          shortLinkAdminHandler,
 		cryptoPaymentHandler:           cryptoPaymentHandler,
 		profileHandler:                 profileHandler,
+		multimediaHandler:              multimediaHandler,
+		platformSettingsHandler:        platformSettingsHandler,
 	}
 }
 
@@ -361,6 +367,19 @@ func (r *FiberRouter) SetupRoutes() {
 
 	// Profile route (protected)
 	api.Get("/profile", r.authMiddleware.Authenticate(), r.profileHandler.GetProfile)
+
+	// Multimedia upload route (protected)
+	media := api.Group("/media")
+	media.Use(r.authMiddleware.Authenticate())
+	media.Post("/upload", r.multimediaHandler.Upload)
+	media.Get("/:uuid", r.multimediaHandler.Download)
+	media.Get("/:uuid/preview", r.multimediaHandler.Preview)
+
+	// Platform settings routes (protected)
+	platformSettings := api.Group("/platform-settings")
+	platformSettings.Use(r.authMiddleware.Authenticate())
+	platformSettings.Post("/", r.platformSettingsHandler.Create)
+	platformSettings.Get("/", r.platformSettingsHandler.List)
 
 	// Public short-link redirect (no auth)
 	r.app.Get("/s/:uid", r.shortLinkHandler.Visit)
