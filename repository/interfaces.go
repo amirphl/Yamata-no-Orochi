@@ -316,6 +316,21 @@ type SMSStatusResultRepository interface {
 	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SMSStatusAggregates, error)
 }
 
+// MultimediaAssetRepository defines operations for multimedia assets
+type MultimediaAssetRepository interface {
+	Repository[models.MultimediaAsset, models.MultimediaAssetFilter]
+	ByID(ctx context.Context, id uint) (*models.MultimediaAsset, error)
+	ByUUID(ctx context.Context, uuid string) (*models.MultimediaAsset, error)
+	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.MultimediaAsset, error)
+}
+
+// PlatformSettingsRepository defines operations for platform settings
+type PlatformSettingsRepository interface {
+	Repository[models.PlatformSettings, models.PlatformSettingsFilter]
+	ByID(ctx context.Context, id uint) (*models.PlatformSettings, error)
+	ByUUID(ctx context.Context, uuid string) (*models.PlatformSettings, error)
+}
+
 // TicketRepository defines operations for tickets
 type TicketRepository interface {
 	Repository[models.Ticket, models.TicketFilter]
