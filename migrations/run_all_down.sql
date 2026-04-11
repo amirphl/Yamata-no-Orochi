@@ -3,6 +3,15 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0069_add_platform_to_platform_settings_down.sql...'
+\i migrations/0069_add_platform_to_platform_settings_down.sql
+
+\echo 'Running 0068_create_platform_settings_down.sql...'
+\i migrations/0068_create_platform_settings_down.sql
+
+\echo 'Running 0067_create_multimedia_assets_down.sql...'
+\i migrations/0067_create_multimedia_assets_down.sql
+
 \echo 'Running 0066_allow_empty_audit_log_ip_address_down.sql...'
 \i migrations/0066_allow_empty_audit_log_ip_address_down.sql
 
