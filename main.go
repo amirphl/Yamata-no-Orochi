@@ -356,6 +356,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	smsStatusJobRepo := repository.NewSMSStatusJobRepository(db)
 	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
+	multimediaRepo := repository.NewMultimediaAssetRepository(db)
+	platformSettingsRepo := repository.NewPlatformSettingsRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
 	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
@@ -540,6 +542,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
+	multimediaFlow := businessflow.NewMultimediaFlow(customerRepo, multimediaRepo)
+	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo)
 
 	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo, shortLinkClickRepo)
 
@@ -571,6 +575,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	shortLinkAdminHandler := handlers.NewShortLinkAdminHandler(adminShortLinkFlow, adminShortLinkDownloadFlow, adminShortLinkClicksDownloadFlow)
 
 	ticketHandler := handlers.NewTicketHandler(ticketFlow)
+	multimediaHandler := handlers.NewMultimediaHandler(multimediaFlow)
+	platformSettingsHandler := handlers.NewPlatformSettingsHandler(platformSettingsFlow)
 
 	profileHandler := handlers.NewProfileHandler(profileFlow)
 
@@ -602,6 +608,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		shortLinkAdminHandler,
 		cryptoPaymentHandler,
 		profileHandler,
+		multimediaHandler,
+		platformSettingsHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
