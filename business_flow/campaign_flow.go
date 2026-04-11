@@ -719,15 +719,16 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 	// Calculate the number of parts based on content length
 	numPages := s.calculateSMSParts(req.Content)
 
-	if req.LineNumber == nil {
-		return nil, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required", ErrCampaignLineNumberRequired)
-	}
-
 	// Pricing constants
 	basePrice := uint64(200)
-	lineNumberFactor, err := s.fetchLineNumberPriceFactor(ctx, req.LineNumber)
-	if err != nil {
-		return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
+	// TODO:
+	lineNumberFactor := float64(1)
+	if req.LineNumber != nil && strings.TrimSpace(*req.LineNumber) != "" {
+		var err error
+		lineNumberFactor, err = s.fetchLineNumberPriceFactor(ctx, req.LineNumber)
+		if err != nil {
+			return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
+		}
 	}
 	segmentPriceFactor := float64(1)
 	if len(req.Level3s) > 0 {
