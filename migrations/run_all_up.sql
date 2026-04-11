@@ -204,5 +204,14 @@
 \echo 'Running 0066_allow_empty_audit_log_ip_address.sql...'
 \i migrations/0066_allow_empty_audit_log_ip_address.sql
 
+\echo 'Running 0067_create_multimedia_assets.sql...'
+\i migrations/0067_create_multimedia_assets.sql
+
+\echo 'Running 0068_create_platform_settings.sql...'
+\i migrations/0068_create_platform_settings.sql
+
+\echo 'Running 0069_add_platform_to_platform_settings.sql...'
+\i migrations/0069_add_platform_to_platform_settings.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
