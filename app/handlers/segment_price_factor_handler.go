@@ -36,12 +36,22 @@ func (h *SegmentPriceFactorHandler) SuccessResponse(c fiber.Ctx, status int, mes
 // @Description List the latest price factor per level3
 // @Tags Segment Price Factors
 // @Produce json
+// @Param platform query string false "Platform (sms|rubika|bale|splus), default sms"
 // @Success 200 {object} dto.APIResponse{data=dto.ListLatestSegmentPriceFactorsResponse}
 // @Failure 500 {object} dto.APIResponse "List failed"
 // @Router /api/v1/segment-price-factors [get]
 func (h *SegmentPriceFactorHandler) ListLatest(c fiber.Ctx) error {
-	res, err := h.flow.ListLatestSegmentPriceFactors(h.createRequestContext(c, "/api/v1/segment-price-factors"))
+	var platform *string
+	platformRaw := c.Query("platform")
+	if platformRaw != "" {
+		platform = &platformRaw
+	}
+
+	res, err := h.flow.ListLatestSegmentPriceFactors(h.createRequestContext(c, "/api/v1/segment-price-factors"), platform)
 	if err != nil {
+		if businessflow.IsSegmentPriceFactorPlatformInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
+		}
 		log.Println("List segment price factors failed:", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "List segment price factors failed", "SEGMENT_PRICE_FACTOR_LIST_FAILED", nil)
 	}
