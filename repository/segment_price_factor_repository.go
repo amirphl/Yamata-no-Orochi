@@ -22,14 +22,20 @@ func NewSegmentPriceFactorRepository(db *gorm.DB) SegmentPriceFactorRepository {
 
 // ListLatestByLevel3 returns the latest price factor per level3 (last inserted wins).
 func (r *SegmentPriceFactorRepositoryImpl) ListLatestByLevel3(ctx context.Context) ([]*models.SegmentPriceFactor, error) {
+	return r.ListLatestByLevel3ForPlatform(ctx, models.SegmentPriceFactorPlatformSMS)
+}
+
+// ListLatestByLevel3ForPlatform returns the latest price factor per level3 scoped by platform.
+func (r *SegmentPriceFactorRepositoryImpl) ListLatestByLevel3ForPlatform(ctx context.Context, platform string) ([]*models.SegmentPriceFactor, error) {
 	db := r.getDB(ctx)
 
 	var rows []*models.SegmentPriceFactor
 	err := db.Raw(`
-		SELECT DISTINCT ON (level3) id, level3, price_factor, created_at, updated_at
+		SELECT DISTINCT ON (level3) id, platform, level3, price_factor, created_at, updated_at
 		FROM segment_price_factors
+		WHERE platform = ?
 		ORDER BY level3, created_at DESC
-	`).Scan(&rows).Error
+	`, platform).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +59,9 @@ func (r *SegmentPriceFactorRepositoryImpl) ByID(ctx context.Context, id uint) (*
 
 // applyFilter applies filter conditions to the GORM query
 func (r *SegmentPriceFactorRepositoryImpl) applyFilter(db *gorm.DB, filter models.SegmentPriceFactorFilter) *gorm.DB {
+	if filter.Platform != nil {
+		db = db.Where("platform = ?", *filter.Platform)
+	}
 	if filter.Level3 != nil {
 		db = db.Where("level3 = ?", *filter.Level3)
 	}
@@ -61,6 +70,11 @@ func (r *SegmentPriceFactorRepositoryImpl) applyFilter(db *gorm.DB, filter model
 
 // LatestByLevel3s returns a map of level3 -> latest price factor for the provided level3 values.
 func (r *SegmentPriceFactorRepositoryImpl) LatestByLevel3s(ctx context.Context, level3s []string) (map[string]float64, error) {
+	return r.LatestByLevel3sForPlatform(ctx, level3s, models.SegmentPriceFactorPlatformSMS)
+}
+
+// LatestByLevel3sForPlatform returns a map of level3 -> latest price factor for the provided level3 values scoped by platform.
+func (r *SegmentPriceFactorRepositoryImpl) LatestByLevel3sForPlatform(ctx context.Context, level3s []string, platform string) (map[string]float64, error) {
 	out := make(map[string]float64)
 	if len(level3s) == 0 {
 		return out, nil
@@ -76,9 +90,9 @@ func (r *SegmentPriceFactorRepositoryImpl) LatestByLevel3s(ctx context.Context, 
 	err := db.Raw(`
 		SELECT DISTINCT ON (level3) level3, price_factor
 		FROM segment_price_factors
-		WHERE level3 IN ?
+		WHERE platform = ? AND level3 IN ?
 		ORDER BY level3, created_at DESC
-	`, level3s).Scan(&rows).Error
+	`, platform, level3s).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
