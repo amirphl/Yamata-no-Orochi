@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -21,11 +22,11 @@ type SegmentPriceFactorAdminHandlerInterface interface {
 
 // SegmentPriceFactorAdminHandler implements admin endpoints for segment price factors.
 type SegmentPriceFactorAdminHandler struct {
-	flow      businessflow.SegmentPriceFactorFlow
+	flow      businessflow.SegmentPriceFactorAdminFlow
 	validator *validator.Validate
 }
 
-func NewSegmentPriceFactorAdminHandler(flow businessflow.SegmentPriceFactorFlow) SegmentPriceFactorAdminHandlerInterface {
+func NewSegmentPriceFactorAdminHandler(flow businessflow.SegmentPriceFactorAdminFlow) SegmentPriceFactorAdminHandlerInterface {
 	return &SegmentPriceFactorAdminHandler{
 		flow:      flow,
 		validator: validator.New(),
@@ -56,6 +57,7 @@ func (h *SegmentPriceFactorAdminHandler) CreateSegmentPriceFactor(c fiber.Ctx) e
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
+	req.Platform = strings.ToLower(strings.TrimSpace(req.Platform))
 	if err := h.validator.Struct(&req); err != nil {
 		var validationErrors []string
 		for _, e := range err.(validator.ValidationErrors) {
@@ -68,6 +70,9 @@ func (h *SegmentPriceFactorAdminHandler) CreateSegmentPriceFactor(c fiber.Ctx) e
 	if err != nil {
 		if businessflow.IsLevel3Required(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Level3 is required", "LEVEL3_REQUIRED", nil)
+		}
+		if businessflow.IsSegmentPriceFactorPlatformInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
 		}
 		if businessflow.IsPriceFactorInvalid(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Price factor must be greater than zero", "PRICE_FACTOR_INVALID", nil)
@@ -84,12 +89,22 @@ func (h *SegmentPriceFactorAdminHandler) CreateSegmentPriceFactor(c fiber.Ctx) e
 // @Description List the latest price factor per level3
 // @Tags Admin Segment Price Factors
 // @Produce json
+// @Param platform query string false "Platform (sms|rubika|bale|splus), default sms"
 // @Success 200 {object} dto.APIResponse{data=dto.AdminListSegmentPriceFactorsResponse}
 // @Failure 500 {object} dto.APIResponse "List failed"
 // @Router /api/v1/admin/segment-price-factors [get]
 func (h *SegmentPriceFactorAdminHandler) ListSegmentPriceFactors(c fiber.Ctx) error {
-	res, err := h.flow.AdminListSegmentPriceFactors(h.createRequestContext(c, "/api/v1/admin/segment-price-factors"))
+	var platform *string
+	platformRaw := c.Query("platform")
+	if platformRaw != "" {
+		platform = &platformRaw
+	}
+
+	res, err := h.flow.AdminListSegmentPriceFactors(h.createRequestContext(c, "/api/v1/admin/segment-price-factors"), platform)
 	if err != nil {
+		if businessflow.IsSegmentPriceFactorPlatformInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
+		}
 		log.Println("List segment price factors failed:", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "List segment price factors failed", "SEGMENT_PRICE_FACTOR_LIST_FAILED", nil)
 	}
