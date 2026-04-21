@@ -2,26 +2,31 @@ package dto
 
 import (
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // CreateCampaignRequest represents the request to create a new campaign
 type CreateCampaignRequest struct {
-	CustomerID      uint       `json:"-"`
-	Title           *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1          *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s         []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s         []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags            []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex             *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City            []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
-	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	ScheduleAt      *time.Time `json:"schedule_at,omitempty"`
-	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	Budget          *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	CustomerID         uint       `json:"-"`
+	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags               []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content            *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	ScheduleAt         *time.Time `json:"scheduleat,omitempty"`
+	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
+	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
 }
 
 // CreateCampaignResponse represents the response to create a new campaign
@@ -35,24 +40,27 @@ type CreateCampaignResponse struct {
 
 // UpdateCampaignRequest represents the request to update an existing campaign
 type UpdateCampaignRequest struct {
-	UUID            string     `json:"-"`
-	CustomerID      uint       `json:"-"`
-	Title           *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1          *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s         []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s         []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags            []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex             *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City            []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
-	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	Budget          *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Finalize        *bool      `json:"finalize,omitempty" validate:"omitempty"`
+	UUID               string     `json:"-"`
+	CustomerID         uint       `json:"-"`
+	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags               []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content            *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
+	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	Finalize           *bool      `json:"finalize,omitempty" validate:"omitempty"`
 }
 
 // UpdateCampaignResponse represents the response to update an existing campaign
@@ -78,51 +86,57 @@ type GetCampaignRequest struct {
 
 // GetCampaignResponse represents the campaign specification in responses
 type GetCampaignResponse struct {
-	ID              uint           `json:"id"`
-	UUID            string         `json:"uuid"`
-	Status          string         `json:"status"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       *time.Time     `json:"updated_at,omitempty"`
-	Title           *string        `json:"title,omitempty" validate:"omitempty"`
-	Level1          *string        `json:"level1,omitempty" validate:"omitempty"`
-	Level2s         []string       `json:"level2s,omitempty" validate:"omitempty"`
-	Level3s         []string       `json:"level3s,omitempty" validate:"omitempty"`
-	Tags            []string       `json:"tags,omitempty" validate:"omitempty"`
-	Sex             *string        `json:"sex,omitempty" validate:"omitempty"`
-	City            []string       `json:"city,omitempty" validate:"omitempty"`
-	AdLink          *string        `json:"adlink,omitempty" validate:"omitempty"`
-	Content         *string        `json:"content,omitempty" validate:"omitempty"`
-	ShortLinkDomain *string        `json:"short_link_domain,omitempty" validate:"omitempty"`
-	Category        *string        `json:"job_category,omitempty" validate:"omitempty"`
-	Job             *string        `json:"job,omitempty" validate:"omitempty"`
-	ScheduleAt      *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber      *string        `json:"line_number,omitempty" validate:"omitempty"`
-	LinePriceFactor *float64       `json:"line_price_factor,omitempty"`
-	Budget          *uint64        `json:"budget,omitempty" validate:"omitempty"`
-	NumAudience     *uint64        `json:"num_audience,omitempty"`
-	Comment         *string        `json:"comment,omitempty" validate:"omitempty"`
-	Statistics      map[string]any `json:"statistics,omitempty"`
-	ClickRate       *float64       `json:"click_rate,omitempty"`
-	TotalClicks     *int64         `json:"total_clicks,omitempty"`
+	ID                 uint           `json:"id"`
+	UUID               string         `json:"uuid"`
+	Status             string         `json:"status"`
+	CreatedAt          time.Time      `json:"created_at"`
+	UpdatedAt          *time.Time     `json:"updated_at,omitempty"`
+	Title              *string        `json:"title,omitempty" validate:"omitempty"`
+	Level1             *string        `json:"level1,omitempty" validate:"omitempty"`
+	Level2s            []string       `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s            []string       `json:"level3s,omitempty" validate:"omitempty"`
+	Tags               []string       `json:"tags,omitempty" validate:"omitempty"`
+	Sex                *string        `json:"sex,omitempty" validate:"omitempty"`
+	City               []string       `json:"city,omitempty" validate:"omitempty"`
+	AdLink             *string        `json:"adlink,omitempty" validate:"omitempty"`
+	Content            *string        `json:"content,omitempty" validate:"omitempty"`
+	ShortLinkDomain    *string        `json:"short_link_domain,omitempty" validate:"omitempty"`
+	Category           *string        `json:"job_category,omitempty" validate:"omitempty"`
+	Job                *string        `json:"job,omitempty" validate:"omitempty"`
+	ScheduleAt         *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber         *string        `json:"line_number,omitempty" validate:"omitempty"`
+	MediaUUID          *uuid.UUID     `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint          `json:"platform_settings_id,omitempty"`
+	Platform           string         `json:"platform"`
+	LinePriceFactor    *float64       `json:"line_price_factor,omitempty"`
+	Budget             *uint64        `json:"budget,omitempty" validate:"omitempty"`
+	NumAudience        *uint64        `json:"num_audience,omitempty"`
+	Comment            *string        `json:"comment,omitempty" validate:"omitempty"`
+	Statistics         map[string]any `json:"statistics,omitempty"`
+	ClickRate          *float64       `json:"click_rate,omitempty"`
+	TotalClicks        *int64         `json:"total_clicks,omitempty"`
 }
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
 type CalculateCampaignCapacityRequest struct {
-	Title           *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1          *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s         []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s         []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags            []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex             *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City            []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
-	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	Budget          *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags               []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content            *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
+	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
 }
 
 // CalculateCampaignCapacityResponse represents the response to calculate the capacity of an campaign
@@ -133,22 +147,49 @@ type CalculateCampaignCapacityResponse struct {
 
 // CalculateCampaignCostRequest represents the request to calculate the cost of an campaign
 type CalculateCampaignCostRequest struct {
-	Title           *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1          *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s         []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s         []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags            []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex             *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City            []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content         *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
-	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	Budget          *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category        *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job             *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	CustomerID      uint       `json:"-"`
+	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags               []string   `json:"tags,omitempty" validate:"omitempty"`
+	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content            *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
+	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	CustomerID         uint       `json:"-"`
+}
+
+// CalculateCampaignCostV2Request represents the request to calculate required cost
+// for a desired number of messages (capped by available audience capacity).
+type CalculateCampaignCostV2Request struct {
+	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags               []string   `json:"tags,omitempty" validate:"omitempty"`
+	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content            *string    `json:"content,omitempty" validate:"omitempty,max=512,min=1"`
+	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
+	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	NumMessages        uint64     `json:"num_messages" validate:"required,gt=0"`
+	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	CustomerID         uint       `json:"-"`
 }
 
 // CalculateCampaignCostResponse represents the response to calculate the cost of an campaign
@@ -218,6 +259,9 @@ type AdminGetCampaignResponse struct {
 	Job                   *string        `json:"job,omitempty" validate:"omitempty"`
 	ScheduleAt            *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
 	LineNumber            *string        `json:"line_number,omitempty" validate:"omitempty"`
+	MediaUUID             *uuid.UUID     `json:"media_uuid,omitempty"`
+	PlatformSettingsID    *uint          `json:"platform_settings_id,omitempty"`
+	Platform              string         `json:"platform"`
 	Budget                *uint64        `json:"budget,omitempty" validate:"omitempty"`
 	Comment               *string        `json:"comment,omitempty" validate:"omitempty"`
 	SegmentPriceFactor    float64        `json:"segment_price_factor,omitempty"`
@@ -255,30 +299,60 @@ type AdminRejectCampaignResponse struct {
 	Message string `json:"message"`
 }
 
+// AdminCancelCampaignRequest represents admin cancellation input
+type AdminCancelCampaignRequest struct {
+	CampaignID uint   `json:"campaign_id" validate:"required"`
+	Comment    string `json:"comment" validate:"required,max=1000"`
+}
+
+// AdminCancelCampaignResponse represents admin cancellation result
+type AdminCancelCampaignResponse struct {
+	Message string `json:"message"`
+}
+
+type AdminRemoveAudienceSpecResponse struct {
+	Message  string `json:"message"`
+	Platform string `json:"platform"`
+}
+
 // BotGetCampaignResponse represents the campaign specification in responses
 type BotGetCampaignResponse struct {
-	ID              uint       `json:"id"`
-	CustomerID      uint       `json:"customer_id"`
-	Status          string     `json:"status"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
-	Title           *string    `json:"title,omitempty" validate:"omitempty"`
-	Level1          *string    `json:"level1,omitempty" validate:"omitempty"`
-	Level2s         []string   `json:"level2s,omitempty" validate:"omitempty"`
-	Level3s         []string   `json:"level3s,omitempty" validate:"omitempty"`
-	Tags            []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex             *string    `json:"sex,omitempty" validate:"omitempty"`
-	City            []string   `json:"city,omitempty" validate:"omitempty"`
-	AdLink          *string    `json:"adlink,omitempty" validate:"omitempty"`
-	Content         *string    `json:"content,omitempty" validate:"omitempty"`
-	ShortLinkDomain *string    `json:"short_link_domain,omitempty" validate:"omitempty"`
-	Category        *string    `json:"job_category,omitempty" validate:"omitempty"`
-	Job             *string    `json:"job,omitempty" validate:"omitempty"`
-	ScheduleAt      *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber      *string    `json:"line_number,omitempty" validate:"omitempty"`
-	Budget          *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Comment         *string    `json:"comment,omitempty" validate:"omitempty"`
-	NumAudiences    uint64     `json:"num_audiences"`
+	ID                 uint                             `json:"id"`
+	CustomerID         uint                             `json:"customer_id"`
+	Status             string                           `json:"status"`
+	CreatedAt          time.Time                        `json:"created_at"`
+	UpdatedAt          *time.Time                       `json:"updated_at,omitempty"`
+	Title              *string                          `json:"title,omitempty" validate:"omitempty"`
+	Level1             *string                          `json:"level1,omitempty" validate:"omitempty"`
+	Level2s            []string                         `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s            []string                         `json:"level3s,omitempty" validate:"omitempty"`
+	Tags               []string                         `json:"tags,omitempty" validate:"omitempty"`
+	Sex                *string                          `json:"sex,omitempty" validate:"omitempty"`
+	City               []string                         `json:"city,omitempty" validate:"omitempty"`
+	AdLink             *string                          `json:"adlink,omitempty" validate:"omitempty"`
+	Content            *string                          `json:"content,omitempty" validate:"omitempty"`
+	ShortLinkDomain    *string                          `json:"short_link_domain,omitempty" validate:"omitempty"`
+	Category           *string                          `json:"job_category,omitempty" validate:"omitempty"`
+	Job                *string                          `json:"job,omitempty" validate:"omitempty"`
+	ScheduleAt         *time.Time                       `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber         *string                          `json:"line_number,omitempty" validate:"omitempty"`
+	MediaUUID          *uuid.UUID                       `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint                            `json:"platform_settings_id,omitempty"`
+	PlatformSettings   *BotCampaignPlatformSettingsSpec `json:"platform_settings,omitempty"`
+	Platform           string                           `json:"platform"`
+	Budget             *uint64                          `json:"budget,omitempty" validate:"omitempty"`
+	Comment            *string                          `json:"comment,omitempty" validate:"omitempty"`
+	NumAudiences       *uint64                          `json:"num_audiences"`
+}
+
+type BotCampaignPlatformSettingsSpec struct {
+	ID           uint           `json:"id"`
+	Platform     string         `json:"platform"`
+	Name         *string        `json:"name,omitempty"`
+	Description  *string        `json:"description,omitempty"`
+	MultimediaID *uint          `json:"multimedia_id,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
+	Status       string         `json:"status"`
 }
 
 // BotListCampaignsResponse represents list of campaigns for bot
