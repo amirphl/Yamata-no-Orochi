@@ -43,32 +43,42 @@ var (
 	ErrAlreadyVerified = errors.New("already verified")
 
 	// Campaign-related errors
-	ErrCampaignNotFound             = errors.New("campaign not found")
-	ErrCampaignAccessDenied         = errors.New("campaign access denied")
-	ErrCampaignUpdateNotAllowed     = errors.New("campaign update not allowed")
-	ErrInsufficientCampaignCapacity = errors.New("insufficient campaign capacity")
-	ErrCampaignTitleRequired        = errors.New("campaign title is required")
-	ErrCampaignContentRequired      = errors.New("campaign content is required")
-	ErrCampaignLevel1Required       = errors.New("campaign level 1 is required")
-	ErrCampaignLevel2sRequired      = errors.New("at least one campaign level 2 is required")
-	ErrCampaignLevel3sRequired      = errors.New("at least one campaign level 3 is required")
-	ErrCampaignLineNumberRequired   = errors.New("campaign line number is required")
-	ErrCampaignLineNumberNotActive  = errors.New("campaign line number is not active")
-	ErrCampaignBudgetRequired       = errors.New("campaign budget is required")
-	ErrCampaignSexRequired          = errors.New("campaign sex is required")
-	ErrCampaignAdLinkRequired       = errors.New("campaign ad link is required")
-	ErrInvalidShortLinkDomain       = errors.New("invalid short link domain")
-	ErrAgencyCategoryJobRequired    = errors.New("category and job are required for marketing agencies")
-	ErrScheduleTimeNotPresent       = errors.New("schedule time is not present")
-	ErrScheduleTimeTooSoon          = errors.New("schedule time is too soon")
-	ErrCampaignCityRequired         = errors.New("campaign city is required")
-	ErrCampaignTagsRequired         = errors.New("campaign tags is required")
-	ErrCampaignUpdateRequired       = errors.New("at least one field must be provided for update")
-	ErrCampaignUUIDRequired         = errors.New("campaign UUID is required")
+	ErrCampaignNotFound                     = errors.New("campaign not found")
+	ErrCampaignAccessDenied                 = errors.New("campaign access denied")
+	ErrCampaignUpdateNotAllowed             = errors.New("campaign update not allowed")
+	ErrInsufficientCampaignCapacity         = errors.New("insufficient campaign capacity")
+	ErrCampaignTitleRequired                = errors.New("campaign title is required")
+	ErrCampaignContentRequired              = errors.New("campaign content is required")
+	ErrCampaignLevel1Required               = errors.New("campaign level 1 is required")
+	ErrCampaignLevel2sRequired              = errors.New("at least one campaign level 2 is required")
+	ErrCampaignLevel3sRequired              = errors.New("at least one campaign level 3 is required")
+	ErrCampaignLineNumberRequired           = errors.New("campaign line number is required")
+	ErrCampaignLineNumberNotActive          = errors.New("campaign line number is not active")
+	ErrCampaignBudgetRequired               = errors.New("campaign budget is required")
+	ErrCampaignSexRequired                  = errors.New("campaign sex is required")
+	ErrCampaignAdLinkRequired               = errors.New("campaign ad link is required")
+	ErrInvalidShortLinkDomain               = errors.New("invalid short link domain")
+	ErrAgencyCategoryJobRequired            = errors.New("category and job are required for marketing agencies")
+	ErrScheduleTimeNotPresent               = errors.New("schedule time is not present")
+	ErrScheduleTimeTooSoon                  = errors.New("schedule time is too soon")
+	ErrCampaignCityRequired                 = errors.New("campaign city is required")
+	ErrCampaignTagsRequired                 = errors.New("campaign tags is required")
+	ErrCampaignUpdateRequired               = errors.New("at least one field must be provided for update")
+	ErrCampaignUUIDRequired                 = errors.New("campaign UUID is required")
+	ErrCampaignMediaNotFound                = errors.New("campaign media not found")
+	ErrCampaignLineNumberNotApplicable      = errors.New("campaign line number is not applicable for this platform")
+	ErrCampaignPlatformSettingRequired      = errors.New("campaign platform settings is required")
+	ErrCampaignPlatformSettingNotApplicable = errors.New("campaign platform settings is not applicable for this platform")
+	ErrCampaignPlatformSettingNotFound      = errors.New("campaign platform settings not found")
+	ErrCampaignPlatformRequired             = errors.New("campaign platform is required")
+	ErrCampaignPlatformInvalid              = errors.New("campaign platform is invalid")
 
-	ErrCampaignNotWaitingForApproval   = errors.New("campaign is not waiting for approval")
-	ErrFreezeTransactionNotFound       = errors.New("freeze transaction not found for campaign")
-	ErrMultipleFreezeTransactionsFound = errors.New("multiple freeze transactions found for campaign")
+	ErrCampaignNotWaitingForApproval          = errors.New("campaign is not waiting for approval")
+	ErrCampaignNotApproved                    = errors.New("campaign is not approved")
+	ErrFreezeTransactionNotFound              = errors.New("freeze transaction not found for campaign")
+	ErrMultipleFreezeTransactionsFound        = errors.New("multiple freeze transactions found for campaign")
+	ErrCampaignDebitTransactionNotFound       = errors.New("campaign debit transaction not found")
+	ErrMultipleCampaignDebitTransactionsFound = errors.New("multiple campaign debit transactions found")
 
 	// Payment-related errors
 	ErrWalletNotFound           = errors.New("wallet not found")
@@ -130,8 +140,11 @@ var (
 	ErrLineNumberNotActive     = errors.New("line number is not active")
 
 	// Segment price factor errors
-	ErrLevel3Required             = errors.New("level3 is required")
-	ErrSegmentPriceFactorNotFound = errors.New("segment price factor not found")
+	ErrLevel3Required                    = errors.New("level3 is required")
+	ErrSegmentPriceFactorNotFound        = errors.New("segment price factor not found")
+	ErrSegmentPriceFactorPlatformInvalid = errors.New("segment price factor platform is invalid")
+	ErrAudienceSpecPlatformRequired      = errors.New("audience spec platform is required")
+	ErrAudienceSpecPlatformInvalid       = errors.New("audience spec platform is invalid")
 
 	// Ticket related errors
 	ErrTicketNotFound = errors.New("ticket not found")
@@ -222,6 +235,10 @@ func IsAgencyNotFound(err error) bool {
 	return errors.Is(err, ErrAgencyNotFound)
 }
 
+func IsJobCategoryRequired(err error) bool {
+	return errors.Is(err, ErrJobCategoryRequired)
+}
+
 func IsAgencyInactive(err error) bool {
 	return errors.Is(err, ErrAgencyInactive)
 }
@@ -278,6 +295,10 @@ func IsCampaignLineNumberRequired(err error) bool {
 	return errors.Is(err, ErrCampaignLineNumberRequired)
 }
 
+func IsCampaignLineNumberNotApplicable(err error) bool {
+	return errors.Is(err, ErrCampaignLineNumberNotApplicable)
+}
+
 func IsCampaignLineNumberNotActive(err error) bool {
 	return errors.Is(err, ErrCampaignLineNumberNotActive)
 }
@@ -292,6 +313,14 @@ func IsCampaignSexRequired(err error) bool {
 
 func IsCampaignAdLinkRequired(err error) bool {
 	return errors.Is(err, ErrCampaignAdLinkRequired)
+}
+
+func IsInvalidShortLinkDomain(err error) bool {
+	return errors.Is(err, ErrInvalidShortLinkDomain)
+}
+
+func IsAgencyCategoryJobRequired(err error) bool {
+	return errors.Is(err, ErrAgencyCategoryJobRequired)
 }
 
 func IsScheduleTimeNotPresent(err error) bool {
@@ -318,8 +347,36 @@ func IsCampaignUUIDRequired(err error) bool {
 	return errors.Is(err, ErrCampaignUUIDRequired)
 }
 
+func IsCampaignPlatformRequired(err error) bool {
+	return errors.Is(err, ErrCampaignPlatformRequired)
+}
+
+func IsCampaignPlatformInvalid(err error) bool {
+	return errors.Is(err, ErrCampaignPlatformInvalid)
+}
+
+func IsCampaignPlatformSettingRequired(err error) bool {
+	return errors.Is(err, ErrCampaignPlatformSettingRequired)
+}
+
+func IsCampaignPlatformSettingNotApplicable(err error) bool {
+	return errors.Is(err, ErrCampaignPlatformSettingNotApplicable)
+}
+
+func IsCampaignMediaNotFound(err error) bool {
+	return errors.Is(err, ErrCampaignMediaNotFound)
+}
+
+func IsCampaignPlatformSettingNotFound(err error) bool {
+	return errors.Is(err, ErrCampaignPlatformSettingNotFound)
+}
+
 func IsCampaignNotWaitingForApproval(err error) bool {
 	return errors.Is(err, ErrCampaignNotWaitingForApproval)
+}
+
+func IsCampaignNotApproved(err error) bool {
+	return errors.Is(err, ErrCampaignNotApproved)
 }
 
 func IsFreezeTransactionNotFound(err error) bool {
@@ -328,6 +385,14 @@ func IsFreezeTransactionNotFound(err error) bool {
 
 func IsMultipleFreezeTransactionsFound(err error) bool {
 	return errors.Is(err, ErrMultipleFreezeTransactionsFound)
+}
+
+func IsCampaignDebitTransactionNotFound(err error) bool {
+	return errors.Is(err, ErrCampaignDebitTransactionNotFound)
+}
+
+func IsMultipleCampaignDebitTransactionsFound(err error) bool {
+	return errors.Is(err, ErrMultipleCampaignDebitTransactionsFound)
 }
 
 func IsReferrerAgencyNotFound(err error) bool {
@@ -532,6 +597,18 @@ func IsLevel3Required(err error) bool {
 
 func IsSegmentPriceFactorNotFound(err error) bool {
 	return errors.Is(err, ErrSegmentPriceFactorNotFound)
+}
+
+func IsSegmentPriceFactorPlatformInvalid(err error) bool {
+	return errors.Is(err, ErrSegmentPriceFactorPlatformInvalid)
+}
+
+func IsAudienceSpecPlatformRequired(err error) bool {
+	return errors.Is(err, ErrAudienceSpecPlatformRequired)
+}
+
+func IsAudienceSpecPlatformInvalid(err error) bool {
+	return errors.Is(err, ErrAudienceSpecPlatformInvalid)
 }
 
 func IsTicketNotFound(err error) bool {
