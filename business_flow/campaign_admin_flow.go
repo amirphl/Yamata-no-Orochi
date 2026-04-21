@@ -4,6 +4,7 @@ package businessflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 )
 
@@ -24,6 +26,8 @@ type AdminCampaignFlow interface {
 	GetCampaign(ctx context.Context, id uint) (*dto.AdminGetCampaignResponse, error)
 	ApproveCampaign(ctx context.Context, req *dto.AdminApproveCampaignRequest) (*dto.AdminApproveCampaignResponse, error)
 	RejectCampaign(ctx context.Context, req *dto.AdminRejectCampaignRequest) (*dto.AdminRejectCampaignResponse, error)
+	CancelCampaign(ctx context.Context, req *dto.AdminCancelCampaignRequest) (*dto.AdminCancelCampaignResponse, error)
+	RemoveAudienceSpec(ctx context.Context, platform *string) (*dto.AdminRemoveAudienceSpecResponse, error)
 }
 
 // AdminCampaignFlowImpl implements the campaign business flow
@@ -39,6 +43,8 @@ type AdminCampaignFlowImpl struct {
 	notifier            services.NotificationService
 	adminConfig         config.AdminConfig
 	messageConfig       config.MessageConfig
+	cacheConfig         config.CacheConfig
+	rc                  *redis.Client
 	db                  *gorm.DB
 }
 
@@ -53,9 +59,11 @@ func NewAdminCampaignFlow(
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	db *gorm.DB,
+	rc *redis.Client,
 	notifier services.NotificationService,
 	adminConfig config.AdminConfig,
 	messageConfig config.MessageConfig,
+	cacheConfig config.CacheConfig,
 ) AdminCampaignFlow {
 	return &AdminCampaignFlowImpl{
 		campaignRepo:        campaignRepo,
@@ -69,6 +77,8 @@ func NewAdminCampaignFlow(
 		notifier:            notifier,
 		adminConfig:         adminConfig,
 		messageConfig:       messageConfig,
+		cacheConfig:         cacheConfig,
+		rc:                  rc,
 		db:                  db,
 	}
 }
@@ -94,7 +104,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 
 	if filter.StartDate != nil && filter.EndDate != nil {
 		if filter.EndDate.Before(*filter.StartDate) {
-			return nil, NewBusinessError("ADMIN_LIST_CAMPAIGNS_FAILED", "End date must be after start date", nil)
+			return nil, NewBusinessError("ADMIN_LIST_CAMPAIGNS_FAILED", "End date must be after start date", ErrStartDateAfterEndDate)
 		}
 	}
 
@@ -137,30 +147,33 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		totalClicks := clicks
 
 		items = append(items, dto.AdminGetCampaignResponse{
-			ID:              c.ID,
-			UUID:            c.UUID.String(),
-			Status:          c.Status.String(),
-			CreatedAt:       c.CreatedAt,
-			UpdatedAt:       c.UpdatedAt,
-			Title:           c.Spec.Title,
-			Level1:          c.Spec.Level1,
-			Level2s:         c.Spec.Level2s,
-			Level3s:         c.Spec.Level3s,
-			Tags:            c.Spec.Tags,
-			Sex:             c.Spec.Sex,
-			City:            c.Spec.City,
-			AdLink:          c.Spec.AdLink,
-			Content:         c.Spec.Content,
-			ShortLinkDomain: c.Spec.ShortLinkDomain,
-			Category:        c.Spec.Category,
-			Job:             c.Spec.Job,
-			ScheduleAt:      c.Spec.ScheduleAt,
-			LineNumber:      c.Spec.LineNumber,
-			Budget:          c.Spec.Budget,
-			Comment:         c.Comment,
-			Statistics:      stats,
-			TotalClicks:     &totalClicks,
-			ClickRate:       clickRate,
+			ID:                 c.ID,
+			UUID:               c.UUID.String(),
+			Status:             c.Status.String(),
+			CreatedAt:          c.CreatedAt,
+			UpdatedAt:          c.UpdatedAt,
+			Title:              c.Spec.Title,
+			Level1:             c.Spec.Level1,
+			Level2s:            c.Spec.Level2s,
+			Level3s:            c.Spec.Level3s,
+			Tags:               c.Spec.Tags,
+			Sex:                c.Spec.Sex,
+			City:               c.Spec.City,
+			AdLink:             c.Spec.AdLink,
+			Content:            c.Spec.Content,
+			ShortLinkDomain:    c.Spec.ShortLinkDomain,
+			Category:           c.Spec.Category,
+			Job:                c.Spec.Job,
+			ScheduleAt:         c.Spec.ScheduleAt,
+			LineNumber:         c.Spec.LineNumber,
+			MediaUUID:          c.Spec.MediaUUID,
+			PlatformSettingsID: c.Spec.PlatformSettingsID,
+			Platform:           c.Spec.Platform,
+			Budget:             c.Spec.Budget,
+			Comment:            c.Comment,
+			Statistics:         stats,
+			TotalClicks:        &totalClicks,
+			ClickRate:          clickRate,
 		})
 	}
 
@@ -179,6 +192,7 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	if c == nil {
 		return nil, ErrCampaignNotFound
 	}
+
 	var stats map[string]any
 	if len(c.Statistics) > 0 {
 		_ = json.Unmarshal(c.Statistics, &stats)
@@ -261,6 +275,9 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		Job:                   c.Spec.Job,
 		ScheduleAt:            c.Spec.ScheduleAt,
 		LineNumber:            c.Spec.LineNumber,
+		MediaUUID:             c.Spec.MediaUUID,
+		PlatformSettingsID:    c.Spec.PlatformSettingsID,
+		Platform:              c.Spec.Platform,
 		Budget:                c.Spec.Budget,
 		Comment:               c.Comment,
 		SegmentPriceFactor:    segmentPriceFactor,
@@ -624,6 +641,210 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 
 	return &dto.AdminRejectCampaignResponse{
 		Message: "Campaign rejected and budget refunded successfully",
+	}, nil
+}
+
+// CancelCampaign cancels an approved campaign: change status to cancelled-by-admin and refund spent budget to customer credit balance.
+func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.AdminCancelCampaignRequest) (*dto.AdminCancelCampaignResponse, error) {
+	if req == nil || req.CampaignID == 0 || strings.TrimSpace(req.Comment) == "" {
+		return nil, NewBusinessError("ADMIN_CANCEL_CAMPAIGN_FAILED", "campaign_id and comment are required", nil)
+	}
+
+	var campaign *models.Campaign
+	var customer models.Customer
+
+	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		var err error
+		campaign, err = s.campaignRepo.ByID(txCtx, req.CampaignID)
+		if err != nil {
+			return err
+		}
+		if campaign == nil {
+			return ErrCampaignNotFound
+		}
+		if campaign.Status != models.CampaignStatusApproved {
+			return ErrCampaignNotApproved
+		}
+
+		customer, err = getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
+		if err != nil {
+			return err
+		}
+
+		// Find the debit (fee) transaction created when campaign was approved.
+		debitTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+			CustomerID: &campaign.CustomerID,
+			CampaignID: &campaign.ID,
+			Source:     utils.ToPtr("admin_campaign_approve"),
+			Operation:  utils.ToPtr("approve_campaign_budget_consume"),
+			Type:       utils.ToPtr(models.TransactionTypeFee),
+			Status:     utils.ToPtr(models.TransactionStatusCompleted),
+		}, "id DESC", 0, 0)
+		if err != nil {
+			return err
+		}
+		if len(debitTxs) == 0 {
+			return ErrCampaignDebitTransactionNotFound
+		}
+		if len(debitTxs) > 1 {
+			return ErrMultipleCampaignDebitTransactionsFound
+		}
+		debitTx := debitTxs[0]
+
+		wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
+		if err != nil {
+			return err
+		}
+		latestBalance, err := getLatestBalanceSnapshot(txCtx, s.walletRepo, wallet.ID)
+		if err != nil {
+			return err
+		}
+
+		amount := debitTx.Amount
+		if latestBalance.SpentOnCampaign < amount {
+			return ErrInsufficientFunds
+		}
+
+		meta := map[string]any{
+			"source":      "admin_campaign_cancel",
+			"operation":   "cancel_campaign_refund_spent",
+			"campaign_id": campaign.ID,
+			"comment":     req.Comment,
+		}
+		metaBytes, _ := json.Marshal(meta)
+
+		// Move spent amount back to customer credit.
+		newCredit := latestBalance.CreditBalance + amount
+		newSpentOnCampaign := latestBalance.SpentOnCampaign - amount
+
+		newSnap := &models.BalanceSnapshot{
+			UUID:               uuid.New(),
+			CorrelationID:      debitTx.CorrelationID,
+			WalletID:           wallet.ID,
+			CustomerID:         customer.ID,
+			FreeBalance:        latestBalance.FreeBalance,
+			FrozenBalance:      latestBalance.FrozenBalance,
+			LockedBalance:      latestBalance.LockedBalance,
+			CreditBalance:      newCredit,
+			SpentOnCampaign:    newSpentOnCampaign,
+			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+			TotalBalance:       latestBalance.FreeBalance + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
+			Reason:             "campaign_cancelled_by_admin_budget_refund",
+			Description:        fmt.Sprintf("Refund spent budget for admin-cancelled campaign %d", campaign.ID),
+			Metadata:           metaBytes,
+		}
+		if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+			return err
+		}
+
+		beforeMap, err := latestBalance.GetBalanceMap()
+		if err != nil {
+			return err
+		}
+		afterMap, err := newSnap.GetBalanceMap()
+		if err != nil {
+			return err
+		}
+
+		refundTx := &models.Transaction{
+			UUID:          uuid.New(),
+			CorrelationID: debitTx.CorrelationID,
+			Type:          models.TransactionTypeRefund,
+			Status:        models.TransactionStatusCompleted,
+			Amount:        amount,
+			Currency:      utils.TomanCurrency,
+			WalletID:      wallet.ID,
+			CustomerID:    customer.ID,
+			BalanceBefore: beforeMap,
+			BalanceAfter:  afterMap,
+			Description:   fmt.Sprintf("Refund spent budget for admin-cancelled campaign %d", campaign.ID),
+			Metadata:      metaBytes,
+		}
+		if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+			return err
+		}
+
+		campaign.Status = models.CampaignStatusCancelledByAdmin
+		campaign.Comment = &req.Comment
+		campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+		if err := s.campaignRepo.Update(txCtx, *campaign); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_CANCEL_CAMPAIGN_FAILED", "Failed to cancel campaign", err)
+	}
+
+	// Notify customer/admin (best effort)
+	if s.notifier != nil {
+		title := campaign.UUID.String()
+		if campaign.Spec.Title != nil && *campaign.Spec.Title != "" {
+			title = *campaign.Spec.Title
+		}
+		customerMobile := normalizeIranMobile(customer.RepresentativeMobile)
+		msgCustomer := fmt.Sprintf("Your campaign '%s' has been cancelled by admin.", title)
+		id64 := int64(customer.ID)
+		smsCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = s.notifier.SendSMS(smsCtx, customerMobile, msgCustomer, &id64)
+		adminMsg := fmt.Sprintf("Campaign cancelled by admin:\n%s", title)
+		for _, mobile := range s.adminConfig.ActiveMobiles() {
+			_ = s.notifier.SendSMS(smsCtx, mobile, adminMsg, nil)
+		}
+	}
+
+	return &dto.AdminCancelCampaignResponse{
+		Message: "Campaign cancelled and budget refunded successfully",
+	}, nil
+}
+
+func (s *AdminCampaignFlowImpl) RemoveAudienceSpec(ctx context.Context, platform *string) (*dto.AdminRemoveAudienceSpecResponse, error) {
+	if s.rc == nil {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_FAILED", "Cache config is not available", ErrCacheNotAvailable)
+	}
+
+	normalizedPlatform, err := normalizeAudienceSpecPlatformDefault(platform)
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_INVALID_PLATFORM", "Invalid platform", ErrAudienceSpecPlatformInvalid)
+	}
+
+	lockKey := audienceSpecPlatformLockKey(s.cacheConfig, normalizedPlatform)
+	cacheKey := audienceSpecPlatformCacheKey(s.cacheConfig, normalizedPlatform)
+	filePath := audienceSpecFilePath()
+
+	ok, err := s.rc.SetNX(ctx, lockKey, "1", 10*time.Second).Result()
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_LOCK_FAILED", "Failed to acquire lock", err)
+	}
+	if !ok {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_LOCK_BUSY", "Another worker is updating audience spec", errors.New("lock busy"))
+	}
+	defer func() {
+		_ = s.rc.Del(context.Background(), lockKey).Err()
+	}()
+
+	currentByPlatform, err := readAudienceSpecFileByPlatform(filePath)
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
+	}
+	delete(currentByPlatform, normalizedPlatform)
+
+	bytes, err := json.MarshalIndent(currentByPlatform, "", "  ")
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal audience spec", err)
+	}
+	if err := atomicWrite(filePath, bytes, 0o644); err != nil {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_WRITE_FAILED", "Failed to write audience spec file", err)
+	}
+
+	if err := s.rc.Del(ctx, cacheKey).Err(); err != nil {
+		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_CACHE_FAILED", "Failed to clear audience spec cache", err)
+	}
+
+	return &dto.AdminRemoveAudienceSpecResponse{
+		Message:  "Audience spec removed successfully",
+		Platform: normalizedPlatform,
 	}, nil
 }
 
