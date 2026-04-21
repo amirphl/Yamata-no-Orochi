@@ -15,6 +15,10 @@ import (
 type CampaignStatus string
 
 const (
+	CampaignPlatformSMS                             = "sms"
+	CampaignPlatformRubika                          = "rubika"
+	CampaignPlatformBale                            = "bale"
+	CampaignPlatformSPlus                           = "splus"
 	CampaignStatusInitiated          CampaignStatus = "initiated"
 	CampaignStatusInProgress         CampaignStatus = "in-progress"
 	CampaignStatusWaitingForApproval CampaignStatus = "waiting-for-approval"
@@ -23,7 +27,17 @@ const (
 	CampaignStatusExecuted           CampaignStatus = "executed"
 	CampaignStatusRejected           CampaignStatus = "rejected"
 	CampaignStatusCancelled          CampaignStatus = "cancelled"
+	CampaignStatusCancelledByAdmin   CampaignStatus = "cancelled-by-admin"
 )
+
+func IsValidCampaignPlatform(p string) bool {
+	switch p {
+	case CampaignPlatformSMS, CampaignPlatformRubika, CampaignPlatformBale, CampaignPlatformSPlus:
+		return true
+	default:
+		return false
+	}
+}
 
 // String returns the string representation of the status
 func (s CampaignStatus) String() string {
@@ -36,6 +50,7 @@ func (s CampaignStatus) Valid() bool {
 	case CampaignStatusInitiated, CampaignStatusInProgress,
 		CampaignStatusWaitingForApproval, CampaignStatusApproved,
 		CampaignStatusRejected, CampaignStatusCancelled,
+		CampaignStatusCancelledByAdmin,
 		CampaignStatusRunning, CampaignStatusExecuted:
 		return true
 	default:
@@ -88,8 +103,11 @@ type CampaignSpec struct {
 	Content *string `json:"content,omitempty"`
 
 	// Scheduling and configuration
-	ScheduleAt *time.Time `json:"schedule_at,omitempty"`
-	LineNumber *string    `json:"line_number,omitempty"`
+	ScheduleAt         *time.Time `json:"schedule_at,omitempty"`
+	LineNumber         *string    `json:"line_number,omitempty"`
+	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty"`
+	Platform           string     `json:"platform"`
 	// Short link domain for generated URLs
 	ShortLinkDomain *string `json:"short_link_domain,omitempty"`
 	// Agency metadata
@@ -203,23 +221,26 @@ func (c *Campaign) CanTransitionTo(newStatus CampaignStatus) bool {
 
 // CampaignFilter represents filter criteria for campaigns
 type CampaignFilter struct {
-	ID             *uint           `json:"id,omitempty"`
-	UUID           *uuid.UUID      `json:"uuid,omitempty"`
-	CustomerID     *uint           `json:"customer_id,omitempty"`
-	Status         *CampaignStatus `json:"status,omitempty"`
-	Title          *string         `json:"title,omitempty"`
-	Level1         *string         `json:"level1,omitempty"`
-	Sex            *string         `json:"sex,omitempty"`
-	City           *string         `json:"city,omitempty"`
-	LineNumber     *string         `json:"line_number,omitempty"`
-	CreatedAfter   *time.Time      `json:"created_after,omitempty"`
-	CreatedBefore  *time.Time      `json:"created_before,omitempty"`
-	UpdatedAfter   *time.Time      `json:"updated_after,omitempty"`
-	UpdatedBefore  *time.Time      `json:"updated_before,omitempty"`
-	ScheduleAfter  *time.Time      `json:"schedule_after,omitempty"`
-	ScheduleBefore *time.Time      `json:"schedule_before,omitempty"`
-	MinBudget      *uint64         `json:"min_budget,omitempty"`
-	MaxBudget      *uint64         `json:"max_budget,omitempty"`
+	ID                 *uint           `json:"id,omitempty"`
+	UUID               *uuid.UUID      `json:"uuid,omitempty"`
+	CustomerID         *uint           `json:"customer_id,omitempty"`
+	Status             *CampaignStatus `json:"status,omitempty"`
+	Title              *string         `json:"title,omitempty"`
+	Level1             *string         `json:"level1,omitempty"`
+	Sex                *string         `json:"sex,omitempty"`
+	City               *string         `json:"city,omitempty"`
+	LineNumber         *string         `json:"line_number,omitempty"`
+	MediaUUID          *uuid.UUID      `json:"media_uuid,omitempty"`
+	PlatformSettingsID *uint           `json:"platform_settings_id,omitempty"`
+	Platform           *string         `json:"platform,omitempty"`
+	CreatedAfter       *time.Time      `json:"created_after,omitempty"`
+	CreatedBefore      *time.Time      `json:"created_before,omitempty"`
+	UpdatedAfter       *time.Time      `json:"updated_after,omitempty"`
+	UpdatedBefore      *time.Time      `json:"updated_before,omitempty"`
+	ScheduleAfter      *time.Time      `json:"schedule_after,omitempty"`
+	ScheduleBefore     *time.Time      `json:"schedule_before,omitempty"`
+	MinBudget          *uint64         `json:"min_budget,omitempty"`
+	MaxBudget          *uint64         `json:"max_budget,omitempty"`
 }
 
 // GetStatusDisplayName returns a human-readable status name
