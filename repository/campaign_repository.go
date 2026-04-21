@@ -375,6 +375,15 @@ func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.Campaign
 	if filter.LineNumber != nil {
 		db = db.Where("spec->>'line_number' = ?", *filter.LineNumber)
 	}
+	if filter.MediaUUID != nil {
+		db = db.Where("(COALESCE(spec->>'media_uuid', spec->>'mediaUuid')) = ?", filter.MediaUUID.String())
+	}
+	if filter.PlatformSettingsID != nil {
+		db = db.Where("(COALESCE(spec->>'platform_settings_id', spec->>'platformSettingsId'))::bigint = ?", *filter.PlatformSettingsID)
+	}
+	if filter.Platform != nil {
+		db = db.Where("COALESCE(NULLIF(spec->>'platform', ''), ?) = ?", models.CampaignPlatformSMS, *filter.Platform)
+	}
 	if filter.CreatedAfter != nil {
 		db = db.Where("created_at >= ?", *filter.CreatedAfter)
 	}
