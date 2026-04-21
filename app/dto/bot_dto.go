@@ -5,6 +5,7 @@ package dto
 // color must be one of: black, white, pink
 // tags must contain at least one non-empty element
 type BotUpdateAudienceSpecRequest struct {
+	Platform          string         `json:"platform" validate:"required,oneof=sms rubika bale splus"`
 	Level1            string         `json:"level1" validate:"required,max=255"`
 	Level2            string         `json:"level2" validate:"required,max=255"`
 	Level3            string         `json:"level3" validate:"required,max=255"`
@@ -21,9 +22,10 @@ type BotUpdateAudienceSpecResponse struct {
 // BotResetAudienceSpecRequest is used by bots to reset/delete audience spec
 // This will completely remove the specified level1/level2/level3 from the audience spec
 type BotResetAudienceSpecRequest struct {
-	Level1 string `json:"level1" validate:"required,max=255"`
-	Level2 string `json:"level2" validate:"required,max=255"`
-	Level3 string `json:"level3" validate:"required,max=255"`
+	Platform string `json:"platform" validate:"required,oneof=sms rubika bale splus"`
+	Level1   string `json:"level1" validate:"required,max=255"`
+	Level2   string `json:"level2" validate:"required,max=255"`
+	Level3   string `json:"level3" validate:"required,max=255"`
 }
 
 // BotResetAudienceSpecResponse acknowledges a successful reset/deletion
