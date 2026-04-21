@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -27,23 +29,26 @@ type BotCampaignFlow interface {
 }
 
 type BotCampaignFlowImpl struct {
-	campaignRepo repository.CampaignRepository
-	cacheConfig  *config.CacheConfig
-	db           *gorm.DB
-	rc           *redis.Client
+	campaignRepo         repository.CampaignRepository
+	platformSettingsRepo repository.PlatformSettingsRepository
+	cacheConfig          config.CacheConfig
+	db                   *gorm.DB
+	rc                   *redis.Client
 }
 
 func NewBotCampaignFlow(
 	campaignRepo repository.CampaignRepository,
-	cacheConfig *config.CacheConfig,
+	platformSettingsRepo repository.PlatformSettingsRepository,
+	cacheConfig config.CacheConfig,
 	db *gorm.DB,
 	rc *redis.Client,
 ) BotCampaignFlow {
 	return &BotCampaignFlowImpl{
-		campaignRepo: campaignRepo,
-		cacheConfig:  cacheConfig,
-		db:           db,
-		rc:           rc,
+		campaignRepo:         campaignRepo,
+		platformSettingsRepo: platformSettingsRepo,
+		cacheConfig:          cacheConfig,
+		db:                   db,
+		rc:                   rc,
 	}
 }
 
@@ -60,30 +65,44 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context) (*dto.BotL
 		return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to list ready campaigns", err)
 	}
 
+	platformSettingsByID, err := s.loadPlatformSettingsSpecs(ctx, readyCampaigns)
+	if err != nil {
+		return nil, err
+	}
+
 	items := make([]dto.BotGetCampaignResponse, 0, len(readyCampaigns))
 	for _, c := range readyCampaigns {
+		var platformSettings *dto.BotCampaignPlatformSettingsSpec
+		if c.Spec.PlatformSettingsID != nil && *c.Spec.PlatformSettingsID != 0 {
+			platformSettings = platformSettingsByID[*c.Spec.PlatformSettingsID]
+		}
+
 		items = append(items, dto.BotGetCampaignResponse{
-			ID:              c.ID,
-			CustomerID:      c.CustomerID,
-			Status:          c.Status.String(),
-			CreatedAt:       c.CreatedAt,
-			UpdatedAt:       c.UpdatedAt,
-			Title:           c.Spec.Title,
-			Level1:          c.Spec.Level1,
-			Level2s:         c.Spec.Level2s,
-			Tags:            c.Spec.Tags,
-			Sex:             c.Spec.Sex,
-			City:            c.Spec.City,
-			AdLink:          c.Spec.AdLink,
-			Content:         c.Spec.Content,
-			ShortLinkDomain: c.Spec.ShortLinkDomain,
-			Category:        c.Spec.Category,
-			Job:             c.Spec.Job,
-			ScheduleAt:      c.Spec.ScheduleAt,
-			LineNumber:      c.Spec.LineNumber,
-			Budget:          c.Spec.Budget,
-			Comment:         c.Comment,
-			NumAudiences:    *c.NumAudience,
+			ID:                 c.ID,
+			CustomerID:         c.CustomerID,
+			Status:             c.Status.String(),
+			CreatedAt:          c.CreatedAt,
+			UpdatedAt:          c.UpdatedAt,
+			Title:              c.Spec.Title,
+			Level1:             c.Spec.Level1,
+			Level2s:            c.Spec.Level2s,
+			Tags:               c.Spec.Tags,
+			Sex:                c.Spec.Sex,
+			City:               c.Spec.City,
+			AdLink:             c.Spec.AdLink,
+			Content:            c.Spec.Content,
+			ShortLinkDomain:    c.Spec.ShortLinkDomain,
+			Category:           c.Spec.Category,
+			Job:                c.Spec.Job,
+			ScheduleAt:         c.Spec.ScheduleAt,
+			LineNumber:         c.Spec.LineNumber,
+			MediaUUID:          c.Spec.MediaUUID,
+			PlatformSettingsID: c.Spec.PlatformSettingsID,
+			PlatformSettings:   platformSettings,
+			Platform:           c.Spec.Platform,
+			Budget:             c.Spec.Budget,
+			Comment:            c.Comment,
+			NumAudiences:       c.NumAudience,
 		})
 	}
 
@@ -91,6 +110,42 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context) (*dto.BotL
 		Message: "Ready campaigns retrieved successfully",
 		Items:   items,
 	}, nil
+}
+
+func (s *BotCampaignFlowImpl) loadPlatformSettingsSpecs(ctx context.Context, campaigns []*models.Campaign) (map[uint]*dto.BotCampaignPlatformSettingsSpec, error) {
+	ids := make(map[uint]struct{})
+	for _, campaign := range campaigns {
+		if campaign.Spec.PlatformSettingsID == nil || *campaign.Spec.PlatformSettingsID == 0 {
+			continue
+		}
+		ids[*campaign.Spec.PlatformSettingsID] = struct{}{}
+	}
+	if len(ids) == 0 {
+		return map[uint]*dto.BotCampaignPlatformSettingsSpec{}, nil
+	}
+
+	result := make(map[uint]*dto.BotCampaignPlatformSettingsSpec, len(ids))
+	for id := range ids {
+		row, err := s.platformSettingsRepo.ByID(ctx, id)
+		if err != nil {
+			return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to fetch platform settings", err)
+		}
+		if row == nil {
+			err := fmt.Errorf("platform settings not found: id=%d", id)
+			return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Campaign references missing platform settings", err)
+		}
+		result[id] = &dto.BotCampaignPlatformSettingsSpec{
+			ID:           row.ID,
+			Platform:     row.Platform,
+			Name:         row.Name,
+			Description:  row.Description,
+			MultimediaID: row.MultimediaID,
+			Metadata:     row.Metadata,
+			Status:       string(row.Status),
+		}
+	}
+
+	return result, nil
 }
 
 // MoveCampaignToRunning moves campaign status to running
@@ -171,19 +226,56 @@ type AudienceSpecLeaf struct {
 	AvailableAudience int      `json:"available_audience"`
 }
 
-type AudienceSpecMap map[string]map[string]map[string]AudienceSpecLeaf
-
-// v2 on-disk format structures (Level2 holds metadata and items)
+// on-disk format structures (Level2 holds metadata and items)
 type audienceSpecLevel2File struct {
 	Metadata map[string]any              `json:"metadata,omitempty"`
 	Items    map[string]AudienceSpecLeaf `json:"items,omitempty"`
 }
 
-type audienceSpecFileV2 map[string]map[string]*audienceSpecLevel2File
+type audienceSpecFile map[string]map[string]*audienceSpecLevel2File
+type audienceSpecByPlatformFile map[string]audienceSpecFile
+
+func audienceSpecPlatformCacheKey(cacheConfig config.CacheConfig, platform string) string {
+	return redisKey(cacheConfig, fmt.Sprintf("%s:%s", utils.AudienceSpecCacheKey, platform))
+}
+
+func audienceSpecPlatformLockKey(cacheConfig config.CacheConfig, platform string) string {
+	return redisKey(cacheConfig, fmt.Sprintf("%s:%s", utils.AudienceSpecLockKey, platform))
+}
+
+func normalizeAudienceSpecPlatformRequired(platform string) (string, error) {
+	p := strings.ToLower(strings.TrimSpace(platform))
+	if p == "" {
+		return "", ErrAudienceSpecPlatformRequired
+	}
+	if !models.IsValidCampaignPlatform(p) {
+		return "", ErrAudienceSpecPlatformInvalid
+	}
+	return p, nil
+}
+
+func normalizeAudienceSpecPlatformDefault(platform *string) (string, error) {
+	if platform == nil {
+		return models.CampaignPlatformSMS, nil
+	}
+	p := strings.ToLower(strings.TrimSpace(*platform))
+	if p == "" {
+		return models.CampaignPlatformSMS, nil
+	}
+	if !models.IsValidCampaignPlatform(p) {
+		return "", ErrAudienceSpecPlatformInvalid
+	}
+	return p, nil
+}
 
 func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error) {
-	lockKey := redisKey(*s.cacheConfig, utils.AudienceSpecLockKey)
-	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
+	platform, err := normalizeAudienceSpecPlatformRequired(req.Platform)
+	if err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_PLATFORM_REQUIRED", "Platform is required", err)
+	}
+
+	lockKey := audienceSpecPlatformLockKey(s.cacheConfig, platform)
+	cacheKey := audienceSpecPlatformCacheKey(s.cacheConfig, platform)
 	filePath := audienceSpecFilePath()
 
 	// Acquire distributed lock (SETNX with TTL)
@@ -198,10 +290,14 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 		_ = s.rc.Del(context.Background(), lockKey).Err()
 	}()
 
-	// Read existing JSON file (if any) in v2 format
-	current, err := readAudienceSpecFileV2(filePath)
+	// Read existing JSON file (if any)
+	currentByPlatform, err := readAudienceSpecFileByPlatform(filePath)
 	if err != nil {
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
+	}
+	current, exists := currentByPlatform[platform]
+	if !exists || current == nil {
+		current = make(audienceSpecFile)
 	}
 
 	// Ensure maps
@@ -226,7 +322,8 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 	}
 
 	// Marshal and write atomically (tmp + rename)
-	bytes, err := json.MarshalIndent(current, "", "  ")
+	currentByPlatform[platform] = current
+	bytes, err := json.MarshalIndent(currentByPlatform, "", "  ")
 	if err != nil {
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal merged spec", err)
 	}
@@ -235,7 +332,11 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 	}
 
 	// Update Redis cache
-	if err := s.rc.Set(ctx, cacheKey, bytes, 0).Err(); err != nil {
+	platformBytes, err := json.MarshalIndent(current, "", "  ")
+	if err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal platform spec", err)
+	}
+	if err := s.rc.Set(ctx, cacheKey, platformBytes, 0).Err(); err != nil {
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_CACHE_FAILED", "Failed to cache audience spec", err)
 	}
 
@@ -244,8 +345,13 @@ func (s *BotCampaignFlowImpl) UpdateAudienceSpec(ctx context.Context, req *dto.B
 
 // ResetAudienceSpec deletes the specified level1/level2/level3 from the audience spec
 func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.BotResetAudienceSpecRequest) (*dto.BotResetAudienceSpecResponse, error) {
-	lockKey := redisKey(*s.cacheConfig, utils.AudienceSpecLockKey)
-	cacheKey := redisKey(*s.cacheConfig, utils.AudienceSpecCacheKey)
+	platform, err := normalizeAudienceSpecPlatformRequired(req.Platform)
+	if err != nil {
+		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_PLATFORM_REQUIRED", "Platform is required", err)
+	}
+
+	lockKey := audienceSpecPlatformLockKey(s.cacheConfig, platform)
+	cacheKey := audienceSpecPlatformCacheKey(s.cacheConfig, platform)
 	filePath := audienceSpecFilePath()
 
 	// Acquire distributed lock (SETNX with TTL)
@@ -261,9 +367,13 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 	}()
 
 	// Read existing JSON file (if any)
-	current, err := readAudienceSpecFileV2(filePath)
+	currentByPlatform, err := readAudienceSpecFileByPlatform(filePath)
 	if err != nil {
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
+	}
+	current, exists := currentByPlatform[platform]
+	if !exists || current == nil {
+		return &dto.BotResetAudienceSpecResponse{Message: "Platform not found, nothing to reset"}, nil
 	}
 
 	// Check if level1 exists
@@ -293,7 +403,13 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 	}
 
 	// Marshal and write atomically (tmp + rename)
-	bytes, err := json.MarshalIndent(current, "", "  ")
+	if len(current) == 0 {
+		delete(currentByPlatform, platform)
+	} else {
+		currentByPlatform[platform] = current
+	}
+
+	bytes, err := json.MarshalIndent(currentByPlatform, "", "  ")
 	if err != nil {
 		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal updated spec", err)
 	}
@@ -302,67 +418,74 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 	}
 
 	// Update Redis cache
-	if err := s.rc.Set(ctx, cacheKey, bytes, 0).Err(); err != nil {
-		return nil, NewBusinessError("BOT_AUDIENCE_SPEC_CACHE_FAILED", "Failed to cache audience spec", err)
+	if len(current) == 0 {
+		if err := s.rc.Del(ctx, cacheKey).Err(); err != nil {
+			return nil, NewBusinessError("BOT_AUDIENCE_SPEC_CACHE_FAILED", "Failed to clear platform cache", err)
+		}
+	} else {
+		platformBytes, err := json.MarshalIndent(current, "", "  ")
+		if err != nil {
+			return nil, NewBusinessError("BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal platform spec", err)
+		}
+		if err := s.rc.Set(ctx, cacheKey, platformBytes, 0).Err(); err != nil {
+			return nil, NewBusinessError("BOT_AUDIENCE_SPEC_CACHE_FAILED", "Failed to cache audience spec", err)
+		}
 	}
 
 	return &dto.BotResetAudienceSpecResponse{Message: "Audience spec reset successfully"}, nil
 }
 
-// readAudienceSpecFileV2 reads the on-disk spec and upgrades legacy format to v2 in-memory
-func readAudienceSpecFileV2(path string) (audienceSpecFileV2, error) {
+func readAudienceSpecFileByPlatform(path string) (audienceSpecByPlatformFile, error) {
 	bytes, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return make(audienceSpecFileV2), nil
+			return make(audienceSpecByPlatformFile), nil
 		}
 		return nil, err
 	}
 	if len(bytes) == 0 {
-		return make(audienceSpecFileV2), nil
+		return make(audienceSpecByPlatformFile), nil
 	}
-	// Try v2
-	var v2 audienceSpecFileV2
-	if err := json.Unmarshal(bytes, &v2); err == nil && v2 != nil {
-		// Ensure inner maps are non-nil
-		for l1, l2map := range v2 {
-			if l2map == nil {
-				v2[l1] = make(map[string]*audienceSpecLevel2File)
+
+	// Current format: map[platform]audienceSpecFile
+	var byPlatform audienceSpecByPlatformFile
+	if err := json.Unmarshal(bytes, &byPlatform); err == nil && byPlatform != nil {
+		for platform, spec := range byPlatform {
+			normalized, nerr := normalizeAudienceSpecPlatformRequired(platform)
+			if nerr != nil {
 				continue
 			}
-			for l2, node := range l2map {
-				if node == nil {
-					l2map[l2] = &audienceSpecLevel2File{Metadata: map[string]any{}, Items: map[string]AudienceSpecLeaf{}}
-					continue
-				}
-				if node.Items == nil {
-					node.Items = make(map[string]AudienceSpecLeaf)
-				}
-				if node.Metadata == nil {
-					node.Metadata = make(map[string]any)
-				}
+			byPlatform[normalized] = ensureAudienceSpecFile(spec)
+			if normalized != platform {
+				delete(byPlatform, platform)
 			}
 		}
-		return v2, nil
+		return byPlatform, nil
 	}
-	// Legacy format: map[level1][level2][level3]leaf
-	var legacy AudienceSpecMap
-	if err := json.Unmarshal(bytes, &legacy); err != nil || legacy == nil {
-		// If unmarshal failed, return empty v2 but not an error to avoid breaking
-		return make(audienceSpecFileV2), nil
+	return make(audienceSpecByPlatformFile), nil
+}
+
+func ensureAudienceSpecFile(in audienceSpecFile) audienceSpecFile {
+	if in == nil {
+		return make(audienceSpecFile)
 	}
-	upgraded := make(audienceSpecFileV2)
-	for l1, l2 := range legacy {
-		if _, ok := upgraded[l1]; !ok {
-			upgraded[l1] = make(map[string]*audienceSpecLevel2File)
+	for l1, l2map := range in {
+		if l2map == nil {
+			in[l1] = make(map[string]*audienceSpecLevel2File)
+			continue
 		}
-		for l2k, l3 := range l2 {
-			node := &audienceSpecLevel2File{Metadata: map[string]any{}, Items: map[string]AudienceSpecLeaf{}}
-			for l3k, leaf := range l3 {
-				node.Items[l3k] = leaf
+		for l2, node := range l2map {
+			if node == nil {
+				l2map[l2] = &audienceSpecLevel2File{Metadata: map[string]any{}, Items: map[string]AudienceSpecLeaf{}}
+				continue
 			}
-			upgraded[l1][l2k] = node
+			if node.Items == nil {
+				node.Items = make(map[string]AudienceSpecLeaf)
+			}
+			if node.Metadata == nil {
+				node.Metadata = make(map[string]any)
+			}
 		}
 	}
-	return upgraded, nil
+	return in
 }
