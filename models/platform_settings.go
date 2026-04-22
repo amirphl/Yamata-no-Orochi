@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql/driver"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -9,6 +10,51 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// PlatformSettingsMetadata handles jsonb <-> Go map conversion.
+type PlatformSettingsMetadata map[string]any
+
+// Scan implements sql.Scanner for jsonb metadata.
+func (m *PlatformSettingsMetadata) Scan(value any) error {
+	if value == nil {
+		*m = PlatformSettingsMetadata{}
+		return nil
+	}
+
+	var raw []byte
+	switch v := value.(type) {
+	case []byte:
+		raw = v
+	case string:
+		raw = []byte(v)
+	default:
+		return fmt.Errorf("cannot scan %T into PlatformSettingsMetadata", value)
+	}
+
+	if len(raw) == 0 || string(raw) == "null" {
+		*m = PlatformSettingsMetadata{}
+		return nil
+	}
+
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return err
+	}
+	*m = PlatformSettingsMetadata(out)
+	return nil
+}
+
+// Value implements driver.Valuer for jsonb metadata.
+func (m PlatformSettingsMetadata) Value() (driver.Value, error) {
+	if m == nil {
+		return []byte("{}"), nil
+	}
+	b, err := json.Marshal(map[string]any(m))
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
 
 // PlatformSettingsStatus represents platform settings status.
 type PlatformSettingsStatus string
@@ -62,16 +108,17 @@ func (s PlatformSettingsStatus) Value() (driver.Value, error) {
 
 // PlatformSettings represents platform settings with optional multimedia attachment.
 type PlatformSettings struct {
-	ID           uint                  `gorm:"primaryKey;autoIncrement" json:"id"`
-	UUID         uuid.UUID             `gorm:"type:uuid;uniqueIndex;not null;default:gen_random_uuid()" json:"uuid"`
-	CustomerID   uint                  `gorm:"not null;index" json:"customer_id"`
-	Platform     string                `gorm:"type:varchar(20);not null;index" json:"platform"`
-	Name         *string               `gorm:"type:varchar(255)" json:"name,omitempty"`
-	Description  *string               `gorm:"type:text" json:"description,omitempty"`
-	MultimediaID *uint                 `gorm:"index" json:"multimedia_id,omitempty"`
-	Status       PlatformSettingsStatus `gorm:"type:varchar(20);not null;default:'initialized';index" json:"status"`
-	CreatedAt    time.Time             `gorm:"not null;default:CURRENT_TIMESTAMP;index" json:"created_at"`
-	UpdatedAt    time.Time             `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
+	ID           uint                     `gorm:"primaryKey;autoIncrement" json:"id"`
+	UUID         uuid.UUID                `gorm:"type:uuid;uniqueIndex;not null;default:gen_random_uuid()" json:"uuid"`
+	CustomerID   uint                     `gorm:"not null;index" json:"customer_id"`
+	Platform     string                   `gorm:"type:varchar(20);not null;index" json:"platform"`
+	Name         *string                  `gorm:"type:varchar(255)" json:"name,omitempty"`
+	Description  *string                  `gorm:"type:text" json:"description,omitempty"`
+	MultimediaID *uint                    `gorm:"index" json:"multimedia_id,omitempty"`
+	Metadata     PlatformSettingsMetadata `gorm:"type:jsonb;not null;default:'{}'" json:"metadata"`
+	Status       PlatformSettingsStatus   `gorm:"type:varchar(20);not null;default:'initialized';index" json:"status"`
+	CreatedAt    time.Time                `gorm:"not null;default:CURRENT_TIMESTAMP;index" json:"created_at"`
+	UpdatedAt    time.Time                `gorm:"not null;default:CURRENT_TIMESTAMP" json:"updated_at"`
 
 	Multimedia *MultimediaAsset `gorm:"foreignKey:MultimediaID;references:ID;constraint:OnDelete:SET NULL" json:"multimedia,omitempty"`
 	Customer   *Customer        `gorm:"foreignKey:CustomerID;references:ID;constraint:OnDelete:CASCADE" json:"customer,omitempty"`
@@ -95,12 +142,12 @@ func (p *PlatformSettings) BeforeCreate(tx *gorm.DB) error {
 
 // PlatformSettingsFilter represents filter criteria for platform settings queries.
 type PlatformSettingsFilter struct {
-	ID            *uint                  `json:"id,omitempty"`
-	UUID          *uuid.UUID             `json:"uuid,omitempty"`
-	CustomerID    *uint                  `json:"customer_id,omitempty"`
-	Platform      *string                `json:"platform,omitempty"`
+	ID            *uint                   `json:"id,omitempty"`
+	UUID          *uuid.UUID              `json:"uuid,omitempty"`
+	CustomerID    *uint                   `json:"customer_id,omitempty"`
+	Platform      *string                 `json:"platform,omitempty"`
 	Status        *PlatformSettingsStatus `json:"status,omitempty"`
-	MultimediaID  *uint                  `json:"multimedia_id,omitempty"`
-	CreatedAfter  *time.Time             `json:"created_after,omitempty"`
-	CreatedBefore *time.Time             `json:"created_before,omitempty"`
+	MultimediaID  *uint                   `json:"multimedia_id,omitempty"`
+	CreatedAfter  *time.Time              `json:"created_after,omitempty"`
+	CreatedBefore *time.Time              `json:"created_before,omitempty"`
 }
