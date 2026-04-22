@@ -4,6 +4,7 @@ package businessflow
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -25,6 +26,11 @@ type AdminCustomerManagementFlowImpl struct {
 	customerRepo    repository.CustomerRepository
 	campaignRepo    repository.CampaignRepository
 }
+
+const (
+	systemCustomerEmail = "system@yamata-no-orochi.com"
+	taxCustomerEmail    = "tax@system.yamata-no-orochi.com"
+)
 
 func NewAdminCustomerManagementFlow(
 	customerRepo repository.CustomerRepository,
@@ -62,6 +68,9 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomersShares(ctx context.Context
 			return nil, NewBusinessError("VALIDATION_ERROR", "Invalid end_date format", e)
 		}
 		endDate = &et
+	}
+	if startDate != nil && endDate != nil && startDate.After(*endDate) {
+		return nil, NewBusinessError("VALIDATION_ERROR", "start_date cannot be after end_date", ErrStartDateAfterEndDate)
 	}
 
 	rows, err := f.transactionRepo.AggregateCustomersShares(ctx, startDate, endDate)
@@ -293,9 +302,11 @@ func (f *AdminCustomerManagementFlowImpl) SetCustomerActiveStatus(ctx context.Co
 		return nil, NewBusinessError("CUSTOMER_NOT_FOUND", "Customer not found", ErrCustomerNotFound)
 	}
 	if !req.IsActive {
-		// TODO: Use account type name instead of representative names
-		fullName := (cust.RepresentativeFirstName + " " + cust.RepresentativeLastName)
-		if fullName == "System Account" || fullName == "Tax Collector" {
+		fullName := strings.TrimSpace(cust.RepresentativeFirstName + " " + cust.RepresentativeLastName)
+		if strings.EqualFold(cust.Email, systemCustomerEmail) ||
+			strings.EqualFold(cust.Email, taxCustomerEmail) ||
+			strings.EqualFold(fullName, "System Account") ||
+			strings.EqualFold(fullName, "Tax Collector") {
 			return nil, NewBusinessError("FORBIDDEN_OPERATION", "System and Tax users cannot be deactivated", ErrAccountInactive)
 		}
 	}
