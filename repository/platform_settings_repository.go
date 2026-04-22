@@ -125,3 +125,62 @@ func (r *PlatformSettingsRepositoryImpl) Exists(ctx context.Context, filter mode
 	}
 	return c > 0, nil
 }
+
+// UpdateStatus updates only status/updated_at for a platform settings row.
+func (r *PlatformSettingsRepositoryImpl) UpdateStatus(ctx context.Context, id uint, status models.PlatformSettingsStatus) error {
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Model(&models.PlatformSettings{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":     status,
+			"updated_at": utils.UTCNow(),
+		}).Error
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+// AppendMetadata merges a single key-value pair into metadata without replacing existing keys.
+func (r *PlatformSettingsRepositoryImpl) AppendMetadata(ctx context.Context, id uint, key, value string) error {
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	err = db.Model(&models.PlatformSettings{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"metadata":   gorm.Expr("COALESCE(metadata, '{}'::jsonb) || jsonb_build_object(?::text, to_jsonb(?::text))", key, value),
+			"updated_at": utils.UTCNow(),
+		}).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
