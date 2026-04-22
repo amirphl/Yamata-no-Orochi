@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strconv"
 	"time"
@@ -67,7 +68,7 @@ func (h *AdminCustomerManagementHandler) GetCustomersShares(c fiber.Ctx) error {
 	res, err := h.flow.GetCustomersShares(ctx, &req)
 	if err != nil {
 		log.Println("Admin get customers shares failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to retrieve customers shares", "GET_ADMIN_CUSTOMERS_SHARES_FAILED", nil)
+		return h.respondAdminCustomerManagementError(c, err, "Failed to retrieve customers shares", "GET_ADMIN_CUSTOMERS_SHARES_FAILED")
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Customers shares retrieved successfully", res)
 }
@@ -91,11 +92,8 @@ func (h *AdminCustomerManagementHandler) GetCustomerWithCampaigns(c fiber.Ctx) e
 	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management/"+cidStr)
 	res, err := h.flow.GetCustomerWithCampaigns(ctx, uint(cid))
 	if err != nil {
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
 		log.Println("Admin get customer with campaigns failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to retrieve customer details", "GET_ADMIN_CUSTOMER_WITH_CAMPAIGNS_FAILED", nil)
+		return h.respondAdminCustomerManagementError(c, err, "Failed to retrieve customer details", "GET_ADMIN_CUSTOMER_WITH_CAMPAIGNS_FAILED")
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Customer details retrieved successfully", res)
 }
@@ -109,7 +107,7 @@ func (h *AdminCustomerManagementHandler) GetCustomerWithCampaigns(c fiber.Ctx) e
 // @Success 200 {object} dto.APIResponse{data=dto.AdminSetCustomerActiveStatusResponse}
 // @Failure 400 {object} dto.APIResponse
 // @Failure 404 {object} dto.APIResponse
-// @Failure 409 {object} dto.APIResponse
+// @Failure 403 {object} dto.APIResponse
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/admin/customer-management/active-status [post]
 func (h *AdminCustomerManagementHandler) SetCustomerActiveStatus(c fiber.Ctx) error {
@@ -123,14 +121,8 @@ func (h *AdminCustomerManagementHandler) SetCustomerActiveStatus(c fiber.Ctx) er
 	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management/active-status")
 	res, err := h.flow.SetCustomerActiveStatus(ctx, &req)
 	if err != nil {
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
-		if businessflow.IsAccountInactive(err) {
-			return h.ErrorResponse(c, fiber.StatusConflict, "System and Tax users cannot be deactivated", "FORBIDDEN_OPERATION", nil)
-		}
 		log.Println("Admin set customer active status failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to set customer active status", "SET_CUSTOMER_ACTIVE_STATUS_FAILED", nil)
+		return h.respondAdminCustomerManagementError(c, err, "Failed to set customer active status", "SET_CUSTOMER_ACTIVE_STATUS_FAILED")
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Customer active status updated", res)
 }
@@ -154,13 +146,44 @@ func (h *AdminCustomerManagementHandler) GetCustomerDiscountsHistory(c fiber.Ctx
 	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management/"+cidStr+"/discounts")
 	res, err := h.flow.GetCustomerDiscountsHistory(ctx, uint(cid))
 	if err != nil {
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
-		}
 		log.Println("Admin list customer discounts history failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list customer discounts history", "LIST_CUSTOMER_DISCOUNTS_HISTORY_FAILED", nil)
+		return h.respondAdminCustomerManagementError(c, err, "Failed to list customer discounts history", "LIST_CUSTOMER_DISCOUNTS_HISTORY_FAILED")
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Customer discounts history retrieved successfully", res)
+}
+
+func (h *AdminCustomerManagementHandler) respondAdminCustomerManagementError(
+	c fiber.Ctx,
+	err error,
+	defaultMessage string,
+	defaultCode string,
+) error {
+	if businessflow.IsCustomerNotFound(err) {
+		return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+	}
+	if businessflow.IsAccountInactive(err) {
+		return h.ErrorResponse(c, fiber.StatusForbidden, "System and Tax users cannot be deactivated", "FORBIDDEN_OPERATION", nil)
+	}
+
+	var be *businessflow.BusinessError
+	if errors.As(err, &be) {
+		switch be.Code {
+		case "VALIDATION_ERROR":
+			return h.ErrorResponse(c, fiber.StatusBadRequest, be.Message, be.Code, nil)
+		case "CUSTOMER_NOT_FOUND":
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", be.Code, nil)
+		case "FORBIDDEN_OPERATION":
+			return h.ErrorResponse(c, fiber.StatusForbidden, be.Message, be.Code, nil)
+		case "GET_ADMIN_CUSTOMERS_SHARES_FAILED",
+			"GET_ADMIN_CUSTOMER_FAILED",
+			"GET_ADMIN_CUSTOMER_CAMPAIGNS_FAILED",
+			"GET_ADMIN_CUSTOMER_DISCOUNTS_HISTORY_FAILED",
+			"SET_CUSTOMER_ACTIVE_STATUS_FAILED":
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, be.Message, be.Code, nil)
+		}
+	}
+
+	return h.ErrorResponse(c, fiber.StatusInternalServerError, defaultMessage, defaultCode, nil)
 }
 
 func (h *AdminCustomerManagementHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
