@@ -69,6 +69,7 @@ func (f *PlatformSettingsFlowImpl) CreatePlatformSettings(ctx context.Context, r
 		Name:         req.Name,
 		Description:  req.Description,
 		MultimediaID: multimediaID,
+		Metadata:     map[string]any{},
 		Status:       status,
 	}
 
@@ -92,7 +93,9 @@ func (f *PlatformSettingsFlowImpl) ListPlatformSettings(ctx context.Context, cus
 	if customerID == 0 {
 		return nil, NewBusinessError("MISSING_CUSTOMER_ID", "customer id is required", nil)
 	}
-	rows, err := f.platformSettingsRepo.ByFilter(ctx, models.PlatformSettingsFilter{CustomerID: &customerID}, "id DESC", 0, 0)
+	rows, err := f.platformSettingsRepo.ByFilter(ctx, models.PlatformSettingsFilter{
+		CustomerID: &customerID,
+	}, "id DESC", 0, 0)
 	if err != nil {
 		return nil, err
 	}
