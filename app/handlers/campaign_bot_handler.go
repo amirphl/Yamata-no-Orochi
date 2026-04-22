@@ -81,6 +81,17 @@ func (h *CampaignBotHandler) UpdateAudienceSpec(c fiber.Ctx) error {
 	_ = metadata
 	res, err := h.campaignFlow.UpdateAudienceSpec(h.createRequestContext(c, "/api/v1/bot/campaigns/audience-spec"), &req)
 	if err != nil {
+		if businessflow.IsAudienceSpecPlatformRequired(err) || businessflow.IsAudienceSpecPlatformInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "BOT_AUDIENCE_SPEC_LOCK_BUSY":
+				return h.ErrorResponse(c, fiber.StatusConflict, "Another worker is updating audience spec", be.Code, nil)
+			case "BOT_AUDIENCE_SPEC_READ_FAILED", "BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "BOT_AUDIENCE_SPEC_WRITE_FAILED", "BOT_AUDIENCE_SPEC_CACHE_FAILED", "BOT_AUDIENCE_SPEC_LOCK_FAILED":
+				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update audience spec", be.Code, nil)
+			}
+		}
 		log.Println("Update audience spec failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update audience spec", "UPDATE_AUDIENCE_SPEC_FAILED", nil)
 	}
@@ -112,6 +123,17 @@ func (h *CampaignBotHandler) ResetAudienceSpec(c fiber.Ctx) error {
 	_ = metadata
 	res, err := h.campaignFlow.ResetAudienceSpec(h.createRequestContext(c, "/api/v1/bot/campaigns/audience-spec/reset"), &req)
 	if err != nil {
+		if businessflow.IsAudienceSpecPlatformRequired(err) || businessflow.IsAudienceSpecPlatformInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "BOT_AUDIENCE_SPEC_LOCK_BUSY":
+				return h.ErrorResponse(c, fiber.StatusConflict, "Another worker is updating audience spec", be.Code, nil)
+			case "BOT_AUDIENCE_SPEC_READ_FAILED", "BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "BOT_AUDIENCE_SPEC_WRITE_FAILED", "BOT_AUDIENCE_SPEC_CACHE_FAILED", "BOT_AUDIENCE_SPEC_LOCK_FAILED":
+				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reset audience spec", be.Code, nil)
+			}
+		}
 		log.Println("Reset audience spec failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reset audience spec", "RESET_AUDIENCE_SPEC_FAILED", nil)
 	}
@@ -149,6 +171,12 @@ func (h *CampaignBotHandler) MoveCampaignToExecuted(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	_ = metadata
 	if err := h.campaignFlow.MoveCampaignToExecuted(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/executed"), uint(id)); err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok && be.Code == "BOT_MOVE_CAMPAIGN_TO_EXECUTED_FAILED" {
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to executed", be.Code, nil)
+		}
 		log.Println("Move to executed failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to executed", "MOVE_TO_EXECUTED_FAILED", nil)
 	}
@@ -171,6 +199,12 @@ func (h *CampaignBotHandler) MoveCampaignToRunning(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	_ = metadata
 	if err := h.campaignFlow.MoveCampaignToRunning(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/running"), uint(id)); err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok && be.Code == "BOT_MOVE_CAMPAIGN_TO_RUNNING_FAILED" {
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to running", be.Code, nil)
+		}
 		log.Println("Move to running failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to running", "MOVE_TO_RUNNING_FAILED", nil)
 	}
@@ -206,6 +240,17 @@ func (h *CampaignBotHandler) UpdateCampaignStatistics(c fiber.Ctx) error {
 	}
 	res, err := h.campaignFlow.UpdateCampaignStatistics(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/statistics"), uint(id), req.Statistics)
 	if err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "VALIDATION_ERROR":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", be.Code, nil)
+			case "CAMPAIGN_FETCH_FAILED", "STATISTICS_MARSHAL_FAILED", "CAMPAIGN_STATISTICS_UPDATE_FAILED":
+				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update campaign statistics", be.Code, nil)
+			}
+		}
 		log.Println("Update campaign statistics failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update campaign statistics", "UPDATE_CAMPAIGN_STATISTICS_FAILED", nil)
 	}
