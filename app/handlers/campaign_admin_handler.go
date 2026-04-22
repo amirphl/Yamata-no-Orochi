@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strconv"
 	"time"
@@ -20,6 +21,8 @@ type CampaignAdminHandlerInterface interface {
 	GetCampaign(c fiber.Ctx) error
 	ApproveCampaign(c fiber.Ctx) error
 	RejectCampaign(c fiber.Ctx) error
+	CancelCampaign(c fiber.Ctx) error
+	RemoveAudienceSpec(c fiber.Ctx) error
 }
 
 // CampaignAdminHandler handles campaign-related HTTP requests
@@ -99,6 +102,9 @@ func (h *CampaignAdminHandler) ListCampaigns(c fiber.Ctx) error {
 
 	resp, err := h.campaignFlow.ListCampaigns(h.createRequestContext(c, "/api/v1/admin/campaigns"), filter)
 	if err != nil {
+		if businessflow.IsStartDateAfterEndDate(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "End date must be after start date", "INVALID_DATE_RANGE", nil)
+		}
 		log.Println("Admin list campaigns failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list campaigns", "ADMIN_LIST_CAMPAIGNS_FAILED", nil)
 	}
@@ -183,6 +189,12 @@ func (h *CampaignAdminHandler) ApproveCampaign(c fiber.Ctx) error {
 		if businessflow.IsMultipleFreezeTransactionsFound(err) {
 			return h.ErrorResponse(c, fiber.StatusConflict, "Multiple freeze transactions found", "MULTIPLE_FREEZE_TRANSACTIONS_FOUND", nil)
 		}
+		if businessflow.IsInsufficientFunds(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Insufficient funds", "INSUFFICIENT_FUNDS", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
 		log.Println("Admin approve campaign failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to approve campaign", "ADMIN_APPROVE_CAMPAIGN_FAILED", nil)
 	}
@@ -237,10 +249,111 @@ func (h *CampaignAdminHandler) RejectCampaign(c fiber.Ctx) error {
 		if businessflow.IsMultipleFreezeTransactionsFound(err) {
 			return h.ErrorResponse(c, fiber.StatusConflict, "Multiple freeze transactions found", "MULTIPLE_FREEZE_TRANSACTIONS_FOUND", nil)
 		}
+		if businessflow.IsInsufficientFunds(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Insufficient funds", "INSUFFICIENT_FUNDS", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
 		log.Println("Admin reject campaign failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reject campaign", "ADMIN_REJECT_CAMPAIGN_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign rejected successfully", res)
+}
+
+// CancelCampaign cancels an approved campaign and refunds consumed budget.
+// @Summary Cancel Campaign
+// @Description Cancel an approved campaign by admin and refund consumed budget to customer
+// @Tags Admin Campaigns
+// @Accept json
+// @Produce json
+// @Param request body dto.AdminCancelCampaignRequest true "Cancellation payload"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminCancelCampaignResponse}
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 404 {object} dto.APIResponse "Campaign not found"
+// @Failure 409 {object} dto.APIResponse "Invalid state"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/campaigns/cancel [post]
+func (h *CampaignAdminHandler) CancelCampaign(c fiber.Ctx) error {
+	var req dto.AdminCancelCampaignRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
+	}
+
+	res, err := h.campaignFlow.CancelCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/cancel"), &req)
+	if err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		if businessflow.IsCampaignNotApproved(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Invalid campaign state for cancel", "INVALID_STATE", nil)
+		}
+		if businessflow.IsCustomerNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+		if businessflow.IsWalletNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Wallet not found", "WALLET_NOT_FOUND", nil)
+		}
+		if businessflow.IsBalanceSnapshotNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Balance snapshot not found", "BALANCE_SNAPSHOT_NOT_FOUND", nil)
+		}
+		if businessflow.IsCampaignDebitTransactionNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Campaign debit transaction not found", "CAMPAIGN_DEBIT_TRANSACTION_NOT_FOUND", nil)
+		}
+		if businessflow.IsMultipleCampaignDebitTransactionsFound(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Multiple campaign debit transactions found", "MULTIPLE_CAMPAIGN_DEBIT_TRANSACTIONS_FOUND", nil)
+		}
+		if businessflow.IsInsufficientFunds(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Insufficient funds", "INSUFFICIENT_FUNDS", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+		log.Println("Admin cancel campaign failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to cancel campaign", "ADMIN_CANCEL_CAMPAIGN_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaign cancelled successfully", res)
+}
+
+// RemoveAudienceSpec removes audience spec for a platform from both file and cache.
+// @Summary Remove Audience Spec
+// @Description Remove audience spec for a platform from storage and cache (default platform is sms)
+// @Tags Admin Campaigns
+// @Produce json
+// @Param platform query string false "Platform (default: sms)"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminRemoveAudienceSpecResponse}
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/campaigns/audience-spec [delete]
+func (h *CampaignAdminHandler) RemoveAudienceSpec(c fiber.Ctx) error {
+	var platform *string
+	platformRaw := c.Query("platform")
+	if platformRaw != "" {
+		platform = &platformRaw
+	}
+
+	res, err := h.campaignFlow.RemoveAudienceSpec(h.createRequestContext(c, "/api/v1/admin/campaigns/audience-spec"), platform)
+	if err != nil {
+		if businessflow.IsAudienceSpecPlatformInvalid(err) || businessflow.IsAudienceSpecPlatformRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
+		}
+		if businessflow.IsCacheNotAvailable(err) {
+			return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Cache is not available", "CACHE_NOT_AVAILABLE", nil)
+		}
+		var be *businessflow.BusinessError
+		if errors.As(err, &be) {
+			switch be.Code {
+			case "ADMIN_REMOVE_AUDIENCE_SPEC_LOCK_BUSY":
+				return h.ErrorResponse(c, fiber.StatusConflict, "Another worker is updating audience spec", "AUDIENCE_SPEC_LOCK_BUSY", nil)
+			}
+		}
+		log.Println("Admin remove audience spec failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to remove audience spec", "ADMIN_REMOVE_AUDIENCE_SPEC_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Audience spec removed successfully", res)
 }
 
 // createRequestContext creates a context with request-scoped values for observability and timeout
