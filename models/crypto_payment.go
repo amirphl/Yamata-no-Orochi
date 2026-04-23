@@ -8,11 +8,11 @@ import (
 	"gorm.io/gorm"
 )
 
-// CryptoPlatform represents external crypto payment platform/provider (e.g., bithide)
+// CryptoPlatform represents external crypto payment platform/provider.
 type CryptoPlatform string
 
 const (
-	CryptoPlatformBithide CryptoPlatform = "bithide"
+	CryptoPlatformOxapay CryptoPlatform = "oxapay"
 )
 
 // CryptoCurrency represents supported crypto assets for deposit

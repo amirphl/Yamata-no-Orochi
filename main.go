@@ -487,26 +487,6 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Initialize CryptoPaymentFlow (providers registry)
 	providers := map[string]services.CryptoPaymentProvider{}
-	if cfg.Crypto.Bithide.BaseURL != "" && cfg.Crypto.Bithide.APIKey != "" {
-		defaultConfs := map[string]int{"ETH": 12, "BNB": 15, "XRP": 2, "DOGE": 6}
-		providers["bithide"] = services.NewBithideClient(
-			cfg.Crypto.Bithide.BaseURL,
-			cfg.Crypto.Bithide.APIKey,
-			cfg.Crypto.Bithide.Timeout,
-			defaultConfs,
-		)
-	}
-	if cfg.Crypto.Coinremitter.BaseURL != "" {
-		wallets := map[string]services.CoinremitterWalletConfig{}
-		for coin, w := range cfg.Crypto.Coinremitter.Wallets {
-			wallets[coin] = services.CoinremitterWalletConfig{APIKey: w.APIKey, APIPassword: w.APIPassword}
-		}
-		providers["coinremitter"] = services.NewCoinremitterClient(
-			cfg.Crypto.Coinremitter.BaseURL,
-			cfg.Crypto.Coinremitter.Timeout,
-			wallets,
-		)
-	}
 	if cfg.Crypto.Oxapay.BaseURL != "" && cfg.Crypto.Oxapay.APIKey != "" {
 		providers["oxapay"] = services.NewOxapayClient(
 			cfg.Crypto.Oxapay.BaseURL,
@@ -574,7 +554,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo, auditRepo)
 
-	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, platformSettingsRepo, cfg.Cache, db, rc)
+	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, multimediaRepo, platformSettingsRepo, cfg.Cache, db, rc)
 	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)

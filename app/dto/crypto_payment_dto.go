@@ -87,21 +87,6 @@ type CancelCryptoPaymentRequest struct {
 	UUID       string `json:"uuid" validate:"required"`
 }
 
-// BitHideTransactionNotification models the BitHide callback payload (subset used)
-type BitHideTransactionNotification struct {
-	RequestId   *string   `json:"RequestId"`
-	Id          int64     `json:"Id"`
-	Label       *string   `json:"Label"`
-	Address     *string   `json:"Address"`
-	SenderAddrs *string   `json:"SenderAddresses"`
-	Amount      float64   `json:"Amount"`
-	Currency    *string   `json:"Currency"`
-	TxId        *string   `json:"TxId"`
-	Date        time.Time `json:"Date"`
-	Status      *string   `json:"Status"` // Completed, WaitingConfirmation, Failed, etc.
-	Checksum    *string   `json:"Checksum"`
-}
-
 // OxapayWebhookTx describes one transaction object inside Oxapay webhook
 type OxapayWebhookTx struct {
 	Status          string  `json:"status"`

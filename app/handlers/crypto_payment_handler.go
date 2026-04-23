@@ -122,13 +122,13 @@ func (h *CryptoPaymentHandler) ManualVerify(c fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).JSON(dto.APIResponse{Success: true, Message: "Crypto deposit verified", Data: resp})
 }
 
-// Webhook receives provider callbacks (e.g., oxapay, bithide)
+// Webhook receives provider callbacks (oxapay)
 // @Summary Crypto Provider Webhook
 // @Description Receives provider callbacks and updates deposit and wallet balances
 // @Tags Payments
 // @Accept json
 // @Produce text/plain
-// @Param platform path string true "Provider platform (oxapay|bithide)"
+// @Param platform path string true "Provider platform (oxapay)"
 // @Success 200 {string} string "OK"
 // @Router /api/v1/crypto/providers/{platform}/callback [post]
 func (h *CryptoPaymentHandler) Webhook(c fiber.Ctx) error {
@@ -139,16 +139,6 @@ func (h *CryptoPaymentHandler) Webhook(c fiber.Ctx) error {
 		raw := c.Body()
 		hmacHeader := c.Get("HMAC")
 		if err := h.flow.HandleOxapayWebhook(h.requestCtx(c, "/api/v1/crypto/providers/oxapay/callback"), raw, hmacHeader, h.cfg.Crypto.Oxapay.APIKey, meta); err != nil {
-			return c.Status(fiber.StatusBadRequest).SendString("ERR")
-		}
-		// return c.SendString("OK")
-		return c.SendString("ok") // TODO: TEST
-	case "bithide":
-		var payload dto.BitHideTransactionNotification
-		if err := c.Bind().JSON(&payload); err != nil {
-			return c.Status(fiber.StatusBadRequest).SendString("ERR")
-		}
-		if err := h.flow.HandleBithideWebhook(h.requestCtx(c, "/api/v1/crypto/providers/bithide/callback"), &payload, h.cfg.Crypto.Bithide.WebhookSecret, meta); err != nil {
 			return c.Status(fiber.StatusBadRequest).SendString("ERR")
 		}
 		// return c.SendString("OK")
