@@ -81,5 +81,8 @@ func (f *MultimediaAdminFlowImpl) PreviewMultimediaByAdmin(ctx context.Context, 
 	if asset.MediaType == "video" {
 		return extractVideoThumbnail(cleanPath)
 	}
+	if asset.MediaType != "image" {
+		return "", "", nil, NewBusinessError("PREVIEW_NOT_SUPPORTED", "preview is only supported for image and video files", nil)
+	}
 	return generateImageThumbnail(cleanPath)
 }
