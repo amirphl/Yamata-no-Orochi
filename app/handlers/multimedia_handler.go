@@ -47,9 +47,9 @@ func (h *MultimediaHandler) SuccessResponse(c fiber.Ctx, statusCode int, message
 	})
 }
 
-// Upload handles multimedia upload (image/video) for authenticated customers.
+// Upload handles multimedia upload (image/video/excel) for authenticated customers.
 // @Summary Upload multimedia
-// @Description Upload an image or video (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv, <=100MB)
+// @Description Upload an image, video, or excel file (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv/xlsx/xls/xlsm, <=100MB)
 // @Tags Multimedia
 // @Accept mpfd
 // @Produce json
@@ -199,6 +199,8 @@ func (h *MultimediaHandler) Preview(c fiber.Ctx) error {
 				return h.ErrorResponse(c, fiber.StatusNotImplemented, "Video preview unavailable", be.Code, be.Error())
 			case "VIDEO_PREVIEW_FAILED":
 				return h.ErrorResponse(c, fiber.StatusBadRequest, "Video preview failed", be.Code, be.Error())
+			case "PREVIEW_NOT_SUPPORTED":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Preview is not supported for this file type", be.Code, be.Error())
 			}
 		}
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate preview", "PREVIEW_FAILED", nil)

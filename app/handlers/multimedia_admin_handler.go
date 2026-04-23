@@ -114,6 +114,8 @@ func (h *MultimediaAdminHandler) Preview(c fiber.Ctx) error {
 				return h.ErrorResponse(c, fiber.StatusNotImplemented, "Video preview unavailable", be.Code, be.Error())
 			case "VIDEO_PREVIEW_FAILED":
 				return h.ErrorResponse(c, fiber.StatusBadRequest, "Video preview failed", be.Code, be.Error())
+			case "PREVIEW_NOT_SUPPORTED":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Preview is not supported for this file type", be.Code, be.Error())
 			}
 		}
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate preview", "PREVIEW_FAILED", nil)

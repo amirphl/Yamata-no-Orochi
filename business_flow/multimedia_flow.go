@@ -51,7 +51,7 @@ const (
 	maxMultimediaSize = int64(100 * 1024 * 1024) // 100MB
 )
 
-var allowedMultimediaFormats = []string{"jpg", "jpeg", "png", "gif", "webp", "mp4", "mov", "webm", "mkv"}
+var allowedMultimediaFormats = []string{"jpg", "jpeg", "png", "gif", "webp", "mp4", "mov", "webm", "mkv", "xlsx", "xls", "xlsm"}
 
 var allowedMultimediaExts = map[string]string{
 	".jpg":  "image",
@@ -63,6 +63,9 @@ var allowedMultimediaExts = map[string]string{
 	".mov":  "video",
 	".webm": "video",
 	".mkv":  "video",
+	".xlsx": "excel",
+	".xls":  "excel",
+	".xlsm": "excel",
 }
 
 func (f *MultimediaFlowImpl) UploadMultimedia(ctx context.Context, req *dto.UploadMultimediaRequest, metadata *ClientMetadata) (*dto.UploadMultimediaResponse, error) {
@@ -180,6 +183,9 @@ func (f *MultimediaFlowImpl) PreviewMultimedia(ctx context.Context, customerID u
 	if asset.MediaType == "video" {
 		return extractVideoThumbnail(cleanPath)
 	}
+	if asset.MediaType != "image" {
+		return "", "", nil, NewBusinessError("PREVIEW_NOT_SUPPORTED", "preview is only supported for image and video files", nil)
+	}
 	return generateImageThumbnail(cleanPath)
 }
 
@@ -192,7 +198,7 @@ func saveMultimediaToDisk(reader io.Reader, ext, mediaType string) (string, int6
 	head = head[:n]
 
 	detected := http.DetectContentType(head)
-	if detected != "application/octet-stream" && !strings.HasPrefix(detected, mediaType+"/") {
+	if !isAllowedUploadedMime(detected, ext, mediaType) {
 		return "", 0, "", NewBusinessError("INVALID_FILE_TYPE", "file content does not match expected media type", nil)
 	}
 	if detected == "application/octet-stream" {
@@ -319,4 +325,31 @@ func resizeImage(src image.Image, maxDim int) image.Image {
 	imagedraw.Draw(dst, dst.Bounds(), &image.Uniform{C: color.White}, image.Point{}, imagedraw.Src)
 	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, xdraw.Over, nil)
 	return dst
+}
+
+func isAllowedUploadedMime(detected, ext, mediaType string) bool {
+	if detected == "application/octet-stream" {
+		return true
+	}
+	switch mediaType {
+	case "image", "video":
+		return strings.HasPrefix(detected, mediaType+"/")
+	case "excel":
+		return isExcelMime(detected, ext)
+	default:
+		return false
+	}
+}
+
+func isExcelMime(mimeType, ext string) bool {
+	mt := strings.ToLower(strings.TrimSpace(mimeType))
+	ex := strings.ToLower(strings.TrimSpace(ext))
+
+	if strings.Contains(mt, "spreadsheetml") || strings.Contains(mt, "ms-excel") {
+		return true
+	}
+	if mt == "application/zip" || mt == "application/vnd.ms-office" || mt == "application/x-ole-storage" {
+		return ex == ".xlsx" || ex == ".xlsm" || ex == ".xls"
+	}
+	return false
 }
