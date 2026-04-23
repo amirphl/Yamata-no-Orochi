@@ -21,6 +21,7 @@ type CampaignBotHandlerInterface interface {
 	ListReadyCampaigns(c fiber.Ctx) error
 	MoveCampaignToExecuted(c fiber.Ctx) error
 	MoveCampaignToRunning(c fiber.Ctx) error
+	DownloadTargetAudienceExcelFile(c fiber.Ctx) error
 	UpdateCampaignStatistics(c fiber.Ctx) error
 }
 
@@ -218,6 +219,52 @@ func (h *CampaignBotHandler) MoveCampaignToRunning(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to move campaign to running", "MOVE_TO_RUNNING_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign moved to running", fiber.Map{"ok": true})
+}
+
+// DownloadTargetAudienceExcelFile downloads campaign target-audience Excel file for bots.
+// @Summary Bot Download Campaign Target Audience Excel File
+// @Tags Bot Campaigns
+// @Security BearerAuth
+// @Produce application/octet-stream
+// @Param id path int true "Campaign ID"
+// @Success 200 {string} string "Binary file"
+// @Failure 400 {object} dto.APIResponse "Invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 404 {object} dto.APIResponse "Not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/bot/campaigns/{id}/target-audience-excel-file [get]
+func (h *CampaignBotHandler) DownloadTargetAudienceExcelFile(c fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign id", "INVALID_CAMPAIGN_ID", nil)
+	}
+
+	filename, contentType, data, err := h.campaignFlow.DownloadTargetAudienceExcelFile(
+		h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/target-audience-excel-file"),
+		uint(id),
+	)
+	if err != nil {
+		if businessflow.IsCampaignNotFound(err) || businessflow.IsCampaignTargetAudienceExcelMediaNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Target audience excel file not found", "TARGET_AUDIENCE_EXCEL_FILE_NOT_FOUND", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "INVALID_CAMPAIGN_ID":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign id", be.Code, nil)
+			case "TARGET_AUDIENCE_EXCEL_FILE_NOT_FOUND":
+				return h.ErrorResponse(c, fiber.StatusNotFound, "Target audience excel file not found", be.Code, nil)
+			}
+		}
+		log.Println("Download target audience excel file failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to download target audience excel file", "DOWNLOAD_TARGET_AUDIENCE_EXCEL_FILE_FAILED", nil)
+	}
+
+	if contentType != "" {
+		c.Set("Content-Type", contentType)
+	}
+	c.Set("Content-Disposition", "attachment; filename="+filename)
+	return c.Send(data)
 }
 
 // UpdateCampaignStatistics updates statistics json for a campaign

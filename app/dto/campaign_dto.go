@@ -27,6 +27,8 @@ type CreateCampaignRequest struct {
 	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
 	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
 	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
 
 // CreateCampaignResponse represents the response to create a new campaign
@@ -61,6 +63,8 @@ type UpdateCampaignRequest struct {
 	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
 	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
 	Finalize           *bool      `json:"finalize,omitempty" validate:"omitempty"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
 
 // UpdateCampaignResponse represents the response to update an existing campaign
@@ -130,6 +134,8 @@ type GetCampaignResponse struct {
 	Statistics         map[string]any `json:"statistics,omitempty"`
 	ClickRate          *float64       `json:"click_rate,omitempty"`
 	TotalClicks        *int64         `json:"total_clicks,omitempty"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
@@ -152,6 +158,8 @@ type CalculateCampaignCapacityRequest struct {
 	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
 	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
 	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
 
 // CalculateCampaignCapacityResponse represents the response to calculate the capacity of an campaign
@@ -181,6 +189,8 @@ type CalculateCampaignCostRequest struct {
 	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
 	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
 	CustomerID         uint       `json:"-"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
 
 // CalculateCampaignCostV2Request represents the request to calculate required cost
@@ -205,6 +215,8 @@ type CalculateCampaignCostV2Request struct {
 	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
 	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
 	CustomerID         uint       `json:"-"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
 
 // CalculateCampaignCostResponse represents the response to calculate the cost of an campaign
@@ -289,6 +301,8 @@ type AdminGetCampaignResponse struct {
 	Statistics            map[string]any `json:"statistics,omitempty"`
 	TotalClicks           *int64         `json:"total_clicks,omitempty"`
 	ClickRate             *float64       `json:"click_rate,omitempty"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
 
 // AdminListCampaignsResponse represents a paginated list of campaigns
@@ -374,6 +388,8 @@ type BotGetCampaignResponse struct {
 	Budget             *uint64                          `json:"budget,omitempty" validate:"omitempty"`
 	Comment            *string                          `json:"comment,omitempty" validate:"omitempty"`
 	NumAudiences       *uint64                          `json:"num_audiences"`
+
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
 
 type BotCampaignPlatformSettingsSpec struct {

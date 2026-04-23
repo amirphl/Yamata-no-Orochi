@@ -184,6 +184,8 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			Statistics:         stats,
 			TotalClicks:        &totalClicks,
 			ClickRate:          clickRate,
+
+			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 		})
 	}
 
@@ -299,6 +301,8 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		Statistics:            stats,
 		TotalClicks:           &totalClicks,
 		ClickRate:             clickRate,
+
+		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 	}
 	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignGet, "Admin fetched campaign", true, &c.CustomerID, map[string]any{
 		"campaign_id": c.ID,

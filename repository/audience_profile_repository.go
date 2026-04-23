@@ -41,6 +41,22 @@ func (r *AudienceProfileRepositoryImpl) ByUID(ctx context.Context, uid string) (
 	return rows[0], nil
 }
 
+func (r *AudienceProfileRepositoryImpl) ByUIDs(ctx context.Context, uids []string) ([]*models.AudienceProfile, error) {
+	if len(uids) == 0 {
+		return nil, nil
+	}
+
+	db := r.getDB(ctx)
+	rows := make([]*models.AudienceProfile, 0, len(uids))
+	if err := db.Model(&models.AudienceProfile{}).
+		Where("uid IN ?", uids).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	return rows, nil
+}
+
 func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.AudienceProfileFilter) *gorm.DB {
 	if f.ID != nil {
 		db = db.Where("id = ?", *f.ID)

@@ -307,6 +307,7 @@ func (r *FiberRouter) SetupRoutes() {
 	botCampaigns.Post("/:id/executed", r.campaignBotHandler.MoveCampaignToExecuted)
 	botCampaigns.Post("/:id/running", r.campaignBotHandler.MoveCampaignToRunning)
 	botCampaigns.Post("/:id/statistics", r.campaignBotHandler.UpdateCampaignStatistics)
+	botCampaigns.Get("/:id/target-audience-excel-file", r.campaignBotHandler.DownloadTargetAudienceExcelFile)
 
 	// Bot short-links routes (protected)
 	botShortLinks := api.Group("/bot/short-links")
