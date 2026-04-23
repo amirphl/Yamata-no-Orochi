@@ -99,6 +99,8 @@ type CampaignSpec struct {
 	Sex     *string  `json:"sex,omitempty"`
 	City    []string `json:"city,omitempty"`
 
+	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
+
 	// Campaign content
 	AdLink  *string `json:"adlink,omitempty"`
 	Content *string `json:"content,omitempty"`

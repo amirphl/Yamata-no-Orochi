@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +25,7 @@ type BotCampaignFlow interface {
 	ListReadyCampaigns(ctx context.Context, platform *string) (*dto.BotListCampaignsResponse, error)
 	MoveCampaignToRunning(ctx context.Context, campaignID uint) error
 	MoveCampaignToExecuted(ctx context.Context, campaignID uint) error
+	DownloadTargetAudienceExcelFile(ctx context.Context, campaignID uint) (string, string, []byte, error)
 	UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error)
 	ResetAudienceSpec(ctx context.Context, req *dto.BotResetAudienceSpecRequest) (*dto.BotResetAudienceSpecResponse, error)
 	UpdateCampaignStatistics(ctx context.Context, campaignID uint, statistics map[string]any) (*dto.BotUpdateCampaignStatisticsResponse, error)
@@ -30,6 +33,7 @@ type BotCampaignFlow interface {
 
 type BotCampaignFlowImpl struct {
 	campaignRepo         repository.CampaignRepository
+	multimediaRepo       repository.MultimediaAssetRepository
 	platformSettingsRepo repository.PlatformSettingsRepository
 	cacheConfig          config.CacheConfig
 	db                   *gorm.DB
@@ -38,6 +42,7 @@ type BotCampaignFlowImpl struct {
 
 func NewBotCampaignFlow(
 	campaignRepo repository.CampaignRepository,
+	multimediaRepo repository.MultimediaAssetRepository,
 	platformSettingsRepo repository.PlatformSettingsRepository,
 	cacheConfig config.CacheConfig,
 	db *gorm.DB,
@@ -45,6 +50,7 @@ func NewBotCampaignFlow(
 ) BotCampaignFlow {
 	return &BotCampaignFlowImpl{
 		campaignRepo:         campaignRepo,
+		multimediaRepo:       multimediaRepo,
 		platformSettingsRepo: platformSettingsRepo,
 		cacheConfig:          cacheConfig,
 		db:                   db,
@@ -112,6 +118,8 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 			Budget:             c.Spec.Budget,
 			Comment:            c.Comment,
 			NumAudiences:       c.NumAudience,
+
+			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 		})
 	}
 
@@ -203,6 +211,70 @@ func (s *BotCampaignFlowImpl) MoveCampaignToExecuted(ctx context.Context, campai
 		return NewBusinessError("BOT_MOVE_CAMPAIGN_TO_EXECUTED_FAILED", "Failed to move campaign to executed", err)
 	}
 	return nil
+}
+
+// DownloadTargetAudienceExcelFile downloads campaign target-audience Excel file when available.
+func (s *BotCampaignFlowImpl) DownloadTargetAudienceExcelFile(ctx context.Context, campaignID uint) (string, string, []byte, error) {
+	if campaignID == 0 {
+		return "", "", nil, NewBusinessError("INVALID_CAMPAIGN_ID", "campaign id must be greater than 0", nil)
+	}
+
+	campaign, err := s.campaignRepo.ByID(ctx, campaignID)
+	if err != nil {
+		return "", "", nil, NewBusinessError("BOT_DOWNLOAD_TARGET_AUDIENCE_EXCEL_FILE_FAILED", "Failed to fetch campaign", err)
+	}
+	if campaign == nil {
+		return "", "", nil, ErrCampaignNotFound
+	}
+
+	if campaign.Spec.TargetAudienceExcelFileUUID == nil || strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) == "" {
+		return "", "", nil, NewBusinessError(
+			"TARGET_AUDIENCE_EXCEL_FILE_NOT_FOUND",
+			"Campaign has no target audience excel file",
+			ErrCampaignTargetAudienceExcelMediaNotFound,
+		)
+	}
+
+	excelFileUUID := strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID)
+	asset, err := s.multimediaRepo.ByUUID(ctx, excelFileUUID)
+	if err != nil {
+		return "", "", nil, NewBusinessError("BOT_DOWNLOAD_TARGET_AUDIENCE_EXCEL_FILE_FAILED", "Failed to fetch target audience excel file", err)
+	}
+	if asset == nil {
+		return "", "", nil, NewBusinessError(
+			"TARGET_AUDIENCE_EXCEL_FILE_NOT_FOUND",
+			"Target audience excel file not found",
+			ErrCampaignTargetAudienceExcelMediaNotFound,
+		)
+	}
+
+	cleanPath, err := sanitizeMultimediaPath(asset.StoredPath)
+	if err != nil {
+		return "", "", nil, NewBusinessError("BOT_DOWNLOAD_TARGET_AUDIENCE_EXCEL_FILE_FAILED", "Failed to resolve target audience excel path", err)
+	}
+
+	data, err := os.ReadFile(cleanPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", nil, NewBusinessError(
+				"TARGET_AUDIENCE_EXCEL_FILE_NOT_FOUND",
+				"Target audience excel file not found",
+				ErrCampaignTargetAudienceExcelMediaNotFound,
+			)
+		}
+		return "", "", nil, NewBusinessError("BOT_DOWNLOAD_TARGET_AUDIENCE_EXCEL_FILE_FAILED", "Failed to read target audience excel file", err)
+	}
+
+	filename := strings.TrimSpace(asset.OriginalFilename)
+	if filename == "" {
+		filename = filepath.Base(cleanPath)
+	}
+	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
+	if contentType == "" {
+		contentType = strings.TrimSpace(asset.MimeType)
+	}
+
+	return filename, contentType, data, nil
 }
 
 // UpdateCampaignStatistics updates the statistics JSON field of a campaign

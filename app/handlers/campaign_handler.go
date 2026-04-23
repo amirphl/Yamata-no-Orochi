@@ -696,6 +696,12 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 	if businessflow.IsCampaignMediaNotFound(err) {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Media not found", "MEDIA_NOT_FOUND", nil)
 	}
+	if businessflow.IsCampaignTargetAudienceExcelMediaNotFound(err) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Excel media not found", "EXCEL_MEDIA_NOT_FOUND", nil)
+	}
+	if businessflow.IsCampaignTargetAudienceExcelFileInvalid(err) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Excel file is invalid", "EXCEL_FILE_INVALID", nil)
+	}
 	if businessflow.IsSegmentPriceFactorNotFound(err) {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Segment price factor not found", "SEGMENT_PRICE_FACTOR_NOT_FOUND", nil)
 	}

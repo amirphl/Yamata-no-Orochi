@@ -22,6 +22,7 @@ type BotClient interface {
 	ListReadyCampaigns(ctx context.Context, token string, platform string) ([]dto.BotGetCampaignResponse, error)
 	MoveCampaignToRunning(ctx context.Context, token string, id uint) error
 	MoveCampaignToExecuted(ctx context.Context, token string, id uint) error
+	DownloadTargetAudienceExcelFile(ctx context.Context, token string, campaignID uint) ([]byte, error)
 	AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error)
 	PushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error
 	CreateShortLinks(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error
@@ -181,6 +182,29 @@ func (c *httpBotClient) MoveCampaignToExecuted(ctx context.Context, token string
 		return fmt.Errorf("move to executed http status: %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func (c *httpBotClient) DownloadTargetAudienceExcelFile(ctx context.Context, token string, campaignID uint) ([]byte, error) {
+	endpoint := fmt.Sprintf("%s/api/v1/bot/campaigns/%d/target-audience-excel-file", c.cfg.APIDomain, campaignID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("download target audience excel file http status: %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return body, nil
 }
 
 func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error) {
