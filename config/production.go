@@ -296,28 +296,9 @@ type BotConfig struct {
 }
 
 type CryptoConfig struct {
-	DefaultPlatform string             `json:"default_platform"`
-	SupportedCoins  []string           `json:"supported_coins"`
-	Bithide         BithideConfig      `json:"bithide"`
-	Coinremitter    CoinremitterConfig `json:"coinremitter"`
-	Oxapay          OxapayConfig       `json:"oxapay"`
-}
-
-type BithideConfig struct {
-	BaseURL       string        `json:"base_url"`
-	APIKey        string        `json:"api_key"`
-	WebhookSecret string        `json:"webhook_secret"`
-	Timeout       time.Duration `json:"timeout"`
-}
-
-type CoinremitterConfig struct {
-	BaseURL string        `json:"base_url"`
-	Timeout time.Duration `json:"timeout"`
-	// Wallet credentials per coin symbol (e.g., DOGE/ETH/BNB/XRP)
-	Wallets map[string]struct {
-		APIKey      string `json:"api_key"`
-		APIPassword string `json:"api_password"`
-	} `json:"wallets"`
+	DefaultPlatform string       `json:"default_platform"`
+	SupportedCoins  []string     `json:"supported_coins"`
+	Oxapay          OxapayConfig `json:"oxapay"`
 }
 
 type OxapayConfig struct {
@@ -598,25 +579,6 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Crypto: CryptoConfig{
 			DefaultPlatform: getEnvString("CRYPTO_DEFAULT_PLATFORM", "oxapay"),
 			SupportedCoins:  getEnvStringSlice("CRYPTO_SUPPORTED_COINS", []string{"ETH", "DOGE", "XRP", "BNB"}),
-			Bithide: BithideConfig{
-				BaseURL:       getEnvString("CRYPTO_BITHIDE_BASE_URL", ""),
-				APIKey:        getEnvString("CRYPTO_BITHIDE_API_KEY", ""),
-				WebhookSecret: getEnvString("CRYPTO_BITHIDE_WEBHOOK_SECRET", ""),
-				Timeout:       getEnvDuration("CRYPTO_BITHIDE_TIMEOUT", 10*time.Second),
-			},
-			Coinremitter: CoinremitterConfig{
-				BaseURL: getEnvString("CR_BASE_URL", "https://api.coinremitter.com/v1"),
-				Timeout: getEnvDuration("CR_TIMEOUT", 10*time.Second),
-				Wallets: map[string]struct {
-					APIKey      string `json:"api_key"`
-					APIPassword string `json:"api_password"`
-				}{
-					"DOGE": {APIKey: getEnvString("CR_DOGE_API_KEY", ""), APIPassword: getEnvString("CR_DOGE_API_PASSWORD", "")},
-					"ETH":  {APIKey: getEnvString("CR_ETH_API_KEY", ""), APIPassword: getEnvString("CR_ETH_API_PASSWORD", "")},
-					"BNB":  {APIKey: getEnvString("CR_BNB_API_KEY", ""), APIPassword: getEnvString("CR_BNB_API_PASSWORD", "")},
-					"XRP":  {APIKey: getEnvString("CR_XRP_API_KEY", ""), APIPassword: getEnvString("CR_XRP_API_PASSWORD", "")},
-				},
-			},
 			Oxapay: OxapayConfig{
 				BaseURL: getEnvString("OXA_BASE_URL", "https://api.oxapay.com"),
 				APIKey:  getEnvString("OXA_API_KEY", ""),
@@ -914,20 +876,9 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 		errors = append(errors, "SYSTEM_SHEBA_NUMBER is invalid")
 	}
 
-	// Crypto config - optional but if default platform is bithide, API key/base URL should be present
-	if cfg.Crypto.DefaultPlatform == "bithide" {
-		if cfg.Crypto.Bithide.BaseURL == "" {
-			errors = append(errors, "CRYPTO_BITHIDE_BASE_URL is required when bithide is default platform")
-		}
-		if cfg.Crypto.Bithide.APIKey == "" {
-			errors = append(errors, "CRYPTO_BITHIDE_API_KEY is required when bithide is default platform")
-		}
-	}
-	if cfg.Crypto.DefaultPlatform == "coinremitter" {
-		if cfg.Crypto.Coinremitter.BaseURL == "" {
-			errors = append(errors, "CR_BASE_URL is required when coinremitter is default platform")
-		}
-		// At least one wallet can be configured; not strictly required for validation
+	// Crypto config: only oxapay is supported.
+	if cfg.Crypto.DefaultPlatform != "oxapay" {
+		errors = append(errors, "CRYPTO_DEFAULT_PLATFORM must be oxapay")
 	}
 	if cfg.Crypto.DefaultPlatform == "oxapay" {
 		if cfg.Crypto.Oxapay.BaseURL == "" {

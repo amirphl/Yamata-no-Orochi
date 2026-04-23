@@ -4,7 +4,6 @@ package businessflow
 import (
 	"context"
 	"crypto/hmac"
-	"crypto/sha256"
 	"crypto/sha512"
 	"encoding/hex"
 	"encoding/json"
@@ -29,7 +28,6 @@ type CryptoPaymentFlow interface {
 	GetStatus(ctx context.Context, req *dto.GetCryptoPaymentStatusRequest, metadata *ClientMetadata) (*dto.GetCryptoPaymentStatusResponse, error)
 	ManualVerify(ctx context.Context, req *dto.ManualVerifyCryptoDepositRequest, metadata *ClientMetadata) (*dto.ManualVerifyCryptoDepositResponse, error)
 	CancelRequest(ctx context.Context, req *dto.CancelCryptoPaymentRequest, metadata *ClientMetadata) error
-	HandleBithideWebhook(ctx context.Context, payload *dto.BitHideTransactionNotification, secret string, metadata *ClientMetadata) error
 	HandleOxapayWebhook(ctx context.Context, raw []byte, hmacHeader string, secret string, metadata *ClientMetadata) error
 }
 
@@ -672,139 +670,6 @@ func (f *CryptoPaymentFlowImpl) CancelRequest(ctx context.Context, req *dto.Canc
 		return NewBusinessError("CRYPTO_CANCEL_FAILED", "Failed to cancel crypto payment request", err)
 	}
 	return nil
-}
-
-// TODO: Test
-func (f *CryptoPaymentFlowImpl) HandleBithideWebhook(ctx context.Context, payload *dto.BitHideTransactionNotification, secret string, metadata *ClientMetadata) error {
-	if payload == nil || payload.TxId == nil || payload.Address == nil {
-		return NewBusinessError("CRYPTO_WEBHOOK_INVALID", "missing required fields", nil)
-	}
-	if payload.Checksum != nil && *payload.Checksum != "" {
-		if !verifyBithideChecksum(payload, secret) {
-			return NewBusinessError("CRYPTO_WEBHOOK_FORBIDDEN", "invalid checksum", nil)
-		}
-	}
-	label := ""
-	if payload.Label != nil {
-		label = *payload.Label
-	}
-	// resolve request
-	var cpr *models.CryptoPaymentRequest
-	var err error
-	if label != "" {
-		cpr, err = f.cprRepo.ByUUID(ctx, label)
-		if err != nil {
-			return err
-		}
-	}
-	if cpr == nil {
-		// fallback: find by address
-		reqs, err := f.cprRepo.ByDepositAddress(ctx, *payload.Address, "")
-		if err != nil {
-			return err
-		}
-		if len(reqs) == 0 {
-			return ErrCryptoRequestNotFound
-		}
-		cpr = reqs[0]
-	}
-	// upsert deposit by tx
-	err = repository.WithTransaction(ctx, f.db, func(txCtx context.Context) error {
-		existing, _ := f.cdRepo.ByTxHash(txCtx, *payload.TxId)
-		dep := existing
-		if dep == nil {
-			dep = &models.CryptoDeposit{
-				UUID:                   uuid.New(),
-				CorrelationID:          cpr.CorrelationID,
-				CryptoPaymentRequestID: &cpr.ID,
-				CustomerID:             cpr.CustomerID,
-				WalletID:               cpr.WalletID,
-				Coin:                   cpr.Coin,
-				Network:                cpr.Network,
-				Platform:               cpr.Platform,
-				TxHash:                 *payload.TxId,
-				// FromAddress: ,
-				ToAddress: *payload.Address,
-				// DestinationTag: ,
-				AmountCoin: fmt.Sprintf("%f", payload.Amount),
-				// Confirmations: ,
-				// RequiredConfirmations: ,
-				// BlockHeight: ,
-				Status:     mapBithideStatus(payload.Status),
-				DetectedAt: utils.ToPtr(payload.Date.UTC()),
-				// ConfirmedAt: ,
-				// CreditedAt: ,
-			}
-			if err := f.cdRepo.Save(txCtx, dep); err != nil {
-				return err
-			}
-		} else {
-			dep.Status = mapBithideStatus(payload.Status)
-			if strings.EqualFold(dep.Status, "confirmed") || strings.EqualFold(dep.Status, "credited") {
-				now := utils.UTCNow()
-				dep.ConfirmedAt = &now
-			}
-			if err := f.cdRepo.Update(txCtx, dep); err != nil {
-				return err
-			}
-		}
-		// credit if applicable and not yet credited
-		if dep.CreditedAt == nil && (strings.EqualFold(dep.Status, "confirmed") || strings.EqualFold(dep.Status, "credited") || strings.EqualFold(*payload.Status, "Completed")) {
-			if err := f.creditOnConfirmed(txCtx, cpr, dep, metadata); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return NewBusinessError("CRYPTO_WEBHOOK_FAILED", "Failed to handle Bithide webhook", err)
-	}
-	return nil
-}
-
-func mapBithideStatus(st *string) string {
-	if st == nil {
-		return "detected"
-	}
-	s := strings.ToLower(*st)
-	switch s {
-	case "completed", "success", "paid":
-		return "confirmed"
-	case "waitingconfirmation", "pending":
-		return "detected"
-	case "failed", "cancelled":
-		return "failed"
-	default:
-		return s
-	}
-}
-
-func verifyBithideChecksum(p *dto.BitHideTransactionNotification, secret string) bool {
-	parts := []string{}
-	add := func(s *string) {
-		if s != nil && *s != "" {
-			parts = append(parts, *s)
-		}
-	}
-	add(p.RequestId)
-	// Id as string
-	parts = append(parts, fmt.Sprintf("%d", p.Id))
-	add(p.Label)
-	add(p.Address)
-	add(p.SenderAddrs)
-	// Amount as string
-	parts = append(parts, fmt.Sprintf("%g", p.Amount))
-	add(p.Currency)
-	add(p.TxId)
-	parts = append(parts, p.Date.UTC().Format(time.RFC3339))
-	add(p.Status)
-	raw := strings.Join(parts, "") + secret
-	sum := sha256.Sum256([]byte(raw))
-	calc := strings.ToLower(hex.EncodeToString(sum[:]))
-	if p.Checksum == nil {
-		return false
-	}
-	return strings.EqualFold(calc, *p.Checksum)
 }
 
 // calculateShares mirrors payment_flow.calculateScatteredSettlementItems minimally for metadata preparation
