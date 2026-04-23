@@ -33,7 +33,7 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 		if row == nil {
 			continue
 		}
-		key := aggKey{pcID: row.ProcessedCampaignID, customerID: row.CustomerID}
+		key := aggKey{pcID: row.ProcessedCampaignID, customerID: row.TrackingID}
 		if _, exists := seen[key]; exists {
 			continue
 		}
@@ -97,6 +97,16 @@ type SMSStatusAggregates struct {
 	AggregatedUnknown        int64
 }
 
+type SMSStatusTrackingResult struct {
+	AudienceProfileUID    *string `json:"audienceProfileUID" gorm:"column:audience_profile_uid"`
+	TrackingID            string  `json:"trackingID" gorm:"column:tracking_id"`
+	TotalParts            *int64  `json:"totalParts" gorm:"column:total_parts"`
+	TotalDeliveredParts   *int64  `json:"totalDeliveredParts" gorm:"column:total_delivered_parts"`
+	TotalUndeliveredParts *int64  `json:"totalUndeliveredParts" gorm:"column:total_undelivered_parts"`
+	TotalUnknownParts     *int64  `json:"totalUnknownParts" gorm:"column:total_unknown_parts"`
+	Status                *string `json:"status" gorm:"column:status"`
+}
+
 func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SMSStatusAggregates, error) {
 	// TODO: Aggregate on status too.
 	// TODO: Query optimization: maintain a summary table updated on insert instead of aggregating on the fly.
@@ -115,6 +125,33 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 		return nil, err
 	}
 	return &agg, nil
+}
+
+func (r *SMSStatusResultRepositoryImpl) TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SMSStatusTrackingResult, error) {
+	db := r.getDB(ctx)
+	trackingResults := make([]SMSStatusTrackingResult, 0)
+	if err := db.Table("sms_status_results AS ssr").
+		Select(`
+			ap.uid AS audience_profile_uid,
+			ssr.customer_id AS tracking_id,
+			ssr.total_parts,
+			ssr.total_delivered_parts,
+			ssr.total_undelivered_parts,
+			ssr.total_unknown_parts,
+			ssr.status`).
+		Joins(`
+			LEFT JOIN sent_sms AS ss
+				ON ss.processed_campaign_id = ssr.processed_campaign_id
+				AND ss.tracking_id = ssr.customer_id`).
+		Joins(`
+			LEFT JOIN audience_profiles AS ap
+				ON ap.phone_number = ss.phone_number`).
+		Where("ssr.processed_campaign_id = ?", processedCampaignID).
+		Order("ssr.customer_id ASC").
+		Scan(&trackingResults).Error; err != nil {
+		return nil, err
+	}
+	return trackingResults, nil
 }
 
 func (r *SMSStatusResultRepositoryImpl) Exists(ctx context.Context, filter any) (bool, error) {

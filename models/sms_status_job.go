@@ -11,7 +11,7 @@ type SMSStatusJob struct {
 	ID                  uint           `gorm:"primaryKey" json:"id"`
 	CorrelationID       string         `gorm:"size:64;index:idx_sms_status_jobs_corr_id;not null" json:"correlation_id"`
 	ProcessedCampaignID uint           `gorm:"index:idx_sms_status_jobs_processed_campaign_id;not null" json:"processed_campaign_id"`
-	CustomerIDs         pq.StringArray `gorm:"type:text[];not null" json:"customer_ids"`
+	TrackingIDs         pq.StringArray `gorm:"type:text[];not null" json:"customer_ids"` // TODO: rename to tracking_ids
 	RetryCount          int            `gorm:"not null;default:0" json:"retry_count"`
 	ScheduledAt         time.Time      `gorm:"index:idx_sms_status_jobs_scheduled_retry;not null" json:"scheduled_at"`
 	ExecutedAt          *time.Time     `json:"executed_at,omitempty"`
