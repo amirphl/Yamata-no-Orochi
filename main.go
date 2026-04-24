@@ -352,6 +352,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	audienceProfileRepo := repository.NewAudienceProfileRepository(db)
 	tagRepo := repository.NewTagRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
+	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
 	smsStatusJobRepo := repository.NewSMSStatusJobRepository(db)
 	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
@@ -424,6 +425,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	campaignFlow := businessflow.NewCampaignFlow(
 		campaignRepo,
 		customerRepo,
+		multimediaRepo,
+		platformSettingsRepo,
 		walletRepo,
 		balanceSnapshotRepo,
 		transactionRepo,
@@ -527,9 +530,11 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberRepo,
 		segmentPriceFactorRepo,
 		db,
+		rc,
 		notificationService,
 		cfg.Admin,
 		cfg.Message,
+		cfg.Cache,
 	)
 
 	lineNumberFlow := businessflow.NewLineNumberFlow(lineNumberRepo)
@@ -538,12 +543,14 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo)
 
-	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, &cfg.Cache, db, rc)
+	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, platformSettingsRepo, cfg.Cache, db, rc)
 	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
 	multimediaFlow := businessflow.NewMultimediaFlow(customerRepo, multimediaRepo)
+	multimediaAdminFlow := businessflow.NewMultimediaAdminFlow(multimediaRepo)
 	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo)
+	platformSettingsAdminFlow := businessflow.NewPlatformSettingsAdminFlow(platformSettingsRepo, multimediaRepo)
 
 	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo, shortLinkClickRepo)
 
@@ -576,7 +583,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	ticketHandler := handlers.NewTicketHandler(ticketFlow)
 	multimediaHandler := handlers.NewMultimediaHandler(multimediaFlow)
+	multimediaAdminHandler := handlers.NewMultimediaAdminHandler(multimediaAdminFlow)
 	platformSettingsHandler := handlers.NewPlatformSettingsHandler(platformSettingsFlow)
+	platformSettingsAdminHandler := handlers.NewPlatformSettingsAdminHandler(platformSettingsAdminFlow)
 
 	profileHandler := handlers.NewProfileHandler(profileFlow)
 
@@ -609,12 +618,14 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cryptoPaymentHandler,
 		profileHandler,
 		multimediaHandler,
+		multimediaAdminHandler,
 		platformSettingsHandler,
+		platformSettingsAdminHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
-		// Start campaign scheduler (every 1 minute)
-		sched := scheduler.NewCampaignScheduler(
+		// Start SMS campaign scheduler.
+		smsSched := scheduler.NewCampaignScheduler(
 			audienceProfileRepo,
 			tagRepo,
 			sentSMSRepo,
@@ -629,8 +640,26 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			cfg.Bot,
 			cfg.Admin,
 		)
-		stopScheduler := sched.Start(context.Background())
-		stopFuncs = append(stopFuncs, stopScheduler)
+		stopSMSScheduler := smsSched.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopSMSScheduler)
+
+		// Start Bale campaign scheduler.
+		baleSched := scheduler.NewBaleCampaignScheduler(
+			audienceProfileRepo,
+			tagRepo,
+			sentBaleMessageRepo,
+			processedCampaignRepo,
+			multimediaRepo,
+			notificationService,
+			db,
+			log.Default(),
+			cfg.Scheduler.CampaignExecutionInterval,
+			cfg.Bale,
+			cfg.Bot,
+			cfg.Admin,
+		)
+		stopBaleScheduler := baleSched.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopBaleScheduler)
 	}
 
 	// Create application struct from FiberRouter
