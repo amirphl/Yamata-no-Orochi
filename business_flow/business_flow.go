@@ -298,7 +298,7 @@ func getCampaign(ctx context.Context, campaignRepo repository.CampaignRepository
 // canUpdateCampaign checks if a campaign can be updated based on its current status
 func canUpdateCampaign(status models.CampaignStatus) bool {
 	// Only campaigns with 'initiated' or 'in-progress' status can be updated
-	// Campaigns with 'waiting-for-approval', 'approved', 'rejected', 'running', or 'executed' status cannot be updated
+	// Campaigns with 'waiting-for-approval', 'approved', 'rejected', 'running', 'executed', 'canceled', or 'cancelled-by-admin' status cannot be updated
 	return status == models.CampaignStatusInitiated || status == models.CampaignStatusInProgress
 }
 
