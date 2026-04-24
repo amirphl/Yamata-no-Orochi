@@ -49,7 +49,7 @@ const (
 )
 
 const (
-	DefaultReferrerAgencyCode = "jazebeh.ir"
+	DefaultReferrerAgencyCode = "monstract.ir"
 )
 
 const (

@@ -3418,6 +3418,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/bot/campaigns/{id}/target-audience-excel-file": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot Download Campaign Target Audience Excel File",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Campaign ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Binary file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/bot/media/{uuid}": {
             "get": {
                 "security": [
@@ -4562,7 +4619,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Provider platform (oxapay|bithide)",
+                        "description": "Provider platform (oxapay)",
                         "name": "platform",
                         "in": "path",
                         "required": true
@@ -4634,7 +4691,7 @@ const docTemplate = `{
         },
         "/api/v1/media/upload": {
             "post": {
-                "description": "Upload an image or video (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv, \u003c=100MB)",
+                "description": "Upload an image, video, or excel file (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv/xlsx/xls/xlsm, \u003c=100MB)",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -7140,6 +7197,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
                 },
@@ -8008,6 +8068,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
                 },
@@ -8283,6 +8346,9 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string",
                     "maxLength": 255
@@ -8384,6 +8450,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string",
@@ -8495,6 +8564,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string",
@@ -8702,6 +8774,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string",
@@ -9119,6 +9194,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string"
@@ -10158,6 +10236,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
                 },
                 "title": {
                     "type": "string",
