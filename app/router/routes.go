@@ -57,7 +57,9 @@ type FiberRouter struct {
 	cryptoPaymentHandler           handlers.CryptoPaymentHandlerInterface
 	profileHandler                 handlers.ProfileHandlerInterface
 	multimediaHandler              handlers.MultimediaHandlerInterface
+	multimediaAdminHandler         handlers.MultimediaAdminHandlerInterface
 	platformSettingsHandler        handlers.PlatformSettingsHandlerInterface
+	platformSettingsAdminHandler   handlers.PlatformSettingsAdminHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -83,7 +85,9 @@ func NewFiberRouter(
 	cryptoPaymentHandler handlers.CryptoPaymentHandlerInterface,
 	profileHandler handlers.ProfileHandlerInterface,
 	multimediaHandler handlers.MultimediaHandlerInterface,
+	multimediaAdminHandler handlers.MultimediaAdminHandlerInterface,
 	platformSettingsHandler handlers.PlatformSettingsHandlerInterface,
+	platformSettingsAdminHandler handlers.PlatformSettingsAdminHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -124,7 +128,9 @@ func NewFiberRouter(
 		cryptoPaymentHandler:           cryptoPaymentHandler,
 		profileHandler:                 profileHandler,
 		multimediaHandler:              multimediaHandler,
+		multimediaAdminHandler:         multimediaAdminHandler,
 		platformSettingsHandler:        platformSettingsHandler,
+		platformSettingsAdminHandler:   platformSettingsAdminHandler,
 	}
 }
 
@@ -239,6 +245,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/", r.campaignHandler.ListCampaigns)
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
 	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
+	campaigns.Post("/calculate-cost-v2", r.campaignHandler.CalculateCampaignCostV2)
 	campaigns.Get("/audience-spec", r.campaignHandler.ListAudienceSpec)
 	campaigns.Get("/summary", r.campaignHandler.GetApprovedRunningSummary)
 	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
@@ -251,6 +258,8 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
 	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
 	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
+	adminCampaigns.Post("/cancel", r.campaignAdminHandler.CancelCampaign)
+	adminCampaigns.Delete("/audience-spec", r.campaignAdminHandler.RemoveAudienceSpec)
 
 	// Admin segment price factors
 	adminSegmentPF := api.Group("/admin/segment-price-factors")
@@ -375,11 +384,26 @@ func (r *FiberRouter) SetupRoutes() {
 	media.Get("/:uuid", r.multimediaHandler.Download)
 	media.Get("/:uuid/preview", r.multimediaHandler.Preview)
 
+	// Admin multimedia routes (protected)
+	adminMedia := api.Group("/admin/media")
+	adminMedia.Use(r.authMiddleware.AdminAuthenticate())
+	adminMedia.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminMedia.Get("/:uuid", r.multimediaAdminHandler.Download)
+	adminMedia.Get("/:uuid/preview", r.multimediaAdminHandler.Preview)
+
 	// Platform settings routes (protected)
 	platformSettings := api.Group("/platform-settings")
 	platformSettings.Use(r.authMiddleware.Authenticate())
 	platformSettings.Post("/", r.platformSettingsHandler.Create)
 	platformSettings.Get("/", r.platformSettingsHandler.List)
+
+	// Admin platform settings routes (protected)
+	adminPlatformSettings := api.Group("/admin/platform-settings")
+	adminPlatformSettings.Use(r.authMiddleware.AdminAuthenticate())
+	adminPlatformSettings.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminPlatformSettings.Get("/", r.platformSettingsAdminHandler.List)
+	adminPlatformSettings.Put("/status", r.platformSettingsAdminHandler.ChangeStatus)
+	adminPlatformSettings.Put("/metadata", r.platformSettingsAdminHandler.AddMetadata)
 
 	// Public short-link redirect (no auth)
 	r.app.Get("/s/:uid", r.shortLinkHandler.Visit)
