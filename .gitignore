@@ -268,3 +268,4 @@ py-ai/Customer Persona New.processed.csv
 data/
 
 scripts/update-audience-spec.sh
+.gocache/
