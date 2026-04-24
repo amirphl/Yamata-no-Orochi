@@ -29,6 +29,7 @@ type ProductionConfig struct {
 	Admin      AdminConfig      `json:"admin"`
 	System     SystemConfig     `json:"system"`
 	PayamSMS   PayamSMSConfig   `json:"payam_sms"`
+	Bale       BaleConfig       `json:"bale"`
 	Bot        BotConfig        `json:"bot"`
 	Scheduler  SchedulerConfig  `json:"scheduler"`
 	Crypto     CryptoConfig     `json:"crypto"`
@@ -338,6 +339,11 @@ type PayamSMSConfig struct {
 	RootAccessToken string `json:"root_access_token"`
 }
 
+// BaleConfig holds credentials for Bale Safir messaging API.
+type BaleConfig struct {
+	APIAccessKey string `json:"api_access_key"`
+}
+
 type SchedulerConfig struct {
 	CampaignExecutionEnabled  bool          `json:"campaign_execution_enabled"`
 	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
@@ -541,6 +547,9 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Scope:           getEnvString("PAYAM_SMS_SCOPE", "webservice"),
 			GrantType:       getEnvString("PAYAM_SMS_GRANT_TYPE", "password"),
 			RootAccessToken: getEnvString("PAYAM_SMS_ROOT_ACCESS_TOKEN", ""),
+		},
+		Bale: BaleConfig{
+			APIAccessKey: getEnvString("BALE_API_ACCESS_KEY", ""),
 		},
 		Bot: BotConfig{
 			Username:  getEnvString("BOT_USERNAME", ""),
