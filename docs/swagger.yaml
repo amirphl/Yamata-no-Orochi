@@ -526,6 +526,8 @@ definitions:
         items:
           type: string
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         type: string
       total_clicks:
@@ -1106,6 +1108,8 @@ definitions:
         items:
           type: string
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         type: string
       updated_at:
@@ -1301,6 +1305,8 @@ definitions:
           type: string
         maxItems: 255
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         maxLength: 255
         type: string
@@ -1374,6 +1380,8 @@ definitions:
         items:
           type: string
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         maxLength: 255
         type: string
@@ -1451,6 +1459,8 @@ definitions:
         items:
           type: string
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         maxLength: 255
         type: string
@@ -1599,6 +1609,8 @@ definitions:
           type: string
         maxItems: 255
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         maxLength: 255
         type: string
@@ -1879,6 +1891,8 @@ definitions:
         items:
           type: string
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         type: string
       total_clicks:
@@ -2597,6 +2611,8 @@ definitions:
           type: string
         maxItems: 255
         type: array
+      target_audience_excel_file_uuid:
+        type: string
       title:
         maxLength: 255
         type: string
@@ -4670,6 +4686,42 @@ paths:
       summary: Bot Update Campaign Statistics
       tags:
       - Bot Campaigns
+  /api/v1/bot/campaigns/{id}/target-audience-excel-file:
+    get:
+      parameters:
+      - description: Campaign ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Binary file
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Bot Download Campaign Target Audience Excel File
+      tags:
+      - Bot Campaigns
   /api/v1/bot/campaigns/audience-spec:
     post:
       consumes:
@@ -5457,7 +5509,7 @@ paths:
       - application/json
       description: Receives provider callbacks and updates deposit and wallet balances
       parameters:
-      - description: Provider platform (oxapay|bithide)
+      - description: Provider platform (oxapay)
         in: path
         name: platform
         required: true
@@ -5587,7 +5639,7 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Upload an image or video (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv,
+      description: Upload an image, video, or excel file (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv/xlsx/xls/xlsm,
         <=100MB)
       parameters:
       - description: Multimedia file (<=100MB)
