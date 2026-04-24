@@ -265,6 +265,8 @@ type SegmentPriceFactorRepository interface {
 	Repository[models.SegmentPriceFactor, models.SegmentPriceFactorFilter]
 	ListLatestByLevel3(ctx context.Context) ([]*models.SegmentPriceFactor, error)
 	LatestByLevel3s(ctx context.Context, level3s []string) (map[string]float64, error)
+	ListLatestByLevel3ForPlatform(ctx context.Context, platform string) ([]*models.SegmentPriceFactor, error)
+	LatestByLevel3sForPlatform(ctx context.Context, level3s []string, platform string) (map[string]float64, error)
 }
 
 // TagRepository defines operations for tags
@@ -300,6 +302,20 @@ type SentSMSRepository interface {
 	UpdateProviderFieldsByTrackingIDs(ctx context.Context, updates []SentSMSProviderUpdate) error
 }
 
+// SentBaleMessageRepository defines operations for sent Bale message rows.
+type SentBaleMessageRepository interface {
+	Repository[models.SentBaleMessage, models.SentBaleMessageFilter]
+	ByID(ctx context.Context, id uint) (*models.SentBaleMessage, error)
+	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentBaleMessage, error)
+	UpdateSendResultByTrackingID(
+		ctx context.Context,
+		trackingID string,
+		status models.BaleSendStatus,
+		partsDelivered int,
+		serverID, errorCode, description *string,
+	) error
+}
+
 // SMSStatusJobRepository defines operations for SMS status check jobs
 type SMSStatusJobRepository interface {
 	Repository[models.SMSStatusJob, any]
@@ -329,6 +345,8 @@ type PlatformSettingsRepository interface {
 	Repository[models.PlatformSettings, models.PlatformSettingsFilter]
 	ByID(ctx context.Context, id uint) (*models.PlatformSettings, error)
 	ByUUID(ctx context.Context, uuid string) (*models.PlatformSettings, error)
+	UpdateStatus(ctx context.Context, id uint, status models.PlatformSettingsStatus) error
+	AppendMetadata(ctx context.Context, id uint, key, value string) error
 }
 
 // TicketRepository defines operations for tickets
