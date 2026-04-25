@@ -65,25 +65,70 @@ type GetTransactionHistoryRequest struct {
 
 // TransactionHistoryItem represents a single transaction history item
 type TransactionHistoryItem struct {
-	UUID               string            `json:"uuid"`                                        // Transaction UUID
-	Status             string            `json:"status"`                                      // Transaction status
-	Amount             uint64            `json:"amount"`                                      // Amount in Tomans
-	CustomerCredit     uint64            `json:"customer_credit"`                              // Customer credit portion (when applicable)
-	AgencyShareWithTax uint64            `json:"agency_share_with_tax"`                       // Agency share with tax (when applicable)
-	Currency           string            `json:"currency"`                                    // Currency (usually TMN)
-	Operation          string            `json:"operation"`                                   // Operation name for display
-	Source             string            `json:"source"`                                      // Metadata source key
-	DateTime           time.Time         `json:"datetime"`                                    // When the transaction occurred
-	ExternalRef        *string           `json:"external_ref,omitempty" validate:"omitempty"` // External reference (e.g., Atipay reference)
-	BalanceBefore      map[string]uint64 `json:"balance_before"`                              // Balance before transaction
-	BalanceAfter       map[string]uint64 `json:"balance_after"`                               // Balance after transaction
-	Metadata           map[string]any    `json:"metadata,omitempty" validate:"omitempty"`     // Additional transaction metadata
+	UUID                string            `json:"uuid"`                                                      // Transaction UUID
+	Status              string            `json:"status"`                                                    // Transaction status
+	Amount              uint64            `json:"amount"`                                                    // Amount in Tomans
+	CustomerCredit      uint64            `json:"customer_credit"`                                           // Customer credit portion (when applicable)
+	AgencyShareWithTax  uint64            `json:"agency_share_with_tax"`                                     // Agency share with tax (when applicable)
+	Currency            string            `json:"currency"`                                                  // Currency (usually TMN)
+	Operation           string            `json:"operation"`                                                 // Operation name for display
+	Source              string            `json:"source"`                                                    // Metadata source key
+	DateTime            time.Time         `json:"datetime"`                                                  // When the transaction occurred
+	ExternalRef         *string           `json:"external_ref,omitempty" validate:"omitempty"`               // External reference (e.g., Atipay reference)
+	CustomerInvoiceUUID *string           `json:"customer_invoice_uuid,omitempty" validate:"omitempty,uuid"` //
+	BalanceBefore       map[string]uint64 `json:"balance_before"`                                            // Balance before transaction
+	BalanceAfter        map[string]uint64 `json:"balance_after"`                                             // Balance after transaction
+	Metadata            map[string]any    `json:"metadata,omitempty" validate:"omitempty"`                   // Additional transaction metadata
 }
 
 // TransactionHistoryResponse represents the response for transaction history
 type TransactionHistoryResponse struct {
 	Items      []TransactionHistoryItem         `json:"items"`      // List of transaction history items
 	Pagination TransactionHistoryPaginationInfo `json:"pagination"` // Pagination information
+}
+
+type AdminListTransactionsRequest struct {
+	Page       uint       `json:"page" validate:"min=1"`
+	PageSize   uint       `json:"page_size" validate:"min=1,max=100"`
+	StartDate  *time.Time `json:"start_date,omitempty" validate:"omitempty"`
+	EndDate    *time.Time `json:"end_date,omitempty" validate:"omitempty"`
+	CustomerID *uint      `json:"customer_id,omitempty" validate:"omitempty,min=1"`
+}
+
+type AdminTransactionItem struct {
+	UUID                string                       `json:"uuid"`
+	CustomerID          uint                         `json:"customer_id"`
+	Customer            AdminTransactionCustomerInfo `json:"customer"`
+	Status              string                       `json:"status"`
+	Amount              uint64                       `json:"amount"`
+	CustomerCredit      uint64                       `json:"customer_credit"`
+	AgencyShareWithTax  uint64                       `json:"agency_share_with_tax"`
+	Currency            string                       `json:"currency"`
+	Operation           string                       `json:"operation"`
+	Source              string                       `json:"source"`
+	DateTime            time.Time                    `json:"datetime"`
+	ExternalRef         *string                      `json:"external_ref,omitempty" validate:"omitempty"`
+	CustomerInvoiceUUID *string                      `json:"customer_invoice_uuid,omitempty" validate:"omitempty,uuid"`
+	BalanceBefore       map[string]uint64            `json:"balance_before"`
+	BalanceAfter        map[string]uint64            `json:"balance_after"`
+	Metadata            map[string]any               `json:"metadata,omitempty" validate:"omitempty"`
+}
+
+type AdminTransactionCustomerInfo struct {
+	RepresentativeFirstName string  `json:"representative_first_name"`
+	RepresentativeLastName  string  `json:"representative_last_name"`
+	FullName                string  `json:"full_name"`
+	RepresentativeMobile    string  `json:"representative_mobile"`
+	Email                   string  `json:"email"`
+	CompanyName             *string `json:"company_name,omitempty"`
+	CompanyPhone            *string `json:"company_phone,omitempty"`
+	NationalID              *string `json:"national_id,omitempty"`
+	AccountType             string  `json:"account_type"`
+}
+
+type AdminListTransactionsResponse struct {
+	Items      []AdminTransactionItem           `json:"items"`
+	Pagination TransactionHistoryPaginationInfo `json:"pagination"`
 }
 
 // TransactionHistoryPaginationInfo represents pagination metadata for transaction history
@@ -200,5 +245,25 @@ type UpdateDepositReceiptFileRequest struct {
 type AdminUpdateDepositReceiptStatusRequest struct {
 	ReceiptUUID string `json:"receipt_uuid" validate:"required"`
 	Action      string `json:"action" validate:"required,oneof=approve reject"`
-	Reason      string `json:"reason,omitempty" validate:"omitempty,min=3,max=500"`
+	// CustomerInvoiceUUID string `json:"customer_invoice_uuid,omitempty" validate:"omitempty,uuid"`
+	Reason string `json:"reason,omitempty" validate:"omitempty,min=3,max=500"`
+}
+
+type AdminAddInvoiceToTransactionRequest struct {
+	TransactionUUID     string `json:"transaction_uuid" validate:"required,uuid"`
+	CustomerInvoiceUUID string `json:"customer_invoice_uuid" validate:"required,uuid"`
+}
+
+type AdminAddInvoiceToTransactionResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}
+
+type NotifyInvoiceIssueRequest struct {
+	TransactionUUID string `json:"transaction_uuid" validate:"required,uuid"`
+}
+
+type NotifyInvoiceIssueResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
