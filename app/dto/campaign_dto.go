@@ -360,6 +360,40 @@ type AdminRemoveAudienceSpecResponse struct {
 	Platform string `json:"platform"`
 }
 
+type AdminUpdatePagePriceRequest struct {
+	Platform string `json:"platform" validate:"required,oneof=sms rubika bale splus"`
+	Price    uint64 `json:"price" validate:"required,gt=0"`
+}
+
+type AdminUpdatePagePriceResponse struct {
+	Message   string    `json:"message"`
+	Platform  string    `json:"platform"`
+	Price     uint64    `json:"price"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AdminPagePriceItem struct {
+	Platform  string    `json:"platform"`
+	Price     uint64    `json:"price"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type AdminGetPagePricesResponse struct {
+	Message string               `json:"message"`
+	Items   []AdminPagePriceItem `json:"items"`
+}
+
+type PagePriceItem struct {
+	Platform  string    `json:"platform"`
+	Price     uint64    `json:"price"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type GetPagePricesResponse struct {
+	Message string          `json:"message"`
+	Items   []PagePriceItem `json:"items"`
+}
+
 // BotGetCampaignResponse represents the campaign specification in responses
 type BotGetCampaignResponse struct {
 	ID                 uint                             `json:"id"`
