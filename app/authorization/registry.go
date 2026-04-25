@@ -14,6 +14,10 @@ type RoutePermission struct {
 // RoutePermissionRegistry centralizes the API → permission bucket mapping.
 // Keep entries at “feature action” granularity (read/write/approve, etc.).
 var RoutePermissionRegistry = []RoutePermission{
+	// Campaign page prices (must come before generic admin campaigns GET prefix)
+	{"GET", "/api/v1/admin/campaigns/page-prices", PermissionPlatformBasePriceRead, "List page prices"},
+	{"PUT", "/api/v1/admin/campaigns/page-prices", PermissionPlatformBasePriceEdit, "Update page price"},
+
 	// Campaign admin
 	{"GET", "/api/v1/admin/campaigns", PermissionCampaignRead, "List/get campaigns"},
 	{"POST", "/api/v1/admin/campaigns/approve", PermissionCampaignApprove, "Approve campaigns"},
@@ -24,9 +28,11 @@ var RoutePermissionRegistry = []RoutePermission{
 
 	// Payments admin
 	{"POST", "/api/v1/admin/payments/charge-wallet", PermissionPaymentChargeWallet, "Charge wallet (admin)"},
+	{"GET", "/api/v1/admin/payments/transactions", PermissionPaymentRead, "List filtered transactions"},
 	{"GET", "/api/v1/admin/payments/deposit-receipts", PermissionPaymentReceiptReview, "List deposit receipts"},
 	{"GET", "/api/v1/admin/payments/deposit-receipts/", PermissionPaymentReceiptReview, "Get deposit receipt file"}, // path prefix covers /deposit-receipts/:uuid/file
 	{"POST", "/api/v1/admin/payments/deposit-receipts/status", PermissionPaymentReceiptReview, "Review deposit receipt"},
+	{"POST", "/api/v1/admin/payments/transactions/invoice", PermissionPaymentInvoiceAttach, "Attach invoice to transaction"},
 
 	// Customer management
 	{"GET", "/api/v1/admin/customer-management", PermissionUserList, "List customers & shares/discounts"},
@@ -51,6 +57,7 @@ var RoutePermissionRegistry = []RoutePermission{
 	{"POST", "/api/v1/admin/tickets/reply", PermissionTicketReply, "Reply to tickets"},
 
 	// Media
+	{"POST", "/api/v1/admin/media/upload", PermissionMediaWrite, "Upload media"},
 	{"GET", "/api/v1/admin/media", PermissionMediaRead, "Download/preview media"},
 
 	// Platform settings & price factors
