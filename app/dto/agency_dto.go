@@ -74,7 +74,7 @@ type CreateAgencyDiscountRequest struct {
 	AgencyID     uint    `json:"-"`
 	CustomerID   uint    `json:"customer_id" validate:"required,min=1"`
 	Name         string  `json:"name" validate:"required,min=1,max=255"`
-	DiscountRate float64 `json:"discount_rate" validate:"required,min=0,max=0.5"`
+	DiscountRate float64 `json:"discount_rate" validate:"gte=0,lte=0.5"`
 }
 
 type CreateAgencyDiscountResponse struct {
