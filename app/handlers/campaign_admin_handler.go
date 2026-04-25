@@ -25,6 +25,8 @@ type CampaignAdminHandlerInterface interface {
 	CancelCampaign(c fiber.Ctx) error
 	RemoveAudienceSpec(c fiber.Ctx) error
 	RescheduleCampaign(c fiber.Ctx) error
+	UpdatePagePrice(c fiber.Ctx) error
+	GetPagePrices(c fiber.Ctx) error
 }
 
 // CampaignAdminHandler handles campaign-related HTTP requests
@@ -396,6 +398,58 @@ func (h *CampaignAdminHandler) RemoveAudienceSpec(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to remove audience spec", "ADMIN_REMOVE_AUDIENCE_SPEC_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Audience spec removed successfully", res)
+}
+
+// UpdatePagePrice inserts a new page price record for a platform.
+// @Summary Update Page Price
+// @Description Insert a new page price version for a platform (insert-only)
+// @Tags Admin Campaigns
+// @Accept json
+// @Produce json
+// @Param request body dto.AdminUpdatePagePriceRequest true "Page price payload"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminUpdatePagePriceResponse}
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/campaigns/page-prices [put]
+func (h *CampaignAdminHandler) UpdatePagePrice(c fiber.Ctx) error {
+	var req dto.AdminUpdatePagePriceRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
+	}
+
+	res, err := h.campaignFlow.UpdatePagePrice(h.createRequestContext(c, "/api/v1/admin/campaigns/page-prices"), &req)
+	if err != nil {
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "INVALID_REQUEST", "PAGE_PRICE_PLATFORM_REQUIRED", "PAGE_PRICE_PLATFORM_INVALID", "PAGE_PRICE_INVALID":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request", be.Code, nil)
+			}
+		}
+		log.Println("Admin update page price failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update page price", "PAGE_PRICE_INSERT_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Page price updated successfully", res)
+}
+
+// GetPagePrices returns latest page price per platform.
+// @Summary Get Page Prices
+// @Description Return latest page price for all platforms
+// @Tags Admin Campaigns
+// @Produce json
+// @Success 200 {object} dto.APIResponse{data=dto.AdminGetPagePricesResponse}
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/campaigns/page-prices [get]
+func (h *CampaignAdminHandler) GetPagePrices(c fiber.Ctx) error {
+	res, err := h.campaignFlow.GetPagePrices(h.createRequestContext(c, "/api/v1/admin/campaigns/page-prices"))
+	if err != nil {
+		log.Println("Admin get page prices failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get page prices", "PAGE_PRICE_LIST_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Page prices retrieved successfully", res)
 }
 
 // createRequestContext creates a context with request-scoped values for observability and timeout
