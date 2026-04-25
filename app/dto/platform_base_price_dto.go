@@ -20,3 +20,13 @@ type AdminListPlatformBasePricesResponse struct {
 	Message string                       `json:"message"`
 	Items   []AdminPlatformBasePriceItem `json:"items"`
 }
+
+type PlatformBasePriceItem struct {
+	Platform string `json:"platform"`
+	Price    uint64 `json:"price"`
+}
+
+type ListPlatformBasePricesResponse struct {
+	Message string                  `json:"message"`
+	Items   []PlatformBasePriceItem `json:"items"`
+}
