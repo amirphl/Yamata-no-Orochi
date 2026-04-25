@@ -213,5 +213,20 @@
 \echo 'Running 0069_add_platform_to_platform_settings.sql...'
 \i migrations/0069_add_platform_to_platform_settings.sql
 
+\echo 'Running 0070_add_platform_to_segment_price_factors.sql...'
+\i migrations/0070_add_platform_to_segment_price_factors.sql
+
+\echo 'Running 0071_add_cancelled_by_admin_status_to_sms_campaigns.sql...'
+\i migrations/0071_add_cancelled_by_admin_status_to_sms_campaigns.sql
+
+\echo 'Running 0072_add_metadata_to_platform_settings.sql...'
+\i migrations/0072_add_metadata_to_platform_settings.sql
+
+\echo 'Running 0073_create_sent_bale_messages.sql...'
+\i migrations/0073_create_sent_bale_messages.sql
+
+\echo 'Running 0074_replicate_sms_segment_price_factors_to_other_platforms.sql...'
+\i migrations/0074_replicate_sms_segment_price_factors_to_other_platforms.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
