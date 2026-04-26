@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -13,6 +14,7 @@ import (
 
 // MultimediaAdminHandlerInterface defines admin multimedia handlers.
 type MultimediaAdminHandlerInterface interface {
+	Upload(c fiber.Ctx) error
 	Download(c fiber.Ctx) error
 	Preview(c fiber.Ctx) error
 }
@@ -38,9 +40,88 @@ func (h *MultimediaAdminHandler) ErrorResponse(c fiber.Ctx, statusCode int, mess
 	})
 }
 
+func (h *MultimediaAdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, message string, data any) error {
+	return c.Status(statusCode).JSON(dto.APIResponse{
+		Success: true,
+		Message: message,
+		Data:    data,
+	})
+}
+
+// Upload handles multimedia upload (image/video/excel/pdf) for admins.
+// @Summary Admin upload multimedia
+// @Description Upload an image, video, excel, or pdf file for a customer (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv/xlsx/xls/xlsm/pdf, <=100MB)
+// @Tags Admin Multimedia
+// @Security BearerAuth
+// @Accept mpfd
+// @Produce json
+// @Param customer_id formData int true "Customer ID"
+// @Param file formData file true "Multimedia file (<=100MB)"
+// @Success 201 {object} dto.APIResponse{data=dto.UploadMultimediaResponse} "Upload successful"
+// @Failure 400 {object} dto.APIResponse "Invalid request or file"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 404 {object} dto.APIResponse "Customer not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/media/upload [post]
+func (h *MultimediaAdminHandler) Upload(c fiber.Ctx) error {
+	customerIDStr := c.FormValue("customer_id")
+	if customerIDStr == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "customer_id is required", "INVALID_CUSTOMER_ID", nil)
+	}
+	customerIDU64, err := strconv.ParseUint(customerIDStr, 10, 64)
+	if err != nil || customerIDU64 == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "invalid customer_id", "INVALID_CUSTOMER_ID", nil)
+	}
+
+	fileHeader, err := c.FormFile("file")
+	if err != nil || fileHeader == nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "file is required", "INVALID_FILE", nil)
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "invalid file", "INVALID_FILE", err.Error())
+	}
+	defer file.Close()
+
+	req := dto.UploadMultimediaRequest{
+		CustomerID:       uint(customerIDU64),
+		OriginalFilename: fileHeader.Filename,
+		FileSize:         fileHeader.Size,
+		ContentType:      fileHeader.Header.Get("Content-Type"),
+		File:             file,
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	result, err := h.flow.UploadMultimediaByAdmin(h.createRequestContext(c, "/api/v1/admin/media/upload"), &req, metadata)
+	if err != nil {
+		if businessflow.IsCustomerNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "INVALID_FILE":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid file", be.Code, be.Error())
+			case "INVALID_FILE_TYPE":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid file type", be.Code, be.Error())
+			case "FILE_TOO_LARGE":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "File too large", be.Code, be.Error())
+			case "INVALID_REQUEST":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request", be.Code, be.Error())
+			}
+		}
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to upload multimedia", "UPLOAD_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusCreated, "Upload successful", result)
+}
+
 // Download handles multimedia download for admins.
 // @Summary Admin download multimedia
-// @Description Download an image or video by uuid (admin access)
+// @Description Download a multimedia file (image/video/excel/pdf) by uuid (admin access)
 // @Tags Admin Multimedia
 // @Security BearerAuth
 // @Produce application/octet-stream
