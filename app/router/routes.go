@@ -50,6 +50,7 @@ type FiberRouter struct {
 	lineNumberAdminHandler         handlers.LineNumberAdminHandlerInterface
 	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface
 	platformBasePriceAdminHandler  handlers.PlatformBasePriceAdminHandlerInterface
+	platformBasePriceHandler       handlers.PlatformBasePriceHandlerInterface
 	segmentPriceFactorHandler      handlers.SegmentPriceFactorHandlerInterface
 	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
 	campaignBotHandler             handlers.CampaignBotHandlerInterface
@@ -83,6 +84,7 @@ func NewFiberRouter(
 	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
 	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface,
 	platformBasePriceAdminHandler handlers.PlatformBasePriceAdminHandlerInterface,
+	platformBasePriceHandler handlers.PlatformBasePriceHandlerInterface,
 	segmentPriceFactorHandler handlers.SegmentPriceFactorHandlerInterface,
 	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
 	campaignBotHandler handlers.CampaignBotHandlerInterface,
@@ -130,8 +132,8 @@ func NewFiberRouter(
 		lineNumberAdminHandler:         lineNumberAdminHandler,
 		segmentPriceFactorAdminHandler: segmentPriceFactorAdminHandler,
 		platformBasePriceAdminHandler:  platformBasePriceAdminHandler,
+		platformBasePriceHandler:       platformBasePriceHandler,
 		segmentPriceFactorHandler:      segmentPriceFactorHandler,
-
 		adminCustomerManagementHandler: adminCustomerManagemetHandler,
 		campaignBotHandler:             campaignBotHandler,
 		ticketHandler:                  ticketHandler,
@@ -262,9 +264,11 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
 	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
 	campaigns.Post("/calculate-cost-v2", r.campaignHandler.CalculateCampaignCostV2)
+	campaigns.Get("/page-prices", r.campaignHandler.GetPagePrices)
 	campaigns.Get("/audience-spec", r.campaignHandler.ListAudienceSpec)
 	campaigns.Get("/summary", r.campaignHandler.GetApprovedRunningSummary)
 	campaigns.Get("/initiated/last", r.campaignHandler.GetLastInitiatedCampaign)
+	campaigns.Get("/:id/export", r.campaignHandler.ExportCampaignReport)
 	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
 
 	// Admin campaigns listing and actions
@@ -273,12 +277,14 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
 	adminCampaigns.Use(r.authzMiddleware.AdminAuthorize())
 	adminCampaigns.Get("/", r.campaignAdminHandler.ListCampaigns)
+	adminCampaigns.Get("/page-prices", r.campaignAdminHandler.GetPagePrices)
 	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
 	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
 	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
 	adminCampaigns.Post("/reschedule", r.campaignAdminHandler.RescheduleCampaign)
 	adminCampaigns.Post("/cancel", r.campaignAdminHandler.CancelCampaign)
 	adminCampaigns.Delete("/audience-spec", r.campaignAdminHandler.RemoveAudienceSpec)
+	adminCampaigns.Put("/page-prices", r.campaignAdminHandler.UpdatePagePrice)
 
 	// Admin segment price factors
 	adminSegmentPF := api.Group("/admin/segment-price-factors")
@@ -296,6 +302,11 @@ func (r *FiberRouter) SetupRoutes() {
 	adminPlatformBasePrice.Use(r.authzMiddleware.AdminAuthorize())
 	adminPlatformBasePrice.Get("/", r.platformBasePriceAdminHandler.List)
 	adminPlatformBasePrice.Put("/", r.platformBasePriceAdminHandler.Update)
+
+	// Platform base prices (authenticated)
+	platformBasePrice := api.Group("/platform-base-prices")
+	platformBasePrice.Use(r.authMiddleware.Authenticate())
+	platformBasePrice.Get("/", r.platformBasePriceHandler.List)
 
 	// Bot campaigns routes (protected)
 	botCampaigns := api.Group("/bot/campaigns")
@@ -396,6 +407,7 @@ func (r *FiberRouter) SetupRoutes() {
 	payments.Get("/history", r.authMiddleware.Authenticate(), r.paymentHandler.GetTransactionHistory)
 	// Deposit receipt submission & listing
 	payments.Post("/deposit-receipts", r.authMiddleware.Authenticate(), r.paymentHandler.SubmitDepositReceipt)
+	payments.Post("/transactions/invoice-issue-request", r.authMiddleware.Authenticate(), r.paymentHandler.NotifyInvoiceIssueRequest)
 	payments.Get("/deposit-receipts", r.authMiddleware.Authenticate(), r.paymentHandler.ListDepositReceipts)
 	// Proforma invoice preview
 	payments.Get("/proforma/preview", r.authMiddleware.Authenticate(), r.paymentHandler.PreviewProformaInvoice)
@@ -412,9 +424,11 @@ func (r *FiberRouter) SetupRoutes() {
 	adminPayments.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
 	adminPayments.Use(r.authzMiddleware.AdminAuthorize())
 	adminPayments.Post("/charge-wallet", r.paymentAdminHandler.ChargeWallet)
+	adminPayments.Get("/transactions", r.paymentAdminHandler.ListTransactions)
 	adminPayments.Get("/deposit-receipts", r.paymentAdminHandler.ListDepositReceipts)
 	adminPayments.Get("/deposit-receipts/:uuid/file", r.paymentAdminHandler.GetDepositReceiptFile)
 	adminPayments.Post("/deposit-receipts/status", r.paymentAdminHandler.UpdateDepositReceiptStatus)
+	adminPayments.Post("/transactions/invoice", r.paymentAdminHandler.AddInvoiceToTransaction)
 
 	// Crypto payment routes
 	crypto := api.Group("/crypto")
@@ -450,6 +464,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminMedia.Use(r.authMiddleware.AdminAuthenticate())
 	adminMedia.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
 	adminMedia.Use(r.authzMiddleware.AdminAuthorize())
+	adminMedia.Post("/upload", r.multimediaAdminHandler.Upload)
 	adminMedia.Get("/:uuid", r.multimediaAdminHandler.Download)
 	adminMedia.Get("/:uuid/preview", r.multimediaAdminHandler.Preview)
 
@@ -869,7 +884,9 @@ func errorHandler(c fiber.Ctx, err error) error {
 // generateRequestID creates a unique request ID
 func generateRequestID() string {
 	bytes := make([]byte, 8)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		return hex.EncodeToString([]byte(time.Now().Format("150405.000000")))
+	}
 	return hex.EncodeToString(bytes)
 }
 
