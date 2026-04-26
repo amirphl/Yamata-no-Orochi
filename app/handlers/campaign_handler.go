@@ -13,6 +13,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v3"
+	"github.com/google/uuid"
 )
 
 // CampaignHandlerInterface defines the contract for campaign handlers
@@ -24,10 +25,12 @@ type CampaignHandlerInterface interface {
 	CalculateCampaignCostV2(c fiber.Ctx) error
 	ListCampaigns(c fiber.Ctx) error
 	GetLastInitiatedCampaign(c fiber.Ctx) error
+	GetPagePrices(c fiber.Ctx) error
 	ListAudienceSpec(c fiber.Ctx) error
 	GetApprovedRunningSummary(c fiber.Ctx) error
 	CancelCampaign(c fiber.Ctx) error
 	CloneCampaign(c fiber.Ctx) error
+	ExportCampaignReport(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -285,6 +288,42 @@ func (h *CampaignHandler) CloneCampaign(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusCreated, "Campaign cloned successfully", res)
 }
 
+// ExportCampaignReport exports campaign tracking results as an Excel report.
+// @Summary Export Campaign Report
+// @Description Export an SMS campaign report as an Excel file for the authenticated customer
+// @Tags Campaigns
+// @Produce application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+// @Param uuid path string true "Campaign UUID"
+// @Success 200 {string} string "Excel file"
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 403 {object} dto.APIResponse "Forbidden"
+// @Failure 404 {object} dto.APIResponse "Campaign not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/{uuid}/export [get]
+func (h *CampaignHandler) ExportCampaignReport(c fiber.Ctx) error {
+	campaignUUID := strings.TrimSpace(c.Params("uuid"))
+	if campaignUUID == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is required", "MISSING_CAMPAIGN_UUID", nil)
+	}
+	parsedCampaignUUID, err := uuid.Parse(campaignUUID)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is invalid", "INVALID_CAMPAIGN_UUID", nil)
+	}
+	campaignUUID = parsedCampaignUUID.String()
+
+	data, err := h.campaignFlow.ExportCampaignReport(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID+"/export"), campaignUUID)
+	if err != nil {
+		log.Println("Export campaign report failed", err)
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to export campaign report", "CAMPAIGN_REPORT_EXPORT_FAILED")
+	}
+
+	filename := "campaign_report_" + campaignUUID + ".xlsx"
+	c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	return c.Send(data)
+}
+
 // CalculateCampaignCapacity handles the campaign capacity calculation process
 // @Summary Calculate Campaign Capacity
 // @Description Calculate the potential reach and capacity of an campaign based on parameters
@@ -529,6 +568,24 @@ func (h *CampaignHandler) GetLastInitiatedCampaign(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, result.Message, result)
+}
+
+// GetPagePrices returns latest page price per platform.
+// @Summary Get Page Prices
+// @Description Return latest page price for all platforms
+// @Tags Campaigns
+// @Produce json
+// @Success 200 {object} dto.APIResponse{data=dto.GetPagePricesResponse}
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/campaigns/page-prices [get]
+func (h *CampaignHandler) GetPagePrices(c fiber.Ctx) error {
+	res, err := h.campaignFlow.GetPagePrices(h.createRequestContext(c, "/api/v1/campaigns/page-prices"))
+	if err != nil {
+		log.Println("Get page prices failed", err)
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to get page prices", "PAGE_PRICE_LIST_FAILED")
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Page prices retrieved successfully", res)
 }
 
 // ListAudienceSpec returns the current audience spec
