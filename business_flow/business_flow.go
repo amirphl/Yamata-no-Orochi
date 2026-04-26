@@ -302,6 +302,11 @@ func canUpdateCampaign(status models.CampaignStatus) bool {
 	return status == models.CampaignStatusInitiated || status == models.CampaignStatusInProgress
 }
 
+// canCancelCampaign checks if a campaign can be cancelled based on its current status.
+func canCancelCampaign(status models.CampaignStatus) bool {
+	return status == models.CampaignStatusWaitingForApproval || status == models.CampaignStatusApproved
+}
+
 func getWallet(ctx context.Context, walletRepo repository.WalletRepository, customerID uint) (models.Wallet, error) {
 	wallet, err := walletRepo.ByCustomerID(ctx, customerID)
 	if err != nil {
