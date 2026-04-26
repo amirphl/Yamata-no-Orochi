@@ -21,8 +21,10 @@ import (
 type PaymentAdminHandlerInterface interface {
 	ChargeWallet(c fiber.Ctx) error
 	ListDepositReceipts(c fiber.Ctx) error
+	ListTransactions(c fiber.Ctx) error
 	GetDepositReceiptFile(c fiber.Ctx) error
 	UpdateDepositReceiptStatus(c fiber.Ctx) error
+	AddInvoiceToTransaction(c fiber.Ctx) error
 }
 
 // PaymentAdminHandler handles admin payment HTTP requests.
@@ -108,6 +110,11 @@ func (h *PaymentAdminHandler) ChargeWallet(c fiber.Ctx) error {
 		adminID,
 	)
 	if err != nil {
+		if businessErr, ok := err.(*businessflow.BusinessError); ok {
+			if businessErr.Code == "IDEMPOTENCY_KEY_REQUIRED" {
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Idempotency key is required", "IDEMPOTENCY_KEY_REQUIRED", nil)
+			}
+		}
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
 		}
@@ -171,8 +178,14 @@ func (h *PaymentAdminHandler) ChargeWallet(c fiber.Ctx) error {
 func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 	status := c.Query("status")
 	lang := c.Query("lang")
-	limit, _ := strconv.Atoi(c.Query("limit", "50"))
-	offset, _ := strconv.Atoi(c.Query("offset", "0"))
+	limit, err := strconv.Atoi(c.Query("limit", "50"))
+	if err != nil || limit <= 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "limit must be a positive integer", "INVALID_LIMIT", nil)
+	}
+	offset, err := strconv.Atoi(c.Query("offset", "0"))
+	if err != nil || offset < 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "offset must be a non-negative integer", "INVALID_OFFSET", nil)
+	}
 	order := c.Query("order", "id DESC")
 	var f models.DepositReceiptFilter
 	if status != "" {
@@ -184,10 +197,12 @@ func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 		f.Lang = &l
 	}
 	if customerStr := c.Query("customer_id"); customerStr != "" {
-		if cid, err := strconv.ParseUint(customerStr, 10, 64); err == nil {
-			cu := uint(cid)
-			f.CustomerID = &cu
+		cid, err := strconv.ParseUint(customerStr, 10, 64)
+		if err != nil {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "customer_id must be a positive integer", "INVALID_CUSTOMER_ID", nil)
 		}
+		cu := uint(cid)
+		f.CustomerID = &cu
 	}
 	resp, err := h.paymentAdminFlow.AdminListDepositReceipts(h.createRequestContext(c, "/api/v1/admin/payments/deposit-receipts"), f, limit, offset, order)
 	if err != nil {
@@ -198,6 +213,97 @@ func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list deposit receipts", "ADMIN_LIST_DEPOSIT_RECEIPTS_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Deposit receipts retrieved", resp)
+}
+
+// ListTransactions returns admin transaction list for customer credit increase operations.
+// @Summary Admin list transactions
+// @Description Lists filtered transactions where source=payment_callback_increase_customer_free_plus_credit and operation=increase_customer_free_plus_credit, including full customer details per transaction.
+// @Tags Payments Admin
+// @Produce json
+// @Param page query int false "Page number (default 1)" minimum(1)
+// @Param page_size query int false "Page size (default 20, max 100)" minimum(1) maximum(100)
+// @Param start_date query string false "Start date (RFC3339)"
+// @Param end_date query string false "End date (RFC3339)"
+// @Param customer_id query int false "Optional customer filter"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminListTransactionsResponse} "Transactions retrieved"
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/payments/transactions [get]
+func (h *PaymentAdminHandler) ListTransactions(c fiber.Ctx) error {
+	page := uint(1)
+	if pageStr := c.Query("page"); pageStr != "" {
+		parsed, err := strconv.ParseUint(pageStr, 10, 32)
+		if err != nil {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "page must be a positive integer", "INVALID_PAGE", nil)
+		}
+		page = uint(parsed)
+	}
+
+	pageSize := uint(20)
+	if pageSizeStr := c.Query("page_size"); pageSizeStr != "" {
+		parsed, err := strconv.ParseUint(pageSizeStr, 10, 32)
+		if err != nil {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "page_size must be a positive integer", "INVALID_PAGE_SIZE", nil)
+		}
+		pageSize = uint(parsed)
+	}
+
+	var startDate, endDate *time.Time
+	if startDateStr := c.Query("start_date"); startDateStr != "" {
+		parsed, err := time.Parse(time.RFC3339, startDateStr)
+		if err != nil {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "start_date must be RFC3339 format", "INVALID_START_DATE", nil)
+		}
+		startDate = &parsed
+	}
+	if endDateStr := c.Query("end_date"); endDateStr != "" {
+		parsed, err := time.Parse(time.RFC3339, endDateStr)
+		if err != nil {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "end_date must be RFC3339 format", "INVALID_END_DATE", nil)
+		}
+		endDate = &parsed
+	}
+
+	var customerID *uint
+	if customerIDStr := c.Query("customer_id"); customerIDStr != "" {
+		parsed, err := strconv.ParseUint(customerIDStr, 10, 64)
+		if err != nil {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "customer_id must be a positive integer", "INVALID_CUSTOMER_ID", nil)
+		}
+		cid := uint(parsed)
+		customerID = &cid
+	}
+
+	req := &dto.AdminListTransactionsRequest{
+		Page:       page,
+		PageSize:   pageSize,
+		StartDate:  startDate,
+		EndDate:    endDate,
+		CustomerID: customerID,
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
+	res, err := h.paymentAdminFlow.AdminListTransactions(
+		h.createRequestContext(c, "/api/v1/admin/payments/transactions"),
+		req,
+		metadata,
+	)
+	if err != nil {
+		switch {
+		case businessflow.IsInvalidPage(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page", "INVALID_PAGE", nil)
+		case businessflow.IsInvalidPageSize(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page size", "INVALID_PAGE_SIZE", nil)
+		case businessflow.IsStartDateAfterEndDate(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Start date must be before end date", "START_DATE_AFTER_END_DATE", nil)
+		default:
+			log.Println("Admin list transactions failed", err)
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list transactions", "ADMIN_LIST_TRANSACTIONS_FAILED", nil)
+		}
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Transactions retrieved", res)
 }
 
 // GetDepositReceiptFile downloads the uploaded file.
@@ -242,24 +348,9 @@ func (h *PaymentAdminHandler) GetDepositReceiptFile(c fiber.Ctx) error {
 	return c.Status(fiber.StatusOK).Send(data)
 }
 
-// mimeFromContentType returns a dot extension for a content type (limited set).
-func mimeFromContentType(ct string) string {
-	ct = strings.ToLower(strings.TrimSpace(ct))
-	switch ct {
-	case "application/pdf":
-		return ".pdf"
-	case "image/png":
-		return ".png"
-	case "image/jpeg", "image/jpg":
-		return ".jpg"
-	default:
-		return ""
-	}
-}
-
 // UpdateDepositReceiptStatus approves/rejects a receipt.
 // @Summary Admin update deposit receipt status
-// @Description Approve or reject a deposit receipt; on approval credits wallet using receipt metadata.
+// @Description Approve or reject a deposit receipt; on approval customer_invoice_uuid is required and is linked in payment metadata.
 // @Tags Payments Admin
 // @Accept json
 // @Produce json
@@ -304,6 +395,14 @@ func (h *PaymentAdminHandler) UpdateDepositReceiptStatus(c fiber.Ctx) error {
 			return h.ErrorResponse(c, fiber.StatusConflict, "Receipt already approved", "RECEIPT_ALREADY_APPROVED", nil)
 		case businessflow.IsDepositReceiptAlreadyRejected(err):
 			return h.ErrorResponse(c, fiber.StatusConflict, "Receipt already rejected", "RECEIPT_ALREADY_REJECTED", nil)
+		case businessflow.IsDepositReceiptInvalidStatus(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "action must be either approve or reject", "INVALID_RECEIPT_ACTION", nil)
+		case businessflow.IsDepositReceiptInvoiceRequired(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "customer_invoice_uuid is required when approving a receipt", "INVOICE_UUID_REQUIRED", nil)
+		case businessflow.IsDepositReceiptInvoiceInvalid(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "customer_invoice_uuid is invalid", "INVOICE_UUID_INVALID", nil)
+		case businessflow.IsDepositReceiptInvoiceDuplicate(err):
+			return h.ErrorResponse(c, fiber.StatusConflict, "customer_invoice_uuid is already linked to another payment", "INVOICE_UUID_ALREADY_USED", nil)
 		case businessflow.IsInvalidLanguage(err):
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
 		default:
@@ -312,6 +411,67 @@ func (h *PaymentAdminHandler) UpdateDepositReceiptStatus(c fiber.Ctx) error {
 		}
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Receipt status updated", res)
+}
+
+// AddInvoiceToTransaction links invoice_uuid into metadata of a transaction resolved by transaction_id.
+// @Summary Admin link invoice to transaction
+// @Description Resolves transaction by transaction_uuid and merges customer_invoice_uuid into transaction metadata.
+// @Tags Payments Admin
+// @Accept json
+// @Produce json
+// @Param request body dto.AdminAddInvoiceToTransactionRequest true "Invoice linking payload"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminAddInvoiceToTransactionResponse} "Invoice linked"
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 404 {object} dto.APIResponse "Transaction not found"
+// @Failure 409 {object} dto.APIResponse "Invoice mismatch with existing metadata"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/payments/transactions/invoice [post]
+func (h *PaymentAdminHandler) AddInvoiceToTransaction(c fiber.Ctx) error {
+	var req dto.AdminAddInvoiceToTransactionRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+	adminID, ok := c.Locals("admin_id").(uint)
+	if !ok || adminID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Admin ID not found in context", "MISSING_ADMIN_ID", nil)
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
+	res, err := h.paymentAdminFlow.AddInvoiceToTransaction(
+		h.createRequestContext(c, "/api/v1/admin/payments/transactions/invoice"),
+		&req,
+		adminID,
+		metadata,
+	)
+	if err != nil {
+		switch {
+		case businessflow.IsTransactionUUIDInvalid(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "transaction_uuid is invalid", "TRANSACTION_UUID_INVALID", nil)
+		case businessflow.IsTransactionNotFound(err):
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Transaction not found", "TRANSACTION_NOT_FOUND", nil)
+		case businessflow.IsPaymentRequestNotFound(err):
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Payment request not found", "PAYMENT_REQUEST_NOT_FOUND", nil)
+		case businessflow.IsInvoiceUUIDRequired(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "customer_invoice_uuid is required", "INVOICE_UUID_REQUIRED", nil)
+		case businessflow.IsInvoiceUUIDInvalid(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "customer_invoice_uuid is invalid", "INVOICE_UUID_INVALID", nil)
+		case businessflow.IsInvoiceUUIDMismatch(err):
+			return h.ErrorResponse(c, fiber.StatusConflict, "customer_invoice_uuid conflicts with existing transaction metadata", "INVOICE_UUID_MISMATCH", nil)
+		default:
+			log.Println("Admin add invoice to transaction failed", err)
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to add invoice to transaction", "ADMIN_ADD_INVOICE_FAILED", nil)
+		}
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Invoice linked to transaction", res)
 }
 
 func (h *PaymentAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
