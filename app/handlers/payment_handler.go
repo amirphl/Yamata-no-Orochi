@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strconv"
 	"strings"
@@ -28,6 +29,7 @@ type PaymentHandlerInterface interface {
 	DownloadDepositReceiptFile(c fiber.Ctx) error
 	UpdateDepositReceiptFile(c fiber.Ctx) error
 	DeleteDepositReceiptFile(c fiber.Ctx) error
+	NotifyInvoiceIssueRequest(c fiber.Ctx) error
 }
 
 // PaymentHandler handles payment-related HTTP requests
@@ -565,8 +567,8 @@ func (h *PaymentHandler) SubmitDepositReceipt(c fiber.Ctx) error {
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/payments/deposit-receipts [get]
 func (h *PaymentHandler) ListDepositReceipts(c fiber.Ctx) error {
-	customerID, _ := c.Locals("customer_id").(uint)
-	if customerID == 0 {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok || customerID == 0 {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 	lang := c.Query("lang")
@@ -594,8 +596,8 @@ func (h *PaymentHandler) ListDepositReceipts(c fiber.Ctx) error {
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/payments/proforma/preview [get]
 func (h *PaymentHandler) PreviewProformaInvoice(c fiber.Ctx) error {
-	customerID, _ := c.Locals("customer_id").(uint)
-	if customerID == 0 {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok || customerID == 0 {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 	receiptUUID := c.Query("receipt_uuid")
@@ -784,4 +786,65 @@ func (h *PaymentHandler) DeleteDepositReceiptFile(c fiber.Ctx) error {
 		}
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Receipt file removed", fiber.Map{"ok": true})
+}
+
+// NotifyInvoiceIssueRequest sends an SMS notification to a deposit reviewer to issue invoice.
+// @Summary Notify admin to issue invoice
+// @Description Customer requests invoice issuance for a transaction. Rate-limited to once every 24h per customer.
+// @Tags Payments
+// @Accept json
+// @Produce json
+// @Param request body dto.NotifyInvoiceIssueRequest true "Transaction UUID payload"
+// @Success 200 {object} dto.APIResponse{data=dto.NotifyInvoiceIssueResponse}
+// @Failure 400 {object} dto.APIResponse
+// @Failure 401 {object} dto.APIResponse
+// @Failure 403 {object} dto.APIResponse
+// @Failure 404 {object} dto.APIResponse
+// @Failure 409 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/payments/transactions/invoice-issue-request [post]
+func (h *PaymentHandler) NotifyInvoiceIssueRequest(c fiber.Ctx) error {
+	var req dto.NotifyInvoiceIssueRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok || customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	resp, err := h.paymentFlow.NotifyInvoiceIssueRequest(
+		h.createRequestContext(c, "/api/v1/payments/transactions/invoice-issue-request"),
+		&req,
+		customerID,
+		metadata,
+	)
+	if err != nil {
+		switch {
+		case businessflow.IsTransactionUUIDInvalid(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid transaction UUID", "INVALID_TRANSACTION_UUID", nil)
+		case businessflow.IsTransactionNotFound(err):
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Transaction not found", "TRANSACTION_NOT_FOUND", nil)
+		case errors.Is(err, businessflow.ErrForbidden):
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Forbidden", "FORBIDDEN", nil)
+		case businessflow.IsInvoiceIssueRequestRateLimited(err):
+			return h.ErrorResponse(c, fiber.StatusConflict, "You have already submitted an invoice issue request in the last 24 hours. Please try again later.", "INVOICE_ISSUE_REQUEST_RATE_LIMITED", nil)
+		case businessflow.IsInvoiceIssueAlreadyAssigned(err):
+			return h.ErrorResponse(c, fiber.StatusConflict, "Invoice is already linked to this transaction", "INVOICE_ALREADY_ASSIGNED", nil)
+		default:
+			log.Println("Notify invoice issue request failed", err)
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to submit invoice issue request", "INVOICE_ISSUE_REQUEST_FAILED", nil)
+		}
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Invoice issue request submitted", resp)
 }
