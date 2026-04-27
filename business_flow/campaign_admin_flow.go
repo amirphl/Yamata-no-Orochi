@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,8 @@ type AdminCampaignFlow interface {
 	CancelCampaign(ctx context.Context, req *dto.AdminCancelCampaignRequest) (*dto.AdminCancelCampaignResponse, error)
 	RemoveAudienceSpec(ctx context.Context, platform *string) (*dto.AdminRemoveAudienceSpecResponse, error)
 	RescheduleCampaign(ctx context.Context, req *dto.AdminRescheduleCampaignRequest) (*dto.AdminRescheduleCampaignResponse, error)
+	UpdatePagePrice(ctx context.Context, req *dto.AdminUpdatePagePriceRequest) (*dto.AdminUpdatePagePriceResponse, error)
+	GetPagePrices(ctx context.Context) (*dto.AdminGetPagePricesResponse, error)
 }
 
 // AdminCampaignFlowImpl implements the campaign business flow
@@ -43,6 +46,7 @@ type AdminCampaignFlowImpl struct {
 	platformSettingsRepo repository.PlatformSettingsRepository
 	lineNumberRepo       repository.LineNumberRepository
 	segmentPriceRepo     repository.SegmentPriceFactorRepository
+	pagePriceRepo        repository.PagePriceRepository
 	notifier             services.NotificationService
 	adminConfig          config.AdminConfig
 	messageConfig        config.MessageConfig
@@ -64,6 +68,7 @@ func NewAdminCampaignFlow(
 	platformSettingsRepo repository.PlatformSettingsRepository,
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
+	pagePriceRepo repository.PagePriceRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -81,6 +86,7 @@ func NewAdminCampaignFlow(
 		platformSettingsRepo: platformSettingsRepo,
 		lineNumberRepo:       lineNumberRepo,
 		segmentPriceRepo:     segmentPriceRepo,
+		pagePriceRepo:        pagePriceRepo,
 		notifier:             notifier,
 		adminConfig:          adminConfig,
 		messageConfig:        messageConfig,
@@ -1080,6 +1086,76 @@ func (s *AdminCampaignFlowImpl) RemoveAudienceSpec(ctx context.Context, platform
 		"platform": normalizedPlatform,
 	}, nil)
 	return resp, nil
+}
+
+func (s *AdminCampaignFlowImpl) UpdatePagePrice(ctx context.Context, req *dto.AdminUpdatePagePriceRequest) (*dto.AdminUpdatePagePriceResponse, error) {
+	if req == nil {
+		return nil, NewBusinessError("INVALID_REQUEST", "request is required", nil)
+	}
+
+	platform := strings.ToLower(strings.TrimSpace(req.Platform))
+	if platform == "" {
+		return nil, NewBusinessError("PAGE_PRICE_PLATFORM_REQUIRED", "platform is required", ErrCampaignPlatformRequired)
+	}
+	if !models.IsValidCampaignPlatform(platform) {
+		return nil, NewBusinessError("PAGE_PRICE_PLATFORM_INVALID", "invalid platform", ErrCampaignPlatformInvalid)
+	}
+	if req.Price == 0 {
+		return nil, NewBusinessError("PAGE_PRICE_INVALID", "price must be greater than zero", ErrPriceFactorInvalid)
+	}
+
+	row := &models.PagePrice{
+		Platform: platform,
+		Price:    req.Price,
+	}
+	if adminID, ok := ctx.Value(utils.AdminIDKey).(uint); ok && adminID > 0 {
+		row.CreatedByAdminID = &adminID
+	}
+	if err := s.pagePriceRepo.Insert(ctx, row); err != nil {
+		return nil, NewBusinessError("PAGE_PRICE_INSERT_FAILED", "failed to insert page price", err)
+	}
+
+	_ = createAuditLog(ctx, s.auditRepo, nil, models.AuditActionAdminUpdatePagePrice, "Admin updated page price", true, nil, nil)
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminUpdatePagePrice, "Admin updated page price", true, nil, map[string]any{
+		"platform": platform,
+		"price":    req.Price,
+	}, nil)
+
+	return &dto.AdminUpdatePagePriceResponse{
+		Message:   "Page price updated successfully",
+		Platform:  row.Platform,
+		Price:     row.Price,
+		CreatedAt: row.CreatedAt,
+	}, nil
+}
+
+func (s *AdminCampaignFlowImpl) GetPagePrices(ctx context.Context) (*dto.AdminGetPagePricesResponse, error) {
+	rows, err := s.pagePriceRepo.ListLatest(ctx)
+	if err != nil {
+		return nil, NewBusinessError("PAGE_PRICE_LIST_FAILED", "failed to list page prices", err)
+	}
+
+	items := make([]dto.AdminPagePriceItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.AdminPagePriceItem{
+			Platform:  row.Platform,
+			Price:     row.Price,
+			CreatedAt: row.CreatedAt,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Platform < items[j].Platform
+	})
+
+	_ = createAuditLog(ctx, s.auditRepo, nil, models.AuditActionAdminGetPagePrices, "Admin listed page prices", true, nil, nil)
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminGetPagePrices, "Admin listed page prices", true, nil, map[string]any{
+		"items": len(items),
+	}, nil)
+
+	return &dto.AdminGetPagePricesResponse{
+		Message: "Page prices retrieved successfully",
+		Items:   items,
+	}, nil
 }
 
 func isAdminReschedulable(status models.CampaignStatus) bool {
