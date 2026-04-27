@@ -104,6 +104,13 @@ var (
 	ErrPaymentRequestNotFound         = errors.New("payment request not found")
 	ErrPaymentRequestAlreadyProcessed = errors.New("payment request already processed")
 	ErrPaymentRequestExpired          = errors.New("payment request expired")
+	ErrTransactionNotFound            = errors.New("transaction not found")
+	ErrTransactionUUIDInvalid         = errors.New("transaction uuid is invalid")
+	ErrInvoiceIssueRequestRateLimited = errors.New("invoice issue request is rate limited")
+	ErrInvoiceIssueAlreadyAssigned    = errors.New("invoice is already assigned to transaction")
+	ErrInvoiceUUIDRequired            = errors.New("invoice uuid is required")
+	ErrInvoiceUUIDInvalid             = errors.New("invoice uuid is invalid")
+	ErrInvoiceUUIDMismatch            = errors.New("invoice uuid does not match existing value")
 
 	// Balance snapshot errors
 	ErrBalanceSnapshotNotFound = errors.New("balance snapshot not found")
@@ -173,6 +180,9 @@ var (
 	ErrDepositReceiptAlreadyApproved  = errors.New("deposit receipt already approved")
 	ErrDepositReceiptAlreadyRejected  = errors.New("deposit receipt already rejected")
 	ErrDepositReceiptInvalidStatus    = errors.New("deposit receipt status is invalid")
+	ErrDepositReceiptInvoiceRequired  = errors.New("invoice uuid is required for approved deposit receipt")
+	ErrDepositReceiptInvoiceInvalid   = errors.New("invoice uuid is invalid")
+	ErrDepositReceiptInvoiceDuplicate = errors.New("invoice uuid is already linked to another deposit receipt payment")
 	ErrDepositReceiptFileTooLarge     = errors.New("deposit receipt file too large")
 	ErrDepositReceiptFileInvalidType  = errors.New("deposit receipt file type is not allowed")
 	ErrDepositReceiptFileEmpty        = errors.New("deposit receipt file is empty")
@@ -180,6 +190,9 @@ var (
 	// Platform base prices
 	ErrPlatformBasePriceNotFound  = errors.New("platform base price not found")
 	ErrPlatformSettingsNameExists = errors.New("platform settings name already exists for this customer")
+
+	// Page price
+	ErrPagePriceNotFound = errors.New("page base price not found")
 
 	ErrNotFound     = errors.New("not found")
 	ErrInvalidState = errors.New("invalid state")
@@ -543,6 +556,33 @@ func IsPaymentRequestExpired(err error) bool {
 	return errors.Is(err, ErrPaymentRequestExpired)
 }
 
+func IsTransactionNotFound(err error) bool {
+	return errors.Is(err, ErrTransactionNotFound)
+}
+
+func IsTransactionUUIDInvalid(err error) bool {
+	return errors.Is(err, ErrTransactionUUIDInvalid)
+}
+
+func IsInvoiceIssueRequestRateLimited(err error) bool {
+	return errors.Is(err, ErrInvoiceIssueRequestRateLimited)
+}
+func IsInvoiceIssueAlreadyAssigned(err error) bool {
+	return errors.Is(err, ErrInvoiceIssueAlreadyAssigned)
+}
+
+func IsInvoiceUUIDRequired(err error) bool {
+	return errors.Is(err, ErrInvoiceUUIDRequired)
+}
+
+func IsInvoiceUUIDInvalid(err error) bool {
+	return errors.Is(err, ErrInvoiceUUIDInvalid)
+}
+
+func IsInvoiceUUIDMismatch(err error) bool {
+	return errors.Is(err, ErrInvoiceUUIDMismatch)
+}
+
 func IsBalanceSnapshotNotFound(err error) bool {
 	return errors.Is(err, ErrBalanceSnapshotNotFound)
 }
@@ -686,8 +726,20 @@ func IsDepositReceiptAlreadyApproved(err error) bool {
 func IsDepositReceiptAlreadyRejected(err error) bool {
 	return errors.Is(err, ErrDepositReceiptAlreadyRejected)
 }
+func IsDepositReceiptInvalidStatus(err error) bool {
+	return errors.Is(err, ErrDepositReceiptInvalidStatus)
+}
 func IsDepositReceiptAlreadyFinalized(err error) bool {
 	return errors.Is(err, ErrDepositReceiptAlreadyFinalized)
+}
+func IsDepositReceiptInvoiceRequired(err error) bool {
+	return errors.Is(err, ErrDepositReceiptInvoiceRequired)
+}
+func IsDepositReceiptInvoiceInvalid(err error) bool {
+	return errors.Is(err, ErrDepositReceiptInvoiceInvalid)
+}
+func IsDepositReceiptInvoiceDuplicate(err error) bool {
+	return errors.Is(err, ErrDepositReceiptInvoiceDuplicate)
 }
 func IsDepositReceiptFileTooLarge(err error) bool {
 	return errors.Is(err, ErrDepositReceiptFileTooLarge)
@@ -695,7 +747,9 @@ func IsDepositReceiptFileTooLarge(err error) bool {
 func IsDepositReceiptFileInvalidType(err error) bool {
 	return errors.Is(err, ErrDepositReceiptFileInvalidType)
 }
-func IsDepositReceiptFileEmpty(err error) bool { return errors.Is(err, ErrDepositReceiptFileEmpty) }
+func IsDepositReceiptFileEmpty(err error) bool {
+	return errors.Is(err, ErrDepositReceiptFileEmpty)
+}
 
 func IsPlatformBasePriceNotFound(err error) bool {
 	return errors.Is(err, ErrPlatformBasePriceNotFound)
@@ -703,4 +757,8 @@ func IsPlatformBasePriceNotFound(err error) bool {
 
 func IsPlatformSettingsNameExists(err error) bool {
 	return errors.Is(err, ErrPlatformSettingsNameExists)
+}
+
+func IsPagePriceNotFound(err error) bool {
+	return errors.Is(err, ErrPagePriceNotFound)
 }
