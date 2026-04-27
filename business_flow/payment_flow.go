@@ -22,6 +22,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/image/draw"
 	"gorm.io/gorm"
 )
@@ -39,6 +40,7 @@ type PaymentFlow interface {
 	DownloadDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) ([]byte, string, string, error)
 	UpdateDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string, req *dto.UpdateDepositReceiptFileRequest) error
 	DeleteDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) error
+	NotifyInvoiceIssueRequest(ctx context.Context, req *dto.NotifyInvoiceIssueRequest, customerID uint, metadata *ClientMetadata) (*dto.NotifyInvoiceIssueResponse, error)
 }
 
 // PaymentFlowImpl implements the payment business flow
@@ -51,9 +53,12 @@ type PaymentFlowImpl struct {
 	transactionRepo     repository.TransactionRepository
 	agencyDiscountRepo  repository.AgencyDiscountRepository
 	depositReceiptRepo  repository.DepositReceiptRepository
+	multimediaRepo      repository.MultimediaAssetRepository
 	notifier            services.NotificationService
 	adminCfg            config.AdminConfig
 	messageCfg          config.MessageConfig
+	cacheCfg            config.CacheConfig
+	rc                  *redis.Client
 	db                  *gorm.DB
 
 	// Atipay configuration
@@ -72,9 +77,12 @@ func NewPaymentFlow(
 	transactionRepo repository.TransactionRepository,
 	agencyDiscountRepo repository.AgencyDiscountRepository,
 	depositReceiptRepo repository.DepositReceiptRepository,
+	multimediaRepo repository.MultimediaAssetRepository,
 	notifier services.NotificationService,
 	adminCfg config.AdminConfig,
 	messageCfg config.MessageConfig,
+	cacheCfg config.CacheConfig,
+	rc *redis.Client,
 	db *gorm.DB,
 	atipayCfg config.AtipayConfig,
 	sysCfg config.SystemConfig,
@@ -89,9 +97,12 @@ func NewPaymentFlow(
 		transactionRepo:     transactionRepo,
 		agencyDiscountRepo:  agencyDiscountRepo,
 		depositReceiptRepo:  depositReceiptRepo,
+		multimediaRepo:      multimediaRepo,
 		notifier:            notifier,
 		adminCfg:            adminCfg,
 		messageCfg:          messageCfg,
+		cacheCfg:            cacheCfg,
+		rc:                  rc,
 		db:                  db,
 		atipayCfg:           atipayCfg,
 		sysCfg:              sysCfg,
@@ -816,13 +827,13 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		"amount_with_tax":       realWithTax,
 		"amount":                real,
 		"tax":                   tax,
+		"customer_credit":       customerCredit,
 		"system_share_with_tax": systemShareWithTax,
 		"system_share":          realSystemShare,
 		"system_share_tax":      taxSystemShare,
 		"agency_share_with_tax": agencyShareWithTax,
 		"agency_share":          realAgencyShare,
 		"agency_share_tax":      taxAgencyShare,
-		"customer_credit":       customerCredit,
 		"atipay_response":       atipayRequest,
 		"payment_channel":       m["payment_channel"],
 	}
@@ -832,6 +843,9 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	if adminID, ok := m["admin_id"]; ok {
 		metadata["admin_id"] = adminID
 		metadata["payment_channel"] = "admin_direct_charge"
+	}
+	if customerInvoiceUUID, ok := m["customer_invoice_uuid"]; ok {
+		metadata["customer_invoice_uuid"] = customerInvoiceUUID
 	}
 
 	// Update customer wallet balance
@@ -1217,7 +1231,7 @@ func (p *PaymentFlowImpl) verifyPaymentWithAtipay(ctx context.Context, reference
 }
 
 // GetTransactionHistory retrieves the transaction history for a customer with pagination and filtering
-func (p *PaymentFlowImpl) GetTransactionHistory(ctx context.Context, req *dto.GetTransactionHistoryRequest, metadata *ClientMetadata) (response *dto.TransactionHistoryResponse, err error) {
+func (p *PaymentFlowImpl) GetTransactionHistory(ctx context.Context, req *dto.GetTransactionHistoryRequest, metadata *ClientMetadata) (resp *dto.TransactionHistoryResponse, err error) {
 	defer func() {
 		if err != nil {
 			err = NewBusinessError("GET_TRANSACTION_HISTORY_FAILED", "Get transaction history failed", err)
@@ -1253,7 +1267,7 @@ func (p *PaymentFlowImpl) GetTransactionHistory(ctx context.Context, req *dto.Ge
 		status = utils.ToPtr(models.TransactionStatus(*req.Status))
 	}
 
-	transactions, totalCount, err := p.transactionRepo.GetHistoryWithMetadata(
+	records, totalCount, err := p.transactionRepo.GetHistoryWithMetadata(
 		ctx,
 		wallet.ID,
 		customer.ID,
@@ -1270,8 +1284,8 @@ func (p *PaymentFlowImpl) GetTransactionHistory(ctx context.Context, req *dto.Ge
 
 	// Convert transactions to transaction history items
 	items := make([]dto.TransactionHistoryItem, 0)
-	for _, transaction := range transactions {
-		item, err := p.convertTransactionToTransactionHistoryItem(transaction)
+	for _, record := range records {
+		item, err := p.convertTransactionToTransactionHistoryItem(record)
 		if err != nil {
 			return nil, err
 		}
@@ -1285,12 +1299,12 @@ func (p *PaymentFlowImpl) GetTransactionHistory(ctx context.Context, req *dto.Ge
 	msg := fmt.Sprintf("Transaction history retrieved: %d items for customer %d", len(items), req.CustomerID)
 	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionTransactionHistoryRetrieved, msg, true, nil, metadata)
 
-	response = &dto.TransactionHistoryResponse{
+	resp = &dto.TransactionHistoryResponse{
 		Items:      items,
 		Pagination: pagination,
 	}
 
-	return response, nil
+	return resp, nil
 }
 
 // validateGetTransactionHistoryRequest validates the transaction history request
@@ -1307,8 +1321,11 @@ func (p *PaymentFlowImpl) validateGetTransactionHistoryRequest(req *dto.GetTrans
 	return nil
 }
 
-// convertTransactionToTransactionHistoryItem converts a transaction model to a transaction history item DTO
 func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction *models.Transaction) (dto.TransactionHistoryItem, error) {
+	if transaction == nil {
+		return dto.TransactionHistoryItem{}, fmt.Errorf("transaction history record is nil")
+	}
+
 	// Get human-readable status
 	status := dto.TransactionStatusDisplay[transaction.Status]
 	if status == "" {
@@ -1347,6 +1364,8 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	customerCredit := toUint64(meta["customer_credit"])
 	agencyShareWithTax := toUint64(meta["agency_share_with_tax"])
 
+	customerInvoiceUUID := customerInvoiceUUIDFromMetadata(meta)
+
 	// Apply case-specific rules
 	switch {
 	case source == models.TransactionSourceIncreaseCustomerFreePlusCredit && operation == "increase_customer_free_plus_credit":
@@ -1364,18 +1383,19 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	}
 
 	return dto.TransactionHistoryItem{
-		UUID:               transaction.UUID.String(),
-		Status:             status,
-		Amount:             amount,
-		CustomerCredit:     customerCredit,
-		AgencyShareWithTax: agencyShareWithTax,
-		Currency:           transaction.Currency,
-		Operation:          operation,
-		Source:             source,
-		DateTime:           transaction.CreatedAt,
-		ExternalRef:        externalRef,
-		BalanceBefore:      balanceBefore,
-		BalanceAfter:       balanceAfter,
+		UUID:                transaction.UUID.String(),
+		Status:              status,
+		Amount:              amount,
+		CustomerCredit:      customerCredit,
+		AgencyShareWithTax:  agencyShareWithTax,
+		Currency:            transaction.Currency,
+		Operation:           operation,
+		Source:              source,
+		DateTime:            transaction.CreatedAt,
+		ExternalRef:         externalRef,
+		BalanceBefore:       balanceBefore,
+		BalanceAfter:        balanceAfter,
+		CustomerInvoiceUUID: customerInvoiceUUID,
 		// Metadata:           meta,
 	}, nil
 }
@@ -1907,4 +1927,79 @@ func (p *PaymentFlowImpl) DeleteDepositReceiptFile(ctx context.Context, customer
 		rec.UpdatedAt = utils.UTCNow()
 		return p.depositReceiptRepo.Update(txCtx, rec)
 	})
+}
+
+func (p *PaymentFlowImpl) NotifyInvoiceIssueRequest(ctx context.Context, req *dto.NotifyInvoiceIssueRequest, customerID uint, metadata *ClientMetadata) (*dto.NotifyInvoiceIssueResponse, error) {
+	if req == nil || strings.TrimSpace(req.TransactionUUID) == "" {
+		return nil, ErrTransactionUUIDInvalid
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(req.TransactionUUID)); err != nil {
+		return nil, ErrTransactionUUIDInvalid
+	}
+	if p.rc == nil {
+		return nil, ErrCacheNotAvailable
+	}
+
+	customer, err := getCustomer(ctx, p.customerRepo, customerID)
+	if err != nil {
+		return nil, err
+	}
+	tx, err := p.transactionRepo.ByUUID(ctx, req.TransactionUUID)
+	if err != nil {
+		return nil, err
+	}
+	if tx == nil {
+		return nil, ErrTransactionNotFound
+	}
+	if tx.CustomerID != customerID {
+		return nil, ErrForbidden
+	}
+	if len(tx.Metadata) > 0 {
+		var txMeta map[string]any
+		if err := json.Unmarshal(tx.Metadata, &txMeta); err != nil {
+			return nil, err
+		}
+		if customerInvoiceUUID := customerInvoiceUUIDFromMetadata(txMeta); customerInvoiceUUID != nil && strings.TrimSpace(*customerInvoiceUUID) != "" {
+			return nil, ErrInvoiceIssueAlreadyAssigned
+		}
+	}
+
+	reviewers := p.adminCfg.ActiveDepositReviewers()
+	if len(reviewers) == 0 {
+		return nil, NewBusinessError("INVOICE_ISSUE_NOTIFY_FAILED", "No deposit receipt reviewer configured", ErrNotFound)
+	}
+	reviewerPhone := reviewers[0]
+
+	rlKey := redisKey(p.cacheCfg, fmt.Sprintf("invoice_issue_request:%d", customerID))
+	allowed, err := p.rc.SetNX(ctx, rlKey, req.TransactionUUID, 24*time.Hour).Result()
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrInvoiceIssueRequestRateLimited
+	}
+
+	fullName := strings.TrimSpace(customer.RepresentativeFirstName + " " + customer.RepresentativeLastName)
+	if fullName == "" {
+		fullName = fmt.Sprintf("customer-%d", customer.ID)
+	}
+	companyName := "-"
+	if customer.CompanyName != nil && strings.TrimSpace(*customer.CompanyName) != "" {
+		companyName = strings.TrimSpace(*customer.CompanyName)
+	}
+
+	template := strings.TrimSpace(p.messageCfg.InvoiceIssueRequestTemplate)
+	msg := fmt.Sprintf(template, fullName, companyName)
+	if smsErr := p.notifier.SendSMS(ctx, reviewerPhone, msg, utils.ToPtr(int64(customerID))); smsErr != nil {
+		_ = p.rc.Del(ctx, rlKey).Err()
+		return nil, smsErr
+	}
+
+	auditMsg := fmt.Sprintf("Customer %d requested invoice issuance notification for transaction %s", customerID, req.TransactionUUID)
+	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionInvoiceIssueRequested, auditMsg, true, nil, metadata)
+
+	return &dto.NotifyInvoiceIssueResponse{
+		Success: true,
+		Message: "Invoice issue request submitted successfully",
+	}, nil
 }
