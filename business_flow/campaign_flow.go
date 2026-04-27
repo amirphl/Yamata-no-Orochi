@@ -34,38 +34,44 @@ type CampaignFlow interface {
 	CalculateCampaignCostV2(ctx context.Context, req *dto.CalculateCampaignCostV2Request, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error)
 	ListCampaigns(ctx context.Context, req *dto.ListCampaignsRequest, metadata *ClientMetadata) (*dto.ListCampaignsResponse, error)
 	GetLastInitiatedCampaign(ctx context.Context, customerID uint, metadata *ClientMetadata) (*dto.GetLastInitiatedCampaignResponse, error)
+	GetPagePrices(ctx context.Context) (*dto.GetPagePricesResponse, error)
 	ListAudienceSpec(ctx context.Context, platform *string) (*dto.ListAudienceSpecResponse, error)
 	GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error)
 	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
 	CloneCampaign(ctx context.Context, req *dto.CloneCampaignRequest, metadata *ClientMetadata) (*dto.CloneCampaignResponse, error)
+	ExportCampaignReport(ctx context.Context, campaignID string) ([]byte, error)
 }
 
 // CampaignFlowImpl implements the campaign business flow
 type CampaignFlowImpl struct {
-	campaignRepo         repository.CampaignRepository
-	customerRepo         repository.CustomerRepository
-	multimediaRepo       repository.MultimediaAssetRepository
-	platformSettingsRepo repository.PlatformSettingsRepository
-	walletRepo           repository.WalletRepository
-	balanceSnapshotRepo  repository.BalanceSnapshotRepository
-	transactionRepo      repository.TransactionRepository
-	auditRepo            repository.AuditLogRepository
-	lineNumberRepo       repository.LineNumberRepository
-	segmentPriceRepo     repository.SegmentPriceFactorRepository
-	platformBaseRepo     repository.PlatformBasePriceRepository
-	notifier             services.NotificationService
-	adminConfig          config.AdminConfig
-	cacheConfig          *config.CacheConfig
-	rc                   *redis.Client
-	db                   *gorm.DB
+	campaignRepo          repository.CampaignRepository
+	customerRepo          repository.CustomerRepository
+	multimediaRepo        repository.MultimediaAssetRepository
+	platformSettingsRepo  repository.PlatformSettingsRepository
+	walletRepo            repository.WalletRepository
+	balanceSnapshotRepo   repository.BalanceSnapshotRepository
+	transactionRepo       repository.TransactionRepository
+	auditRepo             repository.AuditLogRepository
+	lineNumberRepo        repository.LineNumberRepository
+	segmentPriceRepo      repository.SegmentPriceFactorRepository
+	platformBaseRepo      repository.PlatformBasePriceRepository
+	pagePriceRepo         repository.PagePriceRepository
+	processedCampaignRepo repository.ProcessedCampaignRepository
+	smsStatusResultRepo   repository.SMSStatusResultRepository
+	notifier              services.NotificationService
+	adminConfig           config.AdminConfig
+	cacheConfig           *config.CacheConfig
+	rc                    *redis.Client
+	db                    *gorm.DB
 }
 
 const (
-	defaultShortLinkDomain    = "jo1n.ir"
-	pagePrice                 = uint64(200)
-	minCampaignBudget         = uint64(100_000)
-	maxCampaignBudget         = uint64(160_000_000)
-	defaultSegmentPriceFactor = 1.0
+	defaultShortLinkDomain       = "jo1n.ir"
+	minCampaignBudget            = uint64(100_000)
+	maxCampaignBudget            = uint64(160_000_000)
+	defaultSegmentPriceFactor    = 1.0
+	defaultLineNumberPriceFactor = 1.0
+	undeliveredRefundDelay       = 72 * time.Hour
 )
 
 var tehranLoc *time.Location
@@ -85,6 +91,9 @@ func NewCampaignFlow(
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	platformBaseRepo repository.PlatformBasePriceRepository,
+	pagePriceRepo repository.PagePriceRepository,
+	processedCampaignRepo repository.ProcessedCampaignRepository,
+	smsStatusResultRepo repository.SMSStatusResultRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -92,29 +101,32 @@ func NewCampaignFlow(
 	cacheConfig *config.CacheConfig,
 ) CampaignFlow {
 	return &CampaignFlowImpl{
-		campaignRepo:         campaignRepo,
-		customerRepo:         customerRepo,
-		multimediaRepo:       multimediaRepo,
-		platformSettingsRepo: platformSettingsRepo,
-		walletRepo:           walletRepo,
-		balanceSnapshotRepo:  balanceSnapshotRepo,
-		transactionRepo:      transactionRepo,
-		auditRepo:            auditRepo,
-		lineNumberRepo:       lineNumberRepo,
-		segmentPriceRepo:     segmentPriceRepo,
-		platformBaseRepo:     platformBaseRepo,
-		notifier:             notifier,
-		adminConfig:          adminConfig,
-		cacheConfig:          cacheConfig,
-		rc:                   rc,
-		db:                   db,
+		campaignRepo:          campaignRepo,
+		customerRepo:          customerRepo,
+		multimediaRepo:        multimediaRepo,
+		platformSettingsRepo:  platformSettingsRepo,
+		walletRepo:            walletRepo,
+		balanceSnapshotRepo:   balanceSnapshotRepo,
+		transactionRepo:       transactionRepo,
+		auditRepo:             auditRepo,
+		lineNumberRepo:        lineNumberRepo,
+		segmentPriceRepo:      segmentPriceRepo,
+		platformBaseRepo:      platformBaseRepo,
+		pagePriceRepo:         pagePriceRepo,
+		processedCampaignRepo: processedCampaignRepo,
+		smsStatusResultRepo:   smsStatusResultRepo,
+		notifier:              notifier,
+		adminConfig:           adminConfig,
+		cacheConfig:           cacheConfig,
+		rc:                    rc,
+		db:                    db,
 	}
 }
 
 // CreateCampaign handles the complete campaign creation process
 func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCampaignRequest, metadata *ClientMetadata) (*dto.CreateCampaignResponse, error) {
 	// Validate business rules
-	if err := s.validateCreateCampaignRequest(req); err != nil {
+	if err := s.validateCreateCampaignRequest(ctx, req); err != nil {
 		return nil, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
 	}
 
@@ -269,6 +281,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Tags == nil {
 		tags = campaign.Spec.Tags
 	}
+	// TODO:
 	// if req.TargetAudienceExcelFileUUID == nil {
 	// 	targetAudienceExcelFileUUID = campaign.Spec.TargetAudienceExcelFileUUID
 	// }
@@ -414,7 +427,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
-			var lineNumberPriceFactor float64
+			lineNumberPriceFactor := defaultLineNumberPriceFactor
 			if campaign.Spec.Platform == models.CampaignPlatformSMS {
 				lineNumberPriceFactor, err = s.fetchLineNumberPriceFactor(txCtx, lineNumber)
 				if err != nil {
@@ -433,12 +446,19 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				}
 			}
 
-			pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, *platform)
+			pbp, err := s.platformBaseRepo.LatestByPlatform(txCtx, *platform)
 			if err != nil {
 				return err
 			}
 			if pbp == nil {
 				return ErrPlatformBasePriceNotFound
+			}
+			pp, err := s.pagePriceRepo.LatestByPlatform(txCtx, *platform)
+			if err != nil {
+				return err
+			}
+			if pp == nil {
+				return ErrPagePriceNotFound
 			}
 
 			cost, err := s.CalculateCampaignCost(txCtx, &dto.CalculateCampaignCostRequest{
@@ -506,7 +526,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			}
 			newFrozenBalance := latestBalance.FrozenBalance + cost.TotalCost
 
-			numPages := s.calculateSMSParts(content)
+			numPages := s.calculateParts(content, sanitizedPlatform)
 
 			// Build metadata with full campaign spec
 			meta := map[string]any{
@@ -517,7 +537,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				"currency":                 utils.TomanCurrency,
 				"campaign_spec":            campaign.Spec,
 				"base_price":               pbp.Price,
-				"page_price":               pagePrice,
+				"page_price":               pp.Price,
 				"num_pages":                numPages,
 				"line_number_price_factor": lineNumberPriceFactor,
 				"segment_price_factor":     segmentPriceFactor,
@@ -662,8 +682,13 @@ func (s *CampaignFlowImpl) CloneCampaign(ctx context.Context, req *dto.CloneCamp
 
 // CancelCampaign allows a customer to cancel their own campaign and refunds budget according to current campaign status.
 func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error) {
+	// NOTE: Idempotency
 	if req == nil || req.CampaignID == 0 {
 		return nil, NewBusinessError("CANCEL_CAMPAIGN_VALIDATION_FAILED", "campaign_id is required", ErrCampaignNotFound)
+	}
+
+	if !s.tryAcquireFlowLock(ctx, fmt.Sprintf("cancel_campaign:%d", req.CustomerID), 20*time.Second) {
+		return nil, NewBusinessError("CANCEL_CAMPAIGN_BUSY", "cancel campaign request is already in progress", ErrInvalidState)
 	}
 
 	var campaign *models.Campaign
@@ -680,6 +705,10 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 		if campaign.CustomerID != req.CustomerID {
 			return ErrCampaignAccessDenied
 		}
+		if !canCancelCampaign(campaign.Status) {
+			return ErrCampaignNotWaitingForApproval
+		}
+
 		customer, err := getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
 		if err != nil {
 			return err
@@ -778,8 +807,13 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 				return err
 			}
 		case models.CampaignStatusApproved:
-			if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() || !campaign.Spec.ScheduleAt.After(utils.UTCNow()) {
+			if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() {
 				return ErrCampaignNotWaitingForApproval
+			}
+
+			now := utils.UTCNow()
+			if campaign.Spec.ScheduleAt.Before(now.Add(10 * time.Minute)) {
+				return ErrScheduleTimeTooSoon
 			}
 
 			debitTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
@@ -886,6 +920,97 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 	return &dto.CancelCampaignResponse{
 		Message: "Campaign cancelled successfully",
 	}, nil
+}
+
+type campaignReportRow struct {
+	AudienceProfileUID string
+	Status             string
+	Clicked            string
+}
+
+type campaignStatistics struct {
+	TrackingResults []campaignStatisticsTrackingResult `json:"trackingResults"`
+}
+
+type campaignStatisticsTrackingResult struct {
+	AudienceProfileUID    *string `json:"audienceProfileUID"`
+	TrackingID            string  `json:"trackingID"`
+	TotalParts            *int64  `json:"totalParts"`
+	TotalDeliveredParts   *int64  `json:"totalDeliveredParts"`
+	TotalUndeliveredParts *int64  `json:"totalUndeliveredParts"`
+	TotalUnknownParts     *int64  `json:"totalUnknownParts"`
+	Status                *string `json:"status"`
+}
+
+var campaignReportHeaders = []string{
+	"Audience Profile UID",
+	"Status",
+	"Clicked",
+}
+
+func (s *CampaignFlowImpl) ExportCampaignReport(ctx context.Context, campaignUUID string) ([]byte, error) {
+	campaignUUID = strings.TrimSpace(campaignUUID)
+	if campaignUUID == "" {
+		return nil, NewBusinessError("CAMPAIGN_UUID_REQUIRED", "campaign uuid is required", ErrCampaignUUIDRequired)
+	}
+	parsedCampaignUUID, err := uuid.Parse(campaignUUID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_UUID_INVALID", "campaign uuid is invalid", ErrCampaignUUIDRequired)
+	}
+	campaignUUID = parsedCampaignUUID.String()
+
+	customerID, ok := ctx.Value(utils.CustomerIDKey).(uint)
+	if !ok || customerID == 0 {
+		return nil, NewBusinessError("MISSING_CUSTOMER_ID", "customer id is required", ErrCustomerNotFound)
+	}
+
+	customer, err := getCustomer(ctx, s.customerRepo, customerID)
+	if err != nil {
+		return nil, NewBusinessError("CUSTOMER_LOOKUP_FAILED", "failed to lookup customer", err)
+	}
+	auditFailure := func(message string, e error) {
+		errMsg := e.Error()
+		_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignReportExportFailed, message, false, &errMsg, nil)
+	}
+
+	campaign, err := getCampaign(ctx, s.campaignRepo, campaignUUID, customerID)
+	if err != nil {
+		auditFailure(fmt.Sprintf("Campaign report export failed for campaign UUID %s", campaignUUID), err)
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "failed to lookup campaign", err)
+	}
+
+	rows := make([]campaignReportRow, 0)
+	if len(campaign.Statistics) > 0 {
+		var stats campaignStatistics
+		if err := json.Unmarshal(campaign.Statistics, &stats); err != nil {
+			auditFailure(fmt.Sprintf("Campaign report export failed for campaign %s", campaign.UUID.String()), err)
+			return nil, NewBusinessError("CAMPAIGN_STATISTICS_PARSE_FAILED", "failed to parse campaign statistics", err)
+		}
+
+		trackingResults := stats.TrackingResults
+		rows = make([]campaignReportRow, 0, len(trackingResults))
+		for _, tr := range trackingResults {
+			rows = append(rows, campaignReportRow{
+				AudienceProfileUID: stringValue(tr.AudienceProfileUID),
+				Status:             deriveCampaignExportStatus(tr),
+				Clicked:            "", // TODO: Populate clicked status from short link click tracking.
+			})
+		}
+	} else {
+		// Keep empty rows when campaign has no statistics yet.
+		rows = make([]campaignReportRow, 0)
+	}
+
+	reportBytes, err := buildCampaignReportExcel(rows)
+	if err != nil {
+		auditFailure(fmt.Sprintf("Campaign report export failed for campaign %s", campaign.UUID.String()), err)
+		return nil, NewBusinessError("CAMPAIGN_REPORT_EXPORT_FAILED", "failed to generate campaign report", err)
+	}
+
+	msg := fmt.Sprintf("Campaign report exported for %s", campaign.UUID.String())
+	_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignReportExported, msg, true, nil, nil)
+
+	return reportBytes, nil
 }
 
 // CalculateCampaignCapacity handles the campaign capacity calculation process
@@ -1115,13 +1240,11 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		return 0, 0, NewBusinessError("LEVEL3_REQUIRED", "At least one level3 option or target audience Excel file is required for cost calculation", ErrLevel3Required)
 	}
 
-	// Calculate the number of parts based on content length
-	numPages := s.calculateSMSParts(content)
-
 	// Pricing constants
+	numParts := s.calculateParts(content, platform)
 
 	lineNumberFactor := 1.0
-	if lineNumber != nil && strings.TrimSpace(*lineNumber) != "" {
+	if platform == models.CampaignPlatformSMS && lineNumber != nil && strings.TrimSpace(*lineNumber) != "" {
 		var err error
 		lineNumberFactor, err = s.fetchLineNumberPriceFactor(ctx, lineNumber)
 		if err != nil {
@@ -1155,10 +1278,19 @@ func (s *CampaignFlowImpl) computeCostInputs(
 	if pbp == nil {
 		return 0, 0, NewBusinessError("PLATFORM_BASE_PRICE_NOT_FOUND", "Platform base price not found for platform "+platform, ErrPlatformBasePriceNotFound)
 	}
+	pp, err := s.pagePriceRepo.LatestByPlatform(ctx, platform)
+	if err != nil {
+		return 0, 0, NewBusinessError("PAGE_PRICE_FETCH_FAILED", "Failed to fetch page price", err)
+	}
+	if pp == nil {
+		return 0, 0, NewBusinessError("PAGE_PRICE_NOT_FOUND", "Page price not found for platform "+platform, ErrPagePriceNotFound)
+	}
+	pagePrice := float64(pp.Price)
+	numPages := float64(numParts)
 	if platform == models.CampaignPlatformSMS {
-		pricePerMsg = uint64(pagePrice*numPages) + pbp.Price*uint64(float64(lineNumberFactor)*segmentPriceFactor)
+		pricePerMsg = pbp.Price*uint64(lineNumberFactor*numPages) + uint64(segmentPriceFactor*pagePrice)
 	} else {
-		pricePerMsg = uint64(pagePrice*1) + pbp.Price*uint64(float64(1)*segmentPriceFactor)
+		pricePerMsg = pbp.Price*uint64(1*1) + uint64(segmentPriceFactor*pagePrice)
 	}
 
 	// Calculate campaign capacity (target audience size)
@@ -1232,8 +1364,17 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	if err != nil {
 		return nil, err
 	}
-	if err := s.expireCustomerCampaigns(ctx, req.CustomerID); err != nil {
-		return nil, err
+
+	if s.tryAcquireFlowLock(ctx, fmt.Sprintf("list_campaigns_expire:%d", req.CustomerID), 20*time.Second) {
+		if err := s.expireCustomerCampaigns(ctx, req.CustomerID); err != nil {
+			return nil, err
+		}
+	}
+
+	if s.tryAcquireFlowLock(ctx, fmt.Sprintf("list_campaigns_reconcile_refund:%d", req.CustomerID), 20*time.Second) {
+		if err := s.reconcileUndeliveredCampaignRefunds(ctx, req.CustomerID); err != nil {
+			return nil, err
+		}
 	}
 
 	// Normalize pagination
@@ -1481,7 +1622,7 @@ func (s *CampaignFlowImpl) GetLastInitiatedCampaign(ctx context.Context, custome
 }
 
 // validateCreateCampaignRequest validates the campaign creation request
-func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaignRequest) error {
+func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, req *dto.CreateCampaignRequest) error {
 	usingTargetAudienceFromExcelFile := req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != ""
 
 	if req.CustomerID == 0 {
@@ -1507,7 +1648,13 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 			return ErrCampaignTagsRequired
 		}
 	} else {
-		// TODO: Query for uuid existence in media table and return error if not found
+		media, err := s.multimediaRepo.ByUUID(ctx, strings.TrimSpace(*req.TargetAudienceExcelFileUUID))
+		if err != nil {
+			return err
+		}
+		if media == nil {
+			return ErrCampaignTargetAudienceExcelMediaNotFound
+		}
 	}
 	if req.LineNumber != nil && *req.LineNumber == "" {
 		return ErrCampaignLineNumberRequired
@@ -2048,11 +2195,13 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	if len(req.Level3s) > 0 {
 		spec.Level3s = req.Level3s
 	}
-	if req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != "" {
-		excelFileUUID := strings.TrimSpace(*req.TargetAudienceExcelFileUUID)
-		spec.TargetAudienceExcelFileUUID = &excelFileUUID
-	} else {
-		spec.TargetAudienceExcelFileUUID = nil
+	if req.TargetAudienceExcelFileUUID != nil {
+		if strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != "" {
+			excelFileUUID := strings.TrimSpace(*req.TargetAudienceExcelFileUUID)
+			spec.TargetAudienceExcelFileUUID = &excelFileUUID
+		} else {
+			spec.TargetAudienceExcelFileUUID = nil
+		}
 	}
 	if len(req.Tags) > 0 {
 		spec.Tags = req.Tags
@@ -2130,7 +2279,8 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 }
 
 func (s *CampaignFlowImpl) expireCustomerCampaigns(ctx context.Context, customerID uint) error {
-	now := utils.UTCNow()
+	// NOTE: Idempotency
+	cutoff := utils.UTCNow().Add(-6 * time.Hour)
 
 	st := models.CampaignStatusWaitingForApproval
 	rows, err := s.campaignRepo.ByFilter(ctx, models.CampaignFilter{
@@ -2145,15 +2295,552 @@ func (s *CampaignFlowImpl) expireCustomerCampaigns(ctx context.Context, customer
 		if c.Spec.ScheduleAt == nil || c.Spec.ScheduleAt.IsZero() {
 			continue
 		}
-		if !c.Spec.ScheduleAt.Before(now) {
+		if !c.Spec.ScheduleAt.Before(cutoff) {
 			continue
 		}
-		if err := s.campaignRepo.UpdateStatus(ctx, c.ID, models.CampaignStatusExpired); err != nil {
+
+		if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+			campaign, err := s.campaignRepo.ByID(txCtx, c.ID)
+			if err != nil {
+				return err
+			}
+			if campaign == nil {
+				return ErrCampaignNotFound
+			}
+			if campaign.CustomerID != customerID {
+				return ErrCampaignAccessDenied
+			}
+			if campaign.Status != models.CampaignStatusWaitingForApproval {
+				return nil
+			}
+			if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() || !campaign.Spec.ScheduleAt.Before(cutoff) {
+				return nil
+			}
+
+			customer, err := getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
+			if err != nil {
+				return err
+			}
+
+			wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
+			if err != nil {
+				return err
+			}
+			latestBalance, err := getLatestBalanceSnapshot(txCtx, s.walletRepo, wallet.ID)
+			if err != nil {
+				return err
+			}
+
+			freezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CustomerID: &campaign.CustomerID,
+				CampaignID: &campaign.ID,
+				Source:     utils.ToPtr("campaign_update"),
+				Operation:  utils.ToPtr("reserve_budget"),
+				Type:       utils.ToPtr(models.TransactionTypeFreeze),
+				Status:     utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id DESC", 0, 0)
+			if err != nil {
+				return err
+			}
+			if len(freezeTxs) == 0 {
+				return ErrFreezeTransactionNotFound
+			}
+			if len(freezeTxs) > 1 {
+				return ErrMultipleFreezeTransactionsFound
+			}
+			freezeTx := freezeTxs[0]
+
+			amount := freezeTx.Amount
+			if latestBalance.FrozenBalance < amount {
+				return ErrInsufficientFunds
+			}
+
+			meta := map[string]any{
+				"source":      "campaign_expire",
+				"operation":   "expire_campaign_refund_frozen",
+				"campaign_id": campaign.ID,
+				"comment":     "campaign_auto_expired_due_to_schedule_time",
+			}
+			metaBytes, _ := json.Marshal(meta)
+
+			newFrozen := latestBalance.FrozenBalance - amount
+			newCredit := latestBalance.CreditBalance + amount
+
+			newSnap := &models.BalanceSnapshot{
+				UUID:               uuid.New(),
+				CorrelationID:      freezeTx.CorrelationID,
+				WalletID:           wallet.ID,
+				CustomerID:         customer.ID,
+				FreeBalance:        latestBalance.FreeBalance,
+				FrozenBalance:      newFrozen,
+				LockedBalance:      latestBalance.LockedBalance,
+				CreditBalance:      newCredit,
+				SpentOnCampaign:    latestBalance.SpentOnCampaign,
+				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+				TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+				Reason:             "campaign_expired_budget_refund",
+				Description:        fmt.Sprintf("Refund reserved budget for expired campaign %d", campaign.ID),
+				Metadata:           metaBytes,
+			}
+			if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+				return err
+			}
+
+			beforeMap, err := latestBalance.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+			afterMap, err := newSnap.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+
+			refundTx := &models.Transaction{
+				UUID:          uuid.New(),
+				CorrelationID: freezeTx.CorrelationID,
+				Type:          models.TransactionTypeRefund,
+				Status:        models.TransactionStatusCompleted,
+				Amount:        amount,
+				Currency:      utils.TomanCurrency,
+				WalletID:      wallet.ID,
+				CustomerID:    customer.ID,
+				BalanceBefore: beforeMap,
+				BalanceAfter:  afterMap,
+				Description:   fmt.Sprintf("Refund reserved budget for expired campaign %d", campaign.ID),
+				Metadata:      metaBytes,
+			}
+			if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+				return err
+			}
+
+			if err := s.campaignRepo.UpdateStatus(txCtx, campaign.ID, models.CampaignStatusExpired); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// reconcileUndeliveredCampaignRefunds runs a best-effort reconciliation pass to refund
+// executed campaigns that under-delivered relative to their intended audience.
+func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Context, customerID uint) error {
+	// NOTE: Idempotency
+
+	if customerID == 0 {
+		return nil
+	}
+	var auditCustomer *models.Customer
+	if customer, err := getCustomer(ctx, s.customerRepo, customerID); err == nil {
+		auditCustomer = &customer
+	}
+
+	status := models.CampaignStatusExecuted
+	cutoff := utils.UTCNow().Add(-undeliveredRefundDelay)
+	rows, err := s.campaignRepo.ByFilter(ctx, models.CampaignFilter{
+		CustomerID:     &customerID,
+		Status:         &status,
+		ScheduleBefore: &cutoff,
+	}, "id DESC", 0, 0)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range rows {
+		if c == nil {
+			continue
+		}
+		if hasProcessedUndeliveredRefund(c.Statistics) {
+			continue
+		}
+
+		err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+			campaign, err := s.campaignRepo.ByID(txCtx, c.ID)
+			if err != nil {
+				return err
+			}
+			if campaign == nil {
+				return nil
+			}
+			if campaign.Status != models.CampaignStatusExecuted {
+				return nil
+			}
+			if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() {
+				return nil
+			}
+			if campaign.Spec.ScheduleAt.After(utils.UTCNow().Add(-undeliveredRefundDelay)) {
+				return nil
+			}
+			if campaign.NumAudience == nil || *campaign.NumAudience == 0 {
+				return nil
+			}
+
+			// Serialize refund reconciliation per campaign to prevent duplicate refunds
+			// under concurrent list/get requests.
+			if tx, ok := txCtx.Value(repository.TxContextKey).(*gorm.DB); ok && tx != nil {
+				if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(campaign.ID)).Error; err != nil {
+					return err
+				}
+			}
+
+			if hasProcessedUndeliveredRefund(campaign.Statistics) {
+				return nil
+			}
+
+			existing, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CustomerID: &campaign.CustomerID,
+				CampaignID: &campaign.ID,
+				Source:     utils.ToPtr("campaign_partial_refund"),
+				Operation:  utils.ToPtr("partial_undelivered_messages_refund"),
+				Type:       utils.ToPtr(models.TransactionTypeRefund),
+				Status:     utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id DESC", 1, 0)
+			if err != nil {
+				return err
+			}
+			if len(existing) > 0 {
+				return nil
+			}
+
+			aggregatedTotalSent, ok := parseAggregatedTotalSent(campaign.Statistics)
+			if !ok {
+				return nil
+			}
+			if aggregatedTotalSent >= *campaign.NumAudience {
+				return nil
+			}
+
+			missing := *campaign.NumAudience - aggregatedTotalSent
+			if missing == 0 {
+				return nil
+			}
+
+			var costPerMessage uint64
+			if costPerMessage, ok = s.resolveCampaignCostPerMessageFromMetadata(txCtx, campaign); !ok {
+				return nil
+			}
+
+			if costPerMessage == 0 {
+				return nil
+			}
+			if missing > math.MaxUint64/costPerMessage {
+				return fmt.Errorf("refund amount overflow for campaign=%d", campaign.ID)
+			}
+			refundAmount := missing * costPerMessage
+			if refundAmount == 0 {
+				return nil
+			}
+
+			debitTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CustomerID: &campaign.CustomerID,
+				CampaignID: &campaign.ID,
+				Source:     utils.ToPtr("admin_campaign_approve"),
+				Operation:  utils.ToPtr("approve_campaign_budget_consume"),
+				Type:       utils.ToPtr(models.TransactionTypeFee),
+				Status:     utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id DESC", 1, 0)
+			if err != nil {
+				return err
+			}
+			if len(debitTxs) == 0 {
+				return ErrCampaignDebitTransactionNotFound
+			}
+			debitTx := debitTxs[0]
+
+			if debitTx.Amount < refundAmount {
+				return fmt.Errorf("refund amount %d exceeds campaign debit amount %d for campaign=%d", refundAmount, debitTx.Amount, campaign.ID)
+			}
+
+			customer, err := getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
+			if err != nil {
+				return err
+			}
+			wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
+			if err != nil {
+				return err
+			}
+			latestBalance, err := getLatestBalanceSnapshot(txCtx, s.walletRepo, wallet.ID)
+			if err != nil {
+				return err
+			}
+			if latestBalance.SpentOnCampaign < refundAmount {
+				return ErrInsufficientFunds
+			}
+
+			meta := map[string]any{
+				"source":                "campaign_partial_refund",
+				"operation":             "partial_undelivered_messages_refund",
+				"campaign_id":           campaign.ID,
+				"scheduled_at":          campaign.Spec.ScheduleAt.UTC().Format(time.RFC3339),
+				"num_audience":          *campaign.NumAudience,
+				"aggregated_total_sent": aggregatedTotalSent,
+				"missing_messages":      missing,
+				"cost_per_message":      costPerMessage,
+				"refund_amount":         refundAmount,
+			}
+			metaBytes, _ := json.Marshal(meta)
+
+			newCredit := latestBalance.CreditBalance + refundAmount
+			newSpentOnCampaign := latestBalance.SpentOnCampaign - refundAmount
+
+			newSnap := &models.BalanceSnapshot{
+				UUID:               uuid.New(),
+				CorrelationID:      debitTx.CorrelationID,
+				WalletID:           wallet.ID,
+				CustomerID:         customer.ID,
+				FreeBalance:        latestBalance.FreeBalance,
+				FrozenBalance:      latestBalance.FrozenBalance,
+				LockedBalance:      latestBalance.LockedBalance,
+				CreditBalance:      newCredit,
+				SpentOnCampaign:    newSpentOnCampaign,
+				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+				TotalBalance:       latestBalance.FreeBalance + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
+				Reason:             "campaign_partial_refund_for_undelivered_messages",
+				Description:        fmt.Sprintf("Refund undelivered messages for campaign %d", campaign.ID),
+				Metadata:           metaBytes,
+			}
+			if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+				return err
+			}
+
+			beforeMap, err := latestBalance.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+			afterMap, err := newSnap.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+
+			refundTx := &models.Transaction{
+				UUID:          uuid.New(),
+				CorrelationID: debitTx.CorrelationID,
+				Type:          models.TransactionTypeRefund,
+				Status:        models.TransactionStatusCompleted,
+				Amount:        refundAmount,
+				Currency:      utils.TomanCurrency,
+				WalletID:      wallet.ID,
+				CustomerID:    customer.ID,
+				BalanceBefore: beforeMap,
+				BalanceAfter:  afterMap,
+				Description:   fmt.Sprintf("Partial refund for undelivered messages in campaign %d", campaign.ID),
+				Metadata:      metaBytes,
+			}
+			if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+				return err
+			}
+
+			statsMap := map[string]any{}
+			if len(campaign.Statistics) > 0 {
+				_ = json.Unmarshal(campaign.Statistics, &statsMap)
+			}
+			statsMap["undeliveredRefundProcessed"] = true
+			statsMap["undeliveredRefundProcessedAt"] = utils.UTCNow().Format(time.RFC3339)
+			statsMap["undeliveredRefundAmount"] = refundAmount
+			statsMap["undeliveredRefundMissingMessages"] = missing
+			statsMap["undeliveredRefundCostPerMessage"] = costPerMessage
+			statsMap["undeliveredRefundAggregatedTotalSent"] = aggregatedTotalSent
+			statsBytes, _ := json.Marshal(statsMap)
+
+			campaign.Statistics = statsBytes
+			campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+			if err := s.campaignRepo.Update(txCtx, *campaign); err != nil {
+				return err
+			}
+
+			return nil
+		})
+		if err != nil {
+			errMsg := fmt.Sprintf("Undelivered refund reconciliation failed for campaign %d: %v", c.ID, err)
+			if auditCustomer != nil {
+				_ = s.createAuditLog(ctx, auditCustomer, models.AuditActionCampaignRefundReconcileFailed, errMsg, false, &errMsg, nil)
+			}
+			// Best-effort reconciliation: do not block listing/getting campaigns.
+			continue
+		}
+	}
+
+	return nil
+}
+
+func (s *CampaignFlowImpl) tryAcquireFlowLock(ctx context.Context, suffix string, ttl time.Duration) bool {
+	if s.rc == nil || s.cacheConfig == nil {
+		return true
+	}
+	lockKey := redisKey(*s.cacheConfig, "flow_lock:"+suffix)
+	ok, err := s.rc.SetNX(ctx, lockKey, "1", ttl).Result()
+	if err != nil {
+		// Best-effort idempotency lock: continue when redis is unavailable.
+		return true
+	}
+	return ok
+}
+
+func parseAggregatedTotalSent(stats json.RawMessage) (uint64, bool) {
+	if len(stats) == 0 {
+		return 0, false
+	}
+	var statsMap map[string]any
+	if err := json.Unmarshal(stats, &statsMap); err != nil {
+		return 0, false
+	}
+	v, ok := statsMap["aggregatedTotalSent"]
+	if !ok {
+		return 0, false
+	}
+
+	switch n := v.(type) {
+	case float64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case int64:
+		if n < 0 {
+			return 0, false
+		}
+		return uint64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		if err != nil || f < 0 {
+			return 0, false
+		}
+		return uint64(f), true
+	default:
+		return 0, false
+	}
+}
+
+func hasProcessedUndeliveredRefund(stats json.RawMessage) bool {
+	if len(stats) == 0 {
+		return false
+	}
+	var statsMap map[string]any
+	if err := json.Unmarshal(stats, &statsMap); err != nil {
+		return false
+	}
+	raw, ok := statsMap["undeliveredRefundProcessed"]
+	if !ok {
+		return false
+	}
+	b, ok := raw.(bool)
+	return ok && b
+}
+
+func (s *CampaignFlowImpl) resolveCampaignCostPerMessageFromMetadata(ctx context.Context, campaign *models.Campaign) (uint64, bool) {
+	if campaign == nil {
+		return 0, false
+	}
+
+	txs, err := s.transactionRepo.ByFilter(ctx, models.TransactionFilter{
+		CustomerID: &campaign.CustomerID,
+		CampaignID: &campaign.ID,
+		Source:     utils.ToPtr("campaign_update"),
+		Operation:  utils.ToPtr("reserve_budget"),
+		Type:       utils.ToPtr(models.TransactionTypeFreeze),
+		Status:     utils.ToPtr(models.TransactionStatusCompleted),
+	}, "id DESC", 1, 0)
+	if err != nil || len(txs) == 0 || len(txs[0].Metadata) == 0 {
+		return 0, false
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
+		return 0, false
+	}
+
+	basePrice, ok := parseMetadataUint64(meta["base_price"])
+	if !ok || basePrice == 0 {
+		pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, campaign.Spec.Platform)
+		if err != nil || pbp == nil || pbp.Price == 0 {
+			return 0, false
+		}
+		basePrice = pbp.Price
+	}
+	pagePrice, ok := parseMetadataUint64(meta["page_price"])
+	if !ok || pagePrice == 0 {
+		pp, err := s.pagePriceRepo.LatestByPlatform(ctx, campaign.Spec.Platform)
+		if err != nil || pp == nil || pp.Price == 0 {
+			return 0, false
+		}
+		pagePrice = pp.Price
+	}
+
+	numPages, ok := parseMetadataUint64(meta["num_pages"])
+	if !ok || numPages == 0 {
+		numPages = s.calculateParts(campaign.Spec.Content, campaign.Spec.Platform)
+	}
+
+	f := parseMetadataFloat(meta["line_number_price_factor"])
+	lineFactor := defaultLineNumberPriceFactor
+	if f != nil && *f > 0 {
+		lineFactor = *f
+	}
+
+	segmentFactor := defaultSegmentPriceFactor
+	f = parseMetadataFloat(meta["segment_price_factor"])
+	if f != nil && *f > 0 {
+		segmentFactor = *f
+	}
+
+	pagePriceFloat := float64(pagePrice)
+	numPagesFloat := float64(numPages)
+	if campaign.Spec.Platform == models.CampaignPlatformSMS {
+		return basePrice*uint64(lineFactor*numPagesFloat) + uint64(segmentFactor*pagePriceFloat), true
+	}
+	return basePrice*uint64(1*1) + uint64(segmentFactor*pagePriceFloat), true
+}
+
+func parseMetadataUint64(value any) (uint64, bool) {
+	switch v := value.(type) {
+	case float64:
+		if v < 0 {
+			return 0, false
+		}
+		return uint64(v), true
+	case int64:
+		if v < 0 {
+			return 0, false
+		}
+		return uint64(v), true
+	case uint64:
+		return v, true
+	case json.Number:
+		f, err := v.Float64()
+		if err != nil || f < 0 {
+			return 0, false
+		}
+		return uint64(f), true
+	default:
+		return 0, false
+	}
+}
+
+func (s *CampaignFlowImpl) GetPagePrices(ctx context.Context) (*dto.GetPagePricesResponse, error) {
+	rows, err := s.pagePriceRepo.ListLatest(ctx)
+	if err != nil {
+		return nil, NewBusinessError("PAGE_PRICE_LIST_FAILED", "failed to list page prices", err)
+	}
+
+	items := make([]dto.PagePriceItem, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, dto.PagePriceItem{
+			Platform:  row.Platform,
+			Price:     row.Price,
+			CreatedAt: row.CreatedAt,
+		})
+	}
+	slices.SortFunc(items, func(a, b dto.PagePriceItem) int {
+		return strings.Compare(a.Platform, b.Platform)
+	})
+
+	return &dto.GetPagePricesResponse{
+		Message: "Page prices retrieved successfully",
+		Items:   items,
+	}, nil
 }
 
 // ListAudienceSpec returns the current audience spec from cache or file
@@ -2295,9 +2982,13 @@ func (s *CampaignFlowImpl) GetApprovedRunningSummary(ctx context.Context, custom
 	return resp, nil
 }
 
-// calculateSMSParts calculates the number of SMS parts based on character count
-// This implements the same logic as the frontend calculateSMSParts function
-func (s *CampaignFlowImpl) calculateSMSParts(content *string) uint64 {
+// calculateParts calculates the number of content parts.
+// Non-SMS platforms always use a single part.
+func (s *CampaignFlowImpl) calculateParts(content *string, platform string) uint64 {
+	if platform != models.CampaignPlatformSMS {
+		return 1
+	}
+
 	if content == nil || *content == "" {
 		return 1
 	}
@@ -2544,4 +3235,69 @@ func sanitizeStoredMultimediaPath(path string) (string, error) {
 		return "", fmt.Errorf("path outside multimedia root")
 	}
 	return filepath.FromSlash(cleaned), nil
+}
+
+func buildCampaignReportExcel(rows []campaignReportRow) ([]byte, error) {
+	xl := excelize.NewFile()
+	defer func() { _ = xl.Close() }()
+
+	sheetName := "Report"
+	defaultSheet := xl.GetSheetName(0)
+	if defaultSheet != sheetName {
+		xl.SetSheetName(defaultSheet, sheetName)
+	}
+
+	if err := xl.SetSheetRow(sheetName, "A1", &campaignReportHeaders); err != nil {
+		return nil, err
+	}
+
+	for i, row := range rows {
+		record := []string{row.AudienceProfileUID, row.Status, row.Clicked}
+		cellRef, err := excelize.CoordinatesToCellName(1, i+2)
+		if err != nil {
+			return nil, err
+		}
+		if err := xl.SetSheetRow(sheetName, cellRef, &record); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := xl.SetColWidth(sheetName, "A", "C", 24); err != nil {
+		return nil, err
+	}
+
+	buf, err := xl.WriteToBuffer()
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+func deriveCampaignExportStatus(result campaignStatisticsTrackingResult) string {
+	totalParts := int64Value(result.TotalParts)
+	totalDeliveredParts := int64Value(result.TotalDeliveredParts)
+	totalUndeliveredParts := int64Value(result.TotalUndeliveredParts)
+
+	if result.TotalParts != nil && result.TotalDeliveredParts != nil && totalDeliveredParts == totalParts {
+		return "success"
+	}
+	if totalUndeliveredParts > 0 {
+		return "failure"
+	}
+	return "inactive"
+}
+
+func int64Value(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
+}
+
+func stringValue(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(*v)
 }
