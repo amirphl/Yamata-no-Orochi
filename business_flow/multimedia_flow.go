@@ -51,7 +51,7 @@ const (
 	maxMultimediaSize = int64(100 * 1024 * 1024) // 100MB
 )
 
-var allowedMultimediaFormats = []string{"jpg", "jpeg", "png", "gif", "webp", "mp4", "mov", "webm", "mkv", "xlsx", "xls", "xlsm"}
+var allowedMultimediaFormats = []string{"jpg", "jpeg", "png", "gif", "webp", "mp4", "mov", "webm", "mkv", "xlsx", "xls", "xlsm", "pdf"}
 
 var allowedMultimediaExts = map[string]string{
 	".jpg":  "image",
@@ -66,6 +66,7 @@ var allowedMultimediaExts = map[string]string{
 	".xlsx": "excel",
 	".xls":  "excel",
 	".xlsm": "excel",
+	".pdf":  "pdf",
 }
 
 func (f *MultimediaFlowImpl) UploadMultimedia(ctx context.Context, req *dto.UploadMultimediaRequest, metadata *ClientMetadata) (*dto.UploadMultimediaResponse, error) {
@@ -336,6 +337,8 @@ func isAllowedUploadedMime(detected, ext, mediaType string) bool {
 		return strings.HasPrefix(detected, mediaType+"/")
 	case "excel":
 		return isExcelMime(detected, ext)
+	case "pdf":
+		return isPDFMime(detected, ext)
 	default:
 		return false
 	}
@@ -350,6 +353,19 @@ func isExcelMime(mimeType, ext string) bool {
 	}
 	if mt == "application/zip" || mt == "application/vnd.ms-office" || mt == "application/x-ole-storage" {
 		return ex == ".xlsx" || ex == ".xlsm" || ex == ".xls"
+	}
+	return false
+}
+
+func isPDFMime(mimeType, ext string) bool {
+	mt := strings.ToLower(strings.TrimSpace(mimeType))
+	ex := strings.ToLower(strings.TrimSpace(ext))
+
+	if mt == "application/pdf" {
+		return true
+	}
+	if mt == "application/octet-stream" {
+		return ex == ".pdf"
 	}
 	return false
 }
