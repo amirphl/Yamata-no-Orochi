@@ -21,8 +21,10 @@ import (
 type PaymentAdminFlow interface {
 	AdminChargeWallet(ctx context.Context, req *dto.AdminChargeWalletRequest, metadata *ClientMetadata, adminID uint) (*dto.AdminChargeWalletResponse, error)
 	AdminListDepositReceipts(ctx context.Context, f models.DepositReceiptFilter, limit, offset int, order string) (*dto.ListDepositReceiptsResponse, error)
+	AdminListTransactions(ctx context.Context, req *dto.AdminListTransactionsRequest, metadata *ClientMetadata) (*dto.AdminListTransactionsResponse, error)
 	AdminGetDepositReceiptFile(ctx context.Context, receiptUUID string) ([]byte, string, string, error)
 	AdminUpdateDepositReceiptStatus(ctx context.Context, req *dto.AdminUpdateDepositReceiptStatusRequest, adminID uint, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error)
+	AddInvoiceToTransaction(ctx context.Context, req *dto.AdminAddInvoiceToTransactionRequest, adminID uint, metadata *ClientMetadata) (*dto.AdminAddInvoiceToTransactionResponse, error)
 }
 
 // NewPaymentAdminFlow creates a new admin payment flow instance.
@@ -35,6 +37,7 @@ func NewPaymentAdminFlow(
 	transactionRepo repository.TransactionRepository,
 	agencyDiscountRepo repository.AgencyDiscountRepository,
 	depositReceiptRepo repository.DepositReceiptRepository,
+	multimediaRepo repository.MultimediaAssetRepository,
 	db *gorm.DB,
 	atipayCfg config.AtipayConfig,
 	sysCfg config.SystemConfig,
@@ -49,6 +52,7 @@ func NewPaymentAdminFlow(
 		transactionRepo:     transactionRepo,
 		agencyDiscountRepo:  agencyDiscountRepo,
 		depositReceiptRepo:  depositReceiptRepo,
+		multimediaRepo:      multimediaRepo,
 		db:                  db,
 		atipayCfg:           atipayCfg,
 		sysCfg:              sysCfg,
@@ -92,7 +96,7 @@ func (p *PaymentFlowImpl) AdminChargeWallet(
 			return err
 		}
 
-		existing, err := p.findAdminChargeByIdempotencyKey(txCtx, idempotencyKey)
+		existing, err := p.paymentRequestRepo.FindAdminChargeByIdempotencyKey(txCtx, idempotencyKey)
 		if err != nil {
 			return err
 		}
@@ -187,6 +191,13 @@ func (p *PaymentFlowImpl) AdminChargeWallet(
 	if err != nil {
 		errMsg := fmt.Sprintf("Charge wallet by admin failed for customer %d by admin %d: %s", req.CustomerID, adminID, err.Error())
 		_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionWalletChargeFailed, errMsg, false, &errMsg, metadata)
+		logAdminAction(ctx, p.auditRepo, models.AuditActionWalletChargeFailed, "Admin charge wallet", false, &req.CustomerID, map[string]any{
+			"customer_id":       req.CustomerID,
+			"admin_id":          adminID,
+			"amount_with_tax":   req.AmountWithTax,
+			"idempotency_key":   idempotencyKey,
+			"idempotent_replay": isIdempotentReplay,
+		}, err)
 		return nil, NewBusinessError("CHARGE_WALLET_BY_ADMIN_FAILED", "Failed to charge wallet by admin", err)
 	}
 
@@ -196,6 +207,14 @@ func (p *PaymentFlowImpl) AdminChargeWallet(
 	}
 	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionWalletChargeCompleted, msg, true, nil, metadata)
 	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionPaymentCallbackProcessed, msg, true, nil, metadata)
+	logAdminAction(ctx, p.auditRepo, models.AuditActionWalletChargeCompleted, "Admin charge wallet", true, &req.CustomerID, map[string]any{
+		"customer_id":        req.CustomerID,
+		"admin_id":           adminID,
+		"amount_with_tax":    req.AmountWithTax,
+		"idempotency_key":    idempotencyKey,
+		"idempotent_replay":  isIdempotentReplay,
+		"payment_request_id": paymentRequest.ID,
+	}, nil)
 
 	return &dto.AdminChargeWalletResponse{
 		Message: func() string {
@@ -240,6 +259,81 @@ func (p *PaymentFlowImpl) AdminListDepositReceipts(ctx context.Context, f models
 			CreatedAt:     r.CreatedAt,
 		})
 	}
+	logAdminAction(ctx, p.auditRepo, models.AuditActionAdminDepositReceiptReviewed, "Admin listed deposit receipts", true, nil, map[string]any{
+		"limit":      limit,
+		"offset":     offset,
+		"order":      order,
+		"filter":     f,
+		"item_count": len(resp.Items),
+	}, nil)
+	return resp, nil
+}
+
+// AdminListTransactions returns admin-facing filtered transactions for customer balance increase operation.
+func (p *PaymentFlowImpl) AdminListTransactions(ctx context.Context, req *dto.AdminListTransactionsRequest, metadata *ClientMetadata) (resp *dto.AdminListTransactionsResponse, err error) {
+	defer func() {
+		if err != nil {
+			err = NewBusinessError("ADMIN_LIST_TRANSACTIONS_FAILED", "List transactions failed", err)
+		}
+	}()
+
+	if req == nil {
+		return nil, fmt.Errorf("request is nil")
+	}
+	if err := p.validateAdminListTransactionsRequest(req); err != nil {
+		return nil, err
+	}
+
+	filter := models.TransactionFilter{
+		Source:     utils.ToPtr(models.TransactionSourceIncreaseCustomerFreePlusCredit),
+		Operation:  utils.ToPtr("increase_customer_free_plus_credit"),
+		CustomerID: req.CustomerID,
+	}
+	if req.StartDate != nil {
+		filter.CreatedAfter = req.StartDate
+	}
+	if req.EndDate != nil {
+		filter.CreatedBefore = req.EndDate
+	}
+
+	offset := (req.Page - 1) * req.PageSize
+	transactions, err := p.transactionRepo.GetAdminListWithCustomer(ctx, filter, "id DESC", int(req.PageSize), int(offset))
+	if err != nil {
+		return nil, err
+	}
+	totalCount, err := p.transactionRepo.Count(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]dto.AdminTransactionItem, 0, len(transactions))
+	for _, transaction := range transactions {
+		item, err := p.convertTransactionHistoryRecordToTransactionHistoryItem(transaction)
+		if err != nil {
+			return nil, err
+		}
+
+		items = append(items, item)
+	}
+
+	resp = &dto.AdminListTransactionsResponse{
+		Items:      items,
+		Pagination: p.calculatePaginationInfo(req.Page, req.PageSize, uint(totalCount)),
+	}
+
+	msg := fmt.Sprintf("Admin listed transactions: %d items", len(items))
+	_ = createAuditLog(ctx, p.auditRepo, nil, models.AuditActionAdminListTransactions, msg, true, nil, metadata)
+	logAdminAction(ctx, p.auditRepo, models.AuditActionAdminListTransactions, "Admin listed transactions", true, req.CustomerID, map[string]any{
+		"page":        req.Page,
+		"page_size":   req.PageSize,
+		"total_count": totalCount,
+		"item_count":  len(items),
+		"start_date":  req.StartDate,
+		"end_date":    req.EndDate,
+		"customer_id": req.CustomerID,
+		"operation":   "increase_customer_free_plus_credit",
+		"source":      models.TransactionSourceIncreaseCustomerFreePlusCredit,
+	}, nil)
 	return resp, nil
 }
 
@@ -252,7 +346,111 @@ func (p *PaymentFlowImpl) AdminGetDepositReceiptFile(ctx context.Context, receip
 	if rec == nil {
 		return nil, "", "", ErrDepositReceiptNotFound
 	}
+
+	logAdminAction(ctx, p.auditRepo, models.AuditActionAdminDownloadDepositReceiptFile, "Admin download deposit receipt file", true, &rec.CustomerID, map[string]any{
+		"receipt_uuid":   receiptUUID,
+		"file_name":      rec.FileName,
+		"content_type":   rec.ContentType,
+		"file_size":      rec.FileSize,
+		"receipt_status": rec.Status,
+	}, nil)
+
 	return rec.FileData, rec.FileName, rec.ContentType, nil
+}
+
+// AddInvoiceToTransaction links an issued invoice UUID to a transaction resolved by transaction UUID.
+func (p *PaymentFlowImpl) AddInvoiceToTransaction(ctx context.Context, req *dto.AdminAddInvoiceToTransactionRequest, adminID uint, metadata *ClientMetadata) (*dto.AdminAddInvoiceToTransactionResponse, error) {
+	if req == nil {
+		return nil, NewBusinessError("ADMIN_ADD_INVOICE_INVALID", "Invalid request", fmt.Errorf("nil request"))
+	}
+
+	transactionUUID := strings.TrimSpace(req.TransactionUUID)
+	customerInvoiceUUID := strings.TrimSpace(req.CustomerInvoiceUUID)
+	if transactionUUID == "" {
+		return nil, NewBusinessError("ADMIN_ADD_INVOICE_INVALID", "Invalid request", ErrTransactionUUIDInvalid)
+	}
+	if _, err := uuid.Parse(transactionUUID); err != nil {
+		return nil, NewBusinessError("ADMIN_ADD_INVOICE_INVALID", "Invalid request", ErrTransactionUUIDInvalid)
+	}
+	if err := p.validateCustomerInvoiceUUIDForApproval(ctx, customerInvoiceUUID); err != nil {
+		if errors.Is(err, ErrDepositReceiptInvoiceRequired) {
+			return nil, NewBusinessError("ADMIN_ADD_INVOICE_INVALID", "Invalid request", ErrInvoiceUUIDRequired)
+		}
+		if errors.Is(err, ErrDepositReceiptInvoiceInvalid) {
+			return nil, NewBusinessError("ADMIN_ADD_INVOICE_INVALID", "Invalid request", ErrInvoiceUUIDInvalid)
+		}
+		return nil, NewBusinessError("ADMIN_ADD_INVOICE_INVALID", "Invalid request", err)
+	}
+
+	updated := false
+	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		trx, err := p.transactionRepo.ByUUID(txCtx, transactionUUID)
+		if err != nil {
+			return err
+		}
+		if trx == nil {
+			return ErrTransactionNotFound
+		}
+
+		meta := map[string]any{}
+		if len(trx.Metadata) > 0 {
+			if err := json.Unmarshal(trx.Metadata, &meta); err != nil {
+				return err
+			}
+		}
+
+		if meta["source"] != models.TransactionSourceIncreaseCustomerFreePlusCredit {
+			return ErrTransactionNotFound
+		}
+		if meta["operation"] != "increase_customer_free_plus_credit" {
+			return ErrTransactionNotFound
+		}
+
+		retrievedCustomerInvoiceUUID := customerInvoiceUUIDFromMetadata(meta)
+		if retrievedCustomerInvoiceUUID != nil {
+			if strings.TrimSpace(*retrievedCustomerInvoiceUUID) != customerInvoiceUUID {
+				return ErrInvoiceUUIDMismatch
+			}
+			updated = false
+			return nil
+		}
+
+		meta["customer_invoice_uuid"] = customerInvoiceUUID
+		metaJSON, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		trx.Metadata = metaJSON
+		trx.UpdatedAt = utils.UTCNow()
+		if err := p.transactionRepo.UpdateMetadata(txCtx, trx.ID, trx.Metadata, trx.UpdatedAt); err != nil {
+			return err
+		}
+
+		updated = true
+		return nil
+	})
+	if err != nil {
+		errMsg := fmt.Sprintf("Admin %d failed to attach customer invoice %s to transaction %s: %v", adminID, customerInvoiceUUID, transactionUUID, err)
+		_ = createAuditLog(ctx, p.auditRepo, nil, models.AuditActionAdminAttachInvoiceToTransaction, errMsg, false, &errMsg, metadata)
+		logAdminAction(ctx, p.auditRepo, models.AuditActionAdminAttachInvoiceToTransaction, "Admin attached customer invoice to transaction", false, nil, map[string]any{
+			"transaction_uuid":      transactionUUID,
+			"customer_invoice_uuid": customerInvoiceUUID,
+		}, err)
+		return nil, NewBusinessError("ADMIN_ADD_INVOICE_FAILED", "Failed to add invoice to transaction", err)
+	}
+
+	resp := &dto.AdminAddInvoiceToTransactionResponse{
+		Success: updated,
+	}
+
+	msg := fmt.Sprintf("Admin %d attached customer invoice %s to transaction %s", adminID, customerInvoiceUUID, transactionUUID)
+	_ = createAuditLog(ctx, p.auditRepo, nil, models.AuditActionAdminAttachInvoiceToTransaction, msg, true, nil, metadata)
+	logAdminAction(ctx, p.auditRepo, models.AuditActionAdminAttachInvoiceToTransaction, "Admin attached customer invoice to transaction", true, nil, map[string]any{
+		"transaction_uuid":      transactionUUID,
+		"customer_invoice_uuid": customerInvoiceUUID,
+		"updated":               updated,
+	}, nil)
+	return resp, nil
 }
 
 // AdminUpdateDepositReceiptStatus approves or rejects a receipt and on approval credits wallet like normal flow.
@@ -263,6 +461,11 @@ func (p *PaymentFlowImpl) AdminUpdateDepositReceiptStatus(ctx context.Context, r
 	action := strings.ToLower(strings.TrimSpace(req.Action))
 	if action != "approve" && action != "reject" {
 		return nil, ErrDepositReceiptInvalidStatus
+	}
+	if action == "approve" {
+		// if err := p.validateCustomerInvoiceUUIDForApproval(ctx, req.CustomerInvoiceUUID); err != nil {
+		// 	return nil, NewBusinessError("ADMIN_RECEIPT_UPDATE_INVALID", "Invalid request", err)
+		// }
 	}
 
 	var customer models.Customer
@@ -282,6 +485,18 @@ func (p *PaymentFlowImpl) AdminUpdateDepositReceiptStatus(ctx context.Context, r
 		if receipt.Status == models.DepositReceiptStatusRejected {
 			return ErrDepositReceiptAlreadyRejected
 		}
+		if action == "approve" {
+			// if err := p.paymentRequestRepo.LockCustomerInvoiceUUID(txCtx, req.CustomerInvoiceUUID); err != nil {
+			// 	return err
+			// }
+			// used, err := p.paymentRequestRepo.IsCustomerDepositInvoiceUUIDAlreadyLinked(txCtx, req.CustomerInvoiceUUID)
+			// if err != nil {
+			// 	return err
+			// }
+			// if used {
+			// 	return ErrDepositReceiptInvoiceDuplicate
+			// }
+		}
 
 		if action == "reject" {
 			receipt.Status = models.DepositReceiptStatusRejected
@@ -294,7 +509,7 @@ func (p *PaymentFlowImpl) AdminUpdateDepositReceiptStatus(ctx context.Context, r
 				return err
 			}
 			desc := fmt.Sprintf("Deposit receipt %s rejected by admin %d", req.ReceiptUUID, adminID)
-			_ = createAuditLog(txCtx, p.auditRepo, nil, models.AuditActionAdminDepositReceiptReviewed, desc, true, nil, metadata)
+			_ = createAuditLog(txCtx, p.auditRepo, nil, models.AuditActionAdminUpdateDepositReceiptStatus, desc, true, nil, metadata)
 			return nil
 		}
 
@@ -322,6 +537,7 @@ func (p *PaymentFlowImpl) AdminUpdateDepositReceiptStatus(ctx context.Context, r
 		m["source"] = "deposit_receipt"
 		m["deposit_receipt_uuid"] = receipt.UUID.String()
 		m["deposit_invoice_number"] = receipt.InvoiceNumber
+		// m["customer_invoice_uuid"] = req.CustomerInvoiceUUID
 		m["admin_id"] = adminID
 		m["payment_channel"] = "deposit_receipt_manual"
 		metaJSON, err := json.Marshal(m)
@@ -367,18 +583,31 @@ func (p *PaymentFlowImpl) AdminUpdateDepositReceiptStatus(ctx context.Context, r
 			return err
 		}
 
+		// desc := fmt.Sprintf("Deposit receipt %s approved by admin %d and credited (customer_invoice_uuid=%s)", req.ReceiptUUID, adminID, req.CustomerInvoiceUUID)
 		desc := fmt.Sprintf("Deposit receipt %s approved by admin %d and credited", req.ReceiptUUID, adminID)
-		_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionAdminDepositReceiptReviewed, desc, true, nil, metadata)
+		_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionAdminUpdateDepositReceiptStatus, desc, true, nil, metadata)
 		return nil
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Admin %d failed to update receipt %s: %v", adminID, req.ReceiptUUID, err)
-		_ = createAuditLog(ctx, p.auditRepo, nil, models.AuditActionAdminDepositReceiptReviewed, errMsg, false, &errMsg, metadata)
+		_ = createAuditLog(ctx, p.auditRepo, nil, models.AuditActionAdminUpdateDepositReceiptStatus, errMsg, false, &errMsg, metadata)
+		logAdminAction(ctx, p.auditRepo, models.AuditActionAdminUpdateDepositReceiptStatus, "Admin updated deposit receipt status", false, nil, map[string]any{
+			"receipt_uuid": req.ReceiptUUID,
+			"action":       action,
+			// "customer_invoice_uuid": req.CustomerInvoiceUUID,
+		}, err)
 		return nil, NewBusinessError("ADMIN_RECEIPT_UPDATE_FAILED", "Failed to update deposit receipt", err)
 	}
 
 	msg := fmt.Sprintf("Admin %d updated receipt %s to %s", adminID, req.ReceiptUUID, req.Action)
-	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionAdminDepositReceiptReviewed, msg, true, nil, metadata)
+	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionAdminUpdateDepositReceiptStatus, msg, true, nil, metadata)
+	logAdminAction(ctx, p.auditRepo, models.AuditActionAdminUpdateDepositReceiptStatus, "Admin updated deposit receipt status", true, &receipt.CustomerID, map[string]any{
+		"receipt_uuid": req.ReceiptUUID,
+		"action":       action,
+		// "customer_invoice_uuid": req.CustomerInvoiceUUID,
+		"customer_id":      receipt.CustomerID,
+		"resulting_status": receipt.Status,
+	}, nil)
 
 	return &dto.SubmitDepositReceiptResponse{
 		Success:     true,
@@ -386,22 +615,6 @@ func (p *PaymentFlowImpl) AdminUpdateDepositReceiptStatus(ctx context.Context, r
 		ReceiptUUID: req.ReceiptUUID,
 		Status:      string(receipt.Status),
 	}, nil
-}
-
-func (p *PaymentFlowImpl) findAdminChargeByIdempotencyKey(ctx context.Context, idempotencyKey string) (*models.PaymentRequest, error) {
-	var req models.PaymentRequest
-	err := p.db.WithContext(ctx).
-		Where("metadata ->> 'source' = ?", "wallet_recharge_admin").
-		Where("metadata ->> 'idempotency_key' = ?", idempotencyKey).
-		Order("id DESC").
-		First(&req).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &req, nil
 }
 
 func paymentMetadataAdminID(raw json.RawMessage) uint {
@@ -436,4 +649,127 @@ func paymentMetadataAdminID(raw json.RawMessage) uint {
 	default:
 		return 0
 	}
+}
+
+func (p *PaymentFlowImpl) validateAdminListTransactionsRequest(req *dto.AdminListTransactionsRequest) error {
+	if req.Page < 1 {
+		return ErrInvalidPage
+	}
+	if req.PageSize < 1 || req.PageSize > 100 {
+		return ErrInvalidPageSize
+	}
+	if req.StartDate != nil && req.EndDate != nil && req.StartDate.After(*req.EndDate) {
+		return ErrStartDateAfterEndDate
+	}
+	return nil
+}
+
+// convertTransactionHistoryRecordToTransactionHistoryItem converts a history projection into a transaction history item DTO.
+func (p *PaymentFlowImpl) convertTransactionHistoryRecordToTransactionHistoryItem(transaction *models.Transaction) (dto.AdminTransactionItem, error) {
+	if transaction == nil {
+		return dto.AdminTransactionItem{}, fmt.Errorf("transaction history record is nil")
+	}
+
+	// Get human-readable status
+	status := dto.TransactionStatusDisplay[transaction.Status]
+	if status == "" {
+		status = string(transaction.Status)
+	}
+
+	// Prepare external reference
+	var externalRef *string
+	if transaction.ExternalReference != "" {
+		externalRef = &transaction.ExternalReference
+	}
+
+	var balanceBefore map[string]uint64
+	var balanceAfter map[string]uint64
+
+	if err := json.Unmarshal(transaction.BalanceBefore, &balanceBefore); err != nil {
+		return dto.AdminTransactionItem{}, err
+	}
+	if err := json.Unmarshal(transaction.BalanceAfter, &balanceAfter); err != nil {
+		return dto.AdminTransactionItem{}, err
+	}
+
+	// Parse metadata for source/operation and financial breakdown
+	meta := map[string]any{}
+	_ = json.Unmarshal(transaction.Metadata, &meta)
+
+	source := toString(meta["source"])
+	operation := toString(meta["operation"])
+	if operation == "" {
+		operation = dto.TransactionTypeDisplay[transaction.Type]
+		if operation == "" {
+			operation = string(transaction.Type)
+		}
+	}
+
+	amount := toUint64(meta["amount"])
+	customerCredit := toUint64(meta["customer_credit"])
+	agencyShareWithTax := toUint64(meta["agency_share_with_tax"])
+
+	customerInvoiceUUID := customerInvoiceUUIDFromMetadata(meta)
+
+	return dto.AdminTransactionItem{
+		UUID:       transaction.UUID.String(),
+		CustomerID: transaction.CustomerID,
+		Customer: dto.AdminTransactionCustomerInfo{
+			RepresentativeFirstName: transaction.Customer.RepresentativeFirstName,
+			RepresentativeLastName:  transaction.Customer.RepresentativeLastName,
+			FullName:                strings.TrimSpace(transaction.Customer.RepresentativeFirstName + " " + transaction.Customer.RepresentativeLastName),
+			RepresentativeMobile:    transaction.Customer.RepresentativeMobile,
+			Email:                   transaction.Customer.Email,
+			CompanyName:             transaction.Customer.CompanyName,
+			CompanyPhone:            transaction.Customer.CompanyPhone,
+			NationalID:              transaction.Customer.NationalID,
+			AccountType:             transaction.Customer.AccountType.TypeName,
+		},
+		Status:              status,
+		Amount:              amount,
+		CustomerCredit:      customerCredit,
+		AgencyShareWithTax:  agencyShareWithTax,
+		Currency:            transaction.Currency,
+		Operation:           operation,
+		Source:              source,
+		DateTime:            transaction.CreatedAt,
+		ExternalRef:         externalRef,
+		BalanceBefore:       balanceBefore,
+		BalanceAfter:        balanceAfter,
+		CustomerInvoiceUUID: customerInvoiceUUID,
+		// Metadata:           meta,
+	}, nil
+}
+
+func customerInvoiceUUIDFromMetadata(metadata map[string]any) *string {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["customer_invoice_uuid"]
+	if !ok || raw == nil {
+		return nil
+	}
+	s, ok := raw.(string)
+	if !ok {
+		return nil
+	}
+	return utils.ToPtr(strings.TrimSpace(s))
+}
+
+func (p *PaymentFlowImpl) validateCustomerInvoiceUUIDForApproval(ctx context.Context, customerInvoiceUUID string) error {
+	customerInvoiceUUID = strings.TrimSpace(customerInvoiceUUID)
+	if customerInvoiceUUID == "" {
+		return ErrDepositReceiptInvoiceRequired
+	}
+	if _, err := uuid.Parse(customerInvoiceUUID); err != nil {
+		return ErrDepositReceiptInvoiceInvalid
+	}
+	exists, err := p.multimediaRepo.ExistsByUUID(ctx, customerInvoiceUUID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return ErrDepositReceiptInvoiceInvalid
+	}
+	return nil
 }
