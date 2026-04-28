@@ -228,5 +228,8 @@
 \echo 'Running 0074_replicate_sms_segment_price_factors_to_other_platforms.sql...'
 \i migrations/0074_replicate_sms_segment_price_factors_to_other_platforms.sql
 
+\echo 'Running 0075_create_sent_splus_messages.sql...'
+\i migrations/0075_create_sent_splus_messages.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
