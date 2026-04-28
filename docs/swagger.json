@@ -558,6 +558,100 @@
                 }
             }
         },
+        "/api/v1/admin/campaigns/page-prices": {
+            "get": {
+                "description": "Return latest page price for all platforms",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Campaigns"
+                ],
+                "summary": "Get Page Prices",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminGetPagePricesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Insert a new page price version for a platform (insert-only)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Campaigns"
+                ],
+                "summary": "Update Page Price",
+                "parameters": [
+                    {
+                        "description": "Page price payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminUpdatePagePriceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminUpdatePagePriceResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/campaigns/reject": {
             "post": {
                 "description": "Reject a campaign waiting for approval; refunds reserved funds to free balance",
@@ -1234,6 +1328,86 @@
                 }
             }
         },
+        "/api/v1/admin/media/upload": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Upload an image, video, excel, or pdf file for a customer (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv/xlsx/xls/xlsm/pdf, \u003c=100MB)",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Multimedia"
+                ],
+                "summary": "Admin upload multimedia",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Customer ID",
+                        "name": "customer_id",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "file",
+                        "description": "Multimedia file (\u003c=100MB)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Upload successful",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.UploadMultimediaResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or file",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Customer not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/media/{uuid}": {
             "get": {
                 "security": [
@@ -1241,7 +1415,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Download an image or video by uuid (admin access)",
+                "description": "Download a multimedia file (image/video/excel/pdf) by uuid (admin access)",
                 "produces": [
                     "application/octet-stream"
                 ],
@@ -1522,7 +1696,7 @@
         },
         "/api/v1/admin/payments/deposit-receipts/status": {
             "post": {
-                "description": "Approve or reject a deposit receipt; on approval credits wallet using receipt metadata.",
+                "description": "Approve or reject a deposit receipt; on approval customer_invoice_uuid is required and is linked in payment metadata.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1630,6 +1804,167 @@
                     },
                     "404": {
                         "description": "Receipt not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payments/transactions": {
+            "get": {
+                "description": "Lists filtered transactions where source=payment_callback_increase_customer_free_plus_credit and operation=increase_customer_free_plus_credit, including full customer details per transaction.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments Admin"
+                ],
+                "summary": "Admin list transactions",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Page number (default 1)",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Page size (default 20, max 100)",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Start date (RFC3339)",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "End date (RFC3339)",
+                        "name": "end_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Optional customer filter",
+                        "name": "customer_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Transactions retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminListTransactionsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payments/transactions/invoice": {
+            "post": {
+                "description": "Resolves transaction by transaction_uuid and merges customer_invoice_uuid into transaction metadata.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments Admin"
+                ],
+                "summary": "Admin link invoice to transaction",
+                "parameters": [
+                    {
+                        "description": "Invoice linking payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminAddInvoiceToTransactionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Invoice linked",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminAddInvoiceToTransactionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Transaction not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Invoice mismatch with existing metadata",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -4119,6 +4454,44 @@
                 }
             }
         },
+        "/api/v1/campaigns/page-prices": {
+            "get": {
+                "description": "Return latest page price for all platforms",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get Page Prices",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.GetPagePricesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns/summary": {
             "get": {
                 "produces": [
@@ -4383,6 +4756,65 @@
                     },
                     "409": {
                         "description": "Clone not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/export": {
+            "get": {
+                "description": "Export an SMS campaign report as an Excel file for the authenticated customer",
+                "produces": [
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Export Campaign Report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Excel file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign not found",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -5492,6 +5924,126 @@
                 }
             }
         },
+        "/api/v1/payments/transactions/invoice-issue-request": {
+            "post": {
+                "description": "Customer requests invoice issuance for a transaction. Rate-limited to once every 24h per customer.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Notify admin to issue invoice",
+                "parameters": [
+                    {
+                        "description": "Transaction UUID payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.NotifyInvoiceIssueRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.NotifyInvoiceIssueResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/platform-base-prices": {
+            "get": {
+                "description": "List current platform base prices (authenticated)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Platform Base Price"
+                ],
+                "summary": "List platform base prices",
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListPlatformBasePricesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/platform-settings": {
             "get": {
                 "description": "List platform settings (authenticated)",
@@ -6464,6 +7016,32 @@
                 }
             }
         },
+        "dto.AdminAddInvoiceToTransactionRequest": {
+            "type": "object",
+            "required": [
+                "customer_invoice_uuid",
+                "transaction_uuid"
+            ],
+            "properties": {
+                "customer_invoice_uuid": {
+                    "type": "string"
+                },
+                "transaction_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminAddInvoiceToTransactionResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "dto.AdminAddPlatformSettingsMetadataRequest": {
             "type": "object",
             "required": [
@@ -7203,6 +7781,20 @@
                 }
             }
         },
+        "dto.AdminGetPagePricesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminPagePriceItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminLineNumberDTO": {
             "type": "object",
             "properties": {
@@ -7345,6 +7937,34 @@
                 },
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.AdminListTransactionsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminTransactionItem"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/dto.TransactionHistoryPaginationInfo"
+                }
+            }
+        },
+        "dto.AdminPagePriceItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
                 }
             }
         },
@@ -7499,6 +8119,100 @@
                 }
             }
         },
+        "dto.AdminTransactionCustomerInfo": {
+            "type": "object",
+            "properties": {
+                "account_type": {
+                    "type": "string"
+                },
+                "company_name": {
+                    "type": "string"
+                },
+                "company_phone": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "full_name": {
+                    "type": "string"
+                },
+                "national_id": {
+                    "type": "string"
+                },
+                "representative_first_name": {
+                    "type": "string"
+                },
+                "representative_last_name": {
+                    "type": "string"
+                },
+                "representative_mobile": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminTransactionItem": {
+            "type": "object",
+            "properties": {
+                "agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "amount": {
+                    "type": "integer"
+                },
+                "balance_after": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "balance_before": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "customer": {
+                    "$ref": "#/definitions/dto.AdminTransactionCustomerInfo"
+                },
+                "customer_credit": {
+                    "type": "integer"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "customer_invoice_uuid": {
+                    "type": "string"
+                },
+                "datetime": {
+                    "type": "string"
+                },
+                "external_ref": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "operation": {
+                    "type": "string"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminUpdateDepositReceiptStatusRequest": {
             "type": "object",
             "required": [
@@ -7514,6 +8228,7 @@
                     ]
                 },
                 "reason": {
+                    "description": "CustomerInvoiceUUID string `json:\"customer_invoice_uuid,omitempty\" validate:\"omitempty,uuid\"`",
                     "type": "string",
                     "maxLength": 500,
                     "minLength": 3
@@ -7552,6 +8267,44 @@
                     "items": {
                         "$ref": "#/definitions/dto.AdminUpdateLineNumberItem"
                     }
+                }
+            }
+        },
+        "dto.AdminUpdatePagePriceRequest": {
+            "type": "object",
+            "required": [
+                "platform",
+                "price"
+            ],
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "price": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AdminUpdatePagePriceResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
                 }
             }
         },
@@ -8647,7 +9400,6 @@
             "type": "object",
             "required": [
                 "customer_id",
-                "discount_rate",
                 "name"
             ],
             "properties": {
@@ -9253,6 +10005,20 @@
                 }
             }
         },
+        "dto.GetPagePricesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.PagePriceItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.GetProfileResponse": {
             "type": "object",
             "properties": {
@@ -9400,6 +10166,20 @@
                 }
             }
         },
+        "dto.ListPlatformBasePricesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.PlatformBasePriceItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.ListPlatformSettingsResponse": {
             "type": "object",
             "properties": {
@@ -9532,6 +10312,28 @@
                 }
             }
         },
+        "dto.NotifyInvoiceIssueRequest": {
+            "type": "object",
+            "required": [
+                "transaction_uuid"
+            ],
+            "properties": {
+                "transaction_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.NotifyInvoiceIssueResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "dto.OTPResendRequest": {
             "type": "object",
             "required": [
@@ -9574,6 +10376,20 @@
                 }
             }
         },
+        "dto.PagePriceItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.PaginationInfo": {
             "type": "object",
             "properties": {
@@ -9587,6 +10403,17 @@
                     "type": "integer"
                 },
                 "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.PlatformBasePriceItem": {
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string"
+                },
+                "price": {
                     "type": "integer"
                 }
             }
@@ -10056,6 +10883,9 @@
                 "customer_credit": {
                     "description": "Customer credit portion (when applicable)",
                     "type": "integer"
+                },
+                "customer_invoice_uuid": {
+                    "type": "string"
                 },
                 "datetime": {
                     "description": "When the transaction occurred",
