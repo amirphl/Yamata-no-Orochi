@@ -373,6 +373,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
 	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
 	platformBasePriceRepo := repository.NewPlatformBasePriceRepository(db)
+	pagePriceRepo := repository.NewPagePriceRepository(db)
 	// Crypto payment repositories
 	cryptoPaymentRequestRepo := repository.NewCryptoPaymentRequestRepository(db)
 	cryptoDepositRepo := repository.NewCryptoDepositRepository(db)
@@ -445,6 +446,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberRepo,
 		segmentPriceFactorRepo,
 		platformBasePriceRepo,
+		pagePriceRepo,
+		processedCampaignRepo,
+		smsStatusResultRepo,
 		db,
 		rc,
 		notificationService,
@@ -462,9 +466,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		transactionRepo,
 		agencyDiscountRepo,
 		depositReceiptRepo,
+		multimediaRepo,
 		notificationService,
 		cfg.Admin,
 		cfg.Message,
+		cfg.Cache,
+		rc,
 		db,
 		cfg.Atipay,
 		cfg.System,
@@ -479,6 +486,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		transactionRepo,
 		agencyDiscountRepo,
 		depositReceiptRepo,
+		multimediaRepo,
 		db,
 		cfg.Atipay,
 		cfg.System,
@@ -540,6 +548,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		platformSettingsRepo,
 		lineNumberRepo,
 		segmentPriceFactorRepo,
+		pagePriceRepo,
 		db,
 		rc,
 		notificationService,
@@ -559,10 +568,11 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
 	multimediaFlow := businessflow.NewMultimediaFlow(customerRepo, multimediaRepo)
-	multimediaAdminFlow := businessflow.NewMultimediaAdminFlow(multimediaRepo)
+	multimediaAdminFlow := businessflow.NewMultimediaAdminFlow(customerRepo, multimediaRepo)
 	multimediaBotFlow := businessflow.NewMultimediaBotFlow(multimediaRepo)
 	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo, notificationService, cfg.Admin)
 	platformSettingsAdminFlow := businessflow.NewPlatformSettingsAdminFlow(platformSettingsRepo, multimediaRepo)
+	platformBasePriceFlow := businessflow.NewPlatformBasePriceFlow(platformBasePriceRepo)
 	platformBasePriceAdminFlow := businessflow.NewPlatformBasePriceAdminFlow(platformBasePriceRepo, auditRepo)
 
 	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo, shortLinkClickRepo)
@@ -603,6 +613,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	multimediaBotHandler := handlers.NewMultimediaBotHandler(multimediaBotFlow)
 	platformSettingsHandler := handlers.NewPlatformSettingsHandler(platformSettingsFlow)
 	platformSettingsAdminHandler := handlers.NewPlatformSettingsAdminHandler(platformSettingsAdminFlow)
+	platformBasePriceHandler := handlers.NewPlatformBasePriceHandler(platformBasePriceFlow)
 	accessControlHandler := handlers.NewAccessControlHandler(accessControlFlow)
 
 	profileHandler := handlers.NewProfileHandler(profileFlow)
@@ -631,6 +642,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberAdminHandler,
 		segmentPriceFactorAdminHandler,
 		platformBasePriceAdminHandler,
+		platformBasePriceHandler,
 		segmentPriceFactorHandler,
 		adminCustomerManagementHandler,
 		campaignBotHandler,
