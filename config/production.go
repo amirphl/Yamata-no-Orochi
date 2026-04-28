@@ -361,6 +361,7 @@ type MessageConfig struct {
 	PasswordResetVerificationCodeTemplate string `json:"password_reset_verification_code_template"`
 	CampaignRejectedTemplate              string `json:"campaign_rejected_template"`
 	DepositReceiptSubmittedTemplate       string `json:"deposit_receipt_submitted_template"`
+	InvoiceIssueRequestTemplate           string `json:"invoice_issue_request_template"`
 }
 
 // LoadProductionConfig loads and validates configuration from environment variables
@@ -592,6 +593,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			PasswordResetVerificationCodeTemplate: getEnvString("MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE", "Your password reset code is: %s. This code will expire in %v minutes."),
 			CampaignRejectedTemplate:              getEnvString("MESSAGE_CAMPAIGN_REJECTED_TEMPLATE", "Your campaign has been rejected."),
 			DepositReceiptSubmittedTemplate:       getEnvString("MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE", "سلام شارژی در سامانه جاذبه انجام شده است. لطفا از پنل ادمین فاکتور مربوطه را صادر و آپلود نمایید"),
+			InvoiceIssueRequestTemplate:           getEnvString("MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE", "درخواست صدور فاکتور ثبت شد. مشتری: %s، شرکت: %s"),
 		},
 	}
 
