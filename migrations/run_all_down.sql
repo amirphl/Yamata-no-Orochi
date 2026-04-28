@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0075_create_sent_splus_messages_down.sql...'
+\i migrations/0075_create_sent_splus_messages_down.sql
+
 \echo 'Running 0074_replicate_sms_segment_price_factors_to_other_platforms_down.sql...'
 \i migrations/0074_replicate_sms_segment_price_factors_to_other_platforms_down.sql
 
