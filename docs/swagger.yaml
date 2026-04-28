@@ -41,6 +41,23 @@ definitions:
     required:
     - target_admin_id
     type: object
+  dto.AdminAddInvoiceToTransactionRequest:
+    properties:
+      customer_invoice_uuid:
+        type: string
+      transaction_uuid:
+        type: string
+    required:
+    - customer_invoice_uuid
+    - transaction_uuid
+    type: object
+  dto.AdminAddInvoiceToTransactionResponse:
+    properties:
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
   dto.AdminAddPlatformSettingsMetadataRequest:
     properties:
       id:
@@ -537,6 +554,15 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.AdminGetPagePricesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminPagePriceItem'
+        type: array
+      message:
+        type: string
+    type: object
   dto.AdminLineNumberDTO:
     properties:
       created_at:
@@ -630,6 +656,24 @@ definitions:
         type: array
       message:
         type: string
+    type: object
+  dto.AdminListTransactionsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminTransactionItem'
+        type: array
+      pagination:
+        $ref: '#/definitions/dto.TransactionHistoryPaginationInfo'
+    type: object
+  dto.AdminPagePriceItem:
+    properties:
+      created_at:
+        type: string
+      platform:
+        type: string
+      price:
+        type: integer
     type: object
   dto.AdminPlatformBasePriceItem:
     properties:
@@ -730,6 +774,69 @@ definitions:
       message:
         type: string
     type: object
+  dto.AdminTransactionCustomerInfo:
+    properties:
+      account_type:
+        type: string
+      company_name:
+        type: string
+      company_phone:
+        type: string
+      email:
+        type: string
+      full_name:
+        type: string
+      national_id:
+        type: string
+      representative_first_name:
+        type: string
+      representative_last_name:
+        type: string
+      representative_mobile:
+        type: string
+    type: object
+  dto.AdminTransactionItem:
+    properties:
+      agency_share_with_tax:
+        type: integer
+      amount:
+        type: integer
+      balance_after:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      balance_before:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      currency:
+        type: string
+      customer:
+        $ref: '#/definitions/dto.AdminTransactionCustomerInfo'
+      customer_credit:
+        type: integer
+      customer_id:
+        type: integer
+      customer_invoice_uuid:
+        type: string
+      datetime:
+        type: string
+      external_ref:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      operation:
+        type: string
+      source:
+        type: string
+      status:
+        type: string
+      uuid:
+        type: string
+    type: object
   dto.AdminUpdateDepositReceiptStatusRequest:
     properties:
       action:
@@ -738,6 +845,8 @@ definitions:
         - reject
         type: string
       reason:
+        description: CustomerInvoiceUUID string `json:"customer_invoice_uuid,omitempty"
+          validate:"omitempty,uuid"`
         maxLength: 500
         minLength: 3
         type: string
@@ -767,6 +876,32 @@ definitions:
         type: array
     required:
     - items
+    type: object
+  dto.AdminUpdatePagePriceRequest:
+    properties:
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      price:
+        type: integer
+    required:
+    - platform
+    - price
+    type: object
+  dto.AdminUpdatePagePriceResponse:
+    properties:
+      created_at:
+        type: string
+      message:
+        type: string
+      platform:
+        type: string
+      price:
+        type: integer
     type: object
   dto.AdminUpdatePlatformBasePriceRequest:
     properties:
@@ -1536,7 +1671,6 @@ definitions:
         type: string
     required:
     - customer_id
-    - discount_rate
     - name
     type: object
   dto.CreateAgencyDiscountResponse:
@@ -1936,6 +2070,15 @@ definitions:
       message:
         type: string
     type: object
+  dto.GetPagePricesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.PagePriceItem'
+        type: array
+      message:
+        type: string
+    type: object
   dto.GetProfileResponse:
     properties:
       customer:
@@ -2031,6 +2174,15 @@ definitions:
       message:
         type: string
     type: object
+  dto.ListPlatformBasePricesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.PlatformBasePriceItem'
+        type: array
+      message:
+        type: string
+    type: object
   dto.ListPlatformSettingsResponse:
     properties:
       items:
@@ -2121,6 +2273,20 @@ definitions:
       status:
         type: string
     type: object
+  dto.NotifyInvoiceIssueRequest:
+    properties:
+      transaction_uuid:
+        type: string
+    required:
+    - transaction_uuid
+    type: object
+  dto.NotifyInvoiceIssueResponse:
+    properties:
+      message:
+        type: string
+      success:
+        type: boolean
+    type: object
   dto.OTPResendRequest:
     properties:
       customer_id:
@@ -2150,6 +2316,15 @@ definitions:
     - otp_code
     - otp_type
     type: object
+  dto.PagePriceItem:
+    properties:
+      created_at:
+        type: string
+      platform:
+        type: string
+      price:
+        type: integer
+    type: object
   dto.PaginationInfo:
     properties:
       limit:
@@ -2159,6 +2334,13 @@ definitions:
       total:
         type: integer
       total_pages:
+        type: integer
+    type: object
+  dto.PlatformBasePriceItem:
+    properties:
+      platform:
+        type: string
+      price:
         type: integer
     type: object
   dto.PlatformSettingsItem:
@@ -2490,6 +2672,8 @@ definitions:
       customer_credit:
         description: Customer credit portion (when applicable)
         type: integer
+      customer_invoice_uuid:
+        type: string
       datetime:
         description: When the transaction occurred
         type: string
@@ -3040,6 +3224,62 @@ paths:
       summary: Cancel Campaign
       tags:
       - Admin Campaigns
+  /api/v1/admin/campaigns/page-prices:
+    get:
+      description: Return latest page price for all platforms
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminGetPagePricesResponse'
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get Page Prices
+      tags:
+      - Admin Campaigns
+    put:
+      consumes:
+      - application/json
+      description: Insert a new page price version for a platform (insert-only)
+      parameters:
+      - description: Page price payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminUpdatePagePriceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminUpdatePagePriceResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Update Page Price
+      tags:
+      - Admin Campaigns
   /api/v1/admin/campaigns/reject:
     post:
       consumes:
@@ -3421,7 +3661,8 @@ paths:
       - Admin Line Numbers
   /api/v1/admin/media/{uuid}:
     get:
-      description: Download an image or video by uuid (admin access)
+      description: Download a multimedia file (image/video/excel/pdf) by uuid (admin
+        access)
       parameters:
       - description: Multimedia UUID
         in: path
@@ -3500,6 +3741,56 @@ paths:
       security:
       - BearerAuth: []
       summary: Admin preview multimedia
+      tags:
+      - Admin Multimedia
+  /api/v1/admin/media/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload an image, video, excel, or pdf file for a customer (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv/xlsx/xls/xlsm/pdf,
+        <=100MB)
+      parameters:
+      - description: Customer ID
+        in: formData
+        name: customer_id
+        required: true
+        type: integer
+      - description: Multimedia file (<=100MB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Upload successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UploadMultimediaResponse'
+              type: object
+        "400":
+          description: Invalid request or file
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Customer not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Admin upload multimedia
       tags:
       - Admin Multimedia
   /api/v1/admin/payments/charge-wallet:
@@ -3636,8 +3927,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Approve or reject a deposit receipt; on approval credits wallet
-        using receipt metadata.
+      description: Approve or reject a deposit receipt; on approval customer_invoice_uuid
+        is required and is linked in payment metadata.
       parameters:
       - description: Status update payload
         in: body
@@ -3678,6 +3969,110 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Admin update deposit receipt status
+      tags:
+      - Payments Admin
+  /api/v1/admin/payments/transactions:
+    get:
+      description: Lists filtered transactions where source=payment_callback_increase_customer_free_plus_credit
+        and operation=increase_customer_free_plus_credit, including full customer
+        details per transaction.
+      parameters:
+      - description: Page number (default 1)
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - description: Page size (default 20, max 100)
+        in: query
+        maximum: 100
+        minimum: 1
+        name: page_size
+        type: integer
+      - description: Start date (RFC3339)
+        in: query
+        name: start_date
+        type: string
+      - description: End date (RFC3339)
+        in: query
+        name: end_date
+        type: string
+      - description: Optional customer filter
+        in: query
+        name: customer_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Transactions retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListTransactionsResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin list transactions
+      tags:
+      - Payments Admin
+  /api/v1/admin/payments/transactions/invoice:
+    post:
+      consumes:
+      - application/json
+      description: Resolves transaction by transaction_uuid and merges customer_invoice_uuid
+        into transaction metadata.
+      parameters:
+      - description: Invoice linking payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminAddInvoiceToTransactionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Invoice linked
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminAddInvoiceToTransactionResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Transaction not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Invoice mismatch with existing metadata
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin link invoice to transaction
       tags:
       - Payments Admin
   /api/v1/admin/platform-base-prices:
@@ -5184,6 +5579,46 @@ paths:
       summary: Clone Campaign
       tags:
       - Campaigns
+  /api/v1/campaigns/{uuid}/export:
+    get:
+      description: Export an SMS campaign report as an Excel file for the authenticated
+        customer
+      parameters:
+      - description: Campaign UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+      responses:
+        "200":
+          description: Excel file
+          schema:
+            type: string
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Export Campaign Report
+      tags:
+      - Campaigns
   /api/v1/campaigns/audience-spec:
     get:
       parameters:
@@ -5352,6 +5787,28 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Get Last Initiated Campaign
+      tags:
+      - Campaigns
+  /api/v1/campaigns/page-prices:
+    get:
+      description: Return latest page price for all platforms
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.GetPagePricesResponse'
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get Page Prices
       tags:
       - Campaigns
   /api/v1/campaigns/summary:
@@ -6080,6 +6537,80 @@ paths:
       summary: Preview proforma invoice by amount
       tags:
       - Payments
+  /api/v1/payments/transactions/invoice-issue-request:
+    post:
+      consumes:
+      - application/json
+      description: Customer requests invoice issuance for a transaction. Rate-limited
+        to once every 24h per customer.
+      parameters:
+      - description: Transaction UUID payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.NotifyInvoiceIssueRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.NotifyInvoiceIssueResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Notify admin to issue invoice
+      tags:
+      - Payments
+  /api/v1/platform-base-prices:
+    get:
+      description: List current platform base prices (authenticated)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListPlatformBasePricesResponse'
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List platform base prices
+      tags:
+      - Platform Base Price
   /api/v1/platform-settings:
     get:
       description: List platform settings (authenticated)
