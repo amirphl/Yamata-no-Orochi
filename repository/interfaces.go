@@ -316,6 +316,20 @@ type SentBaleMessageRepository interface {
 	) error
 }
 
+// SentSplusMessageRepository defines operations for sent Splus message rows.
+type SentSplusMessageRepository interface {
+	Repository[models.SentSplusMessage, models.SentSplusMessageFilter]
+	ByID(ctx context.Context, id uint) (*models.SentSplusMessage, error)
+	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSplusMessage, error)
+	UpdateSendResultByTrackingID(
+		ctx context.Context,
+		trackingID string,
+		status models.SplusSendStatus,
+		partsDelivered int,
+		serverID, errorCode, description *string,
+	) error
+}
+
 // SMSStatusJobRepository defines operations for SMS status check jobs
 type SMSStatusJobRepository interface {
 	Repository[models.SMSStatusJob, any]
