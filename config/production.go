@@ -30,6 +30,8 @@ type ProductionConfig struct {
 	System     SystemConfig     `json:"system"`
 	PayamSMS   PayamSMSConfig   `json:"payam_sms"`
 	Bale       BaleConfig       `json:"bale"`
+	Rubika     RubikaConfig     `json:"rubika"`
+	Splus      SplusConfig      `json:"splus"`
 	Bot        BotConfig        `json:"bot"`
 	Scheduler  SchedulerConfig  `json:"scheduler"`
 	Crypto     CryptoConfig     `json:"crypto"`
@@ -344,9 +346,22 @@ type BaleConfig struct {
 	APIAccessKey string `json:"api_access_key"`
 }
 
+// RubikaConfig holds credentials for Rubika messaging API.
+type RubikaConfig struct {
+	Token     string `json:"token"`
+	ServiceID string `json:"service_id"`
+	BaseURL   string `json:"base_url"`
+}
+
+// SplusConfig holds credentials for Splus business messaging API.
+type SplusConfig struct {
+	BaseURL string `json:"base_url"`
+}
+
 type SchedulerConfig struct {
 	CampaignExecutionEnabled  bool          `json:"campaign_execution_enabled"`
 	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
+	MessageSendDelay          time.Duration `json:"message_send_delay"`
 }
 
 type MessageConfig struct {
@@ -551,6 +566,14 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Bale: BaleConfig{
 			APIAccessKey: getEnvString("BALE_API_ACCESS_KEY", ""),
 		},
+		Rubika: RubikaConfig{
+			Token:     getEnvString("RUBIKA_TOKEN", ""),
+			ServiceID: getEnvString("RUBIKA_SERVICE_ID", ""),
+			BaseURL:   getEnvString("RUBIKA_BASE_URL", "https://messaging.rubika.ir"),
+		},
+		Splus: SplusConfig{
+			BaseURL: getEnvString("SPLUS_BASE_URL", "https://bui.splus.ir"),
+		},
 		Bot: BotConfig{
 			Username:  getEnvString("BOT_USERNAME", ""),
 			Password:  getEnvString("BOT_PASSWORD", ""),
@@ -559,6 +582,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Scheduler: SchedulerConfig{
 			CampaignExecutionEnabled:  getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
 			CampaignExecutionInterval: getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
+			MessageSendDelay:          getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
 		},
 		Crypto: CryptoConfig{
 			DefaultPlatform: getEnvString("CRYPTO_DEFAULT_PLATFORM", "oxapay"),
