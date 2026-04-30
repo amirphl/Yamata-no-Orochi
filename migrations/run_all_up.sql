@@ -281,5 +281,22 @@
 \echo 'Running 0091_add_admin_platform_base_price_audit_actions.sql...'
 \i migrations/0091_add_admin_platform_base_price_audit_actions.sql
 
+\echo 'Running 0092_create_page_prices.sql...'
+\i migrations/0092_create_page_prices.sql
+
+\echo 'Running 0093_add_admin_payment_audit_actions.sql...'
+\i migrations/0093_add_admin_payment_audit_actions.sql
+
+\echo 'Running 0094_add_campaign_report_export_audit_actions.sql...'
+\i migrations/0094_add_campaign_report_export_audit_actions.sql
+
+\echo 'Running 0095_add_admin_page_price_audit_actions.sql...'
+\i migrations/0095_add_admin_page_price_audit_actions.sql
+
+\echo 'Running 0096_add_campaign_refund_reconcile_failed_audit_action.sql...'
+\i migrations/0096_add_campaign_refund_reconcile_failed_audit_action.sql
+
+\i migrations/0097_add_invoice_issue_requested_audit_action.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
