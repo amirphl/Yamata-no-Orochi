@@ -42,6 +42,7 @@ type BaleCampaignScheduler struct {
 	notifier       NotificationSender
 	logger         *log.Logger
 	interval       time.Duration
+	messageDelay   time.Duration
 
 	db       *gorm.DB
 	adminCfg config.AdminConfig
@@ -67,6 +68,7 @@ func NewBaleCampaignScheduler(
 	db *gorm.DB,
 	logger *log.Logger,
 	interval time.Duration,
+	messageDelay time.Duration,
 	baleCfg config.BaleConfig,
 	botCfg config.BotConfig,
 	adminCfg config.AdminConfig,
@@ -88,6 +90,7 @@ func NewBaleCampaignScheduler(
 		logger:         logger,
 		db:             db,
 		interval:       interval,
+		messageDelay:   messageDelay,
 		adminCfg:       adminCfg,
 		baleCfg:        baleCfg,
 		botClient:      newHTTPBotClient(botCfg),
@@ -215,6 +218,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, token s
 		uids   []string
 		pc     *models.ProcessedCampaign
 	)
+
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
 			CampaignID:          c.ID,
@@ -231,14 +235,16 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, token s
 		s.logger.Printf("bale scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
 
 		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
-		var err error
-		var selectionID uint
+		var (
+			selectionID uint
+			err         error
+		)
 		correlationID := uuid.NewString()
 		phones, ids, uids, selectionID, err = s.fetchBaleAudiencePhones(txCtx, c, token, correlationID)
 		if err != nil {
 			return err
 		}
-		s.logger.Printf("scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
+		s.logger.Printf("bale scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
 
 		pc.AudienceIDs = pq.Int64Array(ids)
 		pc.AudienceCodes = uids
@@ -247,13 +253,13 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, token s
 		if err := s.pcRepo.Update(txCtx, pc); err != nil {
 			return err
 		}
-		s.logger.Printf("scheduler: updated processed campaign id=%d with audience ids", pc.ID)
+		s.logger.Printf("bale scheduler: updated processed campaign id=%d with audience ids", pc.ID)
 
 		return nil
 	}); err != nil {
 		return err
 	}
-	s.logger.Printf("scheduler: persisted processed campaign id=%d num_audiences=%d", pc.ID, len(ids))
+	s.logger.Printf("bale scheduler: persisted processed campaign id=%d num_audiences=%d", pc.ID, len(ids))
 
 	var fileID *string
 	if c.MediaUUID != nil {
@@ -321,6 +327,11 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, token s
 				s.logger.Printf("bale scheduler: persist send result failed for campaign id=%d tracking_id=%s: %v", c.ID, trackingIDs[i], err)
 				// TODO: How to handle this error? Retry sending? Skip to next batch?
 			}
+			if start+i < len(phones)-1 {
+				if err := sleepWithContext(ctx, s.messageDelay); err != nil {
+					return err
+				}
+			}
 		}
 	}
 
@@ -335,7 +346,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, token s
 	s.logger.Printf("bale scheduler: campaign id=%d all batches sent", c.ID)
 
 	if err := s.botClient.MoveCampaignToExecuted(ctx, token, c.ID); err != nil {
-		s.logger.Printf("scheduler: move executed failed for campaign id=%d: %v", c.ID, err)
+		s.logger.Printf("bale scheduler: move executed failed for campaign id=%d: %v", c.ID, err)
 		return err
 	}
 	s.logger.Printf("bale scheduler: campaign id=%d moved to executed", c.ID)
