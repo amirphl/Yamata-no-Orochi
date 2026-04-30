@@ -53,10 +53,13 @@ const (
 	AuditActionOTPResent              = "otp_resent"
 
 	// Campaign actions
-	AuditActionCampaignCreated        = "campaign_created"
-	AuditActionCampaignCreationFailed = "campaign_creation_failed"
-	AuditActionCampaignUpdated        = "campaign_updated"
-	AuditActionCampaignUpdateFailed   = "campaign_update_failed"
+	AuditActionCampaignCreated               = "campaign_created"
+	AuditActionCampaignCreationFailed        = "campaign_creation_failed"
+	AuditActionCampaignUpdated               = "campaign_updated"
+	AuditActionCampaignUpdateFailed          = "campaign_update_failed"
+	AuditActionCampaignRefundReconcileFailed = "campaign_refund_reconcile_failed"
+	AuditActionCampaignReportExported        = "campaign_report_exported"
+	AuditActionCampaignReportExportFailed    = "campaign_report_export_failed"
 
 	// Payment actions
 	AuditActionWalletChargeInitiated       = "wallet_charge_initiated"
@@ -71,6 +74,7 @@ const (
 	AuditActionTransactionHistoryRetrieved = "transaction_history_retrieved"
 	AuditActionDepositReceiptSubmitted     = "deposit_receipt_submitted"
 	AuditActionAdminDepositReceiptReviewed = "admin_deposit_receipt_reviewed"
+	AuditActionInvoiceIssueRequested       = "invoice_issue_requested"
 
 	// Agency discount actions
 	AuditActionCreateDiscountByAgencyFailed    = "create_discount_by_agency_failed"
@@ -100,9 +104,16 @@ const (
 	AuditActionAdminLineNumberReport                 = "admin_line_number_report"
 	AuditActionAdminPlatformBasePriceList            = "admin_platform_base_price_list"
 	AuditActionAdminPlatformBasePriceUpdate          = "admin_platform_base_price_update"
+	AuditActionAdminGetPagePrices                    = "admin_get_page_prices"
+	AuditActionAdminUpdatePagePrice                  = "admin_update_page_price"
 	AuditActionAdminACLRequestCreated                = "admin_acl_request_created"
 	AuditActionAdminACLRequestApproved               = "admin_acl_request_approved"
 	AuditActionAdminACLRequestRejected               = "admin_acl_request_rejected"
+	AuditActionAdminListTransactions                 = "admin_list_transactions"
+	AuditActionAdminAddInvoiceToTransaction          = "admin_add_invoice_to_transaction"
+	AuditActionAdminDownloadDepositReceiptFile       = "admin_download_deposit_receipt_file"
+	AuditActionAdminUpdateDepositReceiptStatus       = "admin_update_deposit_receipt_status"
+	AuditActionAdminAttachInvoiceToTransaction       = "admin_attach_invoice_to_transaction"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries
