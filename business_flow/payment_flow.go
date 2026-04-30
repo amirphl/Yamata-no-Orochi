@@ -790,6 +790,13 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		"customer_credit":       customerCredit,
 		"atipay_response":       atipayRequest,
 	}
+	if source, ok := m["source"]; ok {
+		metadata["payment_request_source"] = source
+	}
+	if adminID, ok := m["admin_id"]; ok {
+		metadata["admin_id"] = adminID
+		metadata["payment_channel"] = "admin_direct_charge"
+	}
 
 	// Update customer wallet balance
 	newCustomerFreeBalance := customerBalance.FreeBalance + real
