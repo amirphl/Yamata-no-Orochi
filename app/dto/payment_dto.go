@@ -20,6 +20,24 @@ type ChargeWalletResponse struct {
 	Token   string `json:"token"`
 }
 
+// ChargeWalletByAdminRequest represents an admin request to directly charge a customer wallet.
+type ChargeWalletByAdminRequest struct {
+	CustomerID    uint   `json:"customer_id" validate:"required,min=1"`
+	AmountWithTax uint64 `json:"amount_with_tax" validate:"required,min=1000,max=1000000000"`
+}
+
+// ChargeWalletByAdminResponse represents the response after a successful admin wallet charge.
+type ChargeWalletByAdminResponse struct {
+	Message          string `json:"message"`
+	Success          bool   `json:"success"`
+	PaymentRequestID uint   `json:"payment_request_id"`
+	InvoiceNumber    string `json:"invoice_number"`
+	ReferenceNumber  string `json:"reference_number"`
+	CustomerID       uint   `json:"customer_id"`
+	AdminID          uint   `json:"admin_id"`
+	AmountWithTax    uint64 `json:"amount_with_tax"`
+}
+
 // AtipayRequest represents the callback data from Atipay after payment completion
 type AtipayRequest struct {
 	State             string `json:"state"`             // Transaction status (1=CanceledByUser, 2=OK, 3=Failed, etc.)
