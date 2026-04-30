@@ -3,6 +3,23 @@
 
 \echo 'Starting database rollback...'
 
+\i migrations/0097_add_invoice_issue_requested_audit_action_down.sql
+
+\echo 'Running 0096_add_campaign_refund_reconcile_failed_audit_action_down.sql...'
+\i migrations/0096_add_campaign_refund_reconcile_failed_audit_action_down.sql
+
+\echo 'Running 0095_add_admin_page_price_audit_actions_down.sql...'
+\i migrations/0095_add_admin_page_price_audit_actions_down.sql
+
+\echo 'Running 0094_add_campaign_report_export_audit_actions_down.sql...'
+\i migrations/0094_add_campaign_report_export_audit_actions_down.sql
+
+\echo 'Running 0093_add_admin_payment_audit_actions_down.sql...'
+\i migrations/0093_add_admin_payment_audit_actions_down.sql
+
+\echo 'Running 0092_create_page_prices_down.sql...'
+\i migrations/0092_create_page_prices_down.sql
+
 \echo 'Running 0091_add_admin_platform_base_price_audit_actions_down.sql...'
 \i migrations/0091_add_admin_platform_base_price_audit_actions_down.sql
 
