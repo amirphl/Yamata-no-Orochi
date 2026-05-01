@@ -72,6 +72,13 @@ type PlatformBasePriceRepository interface {
 	List(ctx context.Context) ([]*models.PlatformBasePrice, error)
 }
 
+// PagePriceRepository defines operations for platform page prices (append-only).
+type PagePriceRepository interface {
+	Insert(ctx context.Context, p *models.PagePrice) error
+	LatestByPlatform(ctx context.Context, platform string) (*models.PagePrice, error)
+	ListLatest(ctx context.Context) ([]*models.PagePrice, error)
+}
+
 // CustomerRepository defines operations for customers
 type CustomerRepository interface {
 	Repository[models.Customer, models.CustomerFilter]
@@ -147,6 +154,7 @@ type TransactionRepository interface {
 	Repository[models.Transaction, models.TransactionFilter]
 	ByID(ctx context.Context, id uint) (*models.Transaction, error)
 	ByUUID(ctx context.Context, uuid string) (*models.Transaction, error)
+	UpdateMetadata(ctx context.Context, id uint, metadata []byte, updatedAt time.Time) error
 	ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.Transaction, error)
 	ByWalletID(ctx context.Context, walletID uint, limit, offset int) ([]*models.Transaction, error)
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Transaction, error)
@@ -155,6 +163,7 @@ type TransactionRepository interface {
 	ByExternalReference(ctx context.Context, externalReference string) (*models.Transaction, error)
 	GetPendingTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
 	GetCompletedTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
+	GetAdminListWithCustomer(ctx context.Context, filter models.TransactionFilter, orderBy string, limit, offset int) ([]*models.Transaction, error)
 	// History queries
 	GetHistoryWithMetadata(ctx context.Context, walletID uint, customerID uint, startDate, endDate *time.Time, txType *models.TransactionType, status *models.TransactionStatus, limit, offset int) ([]*models.Transaction, int64, error)
 	// Reports
@@ -186,6 +195,9 @@ type BalanceSnapshotRepository interface {
 type PaymentRequestRepository interface {
 	Repository[models.PaymentRequest, models.PaymentRequestFilter]
 	Update(ctx context.Context, request *models.PaymentRequest) error
+	LockCustomerInvoiceUUID(ctx context.Context, invoiceUUID string) error
+	IsCustomerDepositInvoiceUUIDAlreadyLinked(ctx context.Context, invoiceUUID string) (bool, error)
+	FindAdminChargeByIdempotencyKey(ctx context.Context, idempotencyKey string) (*models.PaymentRequest, error)
 	ByID(ctx context.Context, id uint) (*models.PaymentRequest, error)
 	ByUUID(ctx context.Context, uuid string) (*models.PaymentRequest, error)
 	ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.PaymentRequest, error)
@@ -348,6 +360,7 @@ type MultimediaAssetRepository interface {
 	Repository[models.MultimediaAsset, models.MultimediaAssetFilter]
 	ByID(ctx context.Context, id uint) (*models.MultimediaAsset, error)
 	ByUUID(ctx context.Context, uuid string) (*models.MultimediaAsset, error)
+	ExistsByUUID(ctx context.Context, uuid string) (bool, error)
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.MultimediaAsset, error)
 }
 
