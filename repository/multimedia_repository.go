@@ -50,6 +50,15 @@ func (r *MultimediaAssetRepositoryImpl) ByUUID(ctx context.Context, uuidStr stri
 	return rows[0], nil
 }
 
+// ExistsByUUID checks whether a multimedia asset exists by UUID.
+func (r *MultimediaAssetRepositoryImpl) ExistsByUUID(ctx context.Context, uuidStr string) (bool, error) {
+	parsed, err := utils.ParseUUID(uuidStr)
+	if err != nil {
+		return false, err
+	}
+	return r.Exists(ctx, models.MultimediaAssetFilter{UUID: &parsed})
+}
+
 // ByCustomerID retrieves multimedia assets for a customer.
 func (r *MultimediaAssetRepositoryImpl) ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.MultimediaAsset, error) {
 	return r.ByFilter(ctx, models.MultimediaAssetFilter{CustomerID: &customerID}, "id DESC", limit, offset)
