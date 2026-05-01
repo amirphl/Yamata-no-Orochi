@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -271,6 +272,45 @@ func (r *PaymentRequestRepositoryImpl) Update(ctx context.Context, request *mode
 		return err
 	}
 	return nil
+}
+
+// LockCustomerInvoiceUUID acquires a transaction-scoped advisory lock for a deposit-receipt invoice UUID.
+func (r *PaymentRequestRepositoryImpl) LockCustomerInvoiceUUID(ctx context.Context, invoiceUUID string) error {
+	db := r.getDB(ctx)
+	lockName := fmt.Sprintf("customer_deposit_receipt_invoice:%s", invoiceUUID)
+	return db.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", lockName).Error
+}
+
+// IsCustomerDepositInvoiceUUIDAlreadyLinked checks if an approved deposit-receipt payment request already used invoiceUUID.
+func (r *PaymentRequestRepositoryImpl) IsCustomerDepositInvoiceUUIDAlreadyLinked(ctx context.Context, invoiceUUID string) (bool, error) {
+	db := r.getDB(ctx)
+	var count int64
+	err := db.Model(&models.PaymentRequest{}).
+		Where("metadata ->> 'source' = ?", "deposit_receipt").
+		Where("metadata ->> 'customer_invoice_uuid' = ?", invoiceUUID).
+		Count(&count).Error
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+// FindAdminChargeByIdempotencyKey returns the latest admin direct-charge payment request by idempotency key.
+func (r *PaymentRequestRepositoryImpl) FindAdminChargeByIdempotencyKey(ctx context.Context, idempotencyKey string) (*models.PaymentRequest, error) {
+	db := r.getDB(ctx)
+	var req models.PaymentRequest
+	err := db.
+		Where("metadata ->> 'source' = ?", "wallet_recharge_admin").
+		Where("metadata ->> 'idempotency_key' = ?", idempotencyKey).
+		Order("id DESC").
+		First(&req).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &req, nil
 }
 
 // Count returns the number of payment requests matching the filter
