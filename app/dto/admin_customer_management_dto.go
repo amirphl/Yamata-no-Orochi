@@ -111,3 +111,10 @@ type AdminSetCustomerActiveStatusResponse struct {
 	Message  string `json:"message"`
 	IsActive bool   `json:"is_active"`
 }
+
+// AdminListCustomersResponse is the response for listing customers by admin.
+type AdminListCustomersResponse struct {
+	Message string                   `json:"message"`
+	Items   []AdminCustomerDetailDTO `json:"items"`
+	Total   uint64                   `json:"total"`
+}
