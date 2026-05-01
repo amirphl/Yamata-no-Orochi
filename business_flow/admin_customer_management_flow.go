@@ -14,6 +14,7 @@ import (
 
 // AdminCustomerManagementFlow exposes admin customer management use cases
 type AdminCustomerManagementFlow interface {
+	ListCustomers(ctx context.Context) (*dto.AdminListCustomersResponse, error)
 	GetCustomersShares(ctx context.Context, req *dto.AdminCustomersSharesRequest) (*dto.AdminCustomersSharesResponse, error)
 	GetCustomerWithCampaigns(ctx context.Context, customerID uint) (*dto.AdminCustomerWithCampaignsResponse, error)
 	GetCustomerDiscountsHistory(ctx context.Context, customerID uint) (*dto.AdminCustomerDiscountHistoryResponse, error)
@@ -42,6 +43,28 @@ func NewAdminCustomerManagementFlow(
 		customerRepo:    customerRepo,
 		campaignRepo:    campaignRepo,
 	}
+}
+
+// ListCustomers returns all customers except system and tax users.
+func (f *AdminCustomerManagementFlowImpl) ListCustomers(ctx context.Context) (*dto.AdminListCustomersResponse, error) {
+	customers, err := f.customerRepo.ByFilter(ctx, models.CustomerFilter{}, "id DESC", 0, 0)
+	if err != nil {
+		return nil, NewBusinessError("GET_ADMIN_CUSTOMERS_LIST_FAILED", "Failed to list customers", err)
+	}
+
+	items := make([]dto.AdminCustomerDetailDTO, 0, len(customers))
+	for _, cust := range customers {
+		if cust == nil || isSystemOrTaxCustomer(cust) {
+			continue
+		}
+		items = append(items, toAdminCustomerDetailDTO(*cust))
+	}
+
+	return &dto.AdminListCustomersResponse{
+		Message: "Customers retrieved successfully",
+		Items:   items,
+		Total:   uint64(len(items)),
+	}, nil
 }
 
 // GetCustomersShares returns aggregated shares per customer with optional date range
@@ -302,11 +325,7 @@ func (f *AdminCustomerManagementFlowImpl) SetCustomerActiveStatus(ctx context.Co
 		return nil, NewBusinessError("CUSTOMER_NOT_FOUND", "Customer not found", ErrCustomerNotFound)
 	}
 	if !req.IsActive {
-		fullName := strings.TrimSpace(cust.RepresentativeFirstName + " " + cust.RepresentativeLastName)
-		if strings.EqualFold(cust.Email, systemCustomerEmail) ||
-			strings.EqualFold(cust.Email, taxCustomerEmail) ||
-			strings.EqualFold(fullName, "System Account") ||
-			strings.EqualFold(fullName, "Tax Collector") {
+		if isSystemOrTaxCustomer(cust) {
 			return nil, NewBusinessError("FORBIDDEN_OPERATION", "System and Tax users cannot be deactivated", ErrAccountInactive)
 		}
 	}
@@ -323,4 +342,15 @@ func (f *AdminCustomerManagementFlowImpl) SetCustomerActiveStatus(ctx context.Co
 		Message:  "Customer status updated successfully",
 		IsActive: req.IsActive,
 	}, nil
+}
+
+func isSystemOrTaxCustomer(cust *models.Customer) bool {
+	if cust == nil {
+		return false
+	}
+	fullName := strings.TrimSpace(cust.RepresentativeFirstName + " " + cust.RepresentativeLastName)
+	return strings.EqualFold(cust.Email, systemCustomerEmail) ||
+		strings.EqualFold(cust.Email, taxCustomerEmail) ||
+		strings.EqualFold(fullName, "System Account") ||
+		strings.EqualFold(fullName, "Tax Collector")
 }
