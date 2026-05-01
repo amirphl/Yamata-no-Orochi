@@ -39,6 +39,7 @@ type FiberRouter struct {
 	authHandler                    handlers.AuthHandlerInterface
 	campaignHandler                handlers.CampaignHandlerInterface
 	paymentHandler                 handlers.PaymentHandlerInterface
+	paymentAdminHandler            handlers.PaymentAdminHandlerInterface
 	agencyHandler                  handlers.AgencyHandlerInterface
 	authMiddleware                 *middleware.AuthMiddleware
 	authAdminHandler               handlers.AuthAdminHandlerInterface
@@ -67,6 +68,7 @@ func NewFiberRouter(
 	authHandler handlers.AuthHandlerInterface,
 	campaignHandler handlers.CampaignHandlerInterface,
 	paymentHandler handlers.PaymentHandlerInterface,
+	paymentAdminHandler handlers.PaymentAdminHandlerInterface,
 	agencyHandler handlers.AgencyHandlerInterface,
 	authMiddleware *middleware.AuthMiddleware,
 	authAdminHandler handlers.AuthAdminHandlerInterface,
@@ -109,6 +111,7 @@ func NewFiberRouter(
 		authHandler:                    authHandler,
 		campaignHandler:                campaignHandler,
 		paymentHandler:                 paymentHandler,
+		paymentAdminHandler:            paymentAdminHandler,
 		agencyHandler:                  agencyHandler,
 		authMiddleware:                 authMiddleware,
 		authAdminHandler:               authAdminHandler,
@@ -302,6 +305,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCustomers := api.Group("/admin/customer-management")
 	adminCustomers.Use(r.authMiddleware.AdminAuthenticate())
 	adminCustomers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminCustomers.Get("/", r.adminCustomerManagementHandler.ListCustomers)
 	adminCustomers.Get("/shares", r.adminCustomerManagementHandler.GetCustomersShares)
 	adminCustomers.Get("/:customer_id", r.adminCustomerManagementHandler.GetCustomerWithCampaigns)
 	adminCustomers.Post("/active-status", r.adminCustomerManagementHandler.SetCustomerActiveStatus)
@@ -354,6 +358,12 @@ func (r *FiberRouter) SetupRoutes() {
 	payments.Post("/callback/:invoice_number", r.paymentHandler.PaymentCallback)
 	// Transaction history endpoint (protected with authentication)
 	payments.Get("/history", r.authMiddleware.Authenticate(), r.paymentHandler.GetTransactionHistory)
+
+	// Admin payment routes (protected)
+	adminPayments := api.Group("/admin/payments")
+	adminPayments.Use(r.authMiddleware.AdminAuthenticate())
+	adminPayments.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminPayments.Post("/charge-wallet", r.paymentAdminHandler.ChargeWalletByAdmin)
 
 	// Crypto payment routes
 	crypto := api.Group("/crypto")
