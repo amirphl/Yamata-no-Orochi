@@ -15,6 +15,7 @@ import (
 )
 
 type AdminCustomerManagementHandlerInterface interface {
+	ListCustomers(c fiber.Ctx) error
 	GetCustomersShares(c fiber.Ctx) error
 	GetCustomerWithCampaigns(c fiber.Ctx) error
 	SetCustomerActiveStatus(c fiber.Ctx) error
@@ -36,6 +37,23 @@ func (h *AdminCustomerManagementHandler) ErrorResponse(c fiber.Ctx, statusCode i
 
 func (h *AdminCustomerManagementHandler) SuccessResponse(c fiber.Ctx, statusCode int, message string, data any) error {
 	return c.Status(statusCode).JSON(dto.APIResponse{Success: true, Message: message, Data: data})
+}
+
+// ListCustomers returns all customers except tax and system users
+// @Summary Admin List Customers
+// @Tags Admin Customer Management
+// @Produce json
+// @Success 200 {object} dto.APIResponse{data=dto.AdminListCustomersResponse}
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/admin/customer-management [get]
+func (h *AdminCustomerManagementHandler) ListCustomers(c fiber.Ctx) error {
+	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management")
+	res, err := h.flow.ListCustomers(ctx)
+	if err != nil {
+		log.Println("Admin list customers failed", err)
+		return h.respondAdminCustomerManagementError(c, err, "Failed to retrieve customers list", "GET_ADMIN_CUSTOMERS_LIST_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Customers retrieved successfully", res)
 }
 
 // GetCustomersShares returns aggregated shares per customer
@@ -175,6 +193,7 @@ func (h *AdminCustomerManagementHandler) respondAdminCustomerManagementError(
 		case "FORBIDDEN_OPERATION":
 			return h.ErrorResponse(c, fiber.StatusForbidden, be.Message, be.Code, nil)
 		case "GET_ADMIN_CUSTOMERS_SHARES_FAILED",
+			"GET_ADMIN_CUSTOMERS_LIST_FAILED",
 			"GET_ADMIN_CUSTOMER_FAILED",
 			"GET_ADMIN_CUSTOMER_CAMPAIGNS_FAILED",
 			"GET_ADMIN_CUSTOMER_DISCOUNTS_HISTORY_FAILED",
