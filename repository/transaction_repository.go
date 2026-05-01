@@ -83,6 +83,17 @@ func (r *TransactionRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*m
 	return &transaction, nil
 }
 
+// UpdateMetadata updates transaction metadata and updated_at atomically for a given transaction id.
+func (r *TransactionRepositoryImpl) UpdateMetadata(ctx context.Context, id uint, metadata []byte, updatedAt time.Time) error {
+	db := r.getDB(ctx)
+	return db.Model(&models.Transaction{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"metadata":   metadata,
+			"updated_at": updatedAt,
+		}).Error
+}
+
 // ByCorrelationID finds transactions by correlation ID
 func (r *TransactionRepositoryImpl) ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.Transaction, error) {
 	db := r.getDB(ctx)
@@ -196,6 +207,34 @@ func (r *TransactionRepositoryImpl) GetPendingTransactions(ctx context.Context, 
 // GetCompletedTransactions gets completed transactions
 func (r *TransactionRepositoryImpl) GetCompletedTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error) {
 	return r.ByStatus(ctx, models.TransactionStatusCompleted, limit, offset)
+}
+
+// GetAdminListWithCustomer retrieves filtered transactions and preloads full customer records.
+func (r *TransactionRepositoryImpl) GetAdminListWithCustomer(ctx context.Context, filter models.TransactionFilter, orderBy string, limit, offset int) ([]*models.Transaction, error) {
+	db := r.getDB(ctx)
+	var transactions []*models.Transaction
+
+	query := db.Model(&models.Transaction{}).
+		Preload("Customer").
+		Preload("Customer.AccountType")
+	query = r.applyFilter(query, filter)
+
+	if orderBy != "" {
+		query = query.Order(orderBy)
+	} else {
+		query = query.Order("created_at DESC")
+	}
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
+	if err := query.Find(&transactions).Error; err != nil {
+		return nil, err
+	}
+	return transactions, nil
 }
 
 // ByFilter retrieves transactions based on filter criteria
