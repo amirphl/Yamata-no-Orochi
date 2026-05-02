@@ -353,6 +353,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	tagRepo := repository.NewTagRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
+	sentSplusMessageRepo := repository.NewSentSplusMessageRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
 	smsStatusJobRepo := repository.NewSMSStatusJobRepository(db)
 	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
@@ -442,6 +443,19 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Initialize PaymentFlow
 	paymentFlow := businessflow.NewPaymentFlow(
+		paymentRequestRepo,
+		walletRepo,
+		customerRepo,
+		auditRepo,
+		balanceSnapshotRepo,
+		transactionRepo,
+		agencyDiscountRepo,
+		db,
+		cfg.Atipay,
+		cfg.System,
+		cfg.Deployment,
+	)
+	paymentAdminFlow := businessflow.NewPaymentAdminFlow(
 		paymentRequestRepo,
 		walletRepo,
 		customerRepo,
@@ -568,6 +582,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
+	paymentAdminHandler := handlers.NewPaymentAdminHandler(paymentAdminFlow)
 	cryptoPaymentHandler := handlers.NewCryptoPaymentHandler(cryptoPaymentFlow, cfg)
 	agencyHandler := handlers.NewAgencyHandler(agencyFlow)
 	authAdminHandler := handlers.NewAuthAdminHandler(adminAuthFlow)
@@ -600,6 +615,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		authHandler,
 		campaignHandler,
 		paymentHandler,
+		paymentAdminHandler,
 		agencyHandler,
 		authMiddleware,
 		authAdminHandler,
@@ -654,12 +670,49 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			db,
 			log.Default(),
 			cfg.Scheduler.CampaignExecutionInterval,
+			cfg.Scheduler.MessageSendDelay,
 			cfg.Bale,
 			cfg.Bot,
 			cfg.Admin,
 		)
 		stopBaleScheduler := baleSched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopBaleScheduler)
+
+		// Start Rubika campaign scheduler.
+		rubikaSched := scheduler.NewRubikaCampaignScheduler(
+			audienceProfileRepo,
+			tagRepo,
+			processedCampaignRepo,
+			notificationService,
+			db,
+			log.Default(),
+			cfg.Scheduler.CampaignExecutionInterval,
+			cfg.Scheduler.MessageSendDelay,
+			cfg.Rubika,
+			cfg.Bot,
+			cfg.Admin,
+		)
+		stopRubikaScheduler := rubikaSched.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopRubikaScheduler)
+
+		// Start Splus campaign scheduler.
+		splusSched := scheduler.NewSplusCampaignScheduler(
+			audienceProfileRepo,
+			tagRepo,
+			sentSplusMessageRepo,
+			processedCampaignRepo,
+			multimediaRepo,
+			notificationService,
+			db,
+			log.Default(),
+			cfg.Scheduler.CampaignExecutionInterval,
+			cfg.Scheduler.MessageSendDelay,
+			cfg.Splus,
+			cfg.Bot,
+			cfg.Admin,
+		)
+		stopSplusScheduler := splusSched.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopSplusScheduler)
 	}
 
 	// Create application struct from FiberRouter
