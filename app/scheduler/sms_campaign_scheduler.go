@@ -442,7 +442,7 @@ func (s *CampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse) er
 }
 
 func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string, correlationID string) ([]string, []int64, []string, uint, error) {
-	log.Printf("fetchSMSAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, c.NumAudiences, len(c.Tags), correlationID)
+	s.logger.Printf("fetchSMSAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, c.NumAudiences, len(c.Tags), correlationID)
 
 	numAudiences := int64(0)
 	if c.NumAudiences != nil {
@@ -456,14 +456,14 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	for i, tag := range c.Tags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
-			log.Printf("fetchSMSAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
+			s.logger.Printf("fetchSMSAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
 			return nil, nil, nil, 0, err
 		}
 		toExtract[i] = uint(tagID)
 	}
 	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
 	if err != nil {
-		log.Printf("fetchSMSAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
+		s.logger.Printf("fetchSMSAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
 		return nil, nil, nil, 0, err
 	}
 
@@ -471,7 +471,7 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	for i, tag := range tags {
 		tagIDs[i] = int32(tag.ID)
 	}
-	log.Printf("fetchSMSAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
+	s.logger.Printf("fetchSMSAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
 
 	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
 
@@ -480,13 +480,13 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	tagsHash := hashTags(c.Tags)
 	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
 	if err != nil {
-		log.Printf("fetchSMSAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
+		s.logger.Printf("fetchSMSAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
 		return nil, nil, nil, 0, err
 	}
 	if selection != nil {
-		log.Printf("fetchSMSAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
+		s.logger.Printf("fetchSMSAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
 	} else {
-		log.Printf("fetchSMSAudiencePhones selection miss: campaign_id=%d", c.ID)
+		s.logger.Printf("fetchSMSAudiencePhones selection miss: campaign_id=%d", c.ID)
 	}
 
 	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
@@ -496,10 +496,10 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 		filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("white")}
 		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
-			log.Printf("fetchSMSAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
+			s.logger.Printf("fetchSMSAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
 			return nil, nil, err
 		}
-		log.Printf("fetchSMSAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
+		s.logger.Printf("fetchSMSAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
 
 		appendIfFresh := func(ap *models.AudienceProfile) {
 			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
@@ -525,10 +525,10 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 			filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("pink")}
 			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 			if err != nil {
-				log.Printf("fetchSMSAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
+				s.logger.Printf("fetchSMSAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
 				return nil, nil, err
 			}
-			log.Printf("fetchSMSAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
+			s.logger.Printf("fetchSMSAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
 			for _, ap := range pinks {
 				if len(phones) >= int(numAudiences) {
 					break
@@ -550,7 +550,7 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchSMSAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+	s.logger.Printf("fetchSMSAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
 
 	resetUsed := false
 	if len(phones) < int(*c.NumAudiences) {
@@ -560,7 +560,7 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 		if err != nil {
 			return nil, nil, nil, 0, err
 		}
-		log.Printf("fetchSMSAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+		s.logger.Printf("fetchSMSAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
 	}
 
 	// Persist selection history with correlation id and merged audience IDs
@@ -571,24 +571,24 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
 	}
 	if err != nil {
-		log.Printf("fetchSMSAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
+		s.logger.Printf("fetchSMSAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchSMSAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
+	s.logger.Printf("fetchSMSAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
 
 	if !hasCampaignAdLink(c.AdLink) {
-		log.Printf("fetchSMSAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
-		log.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
+		s.logger.Printf("fetchSMSAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
+		s.logger.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
 		return phones, ids, make([]string, len(phones)), sel.ID, nil
 	}
 
 	// Generate sequential UIDs via bot API and persist short links centrally
 	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
 	if err != nil {
-		log.Printf("fetchSMSAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
+		s.logger.Printf("fetchSMSAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
+	s.logger.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
 	return phones, ids, codes, sel.ID, nil
 }
 

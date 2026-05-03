@@ -639,7 +639,7 @@ func extractBaleBotID(c dto.BotGetCampaignResponse) (int64, error) {
 }
 
 func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string, correlationID string) ([]string, []int64, []string, uint, error) {
-	log.Printf("fetchBaleAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, c.NumAudiences, len(c.Tags), correlationID)
+	s.logger.Printf("fetchBaleAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, c.NumAudiences, len(c.Tags), correlationID)
 
 	numAudiences := int64(0)
 	if c.NumAudiences != nil {
@@ -653,14 +653,14 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c d
 	for i, tag := range c.Tags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
-			log.Printf("fetchBaleAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
+			s.logger.Printf("fetchBaleAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
 			return nil, nil, nil, 0, err
 		}
 		toExtract[i] = uint(tagID)
 	}
 	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
 	if err != nil {
-		log.Printf("fetchBaleAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
+		s.logger.Printf("fetchBaleAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
 		return nil, nil, nil, 0, err
 	}
 
@@ -676,13 +676,13 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c d
 	tagsHash := baleHashTags(c.Tags)
 	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
 	if err != nil {
-		log.Printf("fetchBaleAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
+		s.logger.Printf("fetchBaleAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
 		return nil, nil, nil, 0, err
 	}
 	if selection != nil {
-		log.Printf("fetchBaleAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
+		s.logger.Printf("fetchBaleAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
 	} else {
-		log.Printf("fetchBaleAudiencePhones selection miss: campaign_id=%d", c.ID)
+		s.logger.Printf("fetchBaleAudiencePhones selection miss: campaign_id=%d", c.ID)
 	}
 
 	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
@@ -692,10 +692,10 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c d
 		filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("white")}
 		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
-			log.Printf("fetchBaleAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
+			s.logger.Printf("fetchBaleAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
 			return nil, nil, err
 		}
-		log.Printf("fetchBaleAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
+		s.logger.Printf("fetchBaleAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
 
 		appendIfFresh := func(ap *models.AudienceProfile) {
 			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
@@ -721,10 +721,10 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c d
 			filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("pink")}
 			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 			if err != nil {
-				log.Printf("fetchBaleAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
+				s.logger.Printf("fetchBaleAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
 				return nil, nil, err
 			}
-			log.Printf("fetchBaleAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
+			s.logger.Printf("fetchBaleAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
 			for _, ap := range pinks {
 				if int64(len(phones)) >= numAudiences {
 					break
@@ -745,7 +745,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c d
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchBaleAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+	s.logger.Printf("fetchBaleAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
 
 	resetUsed := false
 	if int64(len(phones)) < numAudiences {
@@ -755,7 +755,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c d
 		if err != nil {
 			return nil, nil, nil, 0, err
 		}
-		log.Printf("fetchBaleAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+		s.logger.Printf("fetchBaleAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
 	}
 
 	// Persist selection history with correlation id and merged audience IDs
@@ -766,24 +766,24 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(ctx context.Context, c d
 		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
 	}
 	if err != nil {
-		log.Printf("fetchBaleAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
+		s.logger.Printf("fetchBaleAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchBaleAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
+	s.logger.Printf("fetchBaleAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
 
 	if !hasCampaignAdLink(c.AdLink) {
-		log.Printf("fetchBaleAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
-		log.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
+		s.logger.Printf("fetchBaleAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
+		s.logger.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
 		return phones, ids, make([]string, len(phones)), sel.ID, nil
 	}
 
 	// Generate sequential UIDs via bot API and persist short links centrally
 	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
 	if err != nil {
-		log.Printf("fetchBaleAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
+		s.logger.Printf("fetchBaleAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
+	s.logger.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
 	return phones, ids, codes, sel.ID, nil
 }
 
