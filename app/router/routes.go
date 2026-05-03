@@ -59,6 +59,7 @@ type FiberRouter struct {
 	profileHandler                 handlers.ProfileHandlerInterface
 	multimediaHandler              handlers.MultimediaHandlerInterface
 	multimediaAdminHandler         handlers.MultimediaAdminHandlerInterface
+	multimediaBotHandler           handlers.MultimediaBotHandlerInterface
 	platformSettingsHandler        handlers.PlatformSettingsHandlerInterface
 	platformSettingsAdminHandler   handlers.PlatformSettingsAdminHandlerInterface
 }
@@ -88,6 +89,7 @@ func NewFiberRouter(
 	profileHandler handlers.ProfileHandlerInterface,
 	multimediaHandler handlers.MultimediaHandlerInterface,
 	multimediaAdminHandler handlers.MultimediaAdminHandlerInterface,
+	multimediaBotHandler handlers.MultimediaBotHandlerInterface,
 	platformSettingsHandler handlers.PlatformSettingsHandlerInterface,
 	platformSettingsAdminHandler handlers.PlatformSettingsAdminHandlerInterface,
 ) Router {
@@ -132,6 +134,7 @@ func NewFiberRouter(
 		profileHandler:                 profileHandler,
 		multimediaHandler:              multimediaHandler,
 		multimediaAdminHandler:         multimediaAdminHandler,
+		multimediaBotHandler:           multimediaBotHandler,
 		platformSettingsHandler:        platformSettingsHandler,
 		platformSettingsAdminHandler:   platformSettingsAdminHandler,
 	}
@@ -290,6 +293,12 @@ func (r *FiberRouter) SetupRoutes() {
 	botShortLinks.Post("/", r.shortLinkBotHandler.CreateShortLinks)
 	botShortLinks.Post("/one", r.shortLinkBotHandler.CreateShortLink)
 	botShortLinks.Post("/allocate", r.shortLinkBotHandler.AllocateShortLinks)
+
+	// Bot multimedia routes (protected)
+	botMedia := api.Group("/bot/media")
+	botMedia.Use(r.authMiddleware.BotAuthenticate())
+	botMedia.Use(func(c fiber.Ctx) error { return middleware.RequireBotAuth(c) })
+	botMedia.Get("/:uuid", r.multimediaBotHandler.Download)
 
 	// Admin short-links routes (protected)
 	adminShortLinks := api.Group("/admin/short-links")
