@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +46,7 @@ type RubikaCampaignScheduler struct {
 	db        *gorm.DB
 	adminCfg  config.AdminConfig
 	rubikaCfg config.RubikaConfig
+	botCfg    config.BotConfig
 
 	botClient    BotClient
 	rubikaClient RubikaClient
@@ -57,6 +60,7 @@ type RubikaCampaignScheduler struct {
 
 type RubikaClient interface {
 	SendBulkMessages(ctx context.Context, serviceID string, messages []RubikaMessagePayload) (*RubikaSendBulkMessagesResponse, error)
+	UploadFile(ctx context.Context, path string) (*RubikaUploadFileResponse, error)
 }
 
 type RubikaMessagePayload struct {
@@ -89,6 +93,15 @@ type RubikaSendBulkMessagesResponse struct {
 	HTTPStatus int    `json:"http_status,omitempty"`
 	Data       struct {
 		MessageStatusList []RubikaMessageStatus `json:"message_status_list,omitempty"`
+	} `json:"data"`
+}
+
+type RubikaUploadFileResponse struct {
+	Status     string `json:"status,omitempty"`
+	StatusDet  string `json:"status_det,omitempty"`
+	HTTPStatus int    `json:"http_status,omitempty"`
+	Data       struct {
+		FileID string `json:"file_id,omitempty"`
 	} `json:"data"`
 }
 
@@ -168,6 +181,70 @@ func (c *httpRubikaClient) SendBulkMessages(ctx context.Context, serviceID strin
 	return &out, nil
 }
 
+func (c *httpRubikaClient) UploadFile(ctx context.Context, path string) (*RubikaUploadFileResponse, error) {
+	if strings.TrimSpace(c.cfg.Token) == "" {
+		return nil, fmt.Errorf("rubika token is not configured")
+	}
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("upload path is empty")
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	buf := &bytes.Buffer{}
+	writer := multipart.NewWriter(buf)
+	part, err := writer.CreateFormFile("file", filepath.Base(path))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return nil, err
+	}
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/uploadFile", buf)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("token", c.cfg.Token)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var out RubikaUploadFileResponse
+	out.HTTPStatus = resp.StatusCode
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("rubika uploadFile http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if len(body) > 0 {
+		if err := json.Unmarshal(body, &out); err != nil {
+			return nil, fmt.Errorf("decode rubika uploadFile response: %w", err)
+		}
+	}
+	if strings.TrimSpace(out.Data.FileID) == "" {
+		return nil, fmt.Errorf("rubika upload returned empty file_id")
+	}
+
+	return &out, nil
+}
+
 func NewRubikaCampaignScheduler(
 	audRepo repository.AudienceProfileRepository,
 	tagRepo repository.TagRepository,
@@ -199,6 +276,7 @@ func NewRubikaCampaignScheduler(
 		messageDelay:  messageDelay,
 		adminCfg:      adminCfg,
 		rubikaCfg:     rubikaCfg,
+		botCfg:        botCfg,
 		botClient:     newHTTPBotClient(botCfg),
 		rubikaClient:  newHTTPRubikaClient(rubikaCfg),
 		audienceCache: NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
@@ -346,6 +424,11 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 		return err
 	}
 
+	fileID, err := s.uploadCampaignMedia(ctx, token, c)
+	if err != nil {
+		return err
+	}
+
 	var (
 		totalRecords int64
 		totalSent    int64
@@ -354,8 +437,9 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 	for i, phone := range phones {
 		msgs := []RubikaMessagePayload{
 			{
-				Phone: phone,
-				Text:  s.buildRubikaMessageBody(c, uids[i]),
+				Phone:  phone,
+				Text:   s.buildRubikaMessageBody(c, uids[i]),
+				FileID: fileID,
 			},
 		}
 
@@ -403,6 +487,63 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 	}
 
 	return nil
+}
+
+func (s *RubikaCampaignScheduler) uploadCampaignMedia(ctx context.Context, token string, c dto.BotGetCampaignResponse) (*string, error) {
+	if c.MediaUUID == nil {
+		return nil, nil
+	}
+
+	path, err := s.downloadCampaignMediaViaBotAPI(ctx, token, c.MediaUUID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.Remove(path) }()
+
+	resp, err := s.rubikaClient.UploadFile(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	fileID := strings.TrimSpace(resp.Data.FileID)
+	if fileID == "" {
+		return nil, fmt.Errorf("rubika upload returned empty file_id")
+	}
+	return &fileID, nil
+}
+
+func (s *RubikaCampaignScheduler) downloadCampaignMediaViaBotAPI(ctx context.Context, token, mediaUUID string) (string, error) {
+	url := strings.TrimRight(s.botCfg.APIDomain, "/") + "/api/v1/bot/media/" + mediaUUID
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "*/*")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("bot media download http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	tmpFile, err := os.CreateTemp("", "rubika-media-*")
+	if err != nil {
+		return "", err
+	}
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", err
+	}
+
+	return tmpFile.Name(), nil
 }
 
 func (s *RubikaCampaignScheduler) validateRubikaCampaign(c dto.BotGetCampaignResponse) error {

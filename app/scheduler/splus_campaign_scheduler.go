@@ -36,19 +36,19 @@ const (
 )
 
 type SplusCampaignScheduler struct {
-	audRepo        repository.AudienceProfileRepository
-	tagRepo        repository.TagRepository
-	sentRepo       repository.SentSplusMessageRepository
-	pcRepo         repository.ProcessedCampaignRepository
-	multimediaRepo repository.MultimediaAssetRepository
-	notifier       NotificationSender
-	logger         *log.Logger
-	interval       time.Duration
-	messageDelay   time.Duration
+	audRepo      repository.AudienceProfileRepository
+	tagRepo      repository.TagRepository
+	sentRepo     repository.SentSplusMessageRepository
+	pcRepo       repository.ProcessedCampaignRepository
+	notifier     NotificationSender
+	logger       *log.Logger
+	interval     time.Duration
+	messageDelay time.Duration
 
 	db       *gorm.DB
 	adminCfg config.AdminConfig
 	splusCfg config.SplusConfig
+	botCfg   config.BotConfig
 
 	botClient   BotClient
 	splusClient SplusClient
@@ -237,7 +237,6 @@ func NewSplusCampaignScheduler(
 	tagRepo repository.TagRepository,
 	sentRepo repository.SentSplusMessageRepository,
 	pcRepo repository.ProcessedCampaignRepository,
-	multimediaRepo repository.MultimediaAssetRepository,
 	notifier NotificationSender,
 	db *gorm.DB,
 	logger *log.Logger,
@@ -255,22 +254,22 @@ func NewSplusCampaignScheduler(
 	}
 
 	s := &SplusCampaignScheduler{
-		audRepo:        audRepo,
-		tagRepo:        tagRepo,
-		sentRepo:       sentRepo,
-		pcRepo:         pcRepo,
-		multimediaRepo: multimediaRepo,
-		notifier:       notifier,
-		logger:         logger,
-		db:             db,
-		interval:       interval,
-		messageDelay:   messageDelay,
-		adminCfg:       adminCfg,
-		splusCfg:       splusCfg,
-		botClient:      newHTTPBotClient(botCfg),
-		splusClient:    newHTTPSplusClient(splusCfg),
-		audienceCache:  NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
-		schedulerName:  "splus",
+		audRepo:       audRepo,
+		tagRepo:       tagRepo,
+		sentRepo:      sentRepo,
+		pcRepo:        pcRepo,
+		notifier:      notifier,
+		logger:        logger,
+		db:            db,
+		interval:      interval,
+		messageDelay:  messageDelay,
+		adminCfg:      adminCfg,
+		splusCfg:      splusCfg,
+		botCfg:        botCfg,
+		botClient:     newHTTPBotClient(botCfg),
+		splusClient:   newHTTPSplusClient(splusCfg),
+		audienceCache: NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
+		schedulerName: "splus",
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
@@ -432,7 +431,7 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, token
 	}
 	s.logger.Printf("splus scheduler: persisted processed campaign id=%d num_audiences=%d", pc.ID, len(ids))
 
-	fileID, err := s.uploadCampaignMedia(ctx, botID, c)
+	fileID, err := s.uploadCampaignMedia(ctx, token, botID, c)
 	if err != nil {
 		return err
 	}
@@ -493,24 +492,57 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, token
 	return nil
 }
 
-func (s *SplusCampaignScheduler) uploadCampaignMedia(ctx context.Context, botID string, c dto.BotGetCampaignResponse) (*string, error) {
+func (s *SplusCampaignScheduler) uploadCampaignMedia(ctx context.Context, token, botID string, c dto.BotGetCampaignResponse) (*string, error) {
 	if c.MediaUUID == nil {
 		return nil, nil
 	}
-	asset, err := s.multimediaRepo.ByUUID(ctx, c.MediaUUID.String())
+
+	path, err := s.downloadCampaignMediaViaBotAPI(ctx, token, c.MediaUUID.String())
 	if err != nil {
 		return nil, err
 	}
-	if asset == nil {
-		return nil, fmt.Errorf("multimedia asset not found for media_uuid=%s", c.MediaUUID.String())
-	}
+	defer func() { _ = os.Remove(path) }()
 
-	path := filepath.Clean(filepath.FromSlash(asset.StoredPath))
 	resp, err := s.splusClient.UploadFile(ctx, botID, path)
 	if err != nil {
 		return nil, err
 	}
 	return &resp.FileID, nil
+}
+
+func (s *SplusCampaignScheduler) downloadCampaignMediaViaBotAPI(ctx context.Context, token, mediaUUID string) (string, error) {
+	url := strings.TrimRight(s.botCfg.APIDomain, "/") + "/api/v1/bot/media/" + mediaUUID
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "*/*")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("bot media download http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	tmpFile, err := os.CreateTemp("", "splus-media-*")
+	if err != nil {
+		return "", err
+	}
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", err
+	}
+
+	return tmpFile.Name(), nil
 }
 
 func (s *SplusCampaignScheduler) sendWithRetry(ctx context.Context, botID string, req *SplusSendMessageRequest) (*SplusResponse, error) {
@@ -735,14 +767,14 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c
 	for i, tag := range c.Tags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
-			log.Printf("fetchSplusAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
+			s.logger.Printf("fetchSplusAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
 			return nil, nil, nil, 0, err
 		}
 		toExtract[i] = uint(tagID)
 	}
 	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
 	if err != nil {
-		log.Printf("fetchSplusAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
+		s.logger.Printf("fetchSplusAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
 		return nil, nil, nil, 0, err
 	}
 
@@ -758,13 +790,13 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c
 	tagsHash := splusHashTags(c.Tags)
 	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
 	if err != nil {
-		log.Printf("fetchSplusAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
+		s.logger.Printf("fetchSplusAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
 		return nil, nil, nil, 0, err
 	}
 	if selection != nil {
-		log.Printf("fetchSplusAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
+		s.logger.Printf("fetchSplusAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
 	} else {
-		log.Printf("fetchSplusAudiencePhones selection miss: campaign_id=%d", c.ID)
+		s.logger.Printf("fetchSplusAudiencePhones selection miss: campaign_id=%d", c.ID)
 	}
 
 	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
@@ -774,10 +806,10 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c
 		filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("white")}
 		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
-			log.Printf("fetchSplusAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
+			s.logger.Printf("fetchSplusAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
 			return nil, nil, err
 		}
-		log.Printf("fetchSplusAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
+		s.logger.Printf("fetchSplusAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
 
 		appendIfFresh := func(ap *models.AudienceProfile) {
 			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
@@ -803,10 +835,10 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c
 			filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("pink")}
 			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 			if err != nil {
-				log.Printf("fetchSplusAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
+				s.logger.Printf("fetchSplusAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
 				return nil, nil, err
 			}
-			log.Printf("fetchSplusAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
+			s.logger.Printf("fetchSplusAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
 			for _, ap := range pinks {
 				if int64(len(phones)) >= numAudiences {
 					break
@@ -827,7 +859,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchSplusAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+	s.logger.Printf("fetchSplusAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
 
 	resetUsed := false
 	if int64(len(phones)) < numAudiences {
@@ -837,7 +869,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c
 		if err != nil {
 			return nil, nil, nil, 0, err
 		}
-		log.Printf("fetchSplusAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+		s.logger.Printf("fetchSplusAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
 	}
 
 	// Persist selection history with correlation id and merged audience IDs
@@ -848,24 +880,24 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c
 		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
 	}
 	if err != nil {
-		log.Printf("fetchSplusAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
+		s.logger.Printf("fetchSplusAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchSplusAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
+	s.logger.Printf("fetchSplusAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
 
 	if !hasCampaignAdLink(c.AdLink) {
-		log.Printf("fetchSplusAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
-		log.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
+		s.logger.Printf("fetchSplusAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
+		s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
 		return phones, ids, make([]string, len(phones)), sel.ID, nil
 	}
 
 	// Generate sequential UIDs via bot API and persist short links centrally
 	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
 	if err != nil {
-		log.Printf("fetchSplusAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
+		s.logger.Printf("fetchSplusAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, nil, nil, 0, err
 	}
-	log.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
+	s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
 	return phones, ids, codes, sel.ID, nil
 }
 
