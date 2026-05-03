@@ -563,6 +563,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
 	multimediaFlow := businessflow.NewMultimediaFlow(customerRepo, multimediaRepo)
 	multimediaAdminFlow := businessflow.NewMultimediaAdminFlow(multimediaRepo)
+	multimediaBotFlow := businessflow.NewMultimediaBotFlow(multimediaRepo)
 	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo)
 	platformSettingsAdminFlow := businessflow.NewPlatformSettingsAdminFlow(platformSettingsRepo, multimediaRepo)
 
@@ -599,6 +600,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	ticketHandler := handlers.NewTicketHandler(ticketFlow)
 	multimediaHandler := handlers.NewMultimediaHandler(multimediaFlow)
 	multimediaAdminHandler := handlers.NewMultimediaAdminHandler(multimediaAdminFlow)
+	multimediaBotHandler := handlers.NewMultimediaBotHandler(multimediaBotFlow)
 	platformSettingsHandler := handlers.NewPlatformSettingsHandler(platformSettingsFlow)
 	platformSettingsAdminHandler := handlers.NewPlatformSettingsAdminHandler(platformSettingsAdminFlow)
 
@@ -635,6 +637,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		profileHandler,
 		multimediaHandler,
 		multimediaAdminHandler,
+		multimediaBotHandler,
 		platformSettingsHandler,
 		platformSettingsAdminHandler,
 	)
@@ -665,7 +668,6 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			tagRepo,
 			sentBaleMessageRepo,
 			processedCampaignRepo,
-			multimediaRepo,
 			notificationService,
 			db,
 			log.Default(),
