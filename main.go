@@ -703,7 +703,6 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			tagRepo,
 			sentSplusMessageRepo,
 			processedCampaignRepo,
-			multimediaRepo,
 			notificationService,
 			db,
 			log.Default(),
