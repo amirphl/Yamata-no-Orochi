@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,19 +34,19 @@ const (
 )
 
 type BaleCampaignScheduler struct {
-	audRepo        repository.AudienceProfileRepository
-	tagRepo        repository.TagRepository
-	sentRepo       repository.SentBaleMessageRepository
-	pcRepo         repository.ProcessedCampaignRepository
-	multimediaRepo repository.MultimediaAssetRepository
-	notifier       NotificationSender
-	logger         *log.Logger
-	interval       time.Duration
-	messageDelay   time.Duration
+	audRepo      repository.AudienceProfileRepository
+	tagRepo      repository.TagRepository
+	sentRepo     repository.SentBaleMessageRepository
+	pcRepo       repository.ProcessedCampaignRepository
+	notifier     NotificationSender
+	logger       *log.Logger
+	interval     time.Duration
+	messageDelay time.Duration
 
 	db       *gorm.DB
 	adminCfg config.AdminConfig
 	baleCfg  config.BaleConfig
+	botCfg   config.BotConfig
 
 	botClient  BotClient
 	baleClient BaleClient
@@ -63,7 +63,6 @@ func NewBaleCampaignScheduler(
 	tagRepo repository.TagRepository,
 	sentRepo repository.SentBaleMessageRepository,
 	pcRepo repository.ProcessedCampaignRepository,
-	multimediaRepo repository.MultimediaAssetRepository,
 	notifier NotificationSender,
 	db *gorm.DB,
 	logger *log.Logger,
@@ -81,22 +80,22 @@ func NewBaleCampaignScheduler(
 	}
 
 	s := &BaleCampaignScheduler{
-		audRepo:        audRepo,
-		tagRepo:        tagRepo,
-		sentRepo:       sentRepo,
-		pcRepo:         pcRepo,
-		multimediaRepo: multimediaRepo,
-		notifier:       notifier,
-		logger:         logger,
-		db:             db,
-		interval:       interval,
-		messageDelay:   messageDelay,
-		adminCfg:       adminCfg,
-		baleCfg:        baleCfg,
-		botClient:      newHTTPBotClient(botCfg),
-		baleClient:     newHTTPBaleClient(baleCfg),
-		audienceCache:  NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
-		schedulerName:  "bale",
+		audRepo:       audRepo,
+		tagRepo:       tagRepo,
+		sentRepo:      sentRepo,
+		pcRepo:        pcRepo,
+		notifier:      notifier,
+		logger:        logger,
+		db:            db,
+		interval:      interval,
+		messageDelay:  messageDelay,
+		adminCfg:      adminCfg,
+		baleCfg:       baleCfg,
+		botCfg:        botCfg,
+		botClient:     newHTTPBotClient(botCfg),
+		baleClient:    newHTTPBaleClient(baleCfg),
+		audienceCache: NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
+		schedulerName: "bale",
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
@@ -263,7 +262,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, token s
 
 	var fileID *string
 	if c.MediaUUID != nil {
-		id, err := s.uploadCampaignMedia(ctx, c)
+		id, err := s.uploadCampaignMedia(ctx, token, c)
 		if err != nil {
 			return err
 		}
@@ -354,24 +353,57 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, token s
 	return nil
 }
 
-func (s *BaleCampaignScheduler) uploadCampaignMedia(ctx context.Context, c dto.BotGetCampaignResponse) (*string, error) {
+func (s *BaleCampaignScheduler) uploadCampaignMedia(ctx context.Context, token string, c dto.BotGetCampaignResponse) (*string, error) {
 	if c.MediaUUID == nil {
 		return nil, nil
 	}
-	asset, err := s.multimediaRepo.ByUUID(ctx, c.MediaUUID.String())
+
+	path, err := s.downloadCampaignMediaViaBotAPI(ctx, token, c.MediaUUID.String())
 	if err != nil {
 		return nil, err
 	}
-	if asset == nil {
-		return nil, fmt.Errorf("multimedia asset not found for media_uuid=%s", c.MediaUUID.String())
-	}
+	defer func() { _ = os.Remove(path) }()
 
-	path := filepath.Clean(filepath.FromSlash(asset.StoredPath))
 	resp, err := s.baleClient.UploadFile(ctx, path)
 	if err != nil {
 		return nil, err
 	}
 	return &resp.FileID, nil
+}
+
+func (s *BaleCampaignScheduler) downloadCampaignMediaViaBotAPI(ctx context.Context, token, mediaUUID string) (string, error) {
+	url := strings.TrimRight(s.botCfg.APIDomain, "/") + "/api/v1/bot/media/" + mediaUUID
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "*/*")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return "", fmt.Errorf("bot media download http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	tmpFile, err := os.CreateTemp("", "bale-media-*")
+	if err != nil {
+		return "", err
+	}
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", err
+	}
+
+	return tmpFile.Name(), nil
 }
 
 func (s *BaleCampaignScheduler) persistBaleSendResult(ctx context.Context, trackingID string, resp *BaleSendMessageResponse, sendErr error) error {
