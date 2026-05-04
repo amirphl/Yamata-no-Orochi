@@ -4,6 +4,7 @@ package handlers
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -84,6 +85,12 @@ func (h *PaymentAdminHandler) ChargeWalletByAdmin(c fiber.Ctx) error {
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		req.IdempotencyKey = strings.TrimSpace(c.Get("Idempotency-Key"))
+	}
+	if strings.TrimSpace(req.IdempotencyKey) == "" {
+		req.IdempotencyKey = strings.TrimSpace(c.Get("X-Idempotency-Key"))
+	}
 	if err := h.validator.Struct(&req); err != nil {
 		var validationErrors []string
 		for _, err := range err.(validator.ValidationErrors) {
@@ -98,6 +105,7 @@ func (h *PaymentAdminHandler) ChargeWalletByAdmin(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
 	result, err := h.paymentAdminFlow.ChargeWalletByAdmin(
 		h.createRequestContext(c, "/api/v1/admin/payments/charge-wallet"),
 		&req,
