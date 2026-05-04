@@ -334,6 +334,9 @@ type PayamSMSConfig struct {
 // BaleConfig holds credentials for Bale Safir messaging API.
 type BaleConfig struct {
 	APIAccessKey string `json:"api_access_key"`
+	Provider     string `json:"provider"`
+	LegacyDomain string `json:"legacy_domain"`
+	NajvaDomain  string `json:"najva_domain"`
 }
 
 // RubikaConfig holds credentials for Rubika messaging API.
@@ -418,7 +421,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			GlobalRateLimit:        getEnvInt("GLOBAL_RATE_LIMIT", 2000),
 			RateLimitWindow:        getEnvDuration("RATE_LIMIT_WINDOW", 1*time.Minute),
 			RateLimitMemory:        getEnvInt("RATE_LIMIT_MEMORY", 64), // MB
-			CSPPolicy:              getEnvString("CSP_POLICY", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"),
+			CSPPolicy:              getEnvString("CSP_POLICY", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' https:; connect-src 'self' https:; frame-ancestors 'none';"),
 			XFrameOptions:          getEnvString("X_FRAME_OPTIONS", "DENY"),
 			XContentTypeOptions:    getEnvString("X_CONTENT_TYPE_OPTIONS", "nosniff"),
 			XSSProtection:          getEnvString("XSS_PROTECTION", "1; mode=block"),
@@ -558,6 +561,9 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		},
 		Bale: BaleConfig{
 			APIAccessKey: getEnvString("BALE_API_ACCESS_KEY", ""),
+			Provider:     getEnvString("BALE_PROVIDER", "najva"),
+			LegacyDomain: getEnvString("BALE_LEGACY_DOMAIN", "https://safir.bale.ai"),
+			NajvaDomain:  getEnvString("BALE_NAJVA_DOMAIN", "https://sms.najva.com"),
 		},
 		Rubika: RubikaConfig{
 			Token:     getEnvString("RUBIKA_TOKEN", ""),
