@@ -1,0 +1,215 @@
+package scheduler
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/repository"
+)
+
+type stubBaleClient struct {
+	fetchStatusFn func(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error)
+}
+
+func (s *stubBaleClient) SendMessage(ctx context.Context, req *BaleSendMessageRequest) (*BaleSendMessageResponse, error) {
+	return nil, nil
+}
+
+func (s *stubBaleClient) SendBatch(ctx context.Context, reqs []BaleSendMessageRequest) ([]BaleSendMessageResponse, error) {
+	return nil, nil
+}
+
+func (s *stubBaleClient) UploadFile(ctx context.Context, path string) (*BaleUploadFileResponse, error) {
+	return nil, nil
+}
+
+func (s *stubBaleClient) FetchStatus(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error) {
+	if s.fetchStatusFn != nil {
+		return s.fetchStatusFn(ctx, messageIDs)
+	}
+	return nil, nil
+}
+
+func (s *stubBaleClient) SupportsStatusTracking() bool { return true }
+
+type stubSentBaleMessageRepo struct {
+	listByTrackingIDsFn func(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentBaleMessage, error)
+}
+
+func (s *stubSentBaleMessageRepo) ByFilter(ctx context.Context, filter models.SentBaleMessageFilter, orderBy string, limit, offset int) ([]*models.SentBaleMessage, error) {
+	return nil, nil
+}
+
+func (s *stubSentBaleMessageRepo) Save(ctx context.Context, entity *models.SentBaleMessage) error {
+	return nil
+}
+
+func (s *stubSentBaleMessageRepo) SaveBatch(ctx context.Context, entities []*models.SentBaleMessage) error {
+	return nil
+}
+
+func (s *stubSentBaleMessageRepo) Count(ctx context.Context, filter models.SentBaleMessageFilter) (int64, error) {
+	return 0, nil
+}
+
+func (s *stubSentBaleMessageRepo) Exists(ctx context.Context, filter models.SentBaleMessageFilter) (bool, error) {
+	return false, nil
+}
+
+func (s *stubSentBaleMessageRepo) ByID(ctx context.Context, id uint) (*models.SentBaleMessage, error) {
+	return nil, nil
+}
+
+func (s *stubSentBaleMessageRepo) ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentBaleMessage, error) {
+	return nil, nil
+}
+
+func (s *stubSentBaleMessageRepo) ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentBaleMessage, error) {
+	if s.listByTrackingIDsFn != nil {
+		return s.listByTrackingIDsFn(ctx, processedCampaignID, trackingIDs)
+	}
+	return nil, nil
+}
+
+func (s *stubSentBaleMessageRepo) TrackingResultsFromSentRows(ctx context.Context, processedCampaignID uint) ([]repository.BaleTrackingResult, error) {
+	return nil, nil
+}
+
+func (s *stubSentBaleMessageRepo) UpdateSendResultByTrackingIDs(ctx context.Context, updates []repository.SentBaleSendResultUpdate) error {
+	return nil
+}
+
+type stubCampaignStatusJobRepo struct {
+	updated []*models.CampaignStatusJob
+}
+
+func (s *stubCampaignStatusJobRepo) ByFilter(ctx context.Context, filter any, orderBy string, limit, offset int) ([]*models.CampaignStatusJob, error) {
+	return nil, nil
+}
+
+func (s *stubCampaignStatusJobRepo) Save(ctx context.Context, entity *models.CampaignStatusJob) error {
+	return nil
+}
+
+func (s *stubCampaignStatusJobRepo) SaveBatch(ctx context.Context, entities []*models.CampaignStatusJob) error {
+	return nil
+}
+
+func (s *stubCampaignStatusJobRepo) Count(ctx context.Context, filter any) (int64, error) {
+	return 0, nil
+}
+
+func (s *stubCampaignStatusJobRepo) Exists(ctx context.Context, filter any) (bool, error) {
+	return false, nil
+}
+
+func (s *stubCampaignStatusJobRepo) ByID(ctx context.Context, id uint) (*models.CampaignStatusJob, error) {
+	return nil, nil
+}
+
+func (s *stubCampaignStatusJobRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.CampaignStatusJob, error) {
+	return nil, nil
+}
+
+func (s *stubCampaignStatusJobRepo) Update(ctx context.Context, job *models.CampaignStatusJob) error {
+	clone := *job
+	s.updated = append(s.updated, &clone)
+	return nil
+}
+
+func TestHandleStatusJobFetchFailureKeepsJobRetryable(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubSentBaleMessageRepo{
+		listByTrackingIDsFn: func(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentBaleMessage, error) {
+			serverID := "1001"
+			return []*models.SentBaleMessage{{TrackingID: "trk-1", ServerID: &serverID}}, nil
+		},
+	}
+	jobRepo := &stubCampaignStatusJobRepo{}
+	clientErr := errors.New("temporary status provider failure")
+
+	s := &BaleCampaignScheduler{
+		sentRepo: repo,
+		jobRepo:  jobRepo,
+		baleClient: &stubBaleClient{
+			fetchStatusFn: func(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error) {
+				if len(messageIDs) != 1 || messageIDs[0] != "1001" {
+					t.Fatalf("unexpected messageIDs: %#v", messageIDs)
+				}
+				return nil, clientErr
+			},
+		},
+	}
+
+	job := &models.CampaignStatusJob{
+		ID:                  10,
+		ProcessedCampaignID: 77,
+		TrackingIDs:         []string{"trk-1"},
+		RetryCount:          0,
+	}
+
+	err := s.handleStatusJob(context.Background(), job)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if !strings.Contains(err.Error(), clientErr.Error()) {
+		t.Fatalf("expected provider error in return, got: %v", err)
+	}
+	if job.RetryCount != 1 {
+		t.Fatalf("expected retry_count=1, got=%d", job.RetryCount)
+	}
+	if job.ExecutedAt != nil {
+		t.Fatalf("expected executed_at to remain nil before max retries")
+	}
+	if len(jobRepo.updated) != 1 {
+		t.Fatalf("expected one job update, got=%d", len(jobRepo.updated))
+	}
+}
+
+func TestHandleStatusJobFetchFailureMarksExecutedAtOnMaxRetry(t *testing.T) {
+	t.Parallel()
+
+	repo := &stubSentBaleMessageRepo{
+		listByTrackingIDsFn: func(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentBaleMessage, error) {
+			serverID := "1002"
+			return []*models.SentBaleMessage{{TrackingID: "trk-2", ServerID: &serverID}}, nil
+		},
+	}
+	jobRepo := &stubCampaignStatusJobRepo{}
+
+	s := &BaleCampaignScheduler{
+		sentRepo: repo,
+		jobRepo:  jobRepo,
+		baleClient: &stubBaleClient{
+			fetchStatusFn: func(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error) {
+				return nil, errors.New("provider still down")
+			},
+		},
+	}
+
+	job := &models.CampaignStatusJob{
+		ID:                  11,
+		ProcessedCampaignID: 88,
+		TrackingIDs:         []string{"trk-2"},
+		RetryCount:          statusJobMaxRetry - 1,
+	}
+
+	err := s.handleStatusJob(context.Background(), job)
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if job.RetryCount != statusJobMaxRetry {
+		t.Fatalf("expected retry_count=%d, got=%d", statusJobMaxRetry, job.RetryCount)
+	}
+	if job.ExecutedAt == nil {
+		t.Fatalf("expected executed_at to be set at retry limit")
+	}
+	if len(jobRepo.updated) != 1 {
+		t.Fatalf("expected one job update, got=%d", len(jobRepo.updated))
+	}
+}
