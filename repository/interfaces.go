@@ -302,6 +302,16 @@ type SentSMSProviderUpdate struct {
 	Description *string
 }
 
+// SentBaleSendResultUpdate describes send result fields update identified by tracking id.
+type SentBaleSendResultUpdate struct {
+	TrackingID     string
+	Status         models.BaleSendStatus
+	PartsDelivered int
+	ServerID       *string
+	ErrorCode      *string
+	Description    *string
+}
+
 // SentSMSRepository defines operations for sent SMS rows
 type SentSMSRepository interface {
 	Repository[models.SentSMS, models.SentSMSFilter]
@@ -315,13 +325,9 @@ type SentBaleMessageRepository interface {
 	Repository[models.SentBaleMessage, models.SentBaleMessageFilter]
 	ByID(ctx context.Context, id uint) (*models.SentBaleMessage, error)
 	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentBaleMessage, error)
-	UpdateSendResultByTrackingID(
-		ctx context.Context,
-		trackingID string,
-		status models.BaleSendStatus,
-		partsDelivered int,
-		serverID, errorCode, description *string,
-	) error
+	ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentBaleMessage, error)
+	TrackingResultsFromSentRows(ctx context.Context, processedCampaignID uint) ([]BaleTrackingResult, error)
+	UpdateSendResultByTrackingIDs(ctx context.Context, updates []SentBaleSendResultUpdate) error
 }
 
 // SentSplusMessageRepository defines operations for sent Splus message rows.
@@ -338,13 +344,13 @@ type SentSplusMessageRepository interface {
 	) error
 }
 
-// SMSStatusJobRepository defines operations for SMS status check jobs
-type SMSStatusJobRepository interface {
-	Repository[models.SMSStatusJob, any]
-	ByID(ctx context.Context, id uint) (*models.SMSStatusJob, error)
-	SaveBatch(ctx context.Context, jobs []*models.SMSStatusJob) error
-	ListDue(ctx context.Context, now time.Time, limit int) ([]*models.SMSStatusJob, error)
-	Update(ctx context.Context, job *models.SMSStatusJob) error
+// CampaignStatusJobRepository defines operations for cross-platform status check jobs.
+type CampaignStatusJobRepository interface {
+	Repository[models.CampaignStatusJob, any]
+	ByID(ctx context.Context, id uint) (*models.CampaignStatusJob, error)
+	SaveBatch(ctx context.Context, jobs []*models.CampaignStatusJob) error
+	ListDue(ctx context.Context, now time.Time, limit int) ([]*models.CampaignStatusJob, error)
+	Update(ctx context.Context, job *models.CampaignStatusJob) error
 }
 
 // SMSStatusResultRepository defines operations for SMS status check results
@@ -352,7 +358,15 @@ type SMSStatusResultRepository interface {
 	Repository[models.SMSStatusResult, any]
 	SaveBatch(ctx context.Context, rows []*models.SMSStatusResult) error
 	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SMSStatusAggregates, error)
-	TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SMSStatusTrackingResult, error)
+	TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SMSTrackingResult, error)
+}
+
+// BaleStatusResultRepository defines operations for Bale/Najva status check results.
+type BaleStatusResultRepository interface {
+	Repository[models.BaleStatusResult, any]
+	SaveBatch(ctx context.Context, rows []*models.BaleStatusResult) error
+	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*BaleStatusAggregates, error)
+	TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]BaleTrackingResult, error)
 }
 
 // MultimediaAssetRepository defines operations for multimedia assets
