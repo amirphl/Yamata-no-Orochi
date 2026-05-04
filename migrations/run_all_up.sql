@@ -308,5 +308,8 @@
 \echo 'Running 0100_rename_sms_status_results_customer_id_to_tracking_id.sql...'
 \i migrations/0100_rename_sms_status_results_customer_id_to_tracking_id.sql
 
+\echo 'Running 0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids.sql...'
+\i migrations/0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
