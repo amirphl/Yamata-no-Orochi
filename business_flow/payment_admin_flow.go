@@ -722,6 +722,8 @@ func (p *PaymentFlowImpl) convertTransactionHistoryRecordToTransactionHistoryIte
 			Email:                   transaction.Customer.Email,
 			CompanyName:             transaction.Customer.CompanyName,
 			CompanyPhone:            transaction.Customer.CompanyPhone,
+			CompanyAddress:          transaction.Customer.CompanyAddress,
+			PostalCode:              transaction.Customer.PostalCode,
 			NationalID:              transaction.Customer.NationalID,
 			AccountType:             transaction.Customer.AccountType.TypeName,
 		},
