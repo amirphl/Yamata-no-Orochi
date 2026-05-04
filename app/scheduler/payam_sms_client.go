@@ -40,7 +40,7 @@ type PayamStatusResponse struct {
 }
 
 type PayamSMSClient interface {
-	SendBatchWithBodies(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error)
+	SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error)
 	GetToken(ctx context.Context) (string, error)
 	FetchStatus(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error)
 }
@@ -59,8 +59,8 @@ func newHTTPPayamSMSClient(cfg config.PayamSMSConfig) *httpPayamSMSClient {
 	}
 }
 
-// SendBatchWithBodies sends a batch using custom per-recipient bodies.
-func (c *httpPayamSMSClient) SendBatchWithBodies(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error) {
+// SendBatch sends a batch of SMS messages.
+func (c *httpPayamSMSClient) SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
@@ -89,9 +89,16 @@ func (c *httpPayamSMSClient) SendBatchWithBodies(ctx context.Context, sender str
 			"sendDate":   sendDate.Format("2006-01-02 15:04:05"),
 		})
 	}
-	b, _ := json.Marshal(payload)
-	url := "https://www.payamsms.com/panel/webservice/sendMultipleWithSrc"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("payamsms sendBatch marshal payload: %w", err)
+	}
+
+	// BUG FIX 2: local variable renamed from `url` to `sendURL` to stop shadowing
+	// the imported "net/url" package within this function.
+	sendURL := "https://www.payamsms.com/panel/webservice/sendMultipleWithSrc"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
@@ -130,8 +137,15 @@ func (c *httpPayamSMSClient) GetToken(ctx context.Context) (string, error) {
 		grantType = "password"
 	}
 
-	url := fmt.Sprintf("%s?systemName=%s&username=%s&password=%s&scope=%s&grant_type=%s", tokenURL, systemName, username, password, scope, grantType)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	q := url.Values{}
+	q.Set("systemName", systemName)
+	q.Set("username", username)
+	q.Set("password", password)
+	q.Set("scope", scope)
+	q.Set("grant_type", grantType)
+	tokenReqURL := tokenURL + "?" + q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenReqURL, nil)
 	if err != nil {
 		return "", err
 	}
