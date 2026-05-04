@@ -199,6 +199,7 @@ func (a *AgencyFlowImpl) GetAgencyCustomerReport(ctx context.Context, req *dto.A
 	for _, item := range rows {
 		customerTotalSent := totalSentByCustomer[item.CustomerID]
 		items = append(items, dto.AgencyCustomerReportItem{
+			CustomerID:              item.CustomerID,
 			RepresentativeFirstName: item.RepresentativeFirstName,
 			RepresentativeLastName:  item.RepresentativeLastName,
 			CompanyName:             item.CompanyName,
