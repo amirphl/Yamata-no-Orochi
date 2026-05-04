@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"gorm.io/gorm"
@@ -11,6 +12,27 @@ import (
 // SMSStatusResultRepositoryImpl implements SMSStatusResultRepository
 type SMSStatusResultRepositoryImpl struct {
 	*BaseRepository[models.SMSStatusResult, any]
+}
+
+type SMSStatusAggregates struct {
+	AggregatedTotalRecords   int64
+	AggregatedTotalSent      int64
+	AggregatedTotalParts     int64
+	AggregatedDeliveredParts int64
+	AggregatedUndelivered    int64
+	AggregatedUnknown        int64
+}
+
+type SMSTrackingResult struct {
+	AudienceProfileUID    *string `json:"audienceProfileUID" gorm:"column:audience_profile_uid"`
+	PhoneNumber           string  `json:"phoneNumber" gorm:"column:phone_number"`
+	TrackingID            string  `json:"trackingID" gorm:"column:tracking_id"`
+	ServerID              *string `json:"serverID,omitempty" gorm:"column:server_id"`
+	TotalParts            *int64  `json:"totalParts" gorm:"column:total_parts"`
+	TotalDeliveredParts   *int64  `json:"totalDeliveredParts" gorm:"column:total_delivered_parts"`
+	TotalUndeliveredParts *int64  `json:"totalUndeliveredParts" gorm:"column:total_undelivered_parts"`
+	TotalUnknownParts     *int64  `json:"totalUnknownParts" gorm:"column:total_unknown_parts"`
+	Status                *string `json:"status" gorm:"column:status"`
 }
 
 func NewSMSStatusResultRepository(db *gorm.DB) SMSStatusResultRepository {
@@ -25,19 +47,26 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 	// Deduplicate by conflict key to avoid ON CONFLICT hitting same row twice in one statement
 	type aggKey struct {
 		pcID       uint
-		customerID string
+		trackingID string
 	}
-	seen := make(map[aggKey]struct{}, len(rows))
+	seen := make(map[aggKey]int, len(rows))
 	deduped := make([]*models.SMSStatusResult, 0, len(rows))
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
-		key := aggKey{pcID: row.ProcessedCampaignID, customerID: row.TrackingID}
-		if _, exists := seen[key]; exists {
+		trackingID := strings.TrimSpace(row.TrackingID)
+		if trackingID == "" {
 			continue
 		}
-		seen[key] = struct{}{}
+		row.TrackingID = trackingID
+		key := aggKey{pcID: row.ProcessedCampaignID, trackingID: trackingID}
+		if idx, exists := seen[key]; exists {
+			// Keep the latest row for a duplicate conflict key in the same batch.
+			deduped[idx] = row
+			continue
+		}
+		seen[key] = len(deduped)
 		deduped = append(deduped, row)
 	}
 	if len(deduped) == 0 {
@@ -46,7 +75,7 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 
 	db := r.getDB(ctx)
 	return db.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "processed_campaign_id"}, {Name: "customer_id"}},
+		Columns: []clause.Column{{Name: "processed_campaign_id"}, {Name: "tracking_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
 			"job_id":                  clause.Expr{SQL: "EXCLUDED.job_id"},
 			"server_id":               clause.Expr{SQL: "EXCLUDED.server_id"},
@@ -88,25 +117,6 @@ func (r *SMSStatusResultRepositoryImpl) Count(ctx context.Context, _ any) (int64
 	return count, nil
 }
 
-type SMSStatusAggregates struct {
-	AggregatedTotalRecords   int64
-	AggregatedTotalSent      int64
-	AggregatedTotalParts     int64
-	AggregatedDeliveredParts int64
-	AggregatedUndelivered    int64
-	AggregatedUnknown        int64
-}
-
-type SMSStatusTrackingResult struct {
-	AudienceProfileUID    *string `json:"audienceProfileUID" gorm:"column:audience_profile_uid"`
-	TrackingID            string  `json:"trackingID" gorm:"column:tracking_id"`
-	TotalParts            *int64  `json:"totalParts" gorm:"column:total_parts"`
-	TotalDeliveredParts   *int64  `json:"totalDeliveredParts" gorm:"column:total_delivered_parts"`
-	TotalUndeliveredParts *int64  `json:"totalUndeliveredParts" gorm:"column:total_undelivered_parts"`
-	TotalUnknownParts     *int64  `json:"totalUnknownParts" gorm:"column:total_unknown_parts"`
-	Status                *string `json:"status" gorm:"column:status"`
-}
-
 func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SMSStatusAggregates, error) {
 	// TODO: Aggregate on status too.
 	// TODO: Query optimization: maintain a summary table updated on insert instead of aggregating on the fly.
@@ -127,27 +137,34 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 	return &agg, nil
 }
 
-func (r *SMSStatusResultRepositoryImpl) TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SMSStatusTrackingResult, error) {
+func (r *SMSStatusResultRepositoryImpl) TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SMSTrackingResult, error) {
 	db := r.getDB(ctx)
-	trackingResults := make([]SMSStatusTrackingResult, 0)
+	trackingResults := make([]SMSTrackingResult, 0)
 	if err := db.Table("sms_status_results AS ssr").
 		Select(`
-			ap.uid AS audience_profile_uid,
-			ssr.customer_id AS tracking_id,
-			ssr.total_parts,
-			ssr.total_delivered_parts,
-			ssr.total_undelivered_parts,
-			ssr.total_unknown_parts,
-			ssr.status`).
+				ap.uid AS audience_profile_uid,
+				COALESCE(ss.phone_number, '') AS phone_number,
+				ssr.tracking_id,
+				COALESCE(ssr.server_id, ss.server_id) AS server_id,
+				ssr.total_parts,
+				ssr.total_delivered_parts,
+				ssr.total_undelivered_parts,
+				ssr.total_unknown_parts,
+				COALESCE(ssr.status, ss.status::text) AS status`).
 		Joins(`
-			LEFT JOIN sent_sms AS ss
-				ON ss.processed_campaign_id = ssr.processed_campaign_id
-				AND ss.tracking_id = ssr.customer_id`).
+				LEFT JOIN LATERAL (
+					SELECT phone_number, server_id, status
+					FROM sent_sms AS ss
+					WHERE ss.processed_campaign_id = ssr.processed_campaign_id
+						AND ss.tracking_id = ssr.tracking_id
+					ORDER BY ss.id DESC
+					LIMIT 1
+				) AS ss ON TRUE`).
 		Joins(`
-			LEFT JOIN audience_profiles AS ap
-				ON ap.phone_number = ss.phone_number`).
+				LEFT JOIN audience_profiles AS ap
+					ON ss.phone_number <> '' AND ap.phone_number = ss.phone_number`).
 		Where("ssr.processed_campaign_id = ?", processedCampaignID).
-		Order("ssr.customer_id ASC").
+		Order("ssr.tracking_id ASC").
 		Scan(&trackingResults).Error; err != nil {
 		return nil, err
 	}
