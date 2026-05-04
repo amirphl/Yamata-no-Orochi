@@ -15,6 +15,7 @@ type AgencyCustomerReportRequest struct {
 }
 
 type AgencyCustomerReportItem struct {
+	CustomerID              uint   `json:"customer_id"`
 	RepresentativeFirstName string `json:"representative_first_name"`
 	RepresentativeLastName  string `json:"representative_last_name"`
 	CompanyName             string `json:"company_name"`
