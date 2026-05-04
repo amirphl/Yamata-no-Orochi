@@ -3,7 +3,10 @@ package businessflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/config"
@@ -64,12 +67,47 @@ func (p *PaymentFlowImpl) ChargeWalletByAdmin(
 	if err := p.validateChargeWalletRequest(&dto.ChargeWalletRequest{AmountWithTax: req.AmountWithTax}); err != nil {
 		return nil, NewBusinessError("CHARGE_WALLET_BY_ADMIN_FAILED", "Charge wallet by admin failed", err)
 	}
+	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
+	if idempotencyKey == "" && metadata != nil {
+		idempotencyKey = strings.TrimSpace(metadata.RequestID)
+	}
+	if idempotencyKey == "" {
+		return nil, NewBusinessError("IDEMPOTENCY_KEY_REQUIRED", "Idempotency key is required", fmt.Errorf("idempotency_key is required"))
+	}
 
 	var customer models.Customer
 	var paymentRequest *models.PaymentRequest
+	isIdempotentReplay := false
 
 	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
 		var err error
+
+		lockName := "charge_wallet_by_admin:" + idempotencyKey
+		if err := p.db.WithContext(txCtx).Exec("SELECT pg_advisory_xact_lock(hashtext(?))", lockName).Error; err != nil {
+			return err
+		}
+
+		existing, err := p.findAdminChargeByIdempotencyKey(txCtx, idempotencyKey)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			if existing.CustomerID != req.CustomerID || existing.Amount != req.AmountWithTax {
+				return fmt.Errorf("idempotency key already used with different request payload")
+			}
+			existingAdminID := paymentMetadataAdminID(existing.Metadata)
+			if existingAdminID != 0 && existingAdminID != adminID {
+				return fmt.Errorf("idempotency key already used by a different admin")
+			}
+			if existing.Status != models.PaymentRequestStatusCompleted {
+				return fmt.Errorf("idempotency key exists but payment is not completed yet")
+			}
+			customer = models.Customer{ID: req.CustomerID}
+			paymentRequest = existing
+			isIdempotentReplay = true
+			return nil
+		}
+
 		customer, err = getCustomer(txCtx, p.customerRepo, req.CustomerID)
 		if err != nil {
 			return err
@@ -97,6 +135,7 @@ func (p *PaymentFlowImpl) ChargeWalletByAdmin(
 		m["charged_by"] = "admin"
 		m["payment_channel"] = "admin_direct_charge"
 		m["admin_charge"] = true
+		m["idempotency_key"] = idempotencyKey
 		metadataJSON, err := json.Marshal(m)
 		if err != nil {
 			return err
@@ -143,16 +182,24 @@ func (p *PaymentFlowImpl) ChargeWalletByAdmin(
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Charge wallet by admin failed for customer %d by admin %d: %s", req.CustomerID, adminID, err.Error())
-		_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionWalletChargeFailed, errMsg, false, &errMsg, metadata)
+		_ = createAuditLog(ctx, p.auditRepo, customerOrNil(customer), models.AuditActionWalletChargeFailed, errMsg, false, &errMsg, metadata)
 		return nil, NewBusinessError("CHARGE_WALLET_BY_ADMIN_FAILED", "Failed to charge wallet by admin", err)
 	}
 
 	msg := fmt.Sprintf("Wallet charged by admin %d for customer %d (payment request %d)", adminID, req.CustomerID, paymentRequest.ID)
-	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionWalletChargeCompleted, msg, true, nil, metadata)
-	_ = createAuditLog(ctx, p.auditRepo, &customer, models.AuditActionPaymentCallbackProcessed, msg, true, nil, metadata)
+	if isIdempotentReplay {
+		msg = fmt.Sprintf("Wallet charge idempotency replay by admin %d for customer %d (payment request %d)", adminID, req.CustomerID, paymentRequest.ID)
+	}
+	_ = createAuditLog(ctx, p.auditRepo, customerOrNil(customer), models.AuditActionWalletChargeCompleted, msg, true, nil, metadata)
+	_ = createAuditLog(ctx, p.auditRepo, customerOrNil(customer), models.AuditActionPaymentCallbackProcessed, msg, true, nil, metadata)
 
 	return &dto.ChargeWalletByAdminResponse{
-		Message:          "Wallet charged successfully by admin",
+		Message: func() string {
+			if isIdempotentReplay {
+				return "Wallet charge already processed (idempotent replay)"
+			}
+			return "Wallet charged successfully by admin"
+		}(),
 		Success:          true,
 		PaymentRequestID: paymentRequest.ID,
 		InvoiceNumber:    paymentRequest.InvoiceNumber,
@@ -161,4 +208,61 @@ func (p *PaymentFlowImpl) ChargeWalletByAdmin(
 		AdminID:          adminID,
 		AmountWithTax:    req.AmountWithTax,
 	}, nil
+}
+
+func (p *PaymentFlowImpl) findAdminChargeByIdempotencyKey(ctx context.Context, idempotencyKey string) (*models.PaymentRequest, error) {
+	var req models.PaymentRequest
+	err := p.db.WithContext(ctx).
+		Where("metadata ->> 'source' = ?", "wallet_recharge_admin").
+		Where("metadata ->> 'idempotency_key' = ?", idempotencyKey).
+		Order("id DESC").
+		First(&req).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &req, nil
+}
+
+func paymentMetadataAdminID(raw json.RawMessage) uint {
+	if len(raw) == 0 {
+		return 0
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return 0
+	}
+	v, ok := m["admin_id"]
+	if !ok {
+		return 0
+	}
+	switch x := v.(type) {
+	case float64:
+		if x <= 0 {
+			return 0
+		}
+		return uint(x)
+	case int:
+		if x <= 0 {
+			return 0
+		}
+		return uint(x)
+	case string:
+		i, err := strconv.ParseUint(strings.TrimSpace(x), 10, 64)
+		if err != nil || i == 0 {
+			return 0
+		}
+		return uint(i)
+	default:
+		return 0
+	}
+}
+
+func customerOrNil(customer models.Customer) *models.Customer {
+	if customer.ID == 0 {
+		return nil
+	}
+	return &customer
 }
