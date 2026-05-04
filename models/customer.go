@@ -54,7 +54,6 @@ type Customer struct {
 	AuditLogs         []AuditLog        `gorm:"foreignKey:CustomerID" json:"-"`
 	Wallet            *Wallet           `gorm:"foreignKey:CustomerID" json:"wallet,omitempty"`
 	ReferredCustomers []Customer        `gorm:"foreignKey:ReferrerAgencyID" json:"referred_customers,omitempty"`
-	CommissionRates   []CommissionRate  `gorm:"foreignKey:AgencyID" json:"commission_rates,omitempty"`
 }
 
 func (Customer) TableName() string {
