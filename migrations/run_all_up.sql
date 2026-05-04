@@ -296,7 +296,17 @@
 \echo 'Running 0096_add_campaign_refund_reconcile_failed_audit_action.sql...'
 \i migrations/0096_add_campaign_refund_reconcile_failed_audit_action.sql
 
+\echo 'Running 0097_add_invoice_issue_requested_audit_action.sql...'
 \i migrations/0097_add_invoice_issue_requested_audit_action.sql
+
+\echo 'Running 0098_rename_sms_status_jobs_to_campaign_status_jobs.sql...'
+\i migrations/0098_rename_sms_status_jobs_to_campaign_status_jobs.sql
+
+\echo 'Running 0099_create_bale_status_results.sql...'
+\i migrations/0099_create_bale_status_results.sql
+
+\echo 'Running 0100_rename_sms_status_results_customer_id_to_tracking_id.sql...'
+\i migrations/0100_rename_sms_status_results_customer_id_to_tracking_id.sql
 
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
