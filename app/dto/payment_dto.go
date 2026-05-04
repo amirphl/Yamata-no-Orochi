@@ -122,6 +122,8 @@ type AdminTransactionCustomerInfo struct {
 	Email                   string  `json:"email"`
 	CompanyName             *string `json:"company_name,omitempty"`
 	CompanyPhone            *string `json:"company_phone,omitempty"`
+	CompanyAddress          *string `json:"company_address,omitempty"`
+	PostalCode              *string `json:"postal_code,omitempty"`
 	NationalID              *string `json:"national_id,omitempty"`
 	AccountType             string  `json:"account_type"`
 }
