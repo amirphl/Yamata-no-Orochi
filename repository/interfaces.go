@@ -246,17 +246,6 @@ type DepositReceiptRepository interface {
 	List(ctx context.Context, f models.DepositReceiptFilter, limit, offset int, order string) ([]*models.DepositReceipt, error)
 }
 
-// CommissionRateRepository defines the interface for commission rate data access
-type CommissionRateRepository interface {
-	Repository[models.CommissionRate, models.CommissionRateFilter]
-	ByID(ctx context.Context, id uint) (*models.CommissionRate, error)
-	ByUUID(ctx context.Context, uuid string) (*models.CommissionRate, error)
-	ByAgencyID(ctx context.Context, agencyID uint) ([]*models.CommissionRate, error)
-	ByAgencyAndTransactionType(ctx context.Context, agencyID uint, transactionType string) (*models.CommissionRate, error)
-	GetActiveRates(ctx context.Context, limit, offset int) ([]*models.CommissionRate, error)
-	GetRatesByTransactionType(ctx context.Context, transactionType string, limit, offset int) ([]*models.CommissionRate, error)
-}
-
 // AgencyDiscountRepository defines the interface for agency discount data access
 type AgencyDiscountRepository interface {
 	Repository[models.AgencyDiscount, models.AgencyDiscountFilter]
