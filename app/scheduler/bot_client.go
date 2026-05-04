@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -26,6 +28,7 @@ type BotClient interface {
 	AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error)
 	PushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error
 	CreateShortLinks(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error
+	DownloadCampaignMedia(ctx context.Context, token, mediaUUID string) (string, error)
 }
 
 type httpBotClient struct {
@@ -34,9 +37,11 @@ type httpBotClient struct {
 }
 
 func newHTTPBotClient(cfg config.BotConfig) *httpBotClient {
+	cfg.APIDomain = strings.TrimRight(cfg.APIDomain, "/")
 	if cfg.APIDomain == "" {
 		cfg.APIDomain = defaultBotAPIDomain
 	}
+
 	return &httpBotClient{
 		cfg: cfg,
 		client: &http.Client{
@@ -45,17 +50,40 @@ func newHTTPBotClient(cfg config.BotConfig) *httpBotClient {
 	}
 }
 
+func (c *httpBotClient) endpoint(path string) string {
+	return c.cfg.APIDomain + path
+}
+
+func marshalJSON(v any) ([]byte, error) {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("marshal json payload: %w", err)
+	}
+	return b, nil
+}
+
+func statusErr(operation string, resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	if len(strings.TrimSpace(string(body))) == 0 {
+		return fmt.Errorf("%s http status: %d", operation, resp.StatusCode)
+	}
+	return fmt.Errorf("%s http status: %d body: %s", operation, resp.StatusCode, strings.TrimSpace(string(body)))
+}
+
 func (c *httpBotClient) Login(ctx context.Context) (string, error) {
 	if c.cfg.Username == "" || c.cfg.Password == "" {
 		return "", fmt.Errorf("bot credentials not configured")
 	}
-	url := c.cfg.APIDomain + "/api/v1/bot/auth/login"
+	endpoint := c.endpoint("/api/v1/bot/auth/login")
 	reqBody := dto.BotLoginRequest{
 		Username: c.cfg.Username,
 		Password: c.cfg.Password,
 	}
-	payload, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	payload, err := marshalJSON(reqBody)
+	if err != nil {
+		return "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
@@ -66,7 +94,7 @@ func (c *httpBotClient) Login(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("bot login http status: %d", resp.StatusCode)
+		return "", statusErr("bot login", resp)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -101,7 +129,7 @@ func (c *httpBotClient) Login(ctx context.Context) (string, error) {
 }
 
 func (c *httpBotClient) ListReadyCampaigns(ctx context.Context, token string, platform string) ([]dto.BotGetCampaignResponse, error) {
-	endpoint := c.cfg.APIDomain + "/api/v1/bot/campaigns/ready"
+	endpoint := c.endpoint("/api/v1/bot/campaigns/ready")
 	if platform != "" {
 		q := url.Values{}
 		q.Set("platform", platform)
@@ -118,7 +146,7 @@ func (c *httpBotClient) ListReadyCampaigns(ctx context.Context, token string, pl
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("ready campaigns http status: %d", resp.StatusCode)
+		return nil, statusErr("ready campaigns", resp)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -149,8 +177,8 @@ func (c *httpBotClient) ListReadyCampaigns(ctx context.Context, token string, pl
 }
 
 func (c *httpBotClient) MoveCampaignToRunning(ctx context.Context, token string, id uint) error {
-	url := c.cfg.APIDomain + "/api/v1/bot/campaigns/" + strconv.FormatUint(uint64(id), 10) + "/running"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	endpoint := c.endpoint("/api/v1/bot/campaigns/" + strconv.FormatUint(uint64(id), 10) + "/running")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -161,14 +189,14 @@ func (c *httpBotClient) MoveCampaignToRunning(ctx context.Context, token string,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("move to running http status: %d", resp.StatusCode)
+		return statusErr("move to running", resp)
 	}
 	return nil
 }
 
 func (c *httpBotClient) MoveCampaignToExecuted(ctx context.Context, token string, id uint) error {
-	url := c.cfg.APIDomain + "/api/v1/bot/campaigns/" + strconv.FormatUint(uint64(id), 10) + "/executed"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	endpoint := c.endpoint("/api/v1/bot/campaigns/" + strconv.FormatUint(uint64(id), 10) + "/executed")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -179,13 +207,13 @@ func (c *httpBotClient) MoveCampaignToExecuted(ctx context.Context, token string
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("move to executed http status: %d", resp.StatusCode)
+		return statusErr("move to executed", resp)
 	}
 	return nil
 }
 
 func (c *httpBotClient) DownloadTargetAudienceExcelFile(ctx context.Context, token string, campaignID uint) ([]byte, error) {
-	endpoint := fmt.Sprintf("%s/api/v1/bot/campaigns/%d/target-audience-excel-file", c.cfg.APIDomain, campaignID)
+	endpoint := c.endpoint(fmt.Sprintf("/api/v1/bot/campaigns/%d/target-audience-excel-file", campaignID))
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
@@ -197,7 +225,7 @@ func (c *httpBotClient) DownloadTargetAudienceExcelFile(ctx context.Context, tok
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("download target audience excel file http status: %d", resp.StatusCode)
+		return nil, statusErr("download target audience excel file", resp)
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -214,9 +242,12 @@ func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, ca
 		Phones:          phones,
 		ShortLinkDomain: "jo1n.ir/",
 	}
-	b, _ := json.Marshal(payload)
-	url := c.cfg.APIDomain + "/api/v1/bot/short-links/allocate"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	b, err := marshalJSON(payload)
+	if err != nil {
+		return nil, err
+	}
+	endpoint := c.endpoint("/api/v1/bot/short-links/allocate")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +259,7 @@ func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, ca
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("allocate short-links http status: %d", resp.StatusCode)
+		return nil, statusErr("allocate short-links", resp)
 	}
 	var apiResp dto.APIResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
@@ -253,9 +284,12 @@ func (c *httpBotClient) PushCampaignStatistics(ctx context.Context, campaignID u
 	if err != nil {
 		return err
 	}
-	url := fmt.Sprintf("%s/api/v1/bot/campaigns/%d/statistics", c.cfg.APIDomain, campaignID)
-	payload, _ := json.Marshal(dto.BotUpdateCampaignStatisticsRequest{Statistics: stats})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	endpoint := c.endpoint(fmt.Sprintf("/api/v1/bot/campaigns/%d/statistics", campaignID))
+	payload, err := marshalJSON(dto.BotUpdateCampaignStatisticsRequest{Statistics: stats})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -268,15 +302,22 @@ func (c *httpBotClient) PushCampaignStatistics(ctx context.Context, campaignID u
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("push statistics http status: %d", resp.StatusCode)
+		return statusErr("push statistics", resp)
 	}
 	return nil
 }
 
 func (c *httpBotClient) CreateShortLinks(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error {
-	url := c.cfg.APIDomain + "/api/v1/bot/short-links"
-	payload, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if reqBody == nil {
+		return fmt.Errorf("create short-links request body is nil")
+	}
+
+	endpoint := c.endpoint("/api/v1/bot/short-links")
+	payload, err := marshalJSON(reqBody)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
@@ -288,7 +329,7 @@ func (c *httpBotClient) CreateShortLinks(ctx context.Context, token string, reqB
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("create short-links http status: %d", resp.StatusCode)
+		return statusErr("create short-links", resp)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -302,4 +343,38 @@ func (c *httpBotClient) CreateShortLinks(ctx context.Context, token string, reqB
 		return fmt.Errorf("create short-links failed: %v", apiResp.Message)
 	}
 	return nil
+}
+
+func (c *httpBotClient) DownloadCampaignMedia(ctx context.Context, token, mediaUUID string) (string, error) {
+	if strings.TrimSpace(mediaUUID) == "" {
+		return "", fmt.Errorf("media uuid is required")
+	}
+
+	endpoint := c.endpoint("/api/v1/bot/media/" + mediaUUID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "*/*")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", statusErr("bot media download", resp)
+	}
+	tmpFile, err := os.CreateTemp("", "bale-media-*")
+	if err != nil {
+		return "", err
+	}
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
+		_ = os.Remove(tmpFile.Name())
+		return "", err
+	}
+
+	return tmpFile.Name(), nil
 }
