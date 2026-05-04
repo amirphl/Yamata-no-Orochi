@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,20 +33,21 @@ type AdminCampaignFlow interface {
 
 // AdminCampaignFlowImpl implements the campaign business flow
 type AdminCampaignFlowImpl struct {
-	campaignRepo        repository.CampaignRepository
-	customerRepo        repository.CustomerRepository
-	walletRepo          repository.WalletRepository
-	balanceSnapshotRepo repository.BalanceSnapshotRepository
-	transactionRepo     repository.TransactionRepository
-	auditRepo           repository.AuditLogRepository
-	lineNumberRepo      repository.LineNumberRepository
-	segmentPriceRepo    repository.SegmentPriceFactorRepository
-	notifier            services.NotificationService
-	adminConfig         config.AdminConfig
-	messageConfig       config.MessageConfig
-	cacheConfig         config.CacheConfig
-	rc                  *redis.Client
-	db                  *gorm.DB
+	campaignRepo         repository.CampaignRepository
+	customerRepo         repository.CustomerRepository
+	walletRepo           repository.WalletRepository
+	balanceSnapshotRepo  repository.BalanceSnapshotRepository
+	transactionRepo      repository.TransactionRepository
+	auditRepo            repository.AuditLogRepository
+	platformSettingsRepo repository.PlatformSettingsRepository
+	lineNumberRepo       repository.LineNumberRepository
+	segmentPriceRepo     repository.SegmentPriceFactorRepository
+	notifier             services.NotificationService
+	adminConfig          config.AdminConfig
+	messageConfig        config.MessageConfig
+	cacheConfig          config.CacheConfig
+	rc                   *redis.Client
+	db                   *gorm.DB
 }
 
 // NewAdminCampaignFlow creates a new campaign flow instance
@@ -56,6 +58,7 @@ func NewAdminCampaignFlow(
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
+	platformSettingsRepo repository.PlatformSettingsRepository,
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	db *gorm.DB,
@@ -66,20 +69,21 @@ func NewAdminCampaignFlow(
 	cacheConfig config.CacheConfig,
 ) AdminCampaignFlow {
 	return &AdminCampaignFlowImpl{
-		campaignRepo:        campaignRepo,
-		customerRepo:        customerRepo,
-		walletRepo:          walletRepo,
-		balanceSnapshotRepo: balanceSnapshotRepo,
-		transactionRepo:     transactionRepo,
-		auditRepo:           auditRepo,
-		lineNumberRepo:      lineNumberRepo,
-		segmentPriceRepo:    segmentPriceRepo,
-		notifier:            notifier,
-		adminConfig:         adminConfig,
-		messageConfig:       messageConfig,
-		cacheConfig:         cacheConfig,
-		rc:                  rc,
-		db:                  db,
+		campaignRepo:         campaignRepo,
+		customerRepo:         customerRepo,
+		walletRepo:           walletRepo,
+		balanceSnapshotRepo:  balanceSnapshotRepo,
+		transactionRepo:      transactionRepo,
+		auditRepo:            auditRepo,
+		platformSettingsRepo: platformSettingsRepo,
+		lineNumberRepo:       lineNumberRepo,
+		segmentPriceRepo:     segmentPriceRepo,
+		notifier:             notifier,
+		adminConfig:          adminConfig,
+		messageConfig:        messageConfig,
+		cacheConfig:          cacheConfig,
+		rc:                   rc,
+		db:                   db,
 	}
 }
 
@@ -353,6 +357,9 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.Before(utils.UTCNow()) {
 			return ErrScheduleTimeTooSoon
 		}
+		if err := s.validateApprovalPlatformSettings(txCtx, campaign); err != nil {
+			return err
+		}
 
 		customer, err = getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
 		if err != nil {
@@ -481,6 +488,142 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 	}
 
 	return &dto.AdminApproveCampaignResponse{Message: "Campaign approved successfully"}, nil
+}
+
+func (s *AdminCampaignFlowImpl) validateApprovalPlatformSettings(ctx context.Context, campaign *models.Campaign) error {
+	if campaign == nil {
+		return ErrCampaignNotFound
+	}
+
+	platform := strings.ToLower(strings.TrimSpace(campaign.Spec.Platform))
+	switch platform {
+	case models.CampaignPlatformBale, models.CampaignPlatformRubika, models.CampaignPlatformSPlus:
+	default:
+		return nil
+	}
+
+	if campaign.Spec.PlatformSettingsID == nil || *campaign.Spec.PlatformSettingsID == 0 {
+		return ErrCampaignPlatformSettingRequired
+	}
+
+	settings, err := s.platformSettingsRepo.ByID(ctx, *campaign.Spec.PlatformSettingsID)
+	if err != nil {
+		return err
+	}
+	if settings == nil {
+		return ErrCampaignPlatformSettingNotFound
+	}
+	if settings.CustomerID != campaign.CustomerID || strings.ToLower(strings.TrimSpace(settings.Platform)) != platform {
+		return ErrCampaignPlatformSettingNotFound
+	}
+
+	switch platform {
+	case models.CampaignPlatformBale:
+		if _, err := parsePositiveIntMetadata(settings.Metadata, "bale_bot_id"); err != nil {
+			return fmt.Errorf("campaign platform_settings.metadata.bale_bot_id is required for bale campaigns: %w", err)
+		}
+	case models.CampaignPlatformRubika:
+		if _, err := parseStringMetadata(settings.Metadata, "rubika_service_id"); err != nil {
+			return fmt.Errorf("campaign platform_settings.metadata.rubika_service_id is required for rubika campaigns: %w", err)
+		}
+	case models.CampaignPlatformSPlus:
+		if _, err := parseStringMetadata(settings.Metadata, "splus_bot_id"); err != nil {
+			return fmt.Errorf("campaign platform_settings.metadata.splus_bot_id is required for splus campaigns: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func parsePositiveIntMetadata(metadata map[string]any, key string) (int64, error) {
+	if metadata == nil {
+		return 0, fmt.Errorf("metadata is missing")
+	}
+	raw, ok := metadata[key]
+	if !ok {
+		return 0, fmt.Errorf("%s is missing", key)
+	}
+
+	switch v := raw.(type) {
+	case int:
+		if v <= 0 {
+			return 0, fmt.Errorf("%s must be positive", key)
+		}
+		return int64(v), nil
+	case int64:
+		if v <= 0 {
+			return 0, fmt.Errorf("%s must be positive", key)
+		}
+		return v, nil
+	case float64:
+		if v <= 0 || v != float64(int64(v)) {
+			return 0, fmt.Errorf("%s must be a positive integer", key)
+		}
+		return int64(v), nil
+	case string:
+		s := strings.TrimSpace(v)
+		if s == "" {
+			return 0, fmt.Errorf("%s must not be empty", key)
+		}
+		id, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || id <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer", key)
+		}
+		return id, nil
+	case json.Number:
+		id, err := v.Int64()
+		if err != nil || id <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer", key)
+		}
+		return id, nil
+	default:
+		return 0, fmt.Errorf("%s has unsupported type %T", key, raw)
+	}
+}
+
+func parseStringMetadata(metadata map[string]any, key string) (string, error) {
+	if metadata == nil {
+		return "", fmt.Errorf("metadata is missing")
+	}
+	raw, ok := metadata[key]
+	if !ok {
+		return "", fmt.Errorf("%s is missing", key)
+	}
+
+	switch v := raw.(type) {
+	case string:
+		out := strings.TrimSpace(v)
+		if out == "" {
+			return "", fmt.Errorf("%s must not be empty", key)
+		}
+		return out, nil
+	case int:
+		if v <= 0 {
+			return "", fmt.Errorf("%s must be positive", key)
+		}
+		return strconv.Itoa(v), nil
+	case int64:
+		if v <= 0 {
+			return "", fmt.Errorf("%s must be positive", key)
+		}
+		return strconv.FormatInt(v, 10), nil
+	case float64:
+		if v <= 0 {
+			return "", fmt.Errorf("%s must be positive", key)
+		}
+		if v == float64(int64(v)) {
+			return strconv.FormatInt(int64(v), 10), nil
+		}
+		return strconv.FormatFloat(v, 'f', -1, 64), nil
+	case json.Number:
+		out := strings.TrimSpace(v.String())
+		if out == "" {
+			return "", fmt.Errorf("%s must not be empty", key)
+		}
+		return out, nil
+	default:
+		return "", fmt.Errorf("%s has unsupported type %T", key, raw)
+	}
 }
 
 // RejectCampaign rejects a campaign: change status to rejected and refund frozen to free
