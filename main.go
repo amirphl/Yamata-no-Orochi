@@ -541,6 +541,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		balanceSnapshotRepo,
 		transactionRepo,
 		auditRepo,
+		platformSettingsRepo,
 		lineNumberRepo,
 		segmentPriceFactorRepo,
 		db,
