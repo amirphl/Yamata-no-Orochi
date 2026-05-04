@@ -364,8 +364,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
 	sentSplusMessageRepo := repository.NewSentSplusMessageRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
-	smsStatusJobRepo := repository.NewSMSStatusJobRepository(db)
+	campaignStatusJobRepo := repository.NewCampaignStatusJobRepository(db)
 	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
+	baleStatusResultRepo := repository.NewBaleStatusResultRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
 	multimediaRepo := repository.NewMultimediaAssetRepository(db)
 	platformSettingsRepo := repository.NewPlatformSettingsRepository(db)
@@ -667,7 +668,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			tagRepo,
 			sentSMSRepo,
 			processedCampaignRepo,
-			smsStatusJobRepo,
+			campaignStatusJobRepo,
 			smsStatusResultRepo,
 			notificationService,
 			db,
@@ -686,6 +687,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			tagRepo,
 			sentBaleMessageRepo,
 			processedCampaignRepo,
+			campaignStatusJobRepo,
+			baleStatusResultRepo,
 			notificationService,
 			db,
 			log.Default(),
