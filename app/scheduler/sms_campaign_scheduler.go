@@ -2,25 +2,17 @@
 package scheduler
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
-	"math/big"
 	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/config"
@@ -29,16 +21,21 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
-	"github.com/xuri/excelize/v2"
 )
 
-// CampaignScheduler periodically checks for campaigns ready to execute and triggers delivery
-type CampaignScheduler struct {
+// TODO: Tx management in queries, especially around processed_campaign creation and audience fetching to ensure consistency
+
+const (
+	smsSendBatchSize     = 100 // NOTE: MUST BE LESS THAN 250
+	smsStatusJobMaxRetry = 3
+)
+
+type SMSCampaignScheduler struct {
 	audRepo  repository.AudienceProfileRepository
 	tagRepo  repository.TagRepository
 	sentRepo repository.SentSMSRepository
 	pcRepo   repository.ProcessedCampaignRepository
-	jobRepo  repository.SMSStatusJobRepository
+	jobRepo  repository.CampaignStatusJobRepository
 	resRepo  repository.SMSStatusResultRepository
 	notifier NotificationSender
 	logger   *log.Logger
@@ -46,6 +43,7 @@ type CampaignScheduler struct {
 
 	db       *gorm.DB
 	adminCfg config.AdminConfig
+	botCfg   config.BotConfig
 
 	botClient BotClient
 	smsClient PayamSMSClient
@@ -64,21 +62,12 @@ type NotificationSender interface {
 	SendSMSBulk(ctx context.Context, mobiles []string, message string, trackingID *int64) error
 }
 
-type SMSAudiencePhonesResult struct {
-	Phones        []string
-	IDs           []int64
-	Codes         []string
-	SelectionID   uint
-	MatchedUIDs   []string
-	UnmatchedUIDs []string
-}
-
 func NewCampaignScheduler(
 	audRepo repository.AudienceProfileRepository,
 	tagRepo repository.TagRepository,
 	sentRepo repository.SentSMSRepository,
 	pcRepo repository.ProcessedCampaignRepository,
-	jobRepo repository.SMSStatusJobRepository,
+	jobRepo repository.CampaignStatusJobRepository,
 	resRepo repository.SMSStatusResultRepository,
 	notifier NotificationSender,
 	db *gorm.DB,
@@ -87,7 +76,7 @@ func NewCampaignScheduler(
 	payamSMSCfg config.PayamSMSConfig,
 	botCfg config.BotConfig,
 	adminCfg config.AdminConfig,
-) *CampaignScheduler {
+) *SMSCampaignScheduler {
 	if interval <= 0 {
 		interval = time.Minute
 	}
@@ -96,7 +85,7 @@ func NewCampaignScheduler(
 		botCfg.APIDomain = defaultBotAPIDomain
 	}
 
-	s := &CampaignScheduler{
+	s := &SMSCampaignScheduler{
 		audRepo:       audRepo,
 		tagRepo:       tagRepo,
 		sentRepo:      sentRepo,
@@ -108,6 +97,7 @@ func NewCampaignScheduler(
 		db:            db,
 		interval:      interval,
 		adminCfg:      adminCfg,
+		botCfg:        botCfg,
 		botClient:     newHTTPBotClient(botCfg),
 		smsClient:     newHTTPPayamSMSClient(payamSMSCfg),
 		audienceCache: NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
@@ -116,37 +106,13 @@ func NewCampaignScheduler(
 
 	if err := s.initSchedulerLogger(); err != nil {
 		s.logger = log.New(io.Discard, "sms_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
-		s.logger.Printf("scheduler: failed to initialize file logger: %v", err)
+		s.logger.Printf("SMS scheduler: failed to initialize file logger: %v", err)
 	}
 
 	return s
 }
 
-func initSchedulerLogger(name string) (*log.Logger, *os.File, error) {
-	clean := strings.TrimSpace(name)
-	if clean == "" {
-		clean = "scheduler"
-	}
-
-	candidates := []string{"data", "/data"}
-	for _, dir := range candidates {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			continue
-		}
-		logPath := filepath.Join(dir, fmt.Sprintf("%s.log", clean))
-		f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-		if err != nil {
-			continue
-		}
-		mw := io.MultiWriter(f)
-		l := log.New(mw, fmt.Sprintf("%s ", clean), log.LstdFlags|log.Lmicroseconds|log.LUTC)
-		return l, f, nil
-	}
-
-	return nil, nil, fmt.Errorf("could not create %s log file in any candidate directory", clean)
-}
-
-func (s *CampaignScheduler) initSchedulerLogger() error {
+func (s *SMSCampaignScheduler) initSchedulerLogger() error {
 	l, f, err := initSchedulerLogger(s.schedulerName + "_scheduler")
 	if err != nil {
 		return err
@@ -156,100 +122,94 @@ func (s *CampaignScheduler) initSchedulerLogger() error {
 	return nil
 }
 
-func (s *CampaignScheduler) Start(parent context.Context) func() {
-	ctx, cancel := context.WithCancel(parent)
+func (s *SMSCampaignScheduler) Start(parent context.Context) func() {
 	go func() {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		s.runOnce(context.Background())
-
 		for {
 			select {
-			case <-ctx.Done():
+			case <-parent.Done():
 				return
 			case <-ticker.C:
-				// TODO: This is not the correct way of context handling.
-				s.runOnce(context.Background())
+				ctx, cancel := context.WithTimeout(parent, s.interval*4/5)
+				s.runOnce(ctx)
+				cancel()
 			}
 		}
 	}()
 
-	go s.startStatusJobWorker(ctx)
+	go s.startStatusJobWorker(parent)
 
 	return func() {
-		cancel()
 		if s.logFile != nil {
 			_ = s.logFile.Close()
 		}
 	}
 }
 
-func (s *CampaignScheduler) runOnce(ctx context.Context) {
-	// 2) Login to bot API and get access token
-	token, err := s.botClient.Login(ctx)
+func (s *SMSCampaignScheduler) runOnce(ctx context.Context) {
+	jazzAccessToken, err := s.botClient.Login(ctx)
 	if err != nil {
-		s.logger.Printf("scheduler: bot login failed: %v", err)
-		s.notifyAdmin(fmt.Sprintf("Scheduler bot login failed: %v", err))
+		s.logger.Printf("SMS scheduler: bot login failed: %v", err)
+		s.notifyAdmin(fmt.Sprintf("SMS Scheduler: bot login failed: %v", err))
 		return
 	}
 
-	// 3) Get ready campaigns
-	ready, err := s.botClient.ListReadyCampaigns(ctx, token, models.CampaignPlatformSMS)
+	ready, err := s.botClient.ListReadyCampaigns(ctx, jazzAccessToken, models.CampaignPlatformSMS)
 	if err != nil {
-		s.logger.Printf("scheduler: list ready campaigns failed: %v", err)
-		s.notifyAdmin(fmt.Sprintf("Scheduler list ready campaigns failed: %v", err))
+		s.logger.Printf("SMS scheduler: list ready campaigns failed: %v", err)
+		s.notifyAdmin(fmt.Sprintf("SMS Scheduler: list ready campaigns failed: %v", err))
 		return
 	}
 	if len(ready) == 0 {
 		return
 	}
-	s.logger.Printf("scheduler: listed %d ready campaigns", len(ready))
+	s.logger.Printf("SMS scheduler: listed %d ready campaigns", len(ready))
 
-	// 4) Filter already processed
 	pending := make([]dto.BotGetCampaignResponse, 0, len(ready))
 	for _, c := range ready {
 		if strings.ToLower(strings.TrimSpace(c.Platform)) != models.CampaignPlatformSMS {
-			// NOTE: Just skip.
+			s.logger.Printf("SMS scheduler: campaign id=%d has unsupported platform %q, skipping", c.ID, c.Platform)
+			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: campaign id=%d has unsupported platform %q, skipping", c.ID, c.Platform))
 			continue
 		}
 		if err := s.validateSMSCampaign(c); err != nil {
-			s.logger.Printf("scheduler: validate campaign failed for campaign id=%d: %v", c.ID, err)
-			s.notifyAdmin(fmt.Sprintf("Scheduler validate campaign failed for id=%d: %v", c.ID, err))
+			s.logger.Printf("SMS scheduler: validate campaign failed for campaign id=%d (skipped): %v", c.ID, err)
+			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: validate campaign failed for id=%d: %v", c.ID, err))
 			continue
 		}
 		pc, err := s.pcRepo.ByCampaignID(ctx, c.ID)
 		if err != nil {
-			s.logger.Printf("scheduler: check processed failed for campaign id=%d: %v", c.ID, err)
-			s.notifyAdmin(fmt.Sprintf("Scheduler check processed failed for id=%d: %v", c.ID, err))
+			s.logger.Printf("SMS scheduler: check processed failed for campaign id=%d (skipped): %v", c.ID, err)
+			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: check processed failed for id=%d: %v", c.ID, err))
 			continue
 		}
 		if pc == nil {
 			pending = append(pending, c)
 		} else {
-			s.logger.Printf("scheduler: campaign id=%d already processed, skipping", c.ID)
+			s.logger.Printf("SMS scheduler: campaign id=%d already processed, skipping", c.ID)
 		}
 	}
 	if len(pending) == 0 {
 		return
 	}
-	s.logger.Printf("scheduler: %d campaigns pending processing...", len(pending))
+	s.logger.Printf("SMS scheduler: %d campaigns pending processing...", len(pending))
 
-	// 5) Spawn goroutines per campaign
 	for _, camp := range pending {
-		c := camp
-		go func() {
-			if err := s.processSMSCampaign(ctx, token, c); err != nil {
-				s.logger.Printf("scheduler: process campaign id=%d failed: %v", c.ID, err)
-				s.notifyAdmin(fmt.Sprintf("Scheduler process campaign failed for campaign id=%d: %v", c.ID, err))
+		go func(c dto.BotGetCampaignResponse) {
+			// TODO: Make 4 hours configurable or use a more dynamic approach based on campaign content/size
+			ctx2, cancel2 := context.WithTimeout(context.Background(), 4*time.Hour)
+			defer cancel2()
+			if err := s.processSMSCampaign(ctx2, jazzAccessToken, c); err != nil {
+				s.logger.Printf("SMS scheduler: process campaign id=%d failed: %v", c.ID, err)
+				s.notifyAdmin(fmt.Sprintf("SMS Scheduler: process campaign failed for campaign id=%d: %v", c.ID, err))
 			}
-		}()
+		}(camp)
 	}
-	// Do not wait to keep scheduler loop non-blocking; optionally wait if desired
-	// wg.Wait()
 }
 
-func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken string, c dto.BotGetCampaignResponse) error {
+func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) error {
 	// Sender from campaign line number
 	if c.LineNumber == nil {
 		return fmt.Errorf("sender is nil")
@@ -259,10 +219,10 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 	}
 	sender := *c.LineNumber
 
-	if err := s.botClient.MoveCampaignToRunning(ctx, jazzToken, c.ID); err != nil {
+	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
 		return fmt.Errorf("move to running: %w", err)
 	}
-	s.logger.Printf("scheduler: campaign id=%d moved to running", c.ID)
+	s.logger.Printf("SMS scheduler: campaign id=%d moved to running", c.ID)
 
 	// First transaction: create processed_campaign and persist full audience IDs
 	var (
@@ -285,14 +245,14 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
 			return err
 		}
-		s.logger.Printf("scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
+		s.logger.Printf("SMS scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
 
 		if hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID) {
-			fileUIDs, err := s.fetchTargetAudienceUIDsFromExcel(txCtx, jazzToken, c.ID)
+			fileUIDs, err := fetchTargetAudienceUIDsFromExcel(txCtx, s.botClient, jazzAccessToken, c.ID)
 			if err != nil {
 				return err
 			}
-			audienceResult, err := s.fetchSMSAudiencePhonesByUIDs(txCtx, c, jazzToken, fileUIDs)
+			audienceResult, err := fetchAudiencePhonesByUIDs(txCtx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
 			if err != nil {
 				return err
 			}
@@ -300,7 +260,7 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 			ids = audienceResult.IDs
 			codes = audienceResult.Codes
 			unmatchedUID = audienceResult.UnmatchedUIDs
-			s.logger.Printf("scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
+			s.logger.Printf("SMS scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
 			pc.AudienceIDs = pq.Int64Array(ids)
 			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = nil
@@ -308,14 +268,14 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 			// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
 			var err error
 			correlationID := uuid.NewString()
-			audienceResult, err := s.fetchSMSAudiencePhones(txCtx, c, jazzToken, correlationID)
+			audienceResult, err := s.fetchSMSAudiencePhones(txCtx, c, jazzAccessToken, correlationID)
 			if err != nil {
 				return err
 			}
 			phones = audienceResult.Phones
 			ids = audienceResult.IDs
 			codes = audienceResult.Codes
-			s.logger.Printf("scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
+			s.logger.Printf("SMS scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
 			pc.AudienceIDs = pq.Int64Array(ids)
 			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = utils.ToPtr(audienceResult.SelectionID)
@@ -325,13 +285,19 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 		if err := s.pcRepo.Update(txCtx, pc); err != nil {
 			return err
 		}
-		s.logger.Printf("scheduler: updated processed campaign id=%d with audience ids", pc.ID)
+		s.logger.Printf("SMS scheduler: updated processed campaign id=%d with audience ids", pc.ID)
 
 		return nil
 	}); err != nil {
 		return err
 	}
-	s.logger.Printf("scheduler: persisted processed campaign id=%d num_audiences=%d", pc.ID, len(ids))
+	s.logger.Printf("SMS scheduler: persisted processed campaign id=%d num_phones=%d, num_ids=%d, num_codes=%d, num_unmatched=%d", pc.ID, len(phones), len(ids), len(codes), len(unmatchedUID))
+	if len(ids) != len(phones) {
+		return fmt.Errorf("audience ids mismatch for campaign id=%d: phones=%d ids=%d", c.ID, len(phones), len(ids))
+	}
+	if len(codes) != len(phones) {
+		return fmt.Errorf("audience codes mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
+	}
 
 	if len(unmatchedUID) > 0 {
 		if err := s.createUnmatchedSentSMSRows(ctx, pc.ID, unmatchedUID); err != nil {
@@ -339,21 +305,16 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 		}
 	}
 
-	// NOTE: MUST BE LESS THAN 250
-	batchSize := 100
-
-	for start := 0; start < len(phones); start += batchSize {
-		end := start + batchSize
-		end = min(end, len(phones))
+	for start := 0; start < len(phones); start += smsSendBatchSize {
+		end := min(start+smsSendBatchSize, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
 		batchCodes := codes[start:end]
 
-		// Build per-recipient bodies by replacing short URL with unique 6-char code
 		items := make([]PayamSMSItem, 0, len(batchPhones))
-		// Build SentSMS rows from response
+
 		rows := make([]*models.SentSMS, 0, len(batchPhones))
-		trackingIDs, err := s.allocateTrackingIDs(ctx, len(batchPhones))
+		trackingIDs, err := allocateTrackingIDs(ctx, s.db, len(batchPhones))
 		if err != nil {
 			return err
 		}
@@ -378,7 +339,6 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 			})
 		}
 
-		// Store batch results and update last audience id + audience codes in one transaction
 		if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 			if len(rows) > 0 {
 				if err := s.sentRepo.SaveBatch(txCtx, rows); err != nil {
@@ -397,70 +357,71 @@ func (s *CampaignScheduler) processSMSCampaign(ctx context.Context, jazzToken st
 			return err
 		}
 
-		// Sending via PayamSMS for this batch
-		respItems, err := s.smsClient.SendBatchWithBodies(ctx, sender, items)
-		if err != nil {
-			s.logger.Printf("scheduler: payamsms send batch failed for campaign id=%d: %v", c.ID, err)
+		batchResponses, batchErr := s.smsClient.SendBatch(ctx, sender, items)
+		if batchErr != nil {
+			s.logger.Printf("SMS scheduler: payamsms send batch failed for campaign id=%d: %v", c.ID, batchErr)
 			// TODO: How to handle this error? Retry sending? Skip to next batch?
-		} else {
-			// Map provider response back to our sent_sms rows by trackingID using a batch update
-			updates := make([]repository.SentSMSProviderUpdate, 0, len(respItems))
-			for _, r := range respItems {
-				if r.TrackingID == "" {
-					continue
-				}
-				updates = append(updates, repository.SentSMSProviderUpdate{
-					TrackingID:  r.TrackingID,
-					ServerID:    r.ServerID,
-					ErrorCode:   r.ErrorCode,
-					Description: r.Desc,
-				})
-			}
-			if len(updates) > 0 {
-				// TODO: Start tx here if needed?
-				if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, updates); updateErr != nil {
-					s.logger.Printf("scheduler: failed to batch update sent_sms provider fields for campaign id=%d: %v", c.ID, updateErr)
-					// NOTE: Error silent here; not returning to avoid blocking further processing
-				}
-			}
+		}
 
-			// Schedule status check jobs for this batch
-			trackingIDs := make([]string, 0, len(rows))
-			for _, r := range rows {
-				if r.TrackingID != "" {
-					trackingIDs = append(trackingIDs, r.TrackingID)
-				}
+		responseByTrackingID := make(map[string]*PayamSMSResponseItem, len(batchResponses))
+		for i := range batchResponses {
+			resp := batchResponses[i]
+			trackingID := strings.TrimSpace(resp.TrackingID)
+			if trackingID == "" {
+				continue
 			}
-			if err := s.scheduleStatusCheckJobs(ctx, pc.ID, trackingIDs); err != nil {
-				s.logger.Printf("scheduler: failed to schedule status jobs for campaign id=%d: %v", c.ID, err)
+			respCopy := resp
+			responseByTrackingID[trackingID] = &respCopy
+		}
+
+		sendUpdates := make([]repository.SentSMSProviderUpdate, 0, len(items))
+		for _, item := range items {
+			trackingID := strings.TrimSpace(item.trackingID)
+			if trackingID == "" {
+				continue
 			}
+			sendUpdates = append(sendUpdates, buildSMSProviderUpdate(trackingID, responseByTrackingID[trackingID], batchErr))
+		}
+		if len(sendUpdates) > 0 {
+			// TODO: Start tx here if needed?
+			if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, sendUpdates); updateErr != nil {
+				s.logger.Printf("SMS scheduler: failed to batch update sent_sms provider fields for campaign id=%d: %v", c.ID, updateErr)
+				// NOTE: Error silent here; not returning to avoid blocking further processing
+			}
+		}
+
+		// Schedule status check jobs for this batch
+		batchTrackingIDs := make([]string, 0, len(rows))
+		for _, r := range rows {
+			if r.TrackingID != "" {
+				batchTrackingIDs = append(batchTrackingIDs, r.TrackingID)
+			}
+		}
+		if err := s.scheduleStatusCheckJobs(ctx, pc.ID, batchTrackingIDs); err != nil {
+			s.logger.Printf("SMS scheduler: failed to schedule status jobs for campaign id=%d: %v", c.ID, err)
+			// TODO: How to handle this error? Retry scheduling? Skip and rely on next batch's jobs to eventually cover these?
 		}
 	}
 
-	s.logger.Printf("scheduler: campaign id=%d all batches sent", c.ID)
-
-	if err := s.botClient.MoveCampaignToExecuted(ctx, jazzToken, c.ID); err != nil {
-		s.logger.Printf("scheduler: move executed failed for campaign id=%d: %v", c.ID, err)
+	stats, err := s.updateProcessedCampaignStats(ctx, pc.ID)
+	if err != nil {
 		return err
 	}
-	s.logger.Printf("scheduler: campaign id=%d moved to executed", c.ID)
+	if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
+		return err
+	}
+
+	s.logger.Printf("SMS scheduler: campaign id=%d all batches sent", c.ID)
+
+	if err := s.botClient.MoveCampaignToExecuted(ctx, jazzAccessToken, c.ID); err != nil {
+		return err
+	}
+	s.logger.Printf("SMS scheduler: campaign id=%d moved to executed", c.ID)
 
 	return nil
 }
 
-func (s *CampaignScheduler) notifyAdmin(message string) {
-	if s.notifier == nil {
-		return
-	}
-	go func(msg string) {
-		for _, mobile := range s.adminCfg.ActiveMobiles() {
-			_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
-		}
-	}(message)
-}
-
-func (s *CampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse) error {
-	// check status = approved, created_at < nowutc, schedule_at < nowutc, updated_at < nowutc
+func (s *SMSCampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse) error {
 	if c.Status != string(models.CampaignStatusApproved) {
 		return fmt.Errorf("campaign status is not approved")
 	}
@@ -477,16 +438,24 @@ func (s *CampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse) er
 	if c.LineNumber == nil || *c.LineNumber == "" {
 		return fmt.Errorf("campaign line number (sender) is empty")
 	}
+	if strings.ToLower(strings.TrimSpace(c.Platform)) != models.CampaignPlatformSMS {
+		return fmt.Errorf("campaign platform is not sms")
+	}
 	return nil
 }
 
-func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string, correlationID string) (*SMSAudiencePhonesResult, error) {
-	s.logger.Printf("fetchSMSAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, c.NumAudiences, len(c.Tags), correlationID)
-
+func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
+	ctx context.Context,
+	c dto.BotGetCampaignResponse,
+	jazzAccessToken string,
+	correlationID string,
+) (*AudiencePhonesResult, error) {
 	numAudiences := int64(0)
 	if c.NumAudiences != nil {
 		numAudiences = int64(*c.NumAudiences)
 	}
+	s.logger.Printf("fetchSMSAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, numAudiences, len(c.Tags), correlationID)
+
 	if numAudiences <= 0 {
 		return nil, fmt.Errorf("campaign num_audiences must be positive")
 	}
@@ -557,7 +526,7 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 		}
 
 		for _, ap := range whites {
-			if len(phones) >= int(numAudiences) {
+			if int64(len(phones)) >= numAudiences {
 				break
 			}
 			appendIfFresh(ap)
@@ -590,22 +559,21 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	if selection != nil && selection.IDs != nil {
 		exclude = selection.IDs
 	}
-
 	phones, ids, err := selectAudiences(exclude)
 	if err != nil {
 		return nil, err
 	}
-	s.logger.Printf("fetchSMSAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+	s.logger.Printf("fetchSMSAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
 
 	resetUsed := false
-	if len(phones) < int(*c.NumAudiences) {
+	if int64(len(phones)) < numAudiences {
 		// Not enough fresh; retry from scratch without exclusions
 		resetUsed = true
 		phones, ids, err = selectAudiences(nil)
 		if err != nil {
 			return nil, err
 		}
-		s.logger.Printf("fetchSMSAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
+		s.logger.Printf("fetchSMSAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
 	}
 
 	// Persist selection history with correlation id and merged audience IDs
@@ -624,7 +592,7 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	if !hasCampaignAdLink(c.AdLink) {
 		s.logger.Printf("fetchSMSAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
 		s.logger.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
-		return &SMSAudiencePhonesResult{
+		return &AudiencePhonesResult{
 			Phones:      phones,
 			IDs:         ids,
 			Codes:       make([]string, len(phones)),
@@ -633,13 +601,16 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	}
 
 	// Generate sequential UIDs via bot API and persist short links centrally
-	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
+	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, c.ID, c.AdLink, phones)
 	if err != nil {
 		s.logger.Printf("fetchSMSAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, err
 	}
+	if len(codes) != len(phones) {
+		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
+	}
 	s.logger.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
-	return &SMSAudiencePhonesResult{
+	return &AudiencePhonesResult{
 		Phones:      phones,
 		IDs:         ids,
 		Codes:       codes,
@@ -647,7 +618,7 @@ func (s *CampaignScheduler) fetchSMSAudiencePhones(ctx context.Context, c dto.Bo
 	}, nil
 }
 
-func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code string) string {
+func (s *SMSCampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code string) string {
 	content := ""
 	if c.Content != nil {
 		content = *c.Content
@@ -660,172 +631,7 @@ func (s *CampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code stri
 	return strings.ReplaceAll(content, "🔗", "") + "\n" + "لغو۱۱"
 }
 
-func hasCampaignAdLink(link *string) bool {
-	return link != nil && strings.TrimSpace(*link) != ""
-}
-
-func hasTargetAudienceExcelFileUUID(fileUUID *string) bool {
-	return fileUUID != nil && strings.TrimSpace(*fileUUID) != ""
-}
-
-func (s *CampaignScheduler) fetchTargetAudienceUIDsFromExcel(ctx context.Context, jazzToken string, campaignID uint) ([]string, error) {
-	data, err := s.botClient.DownloadTargetAudienceExcelFile(ctx, jazzToken, campaignID)
-	if err != nil {
-		return nil, err
-	}
-
-	f, err := excelize.OpenReader(bytes.NewReader(data), excelize.Options{
-		UnzipSizeLimit:    2 << 30, // 2GB
-		UnzipXMLSizeLimit: 1 << 30, // 1GB
-	})
-	if err != nil {
-		return nil, fmt.Errorf("cannot open target audience excel file: %w", err)
-	}
-	defer func() {
-		_ = f.Close()
-	}()
-
-	sheets := f.GetSheetList()
-	if len(sheets) == 0 {
-		return nil, fmt.Errorf("target audience excel file has no sheets")
-	}
-
-	rows, err := f.Rows(sheets[0])
-	if err != nil {
-		return nil, fmt.Errorf("cannot iterate target audience excel rows: %w", err)
-	}
-	defer func() {
-		_ = rows.Close()
-	}()
-
-	uids := make([]string, 0)
-	rowIndex := 0
-	for rows.Next() {
-		row, err := rows.Columns()
-		if err != nil {
-			return nil, fmt.Errorf("failed to read target audience excel row: %w", err)
-		}
-		if rowIndex == 0 {
-			rowIndex++
-			continue // header row
-		}
-		if len(row) == 0 {
-			rowIndex++
-			continue
-		}
-		uid := strings.TrimSpace(row[0])
-		if uid != "" {
-			uids = append(uids, uid)
-		}
-		rowIndex++
-	}
-	if err := rows.Error(); err != nil {
-		return nil, fmt.Errorf("failed while reading target audience excel rows: %w", err)
-	}
-	return uids, nil
-}
-
-func (s *CampaignScheduler) fetchSMSAudiencePhonesByUIDs(ctx context.Context, c dto.BotGetCampaignResponse, token string, inputUIDs []string) (*SMSAudiencePhonesResult, error) {
-	if len(inputUIDs) == 0 {
-		return &SMSAudiencePhonesResult{}, nil
-	}
-
-	uniqueUIDs := make([]string, 0, len(inputUIDs))
-	seen := make(map[string]struct{}, len(inputUIDs))
-	for _, raw := range inputUIDs {
-		uid := strings.TrimSpace(raw)
-		if uid == "" {
-			continue
-		}
-		if _, ok := seen[uid]; ok {
-			continue
-		}
-		seen[uid] = struct{}{}
-		uniqueUIDs = append(uniqueUIDs, uid)
-	}
-	if len(uniqueUIDs) == 0 {
-		return &SMSAudiencePhonesResult{}, nil
-	}
-
-	profiles, err := s.audRepo.ByUIDs(ctx, uniqueUIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	byUID := make(map[string]*models.AudienceProfile, len(profiles))
-	for _, p := range profiles {
-		if p == nil {
-			continue
-		}
-		byUID[p.UID] = p
-	}
-
-	type matchedAudience struct {
-		id    int64
-		phone string
-		uid   string
-	}
-
-	matched := make([]matchedAudience, 0, len(uniqueUIDs))
-	unmatchedUIDs := make([]string, 0)
-	for _, uid := range uniqueUIDs {
-		profile, ok := byUID[uid]
-		if !ok {
-			unmatchedUIDs = append(unmatchedUIDs, uid)
-			continue
-		}
-		if profile.PhoneNumber == nil || strings.TrimSpace(*profile.PhoneNumber) == "" {
-			unmatchedUIDs = append(unmatchedUIDs, uid)
-			continue
-		}
-		matched = append(matched, matchedAudience{
-			id:    profile.ID,
-			phone: strings.TrimSpace(*profile.PhoneNumber),
-			uid:   uid,
-		})
-	}
-
-	sort.SliceStable(matched, func(i, j int) bool {
-		return matched[i].id < matched[j].id
-	})
-
-	phones := make([]string, 0, len(matched))
-	ids := make([]int64, 0, len(matched))
-	matchedUIDs := make([]string, 0, len(matched))
-	for _, item := range matched {
-		phones = append(phones, item.phone)
-		ids = append(ids, item.id)
-		matchedUIDs = append(matchedUIDs, item.uid)
-	}
-
-	if !hasCampaignAdLink(c.AdLink) {
-		s.logger.Printf("fetchSMSAudiencePhonesByUIDs skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
-		return &SMSAudiencePhonesResult{
-			Phones:        phones,
-			IDs:           ids,
-			Codes:         make([]string, len(phones)),
-			MatchedUIDs:   matchedUIDs,
-			UnmatchedUIDs: unmatchedUIDs,
-		}, nil
-	}
-
-	// Generate sequential UIDs via bot API and persist short links centrally.
-	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
-	if err != nil {
-		s.logger.Printf("fetchSMSAudiencePhonesByUIDs allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
-		return nil, err
-	}
-
-	return &SMSAudiencePhonesResult{
-		Phones:        phones,
-		IDs:           ids,
-		Codes:         codes,
-		MatchedUIDs:   matchedUIDs,
-		UnmatchedUIDs: unmatchedUIDs,
-	}, nil
-}
-
-func (s *CampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, processedCampaignID uint, unmatchedUIDs []string) error {
+func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, processedCampaignID uint, unmatchedUIDs []string) error {
 	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
 	if err != nil {
 		return err
@@ -834,7 +640,7 @@ func (s *CampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, proc
 		return fmt.Errorf("processed campaign not found for processed campaign id=%d", processedCampaignID)
 	}
 
-	trackingIDs, err := s.allocateTrackingIDs(ctx, len(unmatchedUIDs))
+	trackingIDs, err := allocateTrackingIDs(ctx, s.db, len(unmatchedUIDs))
 	if err != nil {
 		return err
 	}
@@ -866,13 +672,14 @@ func (s *CampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, proc
 	}
 
 	now := utils.UTCNow()
-	fakeJob := &models.SMSStatusJob{
+	executedAt := now.Add(time.Second)
+	fakeJob := &models.CampaignStatusJob{
 		ProcessedCampaignID: processedCampaignID,
 		CorrelationID:       uuid.NewString(),
 		TrackingIDs:         pq.StringArray(trackingIDs),
 		RetryCount:          0,
 		ScheduledAt:         now,
-		ExecutedAt:          new(now.Add(time.Second)),
+		ExecutedAt:          &executedAt,
 		CreatedAt:           now,
 		UpdatedAt:           now.Add(time.Second),
 	}
@@ -880,7 +687,8 @@ func (s *CampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, proc
 		return err
 	}
 
-	zero := new(int64(0))
+	zeroVal := int64(0)
+	zero := &zeroVal
 	fakeSMSStatusResults := make([]*models.SMSStatusResult, 0, len(unmatchedUIDs))
 	for _, trackingID := range trackingIDs {
 		status := errCode
@@ -913,97 +721,10 @@ func (s *CampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, proc
 	return nil
 }
 
-const (
-	trackingCounterName   = "sms_tracking_id"
-	trackingCounterHexLen = 16
-	trackingCounterBits   = 16 * 4
-)
-
-func (s *CampaignScheduler) allocateTrackingIDs(ctx context.Context, count int) ([]string, error) {
-	if count <= 0 {
-		return nil, nil
-	}
-
-	var ids []string
-	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
-		db := s.db.WithContext(txCtx)
-		if tx, ok := txCtx.Value(repository.TxContextKey).(*gorm.DB); ok && tx != nil {
-			db = tx.WithContext(txCtx)
-		}
-
-		var counter models.SequenceCounter
-		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&counter, "name = ?", trackingCounterName).Error; err != nil {
-			if !errors.Is(err, gorm.ErrRecordNotFound) {
-				return err
-			}
-			now := utils.UTCNow()
-			counter = models.SequenceCounter{
-				Name:      trackingCounterName,
-				LastValue: strings.Repeat("0", trackingCounterHexLen),
-				CreatedAt: now,
-				UpdatedAt: now,
-			}
-			if err := db.Create(&counter).Error; err != nil {
-				return err
-			}
-		}
-
-		last := strings.TrimSpace(counter.LastValue)
-		if last == "" {
-			last = strings.Repeat("0", trackingCounterHexLen)
-		}
-		if len(last) > trackingCounterHexLen {
-			return fmt.Errorf("tracking counter exceeds %d hex chars", trackingCounterHexLen)
-		}
-		last = strings.Repeat("0", trackingCounterHexLen-len(last)) + strings.ToLower(last)
-		base := new(big.Int)
-		if _, ok := base.SetString(last, 16); !ok {
-			return fmt.Errorf("invalid tracking counter value")
-		}
-
-		ids = make([]string, count)
-		for i := 0; i < count; i++ {
-			base.Add(base, big.NewInt(1))
-			if base.BitLen() > trackingCounterBits {
-				return fmt.Errorf("tracking counter overflow")
-			}
-			ids[i] = fmt.Sprintf("%0*x", trackingCounterHexLen, base)
-		}
-
-		counter.LastValue = ids[len(ids)-1]
-		counter.UpdatedAt = utils.UTCNow()
-		return db.Model(&models.SequenceCounter{}).
-			Where("name = ?", counter.Name).
-			Updates(map[string]any{
-				"last_value": counter.LastValue,
-				"updated_at": counter.UpdatedAt,
-			}).Error
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return ids, nil
-}
-
-func hashTags(tags []string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	cp := make([]string, len(tags))
-	copy(cp, tags)
-	sort.Strings(cp)
-	h := sha1.Sum([]byte(strings.Join(cp, ",")))
-	return hex.EncodeToString(h[:])
-}
-
-// scheduleStatusCheckJobs creates three status check jobs for the provided tracking IDs
-func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, trackingIDs []string) error {
-	if len(trackingIDs) == 0 {
+func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, trackingIDs []string) error {
+	if len(trackingIDs) == 0 || s.jobRepo == nil {
 		return nil
 	}
-	corrID := uuid.NewString()
 	filteredTrackingIDs := make([]string, 0, len(trackingIDs))
 	for _, id := range trackingIDs {
 		if strings.TrimSpace(id) != "" {
@@ -1014,11 +735,12 @@ func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, process
 		return nil
 	}
 
+	corrID := uuid.NewString()
 	now := utils.UTCNow()
 	offsets := []time.Duration{5 * time.Minute, 15 * time.Minute, 1 * time.Hour, 24 * time.Hour, 48 * time.Hour}
-	jobs := make([]*models.SMSStatusJob, 0, len(offsets))
+	jobs := make([]*models.CampaignStatusJob, 0, len(offsets))
 	for _, off := range offsets {
-		jobs = append(jobs, &models.SMSStatusJob{
+		jobs = append(jobs, &models.CampaignStatusJob{
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       corrID,
 			TrackingIDs:         pq.StringArray(filteredTrackingIDs),
@@ -1031,95 +753,105 @@ func (s *CampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, process
 	return s.jobRepo.SaveBatch(ctx, jobs)
 }
 
-// startStatusJobWorker polls and executes due SMS status jobs every 10 minutes
-func (s *CampaignScheduler) startStatusJobWorker(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+func (s *SMSCampaignScheduler) startStatusJobWorker(ctx context.Context) {
+	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
-
-	// initial run
-	s.processStatusJobs(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.processStatusJobs(ctx)
+			ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Minute)
+			s.processStatusJobs(ctx2)
+			cancel2()
 		}
 	}
 }
 
-func (s *CampaignScheduler) processStatusJobs(ctx context.Context) {
+func (s *SMSCampaignScheduler) processStatusJobs(ctx context.Context) {
+	if s.jobRepo == nil || s.resRepo == nil {
+		return
+	}
+
 	now := utils.UTCNow()
-	jobs, err := s.jobRepo.ListDue(ctx, now, 100)
+	jobs, err := s.jobRepo.ListDue(ctx, now, 20)
 	if err != nil {
-		s.logger.Printf("scheduler: list status jobs failed: %v", err)
+		s.logger.Printf("SMS scheduler: list status jobs failed: %v", err)
 		return
 	}
 	if len(jobs) == 0 {
 		return
 	}
 
-	token, err := s.smsClient.GetToken(ctx)
+	atiehAccessToken, err := s.smsClient.GetToken(ctx)
 	if err != nil {
-		s.logger.Printf("scheduler: payamsms token for status jobs failed: %v", err)
+		s.logger.Printf("SMS scheduler: payamsms token for status jobs failed: %v", err)
 		return
 	}
 
-	// TODO: What about parallel execution with limited concurrency?
+	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
 	for _, job := range jobs {
-		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // #TODO: adjust timeout as needed
-		if err := s.handleStatusJob(jobCtx, job, token); err != nil {
-			s.logger.Printf("scheduler: handle status job id=%d failed: %v", job.ID, err)
+		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: adjust timeout as needed
+		if err := s.handleStatusJob(jobCtx, job, atiehAccessToken); err != nil {
+			s.logger.Printf("SMS scheduler: handle status job id=%d failed: %v", job.ID, err)
+			if job.RetryCount >= smsStatusJobMaxRetry {
+				s.logger.Printf("SMS scheduler: status job id=%d reached max retries, marking as failed", job.ID)
+				// Optionally, update job status to failed in DB here
+			}
+			// Note: The job will be retried in the next tick based on its ScheduledAt and RetryCount
 		} else {
-			s.logger.Printf("scheduler: handle status job id=%d succeeded", job.ID)
+			s.logger.Printf("SMS scheduler: handle status job id=%d succeeded", job.ID)
 		}
 		cancel()
 	}
 }
 
-func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMSStatusJob, token string) error {
-	results, err := s.smsClient.FetchStatus(ctx, token, []string(job.TrackingIDs))
-	var stats map[string]any
-
-	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.CampaignStatusJob, jazzAccessToken string) error {
+	statusItems, fetchErr := s.smsClient.FetchStatus(ctx, jazzAccessToken, []string(job.TrackingIDs))
+	if fetchErr != nil {
 		now := utils.UTCNow()
-		if err != nil {
-			job.RetryCount++
-			msg := err.Error()
-			job.Error = &msg
+		job.RetryCount++
+		msg := fetchErr.Error()
+		job.Error = &msg
+		job.UpdatedAt = now
+		if job.RetryCount >= smsStatusJobMaxRetry {
 			job.ExecutedAt = &now
-			job.UpdatedAt = now
-			return s.jobRepo.Update(txCtx, job)
+		} else {
+			job.ExecutedAt = nil
 		}
+		if err := s.jobRepo.Update(ctx, job); err != nil {
+			return err
+		}
+		return fetchErr
+	}
 
-		rows := make([]*models.SMSStatusResult, 0, len(results))
-		for idx, r := range results {
-			tp := r.TotalParts
-			td := r.TotalDeliveredParts
-			tu := r.TotalUndeliveredParts
-			tu2 := r.TotalUnknownParts
-			status := r.Status
-			trackingID := ""
-			if idx < len(job.TrackingIDs) {
-				trackingID = job.TrackingIDs[idx]
+	txErr := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		now := utils.UTCNow()
+
+		statusRows := make([]*models.SMSStatusResult, 0, len(statusItems))
+		for _, item := range statusItems {
+			// BUG FIX 7: was `job.TrackingIDs[idx]` (positional array index). The provider
+			// API is not guaranteed to return results in the same order as the request, so
+			// correlating by position silently maps status results to the wrong tracking IDs.
+			// Use the TrackingID that the provider echoes back in each response item instead.
+			trackingID := strings.TrimSpace(item.TrackingID)
+			if trackingID == "" {
+				continue
 			}
-			rows = append(rows, &models.SMSStatusResult{
+			statusRows = append(statusRows, &models.SMSStatusResult{
 				JobID:                 job.ID,
 				ProcessedCampaignID:   job.ProcessedCampaignID,
 				TrackingID:            trackingID,
-				ServerID:              r.ServerID,
-				TotalParts:            &tp,
-				TotalDeliveredParts:   &td,
-				TotalUndeliveredParts: &tu,
-				TotalUnknownParts:     &tu2,
-				Status:                &status,
+				ServerID:              item.ServerID,
+				TotalParts:            &item.TotalParts,
+				TotalDeliveredParts:   &item.TotalDeliveredParts,
+				TotalUndeliveredParts: &item.TotalUndeliveredParts,
+				TotalUnknownParts:     &item.TotalUnknownParts,
+				Status:                &item.Status,
 			})
 		}
-		if err := s.resRepo.SaveBatch(txCtx, rows); err != nil {
-			return err
-		}
-		if stats, err = s.updateProcessedCampaignStats(txCtx, job.ProcessedCampaignID); err != nil {
+		if err := s.resRepo.SaveBatch(txCtx, statusRows); err != nil {
 			return err
 		}
 		job.ExecutedAt = &now
@@ -1127,11 +859,15 @@ func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMS
 		job.UpdatedAt = now
 		return s.jobRepo.Update(txCtx, job)
 	})
+	if txErr != nil {
+		return txErr
+	}
+
+	stats, err := s.updateProcessedCampaignStats(ctx, job.ProcessedCampaignID)
 	if err != nil {
 		return err
 	}
 
-	// Push statistics to bot API after transaction commits
 	if stats != nil {
 		pc, err := s.pcRepo.ByID(ctx, job.ProcessedCampaignID)
 		if err != nil {
@@ -1147,7 +883,7 @@ func (s *CampaignScheduler) handleStatusJob(ctx context.Context, job *models.SMS
 	return nil
 }
 
-func (s *CampaignScheduler) updateProcessedCampaignStats(txCtx context.Context, processedCampaignID uint) (map[string]any, error) {
+func (s *SMSCampaignScheduler) updateProcessedCampaignStats(txCtx context.Context, processedCampaignID uint) (map[string]any, error) {
 	pc, err := s.pcRepo.ByID(txCtx, processedCampaignID)
 	if err != nil {
 		return nil, err
@@ -1186,4 +922,41 @@ func (s *CampaignScheduler) updateProcessedCampaignStats(txCtx context.Context, 
 		return nil, err
 	}
 	return stats, nil
+}
+
+func (s *SMSCampaignScheduler) notifyAdmin(message string) {
+	if s.notifier == nil {
+		return
+	}
+	go func(msg string) {
+		for _, mobile := range s.adminCfg.ActiveMobiles() {
+			_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
+		}
+	}(message)
+}
+
+func buildSMSProviderUpdate(trackingID string, resp *PayamSMSResponseItem, sendErr error) repository.SentSMSProviderUpdate {
+	update := repository.SentSMSProviderUpdate{
+		TrackingID: trackingID,
+	}
+	if sendErr != nil {
+		code := "SEND_BATCH_FAILED"
+		desc := sendErr.Error()
+		update.ErrorCode = &code
+		update.Description = &desc
+		return update
+	}
+
+	if resp == nil {
+		code := "MISSING_SEND_RESPONSE"
+		desc := fmt.Sprintf("missing send response for tracking_id=%s", trackingID)
+		update.ErrorCode = &code
+		update.Description = &desc
+		return update
+	}
+
+	update.ServerID = resp.ServerID
+	update.ErrorCode = resp.ErrorCode
+	update.Description = resp.Desc
+	return update
 }
