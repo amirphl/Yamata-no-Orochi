@@ -8136,6 +8136,9 @@ const docTemplate = `{
                 "account_type": {
                     "type": "string"
                 },
+                "company_address": {
+                    "type": "string"
+                },
                 "company_name": {
                     "type": "string"
                 },
@@ -8149,6 +8152,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "national_id": {
+                    "type": "string"
+                },
+                "postal_code": {
                     "type": "string"
                 },
                 "representative_first_name": {
@@ -8425,6 +8431,9 @@ const docTemplate = `{
             "properties": {
                 "company_name": {
                     "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
                 },
                 "representative_first_name": {
                     "type": "string"
