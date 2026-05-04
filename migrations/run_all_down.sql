@@ -3,6 +3,16 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0100_rename_sms_status_results_customer_id_to_tracking_id_down.sql...'
+\i migrations/0100_rename_sms_status_results_customer_id_to_tracking_id_down.sql
+
+\echo 'Running 0099_create_bale_status_results_down.sql...'
+\i migrations/0099_create_bale_status_results_down.sql
+
+\echo 'Running 0098_rename_sms_status_jobs_to_campaign_status_jobs_down.sql...'
+\i migrations/0098_rename_sms_status_jobs_to_campaign_status_jobs_down.sql
+
+\echo 'Running 0097_add_invoice_issue_requested_audit_action_down.sql...'
 \i migrations/0097_add_invoice_issue_requested_audit_action_down.sql
 
 \echo 'Running 0096_add_campaign_refund_reconcile_failed_audit_action_down.sql...'
