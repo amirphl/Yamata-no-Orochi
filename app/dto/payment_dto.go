@@ -22,8 +22,9 @@ type ChargeWalletResponse struct {
 
 // ChargeWalletByAdminRequest represents an admin request to directly charge a customer wallet.
 type ChargeWalletByAdminRequest struct {
-	CustomerID    uint   `json:"customer_id" validate:"required,min=1"`
-	AmountWithTax uint64 `json:"amount_with_tax" validate:"required,min=1000,max=1000000000"`
+	CustomerID     uint   `json:"customer_id" validate:"required,min=1"`
+	AmountWithTax  uint64 `json:"amount_with_tax" validate:"required,min=1000,max=1000000000"`
+	IdempotencyKey string `json:"idempotency_key,omitempty" validate:"omitempty,min=8,max=128"`
 }
 
 // ChargeWalletByAdminResponse represents the response after a successful admin wallet charge.
