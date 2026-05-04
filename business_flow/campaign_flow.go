@@ -228,7 +228,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 
 	// if req.ScheduleAt == nil && campaign.Spec.ScheduleAt == nil {
-	// 	req.ScheduleAt = new(utils.UTCNow().Add(time.Hour))
+	// 	req.ScheduleAt = utils.ToPtr(utils.UTCNow().Add(time.Hour))
 	// 	campaign.Spec.ScheduleAt = req.ScheduleAt
 	// }
 
@@ -2134,7 +2134,7 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 		return ErrCampaignContentRequired
 	}
 	if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() {
-		campaign.Spec.ScheduleAt = new(utils.UTCNow().Add(20 * time.Minute))
+		campaign.Spec.ScheduleAt = utils.ToPtr(utils.UTCNow().Add(20 * time.Minute))
 		// return ErrScheduleTimeNotPresent
 	}
 	if campaign.Spec.ScheduleAt.Before(utils.UTCNow().Add(10 * time.Minute)) {
