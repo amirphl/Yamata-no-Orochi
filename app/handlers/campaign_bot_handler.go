@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -144,11 +145,19 @@ func (h *CampaignBotHandler) ResetAudienceSpec(c fiber.Ctx) error {
 // @Summary Bot List Ready Campaigns
 // @Tags Bot Campaigns
 // @Produce json
+// @Param platform query string false "Filter by platform (sms|rubika|bale|splus)"
 // @Success 200 {object} dto.APIResponse{data=dto.BotListCampaignsResponse}
 // @Router /api/v1/bot/campaigns/ready [get]
 func (h *CampaignBotHandler) ListReadyCampaigns(c fiber.Ctx) error {
-	res, err := h.campaignFlow.ListReadyCampaigns(h.createRequestContext(c, "/api/v1/bot/campaigns/ready"))
+	var platformPtr *string
+	if p := strings.TrimSpace(c.Query("platform")); p != "" {
+		platformPtr = &p
+	}
+	res, err := h.campaignFlow.ListReadyCampaigns(h.createRequestContext(c, "/api/v1/bot/campaigns/ready"), platformPtr)
 	if err != nil {
+		if businessflow.IsCampaignPlatformInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
+		}
 		log.Println("List ready campaigns failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list ready campaigns", "LIST_READY_CAMPAIGNS_FAILED", nil)
 	}
