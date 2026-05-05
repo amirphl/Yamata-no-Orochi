@@ -230,7 +230,7 @@ func (c *httpBaleClient) SendBatch(ctx context.Context, reqs []BaleSendMessageRe
 		return nil, fmt.Errorf("bale api access key is not configured")
 	}
 	if len(reqs) == 0 {
-		return nil, nil
+		return []BaleSendMessageResponse{}, nil
 	}
 
 	trimmedItems := make([]BaleSendMessageRequest, 0, len(reqs))
@@ -241,7 +241,7 @@ func (c *httpBaleClient) SendBatch(ctx context.Context, reqs []BaleSendMessageRe
 		trimmedItems = append(trimmedItems, req)
 	}
 	if len(trimmedItems) == 0 {
-		return nil, nil
+		return []BaleSendMessageResponse{}, nil
 	}
 	if c.provider != baleProviderLegacy && len(trimmedItems) > najvaMaxRecipients {
 		return nil, fmt.Errorf("najva send supports at most %d recipients per request, got %d", najvaMaxRecipients, len(trimmedItems))
@@ -450,23 +450,23 @@ func (c *httpBaleClient) sendNajvaP2PBatchWithRetry(ctx context.Context, reqs []
 
 func (c *httpBaleClient) sendNajvaBatchOnce(ctx context.Context, reqs []BaleSendMessageRequest) ([]BaleSendMessageResponse, error) {
 	type najvaSendRequest struct {
-		Receptor []string `json:"receptor"`
-		Message  string   `json:"message"`
-		Sender   string   `json:"sender,omitempty"`
-		FileID   *string  `json:"file_id,omitempty"`
+		Receivers []string `json:"receivers"`
+		Message   string   `json:"message"`
+		Sender    string   `json:"sender,omitempty"`
+		FileID    *string  `json:"file_id,omitempty"`
 	}
 
 	firstText, firstFileID := extractBaleMessagePayload(&reqs[0])
 	payload := najvaSendRequest{
-		Receptor: make([]string, 0, len(reqs)),
-		Message:  strings.TrimSpace(firstText),
-		Sender:   strconv.FormatInt(reqs[0].BotID, 10),
-		FileID:   normalizeOptionalStringPtrRef(firstFileID),
+		Receivers: make([]string, 0, len(reqs)),
+		Message:   strings.TrimSpace(firstText),
+		Sender:    strconv.FormatInt(reqs[0].BotID, 10),
+		FileID:    normalizeOptionalStringPtrRef(firstFileID),
 	}
 	for _, req := range reqs {
-		payload.Receptor = append(payload.Receptor, strings.TrimSpace(req.PhoneNumber))
+		payload.Receivers = append(payload.Receivers, normalizeNajvaPhoneNumber(req.PhoneNumber))
 	}
-	if err := validateNajvaBulkSendRequest(payload.Receptor, payload.Message, payload.Sender); err != nil {
+	if err := validateNajvaBulkSendRequest(payload.Receivers, payload.Message, payload.Sender); err != nil {
 		return nil, err
 	}
 
@@ -493,7 +493,11 @@ func (c *httpBaleClient) sendNajvaBatchOnce(ctx context.Context, reqs []BaleSend
 			RawBody:   body,
 		}
 
-		item, ok := popNajvaSendItemForReceptor(byReceptor, strings.TrimSpace(reqs[i].PhoneNumber))
+		normalizedPhone := normalizeNajvaPhoneNumber(reqs[i].PhoneNumber)
+		item, ok := popNajvaSendItemForReceptor(byReceptor, normalizedPhone)
+		if !ok {
+			item, ok = popNajvaSendItemForReceptor(byReceptor, strings.TrimSpace(reqs[i].PhoneNumber))
+		}
 		if !ok && i < len(items) {
 			item = items[i]
 			ok = true
@@ -536,26 +540,37 @@ func (c *httpBaleClient) sendNajvaBatchOnce(ctx context.Context, reqs []BaleSend
 }
 
 func (c *httpBaleClient) sendNajvaP2PBatchOnce(ctx context.Context, reqs []BaleSendMessageRequest) ([]BaleSendMessageResponse, error) {
+	type najvaP2PMessage struct {
+		Message  string `json:"message"`
+		Receiver string `json:"receiver"`
+	}
+
 	type najvaSendP2PRequest struct {
-		Receptor []string `json:"receptor"`
-		Message  []string `json:"message"`
-		Sender   string   `json:"sender,omitempty"`
-		FileID   *string  `json:"file_id,omitempty"`
+		Messages []najvaP2PMessage `json:"messages"`
+		Sender   string            `json:"sender,omitempty"`
+		FileID   *string           `json:"file_id,omitempty"`
 	}
 
 	_, firstFileID := extractBaleMessagePayload(&reqs[0])
 	payload := najvaSendP2PRequest{
-		Receptor: make([]string, 0, len(reqs)),
-		Message:  make([]string, 0, len(reqs)),
+		Messages: make([]najvaP2PMessage, 0, len(reqs)),
 		Sender:   strconv.FormatInt(reqs[0].BotID, 10),
 		FileID:   normalizeOptionalStringPtrRef(firstFileID),
 	}
+	receptors := make([]string, 0, len(reqs))
+	messages := make([]string, 0, len(reqs))
 	for _, req := range reqs {
 		text, _ := extractBaleMessagePayload(&req)
-		payload.Receptor = append(payload.Receptor, strings.TrimSpace(req.PhoneNumber))
-		payload.Message = append(payload.Message, strings.TrimSpace(text))
+		receiver := normalizeNajvaPhoneNumber(req.PhoneNumber)
+		message := strings.TrimSpace(text)
+		payload.Messages = append(payload.Messages, najvaP2PMessage{
+			Message:  message,
+			Receiver: receiver,
+		})
+		receptors = append(receptors, receiver)
+		messages = append(messages, message)
 	}
-	if err := validateNajvaP2PSendRequest(payload.Receptor, payload.Message, payload.Sender); err != nil {
+	if err := validateNajvaP2PSendRequest(receptors, messages, payload.Sender); err != nil {
 		return nil, err
 	}
 
@@ -582,7 +597,11 @@ func (c *httpBaleClient) sendNajvaP2PBatchOnce(ctx context.Context, reqs []BaleS
 			RawBody:   body,
 		}
 
-		item, ok := popNajvaSendItemForReceptor(byReceptor, strings.TrimSpace(reqs[i].PhoneNumber))
+		normalizedPhone := normalizeNajvaPhoneNumber(reqs[i].PhoneNumber)
+		item, ok := popNajvaSendItemForReceptor(byReceptor, normalizedPhone)
+		if !ok {
+			item, ok = popNajvaSendItemForReceptor(byReceptor, strings.TrimSpace(reqs[i].PhoneNumber))
+		}
 		if !ok && i < len(items) {
 			item = items[i]
 			ok = true
@@ -654,7 +673,7 @@ func (c *httpBaleClient) FetchStatus(ctx context.Context, messageIDs []string) (
 		return nil, fmt.Errorf("bale api access key is not configured")
 	}
 	if len(messageIDs) == 0 {
-		return nil, nil
+		return []BaleStatusResponse{}, nil
 	}
 
 	// Najva is currently the only provider with the documented status API in this codebase.
@@ -675,7 +694,7 @@ func (c *httpBaleClient) FetchStatus(ctx context.Context, messageIDs []string) (
 		cleanIDs = append(cleanIDs, parsed)
 	}
 	if len(cleanIDs) == 0 {
-		return nil, nil
+		return []BaleStatusResponse{}, nil
 	}
 
 	out := make([]BaleStatusResponse, 0, len(cleanIDs))
@@ -800,20 +819,20 @@ func (c *httpBaleClient) sendSafir(ctx context.Context, reqBody *BaleSendMessage
 
 func (c *httpBaleClient) sendNajva(ctx context.Context, reqBody *BaleSendMessageRequest) (*BaleSendMessageResponse, error) {
 	type najvaSendRequest struct {
-		Receptor []string `json:"receptor"`
-		Message  string   `json:"message"`
-		Sender   string   `json:"sender,omitempty"`
-		FileID   *string  `json:"file_id,omitempty"`
+		Receivers []string `json:"receivers"`
+		Message   string   `json:"message"`
+		Sender    string   `json:"sender,omitempty"`
+		FileID    *string  `json:"file_id,omitempty"`
 	}
 
 	text, fileID := extractBaleMessagePayload(reqBody)
 	payload := najvaSendRequest{
-		Receptor: []string{strings.TrimSpace(reqBody.PhoneNumber)},
-		Message:  strings.TrimSpace(text),
-		Sender:   strconv.FormatInt(reqBody.BotID, 10),
-		FileID:   normalizeOptionalStringPtrRef(fileID),
+		Receivers: []string{normalizeNajvaPhoneNumber(reqBody.PhoneNumber)},
+		Message:   strings.TrimSpace(text),
+		Sender:    strconv.FormatInt(reqBody.BotID, 10),
+		FileID:    normalizeOptionalStringPtrRef(fileID),
 	}
-	if err := validateNajvaBulkSendRequest(payload.Receptor, payload.Message, payload.Sender); err != nil {
+	if err := validateNajvaBulkSendRequest(payload.Receivers, payload.Message, payload.Sender); err != nil {
 		return nil, err
 	}
 
@@ -931,18 +950,16 @@ func (c *httpBaleClient) uploadFileNajva(ctx context.Context, path string) (*Bal
 		return nil, newBaleHTTPError("najva upload_file", resp.StatusCode, body)
 	}
 
-	var out struct {
-		FileID string `json:"file_id"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil {
+	fileID, err := decodeNajvaUploadFileID(body)
+	if err != nil {
 		return nil, fmt.Errorf("decode najva upload response: %w", err)
 	}
-	if strings.TrimSpace(out.FileID) == "" {
+	if strings.TrimSpace(fileID) == "" {
 		return nil, fmt.Errorf("najva upload returned empty file_id")
 	}
 
 	return &BaleUploadFileResponse{
-		FileID:   strings.TrimSpace(out.FileID),
+		FileID:   strings.TrimSpace(fileID),
 		RawBody:  body,
 		Provider: baleProviderNajvaV2,
 	}, nil
@@ -1026,10 +1043,14 @@ func setBaleAuthHeaders(req *http.Request, apiKey string) {
 	if trimmed == "" || req == nil {
 		return
 	}
+	if !strings.HasPrefix(strings.ToLower(trimmed), "bearer ") {
+		trimmed = "Bearer " + trimmed
+	}
 	// Keep legacy key header and add common alternatives for proxy providers.
 	req.Header.Set("api-access-key", trimmed)
 	req.Header.Set("x-api-key", trimmed)
 	req.Header.Set("apikey", trimmed)
+	req.Header.Set("Authorization", trimmed)
 }
 
 func extractBaleMessagePayload(req *BaleSendMessageRequest) (string, *string) {
@@ -1110,10 +1131,38 @@ func validateNajvaP2PSendRequest(receptors []string, messages []string, sender s
 	return nil
 }
 
+func normalizeNajvaPhoneNumber(raw string) string {
+	phone := strings.TrimSpace(raw)
+	if phone == "" {
+		return ""
+	}
+
+	switch {
+	case strings.HasPrefix(phone, "+98"):
+		phone = strings.TrimPrefix(phone, "+98")
+	case strings.HasPrefix(phone, "0098"):
+		phone = strings.TrimPrefix(phone, "0098")
+	case strings.HasPrefix(phone, "98"):
+		phone = strings.TrimPrefix(phone, "98")
+	}
+
+	phone = strings.TrimSpace(phone)
+	if phone == "" {
+		return ""
+	}
+	if !strings.HasPrefix(phone, "0") {
+		phone = "0" + strings.TrimLeft(phone, "0")
+	}
+	return phone
+}
+
 func buildNajvaSendItemsByReceptor(items []najvaSendItem) map[string][]najvaSendItem {
 	out := make(map[string][]najvaSendItem, len(items))
 	for _, item := range items {
-		receptor := strings.TrimSpace(item.Receptor)
+		receptor := firstNonEmpty(
+			strings.TrimSpace(item.Receptor),
+			strings.TrimSpace(item.Receiver),
+		)
 		if receptor == "" {
 			continue
 		}
@@ -1146,6 +1195,7 @@ type najvaSendItem struct {
 	StatusText string `json:"statustext"`
 	Sender     string `json:"sender"`
 	Receptor   string `json:"receptor"`
+	Receiver   string `json:"receiver"`
 	Date       any    `json:"date"`
 	Cost       any    `json:"cost"`
 }
@@ -1163,12 +1213,23 @@ func decodeNajvaSendItems(body []byte) ([]najvaSendItem, error) {
 	}
 
 	var envelope struct {
-		Items  []najvaSendItem `json:"items"`
-		Data   []najvaSendItem `json:"data"`
-		Result []najvaSendItem `json:"result"`
+		Return  json.RawMessage `json:"return"`
+		Entries json.RawMessage `json:"entries"`
+		Items   []najvaSendItem `json:"items"`
+		Data    []najvaSendItem `json:"data"`
+		Result  []najvaSendItem `json:"result"`
 	}
 	if err := json.Unmarshal(body, &envelope); err == nil {
 		switch {
+		case len(envelope.Entries) > 0:
+			var entriesMany []najvaSendItem
+			if err := json.Unmarshal(envelope.Entries, &entriesMany); err == nil && len(entriesMany) > 0 {
+				return entriesMany, nil
+			}
+			var entryOne najvaSendItem
+			if err := json.Unmarshal(envelope.Entries, &entryOne); err == nil {
+				return []najvaSendItem{entryOne}, nil
+			}
 		case len(envelope.Items) > 0:
 			return envelope.Items, nil
 		case len(envelope.Data) > 0:
@@ -1192,12 +1253,23 @@ func decodeNajvaStatusItems(body []byte) ([]najvaStatusItem, error) {
 	}
 
 	var envelope struct {
-		Items  []najvaStatusItem `json:"items"`
-		Data   []najvaStatusItem `json:"data"`
-		Result []najvaStatusItem `json:"result"`
+		Return  json.RawMessage   `json:"return"`
+		Entries json.RawMessage   `json:"entries"`
+		Items   []najvaStatusItem `json:"items"`
+		Data    []najvaStatusItem `json:"data"`
+		Result  []najvaStatusItem `json:"result"`
 	}
 	if err := json.Unmarshal(body, &envelope); err == nil {
 		switch {
+		case len(envelope.Entries) > 0:
+			var entriesMany []najvaStatusItem
+			if err := json.Unmarshal(envelope.Entries, &entriesMany); err == nil && len(entriesMany) > 0 {
+				return entriesMany, nil
+			}
+			var entryOne najvaStatusItem
+			if err := json.Unmarshal(envelope.Entries, &entryOne); err == nil {
+				return []najvaStatusItem{entryOne}, nil
+			}
 		case len(envelope.Items) > 0:
 			return envelope.Items, nil
 		case len(envelope.Data) > 0:
@@ -1212,6 +1284,47 @@ func decodeNajvaStatusItems(body []byte) ([]najvaStatusItem, error) {
 		return []najvaStatusItem{one}, nil
 	}
 	return nil, fmt.Errorf("unsupported najva status response format")
+}
+
+func decodeNajvaUploadFileID(body []byte) (string, error) {
+	var flat struct {
+		FileID string `json:"file_id"`
+	}
+	if err := json.Unmarshal(body, &flat); err == nil {
+		if trimmed := strings.TrimSpace(flat.FileID); trimmed != "" {
+			return trimmed, nil
+		}
+	}
+
+	var envelope struct {
+		Return  json.RawMessage `json:"return"`
+		Entries json.RawMessage `json:"entries"`
+	}
+	if err := json.Unmarshal(body, &envelope); err == nil && len(envelope.Entries) > 0 {
+		var entry struct {
+			FileID string `json:"file_id"`
+			FildID string `json:"fild_id"`
+		}
+		if err := json.Unmarshal(envelope.Entries, &entry); err == nil {
+			if id := strings.TrimSpace(firstNonEmpty(entry.FileID, entry.FildID)); id != "" {
+				return id, nil
+			}
+		}
+
+		var entries []struct {
+			FileID string `json:"file_id"`
+			FildID string `json:"fild_id"`
+		}
+		if err := json.Unmarshal(envelope.Entries, &entries); err == nil {
+			for _, e := range entries {
+				if id := strings.TrimSpace(firstNonEmpty(e.FileID, e.FildID)); id != "" {
+					return id, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("unsupported najva upload response format")
 }
 
 func normalizeAnyToString(v any) string {
