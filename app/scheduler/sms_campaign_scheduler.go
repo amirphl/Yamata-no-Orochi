@@ -184,7 +184,7 @@ func (s *CampaignScheduler) runOnce(ctx context.Context) {
 	}
 
 	// 3) Get ready campaigns
-	ready, err := s.botClient.ListReadyCampaigns(ctx, token)
+	ready, err := s.botClient.ListReadyCampaigns(ctx, token, models.CampaignPlatformSMS)
 	if err != nil {
 		s.logger.Printf("scheduler: list ready campaigns failed: %v", err)
 		s.notifyAdmin(fmt.Sprintf("Scheduler list ready campaigns failed: %v", err))
