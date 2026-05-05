@@ -302,7 +302,7 @@ func (r *SentBaleMessageRepositoryImpl) UpdateSendResultByTrackingIDs(
 	for _, u := range normalized {
 		trackingIDs = append(trackingIDs, u.TrackingID)
 	}
-	args = append(args, trackingIDs)
+	args = append(args, trackingIDs, trackingIDs)
 
 	query := "UPDATE sent_bale_messages SET " + strings.Join(setClauses, ", ") +
 		" WHERE tracking_id IN ? AND id IN (" +
