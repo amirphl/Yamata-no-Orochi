@@ -2465,6 +2465,19 @@ definitions:
       price_factor:
         type: number
     type: object
+  dto.SendCampaignTestMessageResponse:
+    properties:
+      delivery:
+        type: string
+      message:
+        type: string
+      platform:
+        type: string
+      recipient:
+        type: string
+      warning:
+        type: string
+    type: object
   dto.ShortLinkDTO:
     properties:
       campaign_id:
@@ -3334,8 +3347,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Admin reschedules an eligible campaign; schedule_at should be provided
-        in Tehran time.
+      description: Admin reschedules an eligible campaign; schedule_at must be UTC
+        and its Tehran-local time must be between 08:00 and 21:00.
       parameters:
       - description: Reschedule payload
         in: body
@@ -5623,6 +5636,59 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Export Campaign Report
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/test-send:
+    post:
+      description: Send a best-effort test message for a campaign to the authenticated
+        customer's representative mobile
+      parameters:
+      - description: Campaign UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SendCampaignTestMessageResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Send Campaign Test Message
       tags:
       - Campaigns
   /api/v1/campaigns/audience-spec:
