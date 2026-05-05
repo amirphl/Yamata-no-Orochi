@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -365,16 +367,134 @@ func (c *httpBotClient) DownloadCampaignMedia(ctx context.Context, token, mediaU
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", statusErr("bot media download", resp)
 	}
-	tmpFile, err := os.CreateTemp("", "bale-media-*")
+
+	head := make([]byte, 512)
+	n, readErr := io.ReadFull(resp.Body, head)
+	if readErr != nil && readErr != io.EOF && readErr != io.ErrUnexpectedEOF {
+		return "", readErr
+	}
+	head = head[:n]
+
+	pattern := "bale-media-*"
+	if ext := resolveBotDownloadedMediaExtension(resp, head); ext != "" {
+		pattern += ext
+	}
+
+	tmpFile, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return "", err
 	}
 	defer tmpFile.Close()
 
+	if len(head) > 0 {
+		if _, err := tmpFile.Write(head); err != nil {
+			_ = os.Remove(tmpFile.Name())
+			return "", err
+		}
+	}
 	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
 		_ = os.Remove(tmpFile.Name())
 		return "", err
 	}
 
 	return tmpFile.Name(), nil
+}
+
+func resolveBotDownloadedMediaExtension(resp *http.Response, bodyHead []byte) string {
+	if resp != nil {
+		contentDisposition := strings.TrimSpace(resp.Header.Get("Content-Disposition"))
+		if contentDisposition != "" {
+			_, params, err := mime.ParseMediaType(contentDisposition)
+			if err == nil {
+				if filename := strings.TrimSpace(params["filename"]); filename != "" {
+					if ext := normalizeBotDownloadedMediaExt(filepath.Ext(filename)); ext != "" {
+						return ext
+					}
+				}
+				if filenameStar := strings.TrimSpace(params["filename*"]); filenameStar != "" {
+					if idx := strings.Index(filenameStar, "''"); idx >= 0 {
+						filenameStar = filenameStar[idx+2:]
+					}
+					if decoded, err := url.QueryUnescape(filenameStar); err == nil {
+						filenameStar = decoded
+					}
+					if ext := normalizeBotDownloadedMediaExt(filepath.Ext(filenameStar)); ext != "" {
+						return ext
+					}
+				}
+			}
+		}
+
+		contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+		if ext := botMediaTypeToExtension(contentType); ext != "" {
+			return ext
+		}
+	}
+
+	if len(bodyHead) > 0 {
+		contentType := http.DetectContentType(bodyHead)
+		if ext := botMediaTypeToExtension(contentType); ext != "" {
+			return ext
+		}
+	}
+
+	return ""
+}
+
+func botMediaTypeToExtension(contentType string) string {
+	trimmed := strings.TrimSpace(contentType)
+	if trimmed == "" {
+		return ""
+	}
+	mediaType, _, err := mime.ParseMediaType(trimmed)
+	if err == nil {
+		trimmed = mediaType
+	}
+	trimmed = strings.ToLower(trimmed)
+
+	switch trimmed {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "video/mp4":
+		return ".mp4"
+	case "audio/ogg", "application/ogg":
+		return ".ogg"
+	case "audio/opus":
+		return ".opus"
+	}
+
+	if exts, err := mime.ExtensionsByType(trimmed); err == nil {
+		for _, ext := range exts {
+			if normalized := normalizeBotDownloadedMediaExt(ext); normalized != "" {
+				return normalized
+			}
+		}
+	}
+	return ""
+}
+
+func normalizeBotDownloadedMediaExt(ext string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(ext))
+	if trimmed == "" {
+		return ""
+	}
+	if !strings.HasPrefix(trimmed, ".") {
+		trimmed = "." + trimmed
+	}
+	switch trimmed {
+	case ".jpeg":
+		return ".jpg"
+	case ".oga", ".ogx":
+		return ".ogg"
+	}
+	switch trimmed {
+	case ".jpg", ".png", ".gif", ".mp4", ".ogg", ".opus":
+		return trimmed
+	default:
+		return ""
+	}
 }
