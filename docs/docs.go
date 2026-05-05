@@ -735,7 +735,7 @@ const docTemplate = `{
         },
         "/api/v1/admin/campaigns/reschedule": {
             "post": {
-                "description": "Admin reschedules an eligible campaign; schedule_at should be provided in Tehran time.",
+                "description": "Admin reschedules an eligible campaign; schedule_at must be UTC and its Tehran-local time must be between 08:00 and 21:00.",
                 "consumes": [
                     "application/json"
                 ],
@@ -4832,6 +4832,89 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/test-send": {
+            "post": {
+                "description": "Send a best-effort test message for a campaign to the authenticated customer's representative mobile",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Send Campaign Test Message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SendCampaignTestMessageResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -10606,6 +10689,26 @@ const docTemplate = `{
                 },
                 "price_factor": {
                     "type": "number"
+                }
+            }
+        },
+        "dto.SendCampaignTestMessageResponse": {
+            "type": "object",
+            "properties": {
+                "delivery": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "recipient": {
+                    "type": "string"
+                },
+                "warning": {
+                    "type": "string"
                 }
             }
         },
