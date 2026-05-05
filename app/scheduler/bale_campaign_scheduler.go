@@ -902,7 +902,7 @@ func mapBaleProviderStatus(statusCode int) (totalParts int64, deliveredParts int
 }
 
 func (s *BaleCampaignScheduler) uploadCampaignMedia(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) (*string, error) {
-	if c.MediaUUID == nil {
+	if c.MediaUUID == nil || *c.MediaUUID == uuid.Nil {
 		return nil, nil
 	}
 
