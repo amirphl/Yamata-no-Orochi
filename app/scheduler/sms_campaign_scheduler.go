@@ -327,7 +327,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			items = append(items, PayamSMSItem{
 				Recipient:  p,
 				Body:       body,
-				trackingID: trackingID,
+				TrackingID: trackingID,
 			})
 
 			rows = append(rows, &models.SentSMS{
@@ -376,7 +376,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 
 		sendUpdates := make([]repository.SentSMSProviderUpdate, 0, len(items))
 		for _, item := range items {
-			trackingID := strings.TrimSpace(item.trackingID)
+			trackingID := strings.TrimSpace(item.TrackingID)
 			if trackingID == "" {
 				continue
 			}
@@ -775,7 +775,7 @@ func (s *SMSCampaignScheduler) processStatusJobs(ctx context.Context) {
 	}
 
 	now := utils.UTCNow()
-	jobs, err := s.jobRepo.ListDue(ctx, now, 20)
+	jobs, err := s.jobRepo.ListDue(ctx, now, numJobsPerTick)
 	if err != nil {
 		s.logger.Printf("SMS scheduler: list status jobs failed: %v", err)
 		return
