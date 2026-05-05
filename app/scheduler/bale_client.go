@@ -919,11 +919,17 @@ func (c *httpBaleClient) uploadFileSafir(ctx context.Context, path string) (*Bal
 }
 
 func (c *httpBaleClient) uploadFileNajva(ctx context.Context, path string) (*BaleUploadFileResponse, error) {
-	if err := validateNajvaUploadFile(path); err != nil {
+	preparedPath, cleanup, err := prepareNajvaUploadPath(path)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	if err := validateNajvaUploadFile(preparedPath); err != nil {
 		return nil, err
 	}
 
-	buf, contentType, err := createMultipartFilePayload(path)
+	buf, contentType, err := createMultipartFilePayload(preparedPath)
 	if err != nil {
 		return nil, err
 	}
@@ -963,6 +969,70 @@ func (c *httpBaleClient) uploadFileNajva(ctx context.Context, path string) (*Bal
 		RawBody:  body,
 		Provider: baleProviderNajvaV2,
 	}, nil
+}
+
+func prepareNajvaUploadPath(path string) (string, func(), error) {
+	trimmed := strings.TrimSpace(path)
+	if trimmed == "" {
+		return "", func() {}, fmt.Errorf("upload path is empty")
+	}
+	if strings.TrimSpace(filepath.Ext(trimmed)) != "" {
+		return trimmed, func() {}, nil
+	}
+
+	inferredExt, err := inferNajvaUploadExtension(trimmed)
+	if err != nil {
+		return "", func() {}, err
+	}
+
+	src, err := os.Open(trimmed)
+	if err != nil {
+		return "", func() {}, err
+	}
+	defer src.Close()
+
+	tmpFile, err := os.CreateTemp("", "najva-upload-*"+inferredExt)
+	if err != nil {
+		return "", func() {}, err
+	}
+	tmpPath := tmpFile.Name()
+	defer tmpFile.Close()
+
+	if _, err := io.Copy(tmpFile, src); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", func() {}, err
+	}
+
+	return tmpPath, func() { _ = os.Remove(tmpPath) }, nil
+}
+
+func inferNajvaUploadExtension(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	header := make([]byte, 512)
+	n, err := f.Read(header)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	contentType := strings.ToLower(strings.TrimSpace(http.DetectContentType(header[:n])))
+	switch {
+	case strings.HasPrefix(contentType, "image/jpeg"):
+		return ".jpg", nil
+	case strings.HasPrefix(contentType, "image/png"):
+		return ".png", nil
+	case strings.HasPrefix(contentType, "image/gif"):
+		return ".gif", nil
+	case strings.HasPrefix(contentType, "video/mp4"):
+		return ".mp4", nil
+	case strings.HasPrefix(contentType, "audio/ogg"), strings.HasPrefix(contentType, "application/ogg"):
+		return ".ogg", nil
+	default:
+		return "", fmt.Errorf("unsupported file extension %q; allowed extensions: jpeg, jpg, png, gif, opus, ogg, mp4", "")
+	}
 }
 
 func (c *httpBaleClient) doJSONPost(ctx context.Context, url string, payload any, op string) ([]byte, error) {
