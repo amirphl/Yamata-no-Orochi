@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -29,7 +30,8 @@ const (
 	trackingCounterHexLen = 16
 	trackingCounterBits   = 16 * 4
 
-	numJobsPerTick = 50
+	numJobsPerTick          = 50
+	statusJobWorkerInterval = 5 * time.Minute
 )
 
 type AudiencePhonesResult struct {
