@@ -683,7 +683,7 @@ func (s *BaleCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, pro
 }
 
 func (s *BaleCampaignScheduler) startStatusJobWorker(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Minute)
+	ticker := time.NewTicker(statusJobWorkerInterval)
 	defer ticker.Stop()
 
 	for {
