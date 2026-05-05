@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ type CampaignHandlerInterface interface {
 	CancelCampaign(c fiber.Ctx) error
 	CloneCampaign(c fiber.Ctx) error
 	ExportCampaignReport(c fiber.Ctx) error
+	SendCampaignTestMessage(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -644,6 +646,52 @@ func (h *CampaignHandler) GetApprovedRunningSummary(c fiber.Ctx) error {
 	})
 }
 
+// SendCampaignTestMessage attempts best-effort delivery of a single test message to the authenticated customer's phone.
+// @Summary Send Campaign Test Message
+// @Description Send a best-effort test message for a campaign to the authenticated customer's representative mobile
+// @Tags Campaigns
+// @Produce json
+// @Param uuid path string true "Campaign UUID"
+// @Success 200 {object} dto.APIResponse{data=dto.SendCampaignTestMessageResponse}
+// @Failure 400 {object} dto.APIResponse
+// @Failure 401 {object} dto.APIResponse
+// @Failure 403 {object} dto.APIResponse
+// @Failure 404 {object} dto.APIResponse
+// @Failure 409 {object} dto.APIResponse
+// @Failure 429 {object} dto.APIResponse
+// @Failure 500 {object} dto.APIResponse
+// @Router /api/v1/campaigns/{uuid}/test-send [post]
+func (h *CampaignHandler) SendCampaignTestMessage(c fiber.Ctx) error {
+	campaignUUID := strings.TrimSpace(c.Params("uuid"))
+	if campaignUUID == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is required", "MISSING_CAMPAIGN_UUID", nil)
+	}
+	parsedCampaignUUID, err := uuid.Parse(campaignUUID)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is invalid", "INVALID_CAMPAIGN_UUID", nil)
+	}
+	campaignUUID = parsedCampaignUUID.String()
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok || customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	req := &dto.SendCampaignTestMessageRequest{
+		UUID:       campaignUUID,
+		CustomerID: customerID,
+	}
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+
+	res, err := h.campaignFlow.SendCampaignTestMessage(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID+"/test-send"), req, metadata)
+	if err != nil {
+		log.Println("Campaign test send failed", err)
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Campaign test send failed", "CAMPAIGN_TEST_SEND_FAILED")
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaign test message attempted", res)
+}
+
 // createRequestContext creates a context with request-scoped values for observability and timeout
 func (h *CampaignHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
 	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
@@ -675,6 +723,9 @@ func (h *CampaignHandler) setupCustomValidations() {
 }
 
 func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaultStatus int, defaultMessage, defaultCode string) error {
+	if errors.Is(err, businessflow.ErrInvalidState) {
+		return h.ErrorResponse(c, fiber.StatusConflict, "Another request is already in progress", "INVALID_STATE", nil)
+	}
 	if businessflow.IsCampaignNotFound(err) {
 		return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
 	}
@@ -737,6 +788,21 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 	if businessflow.IsCampaignPlatformSettingNotFound(err) {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Platform settings not found", "PLATFORM_SETTINGS_NOT_FOUND", nil)
 	}
+	if businessflow.IsCampaignTestPlatformSettingsInvalid(err) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Platform settings are invalid for test send", "PLATFORM_SETTINGS_INVALID", nil)
+	}
+	if businessflow.IsCampaignTestRecipientMissing(err) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Representative mobile is missing", "TEST_RECIPIENT_MISSING", nil)
+	}
+	if businessflow.IsCampaignTestStateNotAllowed(err) {
+		return h.ErrorResponse(c, fiber.StatusConflict, "Campaign state does not allow test send", "TEST_SEND_STATE_NOT_ALLOWED", nil)
+	}
+	if businessflow.IsCampaignTestRateLimited(err) {
+		return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Please wait before sending another test message", "TEST_SEND_RATE_LIMITED", nil)
+	}
+	if businessflow.IsCampaignTestCooldownUnavailable(err) {
+		return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Test send cooldown is temporarily unavailable", "TEST_SEND_COOLDOWN_UNAVAILABLE", nil)
+	}
 	if businessflow.IsCampaignLineNumberNotApplicable(err) {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number is only applicable for sms campaigns", "LINE_NUMBER_NOT_APPLICABLE", nil)
 	}
@@ -772,6 +838,7 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 		businessflow.IsCampaignLevel2sRequired(err) ||
 		businessflow.IsCampaignLevel3sRequired(err) ||
 		businessflow.IsCampaignBudgetRequired(err) ||
+		businessflow.IsCampaignBudgetOutOfRange(err) ||
 		businessflow.IsCampaignSexRequired(err) ||
 		businessflow.IsCampaignAdLinkRequired(err) ||
 		businessflow.IsCampaignCityRequired(err) ||
@@ -787,6 +854,18 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 	}
 	if businessflow.IsScheduleTimeTooSoon(err) {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time must be at least 10 minutes in the future", "SCHEDULE_TIME_TOO_SOON", nil)
+	}
+	if businessflow.IsScheduleTimeOutsideWindow(err) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time must be between 08:00 and 21:00 Asia/Tehran", "SCHEDULE_TIME_OUTSIDE_WINDOW", nil)
+	}
+	if businessflow.IsCampaignRescheduleNotAllowed(err) {
+		return h.ErrorResponse(c, fiber.StatusConflict, "Campaign cannot be rescheduled in current status", "CAMPAIGN_RESCHEDULE_NOT_ALLOWED", nil)
+	}
+	if businessflow.IsPlatformBasePriceNotFound(err) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Platform base price not found", "PLATFORM_BASE_PRICE_NOT_FOUND", nil)
+	}
+	if businessflow.IsPagePriceNotFound(err) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Page price not found", "PAGE_PRICE_NOT_FOUND", nil)
 	}
 
 	if be, ok := err.(*businessflow.BusinessError); ok && be.Code != "" {
