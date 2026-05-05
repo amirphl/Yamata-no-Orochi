@@ -55,6 +55,8 @@ type AdminCampaignFlowImpl struct {
 	db                   *gorm.DB
 }
 
+const adminRescheduleMinLeadTime = 5 * time.Minute
+
 var adminTehranLoc *time.Location = time.FixedZone("Asia/Tehran", 3*3600+1800)
 
 // NewAdminCampaignFlow creates a new campaign flow instance
@@ -830,6 +832,12 @@ func (s *AdminCampaignFlowImpl) RescheduleCampaign(ctx context.Context, req *dto
 	if req == nil || req.CampaignID == 0 {
 		return nil, NewBusinessError("ADMIN_RESCHEDULE_CAMPAIGN_FAILED", "campaign_id is required", ErrCampaignNotFound)
 	}
+	if req.ScheduleAt.IsZero() {
+		return nil, NewBusinessError("SCHEDULE_TIME_REQUIRED", "schedule_at is required", ErrScheduleTimeNotPresent)
+	}
+	if !isUTCInstant(req.ScheduleAt) {
+		return nil, NewBusinessError("SCHEDULE_TIME_MUST_BE_UTC", "schedule_at must be a UTC timestamp", ErrScheduleTimeMustBeUTC)
+	}
 
 	campaign, err := s.campaignRepo.ByID(ctx, req.CampaignID)
 	if err != nil {
@@ -842,11 +850,20 @@ func (s *AdminCampaignFlowImpl) RescheduleCampaign(ctx context.Context, req *dto
 		return nil, ErrCampaignRescheduleNotAllowed
 	}
 
-	scheduleUTC := toUTCFromTehran(req.ScheduleAt)
-	if scheduleUTC.Before(utils.UTCNow().Add(15 * time.Minute)) {
+	scheduleUTC := req.ScheduleAt.UTC()
+	nowUTC := utils.UTCNow()
+	minAllowedUTC := nowUTC.Add(adminRescheduleMinLeadTime)
+
+	if campaign.Spec.ScheduleAt != nil && campaign.Spec.ScheduleAt.IsZero() {
+		return nil, NewBusinessError("SCHEDULE_TIME_NOT_PRESENT", "current campaign schedule is missing", ErrScheduleTimeNotPresent)
+	}
+	// Don't allow rescheduling when execution window is too close to current schedule time.
+	if campaign.Spec.ScheduleAt != nil && campaign.Spec.ScheduleAt.UTC().Sub(nowUTC) < adminRescheduleMinLeadTime {
+		return nil, NewBusinessError("SCHEDULE_TIME_TOO_CLOSE_TO_CURRENT", "current schedule is too close to reschedule", ErrScheduleTimeTooCloseToCurrent)
+	}
+	if scheduleUTC.Before(minAllowedUTC) {
 		return nil, ErrScheduleTimeTooSoon
 	}
-
 	tehranTime := scheduleUTC.In(tehranLocation())
 	if !isWithinRescheduleWindow(tehranTime) {
 		return nil, NewBusinessError("SCHEDULE_TIME_OUTSIDE_WINDOW", "Schedule time must be between 08:00 and 21:00 Asia/Tehran", ErrScheduleTimeOutsideWindow)
@@ -1160,17 +1177,16 @@ func (s *AdminCampaignFlowImpl) GetPagePrices(ctx context.Context) (*dto.AdminGe
 
 func isAdminReschedulable(status models.CampaignStatus) bool {
 	switch status {
-	case models.CampaignStatusInProgress, models.CampaignStatusWaitingForApproval, models.CampaignStatusApproved:
+	case models.CampaignStatusInitiated, models.CampaignStatusInProgress, models.CampaignStatusWaitingForApproval, models.CampaignStatusApproved:
 		return true
 	default:
 		return false
 	}
 }
 
-func toUTCFromTehran(t time.Time) time.Time {
-	loc := tehranLocation()
-	tehranTime := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
-	return tehranTime.UTC()
+func isUTCInstant(t time.Time) bool {
+	_, offset := t.Zone()
+	return offset == 0
 }
 
 func tehranLocation() *time.Location {
