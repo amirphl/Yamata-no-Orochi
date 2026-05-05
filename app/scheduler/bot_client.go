@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -18,7 +19,7 @@ const defaultBotAPIDomain = "https://jazebeh.ir"
 
 type BotClient interface {
 	Login(ctx context.Context) (string, error)
-	ListReadyCampaigns(ctx context.Context, token string) ([]dto.BotGetCampaignResponse, error)
+	ListReadyCampaigns(ctx context.Context, token string, platform string) ([]dto.BotGetCampaignResponse, error)
 	MoveCampaignToRunning(ctx context.Context, token string, id uint) error
 	MoveCampaignToExecuted(ctx context.Context, token string, id uint) error
 	AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error)
@@ -98,9 +99,14 @@ func (c *httpBotClient) Login(ctx context.Context) (string, error) {
 	return botLoginResp.Session.AccessToken, nil
 }
 
-func (c *httpBotClient) ListReadyCampaigns(ctx context.Context, token string) ([]dto.BotGetCampaignResponse, error) {
-	url := c.cfg.APIDomain + "/api/v1/bot/campaigns/ready"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (c *httpBotClient) ListReadyCampaigns(ctx context.Context, token string, platform string) ([]dto.BotGetCampaignResponse, error) {
+	endpoint := c.cfg.APIDomain + "/api/v1/bot/campaigns/ready"
+	if platform != "" {
+		q := url.Values{}
+		q.Set("platform", platform)
+		endpoint += "?" + q.Encode()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
