@@ -20,7 +20,7 @@ import (
 
 // BotCampaignFlow handles campaign listing logic accessible to bots
 type BotCampaignFlow interface {
-	ListReadyCampaigns(ctx context.Context) (*dto.BotListCampaignsResponse, error)
+	ListReadyCampaigns(ctx context.Context, platform *string) (*dto.BotListCampaignsResponse, error)
 	MoveCampaignToRunning(ctx context.Context, campaignID uint) error
 	MoveCampaignToExecuted(ctx context.Context, campaignID uint) error
 	UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error)
@@ -53,11 +53,20 @@ func NewBotCampaignFlow(
 }
 
 // ListReadyCampaigns retrieves ready campaigns for bot
-func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context) (*dto.BotListCampaignsResponse, error) {
+func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *string) (*dto.BotListCampaignsResponse, error) {
 	cf := models.CampaignFilter{
 		Status:         utils.ToPtr(models.CampaignStatusApproved),
 		ScheduleBefore: utils.ToPtr(utils.UTCNow()),
 		ScheduleAfter:  utils.ToPtr(utils.UTCNow().Add(-1 * time.Hour)),
+	}
+	if platform != nil {
+		p := strings.ToLower(strings.TrimSpace(*platform))
+		if p != "" {
+			if !models.IsValidCampaignPlatform(p) {
+				return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to list ready campaigns", ErrCampaignPlatformInvalid)
+			}
+			cf.Platform = &p
+		}
 	}
 
 	readyCampaigns, err := s.campaignRepo.ByFilter(ctx, cf, "created_at DESC", 0, 0)
