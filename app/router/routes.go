@@ -261,6 +261,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Put("/:uuid", r.campaignHandler.UpdateCampaign)
 	campaigns.Get("/", r.campaignHandler.ListCampaigns)
 	campaigns.Post("/:uuid/clone", r.campaignHandler.CloneCampaign)
+	campaigns.Post("/:uuid/test-send", r.campaignHandler.SendCampaignTestMessage)
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
 	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
 	campaigns.Post("/calculate-cost-v2", r.campaignHandler.CalculateCampaignCostV2)
