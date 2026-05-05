@@ -311,5 +311,8 @@
 \echo 'Running 0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids.sql...'
 \i migrations/0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids.sql
 
+\echo 'Running 0102_add_campaign_test_send_audit_action.sql...'
+\i migrations/0102_add_campaign_test_send_audit_action.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
