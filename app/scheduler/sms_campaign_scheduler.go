@@ -754,7 +754,7 @@ func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, proc
 }
 
 func (s *SMSCampaignScheduler) startStatusJobWorker(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Minute)
+	ticker := time.NewTicker(statusJobWorkerInterval)
 	defer ticker.Stop()
 
 	for {
