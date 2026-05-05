@@ -61,6 +61,8 @@ var (
 	ErrAgencyCategoryJobRequired                = errors.New("category and job are required for marketing agencies")
 	ErrScheduleTimeNotPresent                   = errors.New("schedule time is not present")
 	ErrScheduleTimeTooSoon                      = errors.New("schedule time is too soon")
+	ErrScheduleTimeTooCloseToCurrent            = errors.New("current schedule time is too close to allow reschedule")
+	ErrScheduleTimeMustBeUTC                    = errors.New("schedule time must be UTC")
 	ErrCampaignCityRequired                     = errors.New("campaign city is required")
 	ErrCampaignTagsRequired                     = errors.New("campaign tags is required")
 	ErrCampaignUpdateRequired                   = errors.New("at least one field must be provided for update")
@@ -77,6 +79,11 @@ var (
 	ErrCampaignBudgetOutOfRange                 = errors.New("campaign budget must be between 100000 and 160000000 tomans")
 	ErrScheduleTimeOutsideWindow                = errors.New("schedule time must be between 08:00 and 21:00 Asia/Tehran")
 	ErrCampaignRescheduleNotAllowed             = errors.New("campaign cannot be rescheduled in its current status")
+	ErrCampaignTestStateNotAllowed              = errors.New("campaign state does not allow test sending")
+	ErrCampaignTestRateLimited                  = errors.New("campaign test send is rate limited")
+	ErrCampaignTestRecipientMissing             = errors.New("campaign test recipient is missing")
+	ErrCampaignTestPlatformSettingsInvalid      = errors.New("campaign test platform settings are invalid")
+	ErrCampaignTestCooldownUnavailable          = errors.New("campaign test cooldown is unavailable")
 
 	ErrCampaignNotWaitingForApproval          = errors.New("campaign is not waiting for approval")
 	ErrCampaignNotApproved                    = errors.New("campaign is not approved")
@@ -372,6 +379,14 @@ func IsScheduleTimeTooSoon(err error) bool {
 	return errors.Is(err, ErrScheduleTimeTooSoon)
 }
 
+func IsScheduleTimeTooCloseToCurrent(err error) bool {
+	return errors.Is(err, ErrScheduleTimeTooCloseToCurrent)
+}
+
+func IsScheduleTimeMustBeUTC(err error) bool {
+	return errors.Is(err, ErrScheduleTimeMustBeUTC)
+}
+
 func IsScheduleTimeOutsideWindow(err error) bool {
 	return errors.Is(err, ErrScheduleTimeOutsideWindow)
 }
@@ -426,6 +441,26 @@ func IsCampaignTargetAudienceExcelFileInvalid(err error) bool {
 
 func IsCampaignPlatformSettingNotFound(err error) bool {
 	return errors.Is(err, ErrCampaignPlatformSettingNotFound)
+}
+
+func IsCampaignTestStateNotAllowed(err error) bool {
+	return errors.Is(err, ErrCampaignTestStateNotAllowed)
+}
+
+func IsCampaignTestRateLimited(err error) bool {
+	return errors.Is(err, ErrCampaignTestRateLimited)
+}
+
+func IsCampaignTestRecipientMissing(err error) bool {
+	return errors.Is(err, ErrCampaignTestRecipientMissing)
+}
+
+func IsCampaignTestPlatformSettingsInvalid(err error) bool {
+	return errors.Is(err, ErrCampaignTestPlatformSettingsInvalid)
+}
+
+func IsCampaignTestCooldownUnavailable(err error) bool {
+	return errors.Is(err, ErrCampaignTestCooldownUnavailable)
 }
 
 func IsCampaignNotWaitingForApproval(err error) bool {
