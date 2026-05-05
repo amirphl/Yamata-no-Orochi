@@ -704,7 +704,7 @@ func (s *BaleCampaignScheduler) processStatusJobs(ctx context.Context) {
 	}
 
 	now := utils.UTCNow()
-	jobs, err := s.jobRepo.ListDue(ctx, now, 20)
+	jobs, err := s.jobRepo.ListDue(ctx, now, numJobsPerTick)
 	if err != nil {
 		s.logger.Printf("Bale scheduler: list status jobs failed: %v", err)
 		return
