@@ -97,6 +97,21 @@ type CancelCampaignResponse struct {
 	Message string `json:"message"`
 }
 
+// SendCampaignTestMessageRequest represents a request to send a test message for a campaign.
+type SendCampaignTestMessageRequest struct {
+	UUID       string `json:"-"`
+	CustomerID uint   `json:"-"`
+}
+
+// SendCampaignTestMessageResponse represents the response of a test-send attempt.
+type SendCampaignTestMessageResponse struct {
+	Message   string  `json:"message"`
+	Platform  string  `json:"platform"`
+	Recipient string  `json:"recipient"`
+	Delivery  string  `json:"delivery"`
+	Warning   *string `json:"warning,omitempty"`
+}
+
 // GetCampaignRequest represents the request to get an existing campaign
 type GetCampaignRequest struct {
 	UUID       string `json:"-"`
@@ -344,7 +359,7 @@ type AdminCancelCampaignResponse struct {
 	Message string `json:"message"`
 }
 
-// AdminRescheduleCampaignRequest represents admin reschedule input (schedule provided in Tehran time)
+// AdminRescheduleCampaignRequest represents admin reschedule input (schedule_at must be UTC)
 type AdminRescheduleCampaignRequest struct {
 	CampaignID uint      `json:"campaign_id" validate:"required"`
 	ScheduleAt time.Time `json:"schedule_at" validate:"required"`
