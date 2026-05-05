@@ -40,6 +40,7 @@ type CampaignFlow interface {
 	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
 	CloneCampaign(ctx context.Context, req *dto.CloneCampaignRequest, metadata *ClientMetadata) (*dto.CloneCampaignResponse, error)
 	ExportCampaignReport(ctx context.Context, campaignID string) ([]byte, error)
+	SendCampaignTestMessage(ctx context.Context, req *dto.SendCampaignTestMessageRequest, metadata *ClientMetadata) (*dto.SendCampaignTestMessageResponse, error)
 }
 
 // CampaignFlowImpl implements the campaign business flow
@@ -60,7 +61,12 @@ type CampaignFlowImpl struct {
 	smsStatusResultRepo   repository.SMSStatusResultRepository
 	notifier              services.NotificationService
 	adminConfig           config.AdminConfig
-	cacheConfig           *config.CacheConfig
+	cacheConfig           config.CacheConfig
+	botConfig             config.BotConfig
+	payamSMSConfig        config.PayamSMSConfig
+	baleConfig            config.BaleConfig
+	rubikaConfig          config.RubikaConfig
+	splusConfig           config.SplusConfig
 	rc                    *redis.Client
 	db                    *gorm.DB
 }
@@ -98,7 +104,12 @@ func NewCampaignFlow(
 	rc *redis.Client,
 	notifier services.NotificationService,
 	adminConfig config.AdminConfig,
-	cacheConfig *config.CacheConfig,
+	cacheConfig config.CacheConfig,
+	botConfig config.BotConfig,
+	payamSMSConfig config.PayamSMSConfig,
+	baleConfig config.BaleConfig,
+	rubikaConfig config.RubikaConfig,
+	splusConfig config.SplusConfig,
 ) CampaignFlow {
 	return &CampaignFlowImpl{
 		campaignRepo:          campaignRepo,
@@ -118,6 +129,11 @@ func NewCampaignFlow(
 		notifier:              notifier,
 		adminConfig:           adminConfig,
 		cacheConfig:           cacheConfig,
+		botConfig:             botConfig,
+		payamSMSConfig:        payamSMSConfig,
+		baleConfig:            baleConfig,
+		rubikaConfig:          rubikaConfig,
+		splusConfig:           splusConfig,
 		rc:                    rc,
 		db:                    db,
 	}
@@ -2667,10 +2683,10 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 }
 
 func (s *CampaignFlowImpl) tryAcquireFlowLock(ctx context.Context, suffix string, ttl time.Duration) bool {
-	if s.rc == nil || s.cacheConfig == nil {
+	if s.rc == nil {
 		return true
 	}
-	lockKey := redisKey(*s.cacheConfig, "flow_lock:"+suffix)
+	lockKey := redisKey(s.cacheConfig, "flow_lock:"+suffix)
 	ok, err := s.rc.SetNX(ctx, lockKey, "1", ttl).Result()
 	if err != nil {
 		// Best-effort idempotency lock: continue when redis is unavailable.
@@ -2850,7 +2866,7 @@ func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context, platform *strin
 	if err != nil {
 		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_PLATFORM_INVALID", "Invalid platform", err)
 	}
-	cacheKey := audienceSpecPlatformCacheKey(*s.cacheConfig, normalizedPlatform)
+	cacheKey := audienceSpecPlatformCacheKey(s.cacheConfig, normalizedPlatform)
 	filePath := audienceSpecFilePath()
 	hideTestLayer := s.shouldHideTestAudience(ctx)
 
