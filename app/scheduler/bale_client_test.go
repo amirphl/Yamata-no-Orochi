@@ -1,11 +1,17 @@
 package scheduler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/amirphl/Yamata-no-Orochi/config"
 )
 
 func TestNormalizeBaleProvider(t *testing.T) {
@@ -47,12 +53,12 @@ func TestCanSendNajvaBatchMainFlow(t *testing.T) {
 	reqs := []BaleSendMessageRequest{
 		{
 			BotID:       123,
-			PhoneNumber: "989111111111",
+			PhoneNumber: "09111111111",
 			MessageData: BaleSendMessageData{Message: &BaleMessage{Text: "hello"}},
 		},
 		{
 			BotID:       123,
-			PhoneNumber: "989222222222",
+			PhoneNumber: "09222222222",
 			MessageData: BaleSendMessageData{Message: &BaleMessage{Text: "hello"}},
 		},
 	}
@@ -72,12 +78,12 @@ func TestCanSendNajvaP2PBatchMainFlow(t *testing.T) {
 	reqs := []BaleSendMessageRequest{
 		{
 			BotID:       123,
-			PhoneNumber: "989111111111",
+			PhoneNumber: "09111111111",
 			MessageData: BaleSendMessageData{Message: &BaleMessage{Text: "msg1"}},
 		},
 		{
 			BotID:       123,
-			PhoneNumber: "989222222222",
+			PhoneNumber: "09222222222",
 			MessageData: BaleSendMessageData{Message: &BaleMessage{Text: "msg2"}},
 		},
 	}
@@ -89,11 +95,11 @@ func TestCanSendNajvaP2PBatchMainFlow(t *testing.T) {
 func TestValidateNajvaRequestsMainFlow(t *testing.T) {
 	t.Parallel()
 
-	if err := validateNajvaBulkSendRequest([]string{"989111111111"}, "hello", "123"); err != nil {
+	if err := validateNajvaBulkSendRequest([]string{"09111111111"}, "hello", "123"); err != nil {
 		t.Fatalf("bulk validation failed: %v", err)
 	}
 	if err := validateNajvaP2PSendRequest(
-		[]string{"989111111111", "989222222222"},
+		[]string{"09111111111", "09222222222"},
 		[]string{"hello", "world"},
 		"123",
 	); err != nil {
@@ -104,7 +110,12 @@ func TestValidateNajvaRequestsMainFlow(t *testing.T) {
 func TestDecodeNajvaSendAndStatusItemsMainFlow(t *testing.T) {
 	t.Parallel()
 
-	sendBody := []byte(`[{"messageid":"1001","status":1,"statustext":"ok","receptor":"989111111111"}]`)
+	sendBody := []byte(`{
+		"return": {"status": 200, "message": "ok"},
+		"entries": [
+			{"messageid":"1001","status":1,"statustext":"ok","receptor":"09111111111"}
+		]
+	}`)
 	sendItems, err := decodeNajvaSendItems(sendBody)
 	if err != nil {
 		t.Fatalf("decodeNajvaSendItems failed: %v", err)
@@ -113,7 +124,12 @@ func TestDecodeNajvaSendAndStatusItemsMainFlow(t *testing.T) {
 		t.Fatalf("unexpected send items: %+v", sendItems)
 	}
 
-	statusBody := []byte(`{"items":[{"messageid":"1001","status":10,"statustext":"delivered"}]}`)
+	statusBody := []byte(`{
+		"return": {"status": 200, "message": "ok"},
+		"entries": [
+			{"messageid":"1001","status":10,"statustext":"delivered"}
+		]
+	}`)
 	statusItems, err := decodeNajvaStatusItems(statusBody)
 	if err != nil {
 		t.Fatalf("decodeNajvaStatusItems failed: %v", err)
@@ -204,6 +220,27 @@ func TestExtractAndAuthHeaderMainFlow(t *testing.T) {
 	if trimmed == nil || *trimmed != "abc" {
 		t.Fatalf("normalizeOptionalStringPtrRef mismatch")
 	}
+
+	req, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("new request failed: %v", err)
+	}
+	setBaleAuthHeaders(req, "raw-token")
+	if got := req.Header.Get("Authorization"); got != "Bearer raw-token" {
+		t.Fatalf("Authorization header mismatch: got=%q", got)
+	}
+	if got := req.Header.Get("api-access-key"); got != "Bearer raw-token" {
+		t.Fatalf("api-access-key header mismatch: got=%q", got)
+	}
+
+	req2, err := http.NewRequest(http.MethodGet, "https://example.com", nil)
+	if err != nil {
+		t.Fatalf("new request 2 failed: %v", err)
+	}
+	setBaleAuthHeaders(req2, "Bearer already-prefixed")
+	if got := req2.Header.Get("Authorization"); got != "Bearer already-prefixed" {
+		t.Fatalf("Authorization header should preserve bearer prefix: got=%q", got)
+	}
 }
 
 func TestRetryableResponseMainFlow(t *testing.T) {
@@ -285,14 +322,14 @@ func TestBaleRetryDelayMonotonic(t *testing.T) {
 func TestNajvaDocumentedLimits(t *testing.T) {
 	t.Parallel()
 
-	if najvaMaxRecipients != 10000 {
-		t.Fatalf("najvaMaxRecipients mismatch: got=%d want=10000", najvaMaxRecipients)
+	if najvaMaxRecipients != 9000 {
+		t.Fatalf("najvaMaxRecipients mismatch: got=%d want=9000", najvaMaxRecipients)
 	}
-	if najvaMaxStatusIDs != 1000 {
-		t.Fatalf("najvaMaxStatusIDs mismatch: got=%d want=1000", najvaMaxStatusIDs)
+	if najvaMaxStatusIDs != 900 {
+		t.Fatalf("najvaMaxStatusIDs mismatch: got=%d want=900", najvaMaxStatusIDs)
 	}
-	if najvaMaxFileBytes != 15*1024*1024 {
-		t.Fatalf("najvaMaxFileBytes mismatch: got=%d want=%d", najvaMaxFileBytes, 15*1024*1024)
+	if najvaMaxFileBytes != 10*1024*1024 {
+		t.Fatalf("najvaMaxFileBytes mismatch: got=%d want=%d", najvaMaxFileBytes, 10*1024*1024)
 	}
 }
 
@@ -374,5 +411,292 @@ func TestNewBaleHTTPErrorFallbackBody(t *testing.T) {
 	got := err.Error()
 	if !strings.Contains(strings.ToLower(got), "15mb") {
 		t.Fatalf("expected fallback description in error body, got=%q", got)
+	}
+}
+
+func TestNormalizeNajvaPhoneNumber(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{in: "09123456789", want: "09123456789"},
+		{in: "989123456789", want: "09123456789"},
+		{in: "+989123456789", want: "09123456789"},
+		{in: "00989123456789", want: "09123456789"},
+		{in: "9123456789", want: "09123456789"},
+		{in: "  +989123456789  ", want: "09123456789"},
+	}
+
+	for _, tc := range cases {
+		if got := normalizeNajvaPhoneNumber(tc.in); got != tc.want {
+			t.Fatalf("normalizeNajvaPhoneNumber(%q): got=%q want=%q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSendNajvaUsesReceiversAndNormalizesPhones(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/sms/send" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if _, ok := payload["receptor"]; ok {
+			t.Fatalf("payload must not include receptor key")
+		}
+
+		receivers, ok := payload["receivers"].([]any)
+		if !ok || len(receivers) != 1 {
+			t.Fatalf("invalid receivers payload: %#v", payload["receivers"])
+		}
+		if got := strings.TrimSpace(receivers[0].(string)); got != "09121111111" {
+			t.Fatalf("normalized receiver mismatch: got=%q", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"return": {"status": 200, "message": "ok"},
+			"entries": [
+				{"messageid":"m1","status":1,"statustext":"ok","receptor":"09121111111"}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := newHTTPBaleClient(config.BaleConfig{
+		APIAccessKey: "k",
+		Provider:     baleProviderNajvaV2,
+		NajvaDomain:  srv.URL,
+	})
+
+	resp, err := client.sendNajva(context.Background(), &BaleSendMessageRequest{
+		BotID:       123,
+		PhoneNumber: "+989121111111",
+		MessageData: BaleSendMessageData{Message: &BaleMessage{Text: "hello"}},
+	})
+	if err != nil {
+		t.Fatalf("sendNajva failed: %v", err)
+	}
+	if resp == nil || resp.MessageID != "m1" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestSendNajvaP2PUsesReceiversAndMatchesByNormalizedPhone(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/sms/send-p2p" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		if _, ok := payload["receptor"]; ok {
+			t.Fatalf("payload must not include receptor key")
+		}
+
+		if _, ok := payload["receivers"]; ok {
+			t.Fatalf("payload must not include receivers key for p2p")
+		}
+		messages, ok := payload["messages"].([]any)
+		if !ok || len(messages) != 2 {
+			t.Fatalf("invalid messages payload: %#v", payload["messages"])
+		}
+		first, ok := messages[0].(map[string]any)
+		if !ok {
+			t.Fatalf("messages[0] invalid type: %#v", messages[0])
+		}
+		second, ok := messages[1].(map[string]any)
+		if !ok {
+			t.Fatalf("messages[1] invalid type: %#v", messages[1])
+		}
+		if got := strings.TrimSpace(first["receiver"].(string)); got != "09121111111" {
+			t.Fatalf("messages[0].receiver mismatch: got=%q", got)
+		}
+		if got := strings.TrimSpace(second["receiver"].(string)); got != "09123333333" {
+			t.Fatalf("messages[1].receiver mismatch: got=%q", got)
+		}
+		if got := strings.TrimSpace(first["message"].(string)); got != "a" {
+			t.Fatalf("messages[0].message mismatch: got=%q", got)
+		}
+		if got := strings.TrimSpace(second["message"].(string)); got != "b" {
+			t.Fatalf("messages[1].message mismatch: got=%q", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		// Intentionally reverse item order to ensure mapping uses receiver value.
+		_, _ = w.Write([]byte(`{
+			"return": {"status": 200, "message": "ok"},
+			"entries": [
+				{"messageid":"m2","status":1,"statustext":"ok","receptor":"09123333333"},
+				{"messageid":"m1","status":1,"statustext":"ok","receptor":"09121111111"}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := newHTTPBaleClient(config.BaleConfig{
+		APIAccessKey: "k",
+		Provider:     baleProviderNajvaV2,
+		NajvaDomain:  srv.URL,
+	})
+
+	out, err := client.sendNajvaP2PBatchOnce(context.Background(), []BaleSendMessageRequest{
+		{
+			RequestID:   "r1",
+			BotID:       123,
+			PhoneNumber: "+989121111111",
+			MessageData: BaleSendMessageData{Message: &BaleMessage{Text: "a"}},
+		},
+		{
+			RequestID:   "r2",
+			BotID:       123,
+			PhoneNumber: "989123333333",
+			MessageData: BaleSendMessageData{Message: &BaleMessage{Text: "b"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("sendNajvaP2PBatchOnce failed: %v", err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("unexpected response size: %d", len(out))
+	}
+	if out[0].MessageID != "m1" || out[1].MessageID != "m2" {
+		t.Fatalf("unexpected mapped message ids: %+v", out)
+	}
+}
+
+func TestUploadFileNajvaMultipartAndEnvelopeResponse(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/upload-file/bale" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if ct := strings.TrimSpace(r.Header.Get("Content-Type")); !strings.HasPrefix(ct, "multipart/form-data;") {
+			t.Fatalf("expected multipart content type, got %q", ct)
+		}
+		if err := r.ParseMultipartForm(2 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		fileHeaders := r.MultipartForm.File["file"]
+		if len(fileHeaders) != 1 {
+			t.Fatalf("expected one file part, got=%d", len(fileHeaders))
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"return": {"status": 200, "message": "ok"},
+			"entries": {"fild_id":"uuid-123"}
+		}`))
+	}))
+	defer srv.Close()
+
+	tmpPath := filepath.Join(t.TempDir(), "upload.png")
+	if err := os.WriteFile(tmpPath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	client := newHTTPBaleClient(config.BaleConfig{
+		APIAccessKey: "k",
+		Provider:     baleProviderNajvaV2,
+		NajvaDomain:  srv.URL,
+	})
+
+	resp, err := client.uploadFileNajva(context.Background(), tmpPath)
+	if err != nil {
+		t.Fatalf("uploadFileNajva failed: %v", err)
+	}
+	if resp == nil || strings.TrimSpace(resp.FileID) != "uuid-123" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestDecodeNajvaUploadFileIDSupportsEnvelopeAndFlat(t *testing.T) {
+	t.Parallel()
+
+	id, err := decodeNajvaUploadFileID([]byte(`{"file_id":"flat-1"}`))
+	if err != nil || id != "flat-1" {
+		t.Fatalf("flat decode failed: id=%q err=%v", id, err)
+	}
+
+	id, err = decodeNajvaUploadFileID([]byte(`{
+		"return": {"status": 200, "message": "ok"},
+		"entries": {"fild_id":"env-1"}
+	}`))
+	if err != nil || id != "env-1" {
+		t.Fatalf("envelope decode failed: id=%q err=%v", id, err)
+	}
+}
+
+func TestFetchStatusChunkUsesMessageIDsPayloadAndEntriesResponse(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/sms/status" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode payload: %v", err)
+		}
+		ids, ok := payload["messageids"].([]any)
+		if !ok || len(ids) != 3 {
+			t.Fatalf("invalid messageids payload: %#v", payload["messageids"])
+		}
+		if normalizeAnyToInt(ids[0]) != 1 || normalizeAnyToInt(ids[1]) != 2 || normalizeAnyToInt(ids[2]) != 3 {
+			t.Fatalf("unexpected messageids: %#v", ids)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"return": {"status": 200, "message": "ok"},
+			"entries": [
+				{"messageid":1,"status":10,"statustext":"رسیده به گیرنده"},
+				{"messageid":2,"status":4,"statustext":"رسیده به مخابرات"},
+				{"messageid":3,"status":100,"statustext":"شناسه پیامک نامعتبر است"}
+			]
+		}`))
+	}))
+	defer srv.Close()
+
+	client := newHTTPBaleClient(config.BaleConfig{
+		APIAccessKey: "k",
+		Provider:     baleProviderNajvaV2,
+		NajvaDomain:  srv.URL,
+	})
+
+	out, err := client.fetchStatusChunkOnce(context.Background(), []int64{1, 2, 3})
+	if err != nil {
+		t.Fatalf("fetchStatusChunkOnce failed: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("unexpected response size: %d", len(out))
+	}
+	if out[0].MessageID != "1" || out[0].Status != 10 {
+		t.Fatalf("unexpected first item: %+v", out[0])
+	}
+	if out[1].MessageID != "2" || out[1].Status != 4 {
+		t.Fatalf("unexpected second item: %+v", out[1])
+	}
+	if out[2].MessageID != "3" || out[2].Status != 100 {
+		t.Fatalf("unexpected third item: %+v", out[2])
 	}
 }
