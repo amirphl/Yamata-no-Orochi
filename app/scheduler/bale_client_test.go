@@ -625,6 +625,54 @@ func TestUploadFileNajvaMultipartAndEnvelopeResponse(t *testing.T) {
 	}
 }
 
+func TestUploadFileNajvaInfersExtensionWhenPathHasNoExt(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/upload-file/bale" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := r.ParseMultipartForm(2 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		fileHeaders := r.MultipartForm.File["file"]
+		if len(fileHeaders) != 1 {
+			t.Fatalf("expected one file part, got=%d", len(fileHeaders))
+		}
+		if !strings.HasSuffix(strings.ToLower(strings.TrimSpace(fileHeaders[0].Filename)), ".png") {
+			t.Fatalf("expected inferred .png filename, got=%q", fileHeaders[0].Filename)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"return": {"status": 200, "message": "ok"},
+			"entries": {"fild_id":"uuid-456"}
+		}`))
+	}))
+	defer srv.Close()
+
+	tmpPath := filepath.Join(t.TempDir(), "upload_no_ext")
+	// Minimal PNG signature so DetectContentType can infer image/png.
+	content := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}
+	if err := os.WriteFile(tmpPath, content, 0o644); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+
+	client := newHTTPBaleClient(config.BaleConfig{
+		APIAccessKey: "k",
+		Provider:     baleProviderNajvaV2,
+		NajvaDomain:  srv.URL,
+	})
+
+	resp, err := client.uploadFileNajva(context.Background(), tmpPath)
+	if err != nil {
+		t.Fatalf("uploadFileNajva failed: %v", err)
+	}
+	if resp == nil || strings.TrimSpace(resp.FileID) != "uuid-456" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
 func TestDecodeNajvaUploadFileIDSupportsEnvelopeAndFlat(t *testing.T) {
 	t.Parallel()
 
