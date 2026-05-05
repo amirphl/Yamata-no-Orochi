@@ -18,7 +18,7 @@ import (
 type PayamSMSItem struct {
 	Recipient  string
 	Body       string
-	trackingID string
+	TrackingID string
 }
 
 type PayamSMSResponseItem struct {
@@ -85,7 +85,7 @@ func (c *httpPayamSMSClient) SendBatch(ctx context.Context, sender string, items
 		payload.SMSItems = append(payload.SMSItems, map[string]any{
 			"recipient":  it.Recipient,
 			"body":       it.Body,
-			"customerId": it.trackingID,
+			"customerId": it.TrackingID,
 			"sendDate":   sendDate.Format("2006-01-02 15:04:05"),
 		})
 	}
