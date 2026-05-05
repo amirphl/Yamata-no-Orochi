@@ -454,7 +454,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		rc,
 		notificationService,
 		cfg.Admin,
-		&cfg.Cache,
+		cfg.Cache,
+		cfg.Bot,
+		cfg.PayamSMS,
+		cfg.Bale,
+		cfg.Rubika,
+		cfg.Splus,
 	)
 
 	// Initialize PaymentFlow
