@@ -267,7 +267,7 @@ func (h *CampaignAdminHandler) RejectCampaign(c fiber.Ctx) error {
 
 // RescheduleCampaign updates the scheduled time for a campaign (admin-only).
 // @Summary Reschedule Campaign
-// @Description Admin reschedules an eligible campaign; schedule_at should be provided in Tehran time.
+// @Description Admin reschedules an eligible campaign; schedule_at must be UTC and its Tehran-local time must be between 08:00 and 21:00.
 // @Tags Admin Campaigns
 // @Accept json
 // @Produce json
@@ -295,8 +295,24 @@ func (h *CampaignAdminHandler) RescheduleCampaign(c fiber.Ctx) error {
 		if businessflow.IsCampaignRescheduleNotAllowed(err) {
 			return h.ErrorResponse(c, fiber.StatusConflict, "Campaign cannot be rescheduled in its current status", "INVALID_STATE", nil)
 		}
+		if businessflow.IsScheduleTimeNotPresent(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time is required", "SCHEDULE_TIME_REQUIRED", nil)
+		}
+		if businessflow.IsScheduleTimeTooCloseToCurrent(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Current schedule is too close; reschedule must happen at least 5 minutes before scheduled time", "SCHEDULE_TIME_TOO_CLOSE_TO_CURRENT", nil)
+		}
 		if businessflow.IsScheduleTimeTooSoon(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time must be at least 15 minutes in the future", "SCHEDULE_TIME_TOO_SOON", nil)
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time must be at least 5 minutes in the future", "SCHEDULE_TIME_TOO_SOON", nil)
+		}
+		if businessflow.IsScheduleTimeMustBeUTC(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time must be in UTC (offset +00:00)", "SCHEDULE_TIME_MUST_BE_UTC", nil)
+		}
+		if businessflow.IsScheduleTimeOutsideWindow(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Converted Tehran schedule time must be between 08:00 and 21:00", "SCHEDULE_TIME_OUTSIDE_WINDOW", nil)
+		}
+		var be *businessflow.BusinessError
+		if errors.As(err, &be) && be.Code != "" {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, be.Message, be.Code, nil)
 		}
 		log.Println("Admin reschedule campaign failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reschedule campaign", "ADMIN_RESCHEDULE_CAMPAIGN_FAILED", nil)
