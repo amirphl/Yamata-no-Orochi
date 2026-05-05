@@ -28,6 +28,8 @@ const (
 	trackingCounterName   = "sms_tracking_id"
 	trackingCounterHexLen = 16
 	trackingCounterBits   = 16 * 4
+
+	numJobsPerTick = 50
 )
 
 type AudiencePhonesResult struct {
