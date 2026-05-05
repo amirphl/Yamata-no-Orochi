@@ -57,6 +57,7 @@ const (
 	AuditActionCampaignCreationFailed        = "campaign_creation_failed"
 	AuditActionCampaignUpdated               = "campaign_updated"
 	AuditActionCampaignUpdateFailed          = "campaign_update_failed"
+	AuditActionCampaignTestSend              = "campaign_test_send"
 	AuditActionCampaignRefundReconcileFailed = "campaign_refund_reconcile_failed"
 	AuditActionCampaignReportExported        = "campaign_report_exported"
 	AuditActionCampaignReportExportFailed    = "campaign_report_export_failed"
