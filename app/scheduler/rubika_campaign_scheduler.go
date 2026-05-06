@@ -333,7 +333,7 @@ func (s *RubikaCampaignScheduler) runOnce(ctx context.Context) {
 		return
 	}
 
-	ready, err := s.botClient.ListReadyCampaigns(ctx, token)
+	ready, err := s.botClient.ListReadyCampaigns(ctx, token, models.CampaignPlatformRubika)
 	if err != nil {
 		s.logger.Printf("rubika scheduler: list ready campaigns failed: %v", err)
 		s.notifyAdmin(fmt.Sprintf("Rubika scheduler list ready campaigns failed: %v", err))
