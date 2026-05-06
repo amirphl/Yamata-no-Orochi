@@ -30,6 +30,7 @@ type CampaignFlow interface {
 	CalculateCampaignCost(ctx context.Context, req *dto.CalculateCampaignCostRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error)
 	CalculateCampaignCostV2(ctx context.Context, req *dto.CalculateCampaignCostV2Request, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error)
 	ListCampaigns(ctx context.Context, req *dto.ListCampaignsRequest, metadata *ClientMetadata) (*dto.ListCampaignsResponse, error)
+	GetLastInitiatedCampaign(ctx context.Context, customerID uint, metadata *ClientMetadata) (*dto.GetLastInitiatedCampaignResponse, error)
 	ListAudienceSpec(ctx context.Context, platform *string) (*dto.ListAudienceSpecResponse, error)
 	GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error)
 	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
@@ -1161,6 +1162,76 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 			Limit:      limit,
 			TotalPages: totalPages,
 		},
+	}, nil
+}
+
+// GetLastInitiatedCampaign retrieves the most recent initiated campaign for the given customer.
+func (s *CampaignFlowImpl) GetLastInitiatedCampaign(ctx context.Context, customerID uint, metadata *ClientMetadata) (*dto.GetLastInitiatedCampaignResponse, error) {
+	_, err := getCustomer(ctx, s.customerRepo, customerID)
+	if err != nil {
+		return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
+	}
+
+	status := models.CampaignStatusInitiated
+	rows, err := s.campaignRepo.ByFilter(ctx, models.CampaignFilter{
+		CustomerID: &customerID,
+		Status:     &status,
+	}, "created_at DESC", 1, 0)
+	if err != nil {
+		return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
+	}
+
+	if len(rows) == 0 {
+		return &dto.GetLastInitiatedCampaignResponse{
+			Message: "No initiated campaign found",
+			Item:    nil,
+		}, nil
+	}
+
+	c := rows[0]
+	var linePriceFactor *float64
+	if c.Spec.LineNumber != nil {
+		lineNumber, err := s.lineNumberRepo.ByValue(ctx, *c.Spec.LineNumber)
+		if err != nil {
+			return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
+		}
+		if lineNumber != nil {
+			linePriceFactor = &lineNumber.PriceFactor
+		}
+	}
+
+	item := &dto.GetCampaignResponse{
+		ID:                 c.ID,
+		UUID:               c.UUID.String(),
+		Status:             c.Status.String(),
+		CreatedAt:          c.CreatedAt,
+		UpdatedAt:          c.UpdatedAt,
+		Title:              c.Spec.Title,
+		Level1:             c.Spec.Level1,
+		Level2s:            c.Spec.Level2s,
+		Level3s:            c.Spec.Level3s,
+		Tags:               c.Spec.Tags,
+		Sex:                c.Spec.Sex,
+		City:               c.Spec.City,
+		AdLink:             c.Spec.AdLink,
+		Content:            c.Spec.Content,
+		ShortLinkDomain:    c.Spec.ShortLinkDomain,
+		Category:           c.Spec.Category,
+		Job:                c.Spec.Job,
+		ScheduleAt:         c.Spec.ScheduleAt,
+		LineNumber:         c.Spec.LineNumber,
+		MediaUUID:          c.Spec.MediaUUID,
+		PlatformSettingsID: c.Spec.PlatformSettingsID,
+		Platform:           c.Spec.Platform,
+		LinePriceFactor:    linePriceFactor,
+		Budget:             c.Spec.Budget,
+		NumAudience:        c.NumAudience,
+		Comment:            c.Comment,
+	}
+
+	return &dto.GetLastInitiatedCampaignResponse{
+		Message: "Last initiated campaign retrieved successfully",
+		Item:    item,
 	}, nil
 }
 
