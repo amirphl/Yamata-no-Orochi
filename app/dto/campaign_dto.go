@@ -230,6 +230,11 @@ type ListCampaignsResponse struct {
 	Pagination PaginationInfo        `json:"pagination"`
 }
 
+type GetLastInitiatedCampaignResponse struct {
+	Message string               `json:"message"`
+	Item    *GetCampaignResponse `json:"item,omitempty"`
+}
+
 // AdminListCampaignsFilter holds filters for admin campaign listing
 type AdminListCampaignsFilter struct {
 	Title     *string    `json:"title,omitempty" validate:"omitempty,max=255"`
