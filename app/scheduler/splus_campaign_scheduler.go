@@ -323,7 +323,7 @@ func (s *SplusCampaignScheduler) runOnce(ctx context.Context) {
 		return
 	}
 
-	ready, err := s.botClient.ListReadyCampaigns(ctx, token)
+	ready, err := s.botClient.ListReadyCampaigns(ctx, token, models.CampaignPlatformSPlus)
 	if err != nil {
 		s.logger.Printf("splus scheduler: list ready campaigns failed: %v", err)
 		s.notifyAdmin(fmt.Sprintf("Splus scheduler list ready campaigns failed: %v", err))
