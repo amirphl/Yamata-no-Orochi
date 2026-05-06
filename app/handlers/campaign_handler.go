@@ -22,6 +22,7 @@ type CampaignHandlerInterface interface {
 	CalculateCampaignCost(c fiber.Ctx) error
 	CalculateCampaignCostV2(c fiber.Ctx) error
 	ListCampaigns(c fiber.Ctx) error
+	GetLastInitiatedCampaign(c fiber.Ctx) error
 	ListAudienceSpec(c fiber.Ctx) error
 	GetApprovedRunningSummary(c fiber.Ctx) error
 	CancelCampaign(c fiber.Ctx) error
@@ -453,6 +454,31 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 		"items":      result.Items,
 		"pagination": result.Pagination,
 	})
+}
+
+// GetLastInitiatedCampaign returns the authenticated user's latest initiated campaign.
+// @Summary Get Last Initiated Campaign
+// @Description Retrieve the most recent campaign with status initiated for the authenticated user
+// @Tags Campaigns
+// @Produce json
+// @Success 200 {object} dto.APIResponse{data=dto.GetLastInitiatedCampaignResponse}
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/initiated/last [get]
+func (h *CampaignHandler) GetLastInitiatedCampaign(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	result, err := h.campaignFlow.GetLastInitiatedCampaign(h.createRequestContext(c, "/api/v1/campaigns/initiated/last"), customerID, metadata)
+	if err != nil {
+		log.Println("Get last initiated campaign failed", err)
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to get last initiated campaign", "GET_LAST_INITIATED_CAMPAIGN_FAILED")
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, result.Message, result)
 }
 
 // ListAudienceSpec returns the current audience spec
