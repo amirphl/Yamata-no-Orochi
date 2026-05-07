@@ -231,5 +231,8 @@
 \echo 'Running 0075_create_sent_splus_messages.sql...'
 \i migrations/0075_create_sent_splus_messages.sql
 
+\echo 'Running 0076_rename_sms_campaigns_to_campaigns.sql...'
+\i migrations/0076_rename_sms_campaigns_to_campaigns.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
