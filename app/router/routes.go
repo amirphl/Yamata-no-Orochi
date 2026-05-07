@@ -254,6 +254,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Post("/calculate-cost-v2", r.campaignHandler.CalculateCampaignCostV2)
 	campaigns.Get("/audience-spec", r.campaignHandler.ListAudienceSpec)
 	campaigns.Get("/summary", r.campaignHandler.GetApprovedRunningSummary)
+	campaigns.Get("/initiated/last", r.campaignHandler.GetLastInitiatedCampaign)
 	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
 
 	// Admin campaigns listing and actions
