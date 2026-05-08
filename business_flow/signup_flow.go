@@ -3,7 +3,12 @@ package businessflow
 
 import (
 	"context"
+	crand "crypto/rand"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
+	"math/big"
 	"strings"
 	"time"
 
@@ -43,6 +48,12 @@ type SignupFlowImpl struct {
 	rc                 *redis.Client
 }
 
+type pendingSignupData struct {
+	Request      dto.SignupRequest `json:"request"`
+	PasswordHash string            `json:"password_hash"`
+	CreatedAt    time.Time         `json:"created_at"`
+}
+
 // NewSignupFlow creates a new signup flow instance
 func NewSignupFlow(
 	customerRepo repository.CustomerRepository,
@@ -80,6 +91,9 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 	if err := s.validateSignupRequest(ctx, req); err != nil {
 		return nil, NewBusinessError("SIGNUP_VALIDATION_FAILED", "Signup validation failed", err)
 	}
+	if s.rc == nil {
+		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", ErrCacheNotAvailable)
+	}
 
 	// Default referrer code if not provided
 	if req.ReferrerAgencyCode == nil || len(strings.TrimSpace(*req.ReferrerAgencyCode)) == 0 {
@@ -87,62 +101,36 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 		req.ReferrerAgencyCode = &defaultCode
 	}
 
-	// Use transaction for atomicity
-	var customer *models.Customer
-	var otpCode string
-
-	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
-		// Create customer
-		var err error
-		customer, err = s.createCustomer(txCtx, req)
-		if err != nil {
-			return err
-		}
-
-		// Generate and save OTP
-		otpCode, err = s.generateAndSaveOTP(txCtx, customer.ID, customer.RepresentativeMobile, models.OTPTypeMobile)
-		if err != nil {
-			return err
-		}
-
-		if err := s.createDefaultDiscount(txCtx, customer); err != nil {
-			return err
-		}
-
-		//create wallet
-		if _, err := createWalletWithInitialSnapshot(txCtx, s.walletRepo, customer.ID, "signup"); err != nil {
-			return err
-		}
-
-		return nil
-	})
-
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
-		errMsg := fmt.Sprintf("Signup initiation failed: %s", err.Error())
-		_ = s.createAuditLog(ctx, customer, models.AuditActionSignupFailed, errMsg, false, &errMsg, metadata)
+		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", err)
+	}
+	req.Password = ""
+	req.ConfirmPassword = ""
 
+	pendingID, err := s.createPendingSignup(ctx, req, string(hashedPassword))
+	if err != nil {
+		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", err)
+	}
+	otpCode, err := s.generateAndSaveOTP(ctx, pendingID, req.RepresentativeMobile, models.OTPTypeMobile)
+	if err != nil {
+		_ = s.deletePendingSignup(ctx, pendingID)
 		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", err)
 	}
 
-	msg := fmt.Sprintf("Signup initiated successfully for customer %d", customer.ID)
-	_ = s.createAuditLog(ctx, customer, models.AuditActionSignupInitiated, msg, true, nil, metadata)
-
 	// Send OTP via SMS (outside transaction to avoid rollback on SMS failure)
 	go func() {
-		customerID := int64(customer.ID)
+		customerID := int64(pendingID)
 		message := fmt.Sprintf(s.messageConfig.SignupVerificationCodeTemplate, otpCode)
-		err := s.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, message, &customerID)
-		if err != nil {
-			errMsg := fmt.Sprintf("Failed to send SMS: %v", err)
-			_ = s.createAuditLog(context.Background(), customer, models.AuditActionOTPSMSFailed, errMsg, false, &errMsg, metadata)
-		}
+		_ = s.notificationSvc.SendSMS(ctx, req.RepresentativeMobile, message, &customerID)
+		// TODO: Handle error
 	}()
 
 	return &dto.SignupResponse{
 		Message:    "Signup initiated successfully. OTP sent to your mobile number.",
-		CustomerID: customer.ID,
+		CustomerID: pendingID,
 		OTPSent:    true,
-		OTPTarget:  s.maskMobileNumber(customer.RepresentativeMobile),
+		OTPTarget:  s.maskMobileNumber(req.RepresentativeMobile),
 	}, nil
 }
 
@@ -152,6 +140,10 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 	if err := s.validateOTPVerificationRequest(ctx, req); err != nil {
 		return nil, NewBusinessError("OTP_VERIFICATION_VALIDATION_FAILED", "OTP verification validation failed", err)
 	}
+	pending, err := s.getPendingSignup(ctx, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("OTP_VERIFICATION_FAILED", "OTP verification failed", err)
+	}
 
 	var customer models.Customer
 	var tokens struct {
@@ -159,16 +151,29 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 		refresh string
 	}
 
-	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
-		// Find customer
+	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		var err error
-		customer, err = getCustomer(txCtx, s.customerRepo, req.CustomerID)
-		if err != nil {
-			return err
-		}
 
 		// Verify OTP
 		if err := s.verifyOTPCode(txCtx, req.CustomerID, req.OTPCode, req.OTPType); err != nil {
+			return err
+		}
+
+		if err := s.validateSignupRequest(txCtx, &pending.Request); err != nil {
+			return err
+		}
+
+		createdCustomer, err := s.createCustomer(txCtx, &pending.Request, pending.PasswordHash)
+		if err != nil {
+			return err
+		}
+		customer = *createdCustomer
+
+		if err := s.createDefaultDiscount(txCtx, &customer); err != nil {
+			return err
+		}
+
+		if _, err := createWalletWithInitialSnapshot(txCtx, s.walletRepo, customer.ID, "signup"); err != nil {
 			return err
 		}
 
@@ -198,11 +203,9 @@ func (s *SignupFlowImpl) VerifyOTP(ctx context.Context, req *dto.OTPVerification
 	})
 
 	if err != nil {
-		errMsg := fmt.Sprintf("OTP verification failed for customer %d: %s", req.CustomerID, err.Error())
-		_ = s.createAuditLog(ctx, &customer, models.AuditActionOTPVerificationFailed, errMsg, false, &errMsg, metadata)
-
 		return nil, NewBusinessError("OTP_VERIFICATION_FAILED", "OTP verification failed", err)
 	}
+	_ = s.deletePendingSignup(ctx, req.CustomerID)
 
 	msg := fmt.Sprintf("Signup completed successfully for customer %d", customer.ID)
 	_ = s.createAuditLog(ctx, &customer, models.AuditActionSignupCompleted, msg, true, nil, metadata)
@@ -229,59 +232,37 @@ func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendReques
 	if err := s.validateOTPResendRequest(ctx, req); err != nil {
 		return nil, NewBusinessError("OTP_RESEND_VALIDATION_FAILED", "OTP resend validation failed", err)
 	}
-
-	var customer models.Customer
-
-	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
-		// Find customer
-		var err error
-		customer, err = getCustomer(txCtx, s.customerRepo, req.CustomerID)
-		if err != nil {
-			return err
-		}
-
-		// TODO: Expire old OTPs
-		// Expire old OTPs
-		// if err := s.otpRepo.ExpireOldOTPs(txCtx, req.CustomerID, req.OTPType); err != nil {
-		// 	return err
-		// }
-
-		// Generate new OTP
-		var target string
-		target = customer.RepresentativeMobile
-		if req.OTPType == models.OTPTypeEmail {
-			target = customer.Email
-		}
-
-		otpCode, err := s.generateAndSaveOTP(txCtx, req.CustomerID, target, req.OTPType)
-		if err != nil {
-			return err
-		}
-
-		// Send notification
-		message := fmt.Sprintf(s.messageConfig.OTPResendVerificationCodeTemplate, otpCode, utils.OTPExpiry.Minutes())
-		if req.OTPType == models.OTPTypeMobile {
-			customerID := int64(req.CustomerID)
-			return s.notificationSvc.SendSMS(ctx, target, message, &customerID)
-		} else {
-			return s.notificationSvc.SendEmail(target, "Verification Code", message)
-		}
-	})
-
+	pending, err := s.getPendingSignup(ctx, req.CustomerID)
 	if err != nil {
-		errMsg := fmt.Sprintf("Resend OTP failed for customer %d: %s", req.CustomerID, err.Error())
-		_ = s.createAuditLog(ctx, &customer, models.AuditActionOTPResendFailed, errMsg, false, &errMsg, metadata)
-
 		return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", err)
 	}
 
-	msg := fmt.Sprintf("OTP resent successfully for customer %d", req.CustomerID)
-	_ = s.createAuditLog(ctx, &customer, models.AuditActionOTPResent, msg, true, nil, metadata)
+	var target string
+	target = pending.Request.RepresentativeMobile
+	if req.OTPType == models.OTPTypeEmail {
+		target = pending.Request.Email
+	}
+
+	otpCode, err := s.generateAndSaveOTP(ctx, req.CustomerID, target, req.OTPType)
+	if err != nil {
+		return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", err)
+	}
+
+	message := fmt.Sprintf(s.messageConfig.OTPResendVerificationCodeTemplate, otpCode, utils.OTPExpiry.Minutes())
+	if req.OTPType == models.OTPTypeMobile {
+		customerID := int64(req.CustomerID)
+		err = s.notificationSvc.SendSMS(ctx, target, message, &customerID)
+	} else {
+		err = s.notificationSvc.SendEmail(target, "Verification Code", message)
+	}
+	if err != nil {
+		return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", err)
+	}
 
 	return &dto.OTPResendResponse{
 		Message:         "OTP resent successfully",
 		OTPSent:         true,
-		MaskedOTPTarget: s.maskMobileNumber(customer.RepresentativeMobile),
+		MaskedOTPTarget: s.maskMobileNumber(target),
 	}, nil
 }
 
@@ -367,7 +348,7 @@ func (s *SignupFlowImpl) validateSignupRequest(ctx context.Context, req *dto.Sig
 	return nil
 }
 
-func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequest) (*models.Customer, error) {
+func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequest, passwordHash string) (*models.Customer, error) {
 	// Get account type
 	accountType, err := s.accountTypeRepo.ByTypeName(ctx, req.AccountType)
 	if err != nil {
@@ -375,12 +356,6 @@ func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequ
 	}
 	if accountType == nil {
 		return nil, ErrAccountTypeNotFound
-	}
-
-	// Hash password
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
 	}
 
 	// Find agency if provided
@@ -420,7 +395,7 @@ func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequ
 		RepresentativeLastName:  req.RepresentativeLastName,
 		RepresentativeMobile:    req.RepresentativeMobile,
 		Email:                   req.Email,
-		PasswordHash:            string(hashedPassword),
+		PasswordHash:            passwordHash,
 		ReferrerAgencyID:        agencyID,
 		IsEmailVerified:         utils.ToPtr(false),
 		IsMobileVerified:        utils.ToPtr(false),
@@ -590,12 +565,6 @@ func (s *SignupFlowImpl) maskMobileNumber(mobile string) string {
 }
 
 func (s *SignupFlowImpl) validateOTPVerificationRequest(ctx context.Context, req *dto.OTPVerificationRequest) error {
-	// Validate customer exists
-	customer, err := getCustomer(ctx, s.customerRepo, req.CustomerID)
-	if err != nil {
-		return err
-	}
-
 	// Validate OTP type
 	if req.OTPType != models.OTPTypeMobile && req.OTPType != models.OTPTypeEmail {
 		return ErrInvalidOTPType
@@ -606,36 +575,96 @@ func (s *SignupFlowImpl) validateOTPVerificationRequest(ctx context.Context, req
 		return ErrInvalidOTPCode
 	}
 
-	// Check if customer is already verified for this OTP type
-	if req.OTPType == models.OTPTypeMobile && utils.IsTrue(customer.IsMobileVerified) {
-		return ErrAlreadyVerified
-	}
-	if req.OTPType == models.OTPTypeEmail && utils.IsTrue(customer.IsEmailVerified) {
-		return ErrAlreadyVerified
+	if _, err := s.getPendingSignup(ctx, req.CustomerID); err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func (s *SignupFlowImpl) validateOTPResendRequest(ctx context.Context, req *dto.OTPResendRequest) error {
-	// Validate customer exists
-	customer, err := getCustomer(ctx, s.customerRepo, req.CustomerID)
-	if err != nil {
-		return err
-	}
-
 	// Validate OTP type
 	if req.OTPType != models.OTPTypeMobile && req.OTPType != models.OTPTypeEmail {
 		return ErrInvalidOTPType
 	}
 
-	// Check if customer is already verified for this OTP type
-	if req.OTPType == models.OTPTypeMobile && utils.IsTrue(customer.IsMobileVerified) {
-		return ErrAlreadyVerified
-	}
-	if req.OTPType == models.OTPTypeEmail && utils.IsTrue(customer.IsEmailVerified) {
-		return ErrAlreadyVerified
+	if _, err := s.getPendingSignup(ctx, req.CustomerID); err != nil {
+		return err
 	}
 
 	return nil
+}
+
+func (s *SignupFlowImpl) pendingSignupKey(pendingID uint) string {
+	return fmt.Sprintf("signup:pending:%d", pendingID)
+}
+
+func (s *SignupFlowImpl) createPendingSignup(ctx context.Context, req *dto.SignupRequest, passwordHash string) (uint, error) {
+	if s.rc == nil {
+		return 0, ErrCacheNotAvailable
+	}
+
+	payload := pendingSignupData{
+		Request:      *req,
+		PasswordHash: passwordHash,
+		CreatedAt:    utils.UTCNow(),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return 0, err
+	}
+
+	for i := 0; i < 5; i++ {
+		pendingID, err := generatePendingSignupID()
+		if err != nil {
+			return 0, err
+		}
+		ok, err := s.rc.SetNX(ctx, s.pendingSignupKey(pendingID), data, utils.OTPExpiry).Result()
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			return pendingID, nil
+		}
+	}
+	return 0, fmt.Errorf("failed to allocate pending signup id")
+}
+
+func (s *SignupFlowImpl) getPendingSignup(ctx context.Context, pendingID uint) (*pendingSignupData, error) {
+	if s.rc == nil {
+		return nil, ErrCacheNotAvailable
+	}
+	raw, err := s.rc.Get(ctx, s.pendingSignupKey(pendingID)).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrCustomerNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var out pendingSignupData
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (s *SignupFlowImpl) deletePendingSignup(ctx context.Context, pendingID uint) error {
+	if s.rc == nil {
+		return ErrCacheNotAvailable
+	}
+	return s.rc.Del(ctx, s.pendingSignupKey(pendingID)).Err()
+}
+
+func generatePendingSignupID() (uint, error) {
+	max := big.NewInt(math.MaxInt32)
+	n, err := crand.Int(crand.Reader, max)
+	if err != nil {
+		return 0, err
+	}
+	id := uint(n.Int64())
+	if id == 0 {
+		return 1, nil
+	}
+	return id, nil
 }
