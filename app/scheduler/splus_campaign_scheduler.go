@@ -718,37 +718,12 @@ func extractSplusBotID(c dto.BotGetCampaignResponse) (string, error) {
 	}
 
 	switch v := raw.(type) {
-	case int:
-		if v <= 0 {
-			return "", fmt.Errorf("campaign platform_settings.metadata.splus_bot_id must be positive")
-		}
-		return strconv.FormatInt(int64(v), 10), nil
-	case int64:
-		if v <= 0 {
-			return "", fmt.Errorf("campaign platform_settings.metadata.splus_bot_id must be positive")
-		}
-		return strconv.FormatInt(v, 10), nil
-	case float64:
-		if v <= 0 || v != float64(int64(v)) {
-			return "", fmt.Errorf("campaign platform_settings.metadata.splus_bot_id must be a positive integer")
-		}
-		return strconv.FormatInt(int64(v), 10), nil
 	case string:
 		s := strings.TrimSpace(v)
 		if s == "" {
 			return "", fmt.Errorf("campaign platform_settings.metadata.splus_bot_id must not be empty")
 		}
-		id, err := strconv.ParseInt(s, 10, 64)
-		if err != nil || id <= 0 {
-			return "", fmt.Errorf("campaign platform_settings.metadata.splus_bot_id must be a positive integer")
-		}
-		return strconv.FormatInt(id, 10), nil
-	case json.Number:
-		id, err := v.Int64()
-		if err != nil || id <= 0 {
-			return "", fmt.Errorf("campaign platform_settings.metadata.splus_bot_id must be a positive integer")
-		}
-		return strconv.FormatInt(id, 10), nil
+		return s, nil
 	default:
 		return "", fmt.Errorf("campaign platform_settings.metadata.splus_bot_id has unsupported type %T", raw)
 	}
