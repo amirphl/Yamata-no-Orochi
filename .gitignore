@@ -265,6 +265,8 @@ py-ai/backup/
 py-ai/backup 2/
 py-ai/Customer Persona New.csv
 py-ai/Customer Persona New.processed.csv
+py-ai/tag-extraction/Customer Segmentation.xlsx
+py-ai/tag-extraction/stat_with_tags.csv
 data/
 
 scripts/update-audience-spec.sh
