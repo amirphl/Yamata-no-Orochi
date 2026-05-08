@@ -9,6 +9,8 @@ import sys
 import ast
 
 API_URL = "https://jazebeh.ir/api/v1/bot/campaigns/audience-spec"
+# API_URL = "http://localhost:8080/api/v1/bot/campaigns/audience-spec"
+ALLOWED_PLATFORMS = {"sms", "rubika", "bale", "splus"}
 
 
 def clean_str(s: object) -> str:
@@ -33,21 +35,49 @@ def parse_tags(cell: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Push audience specs to API from stat_with_tags.csv.")
-    parser.add_argument("--csv", default="stat_with_tags.csv",
-                        help="Path to input CSV (default: stat_with_tags.csv)")
-    parser.add_argument("--sleep", type=float, default=0.2,
-                        help="Seconds to sleep between calls (default: 0.2)")
-    parser.add_argument("--timeout", type=int, default=30,
-                        help="HTTP timeout seconds (default: 30)")
-    parser.add_argument("--log", default="audience_spec_push_log.csv",
-                        help="Path to write per-row results (default: audience_spec_push_log.csv)")
+    parser = argparse.ArgumentParser(
+        description="Push audience specs to API from stat_with_tags.csv."
+    )
+    parser.add_argument(
+        "--csv",
+        default="stat_with_tags.csv",
+        help="Path to input CSV (default: stat_with_tags.csv)",
+    )
+    parser.add_argument(
+        "--sleep",
+        type=float,
+        default=0.2,
+        help="Seconds to sleep between calls (default: 0.2)",
+    )
+    parser.add_argument(
+        "--timeout", type=int, default=30, help="HTTP timeout seconds (default: 30)"
+    )
+    parser.add_argument(
+        "--platform",
+        default="sms",
+        help="Target platform: sms|rubika|bale|splus (default: sms)",
+    )
+    parser.add_argument(
+        "--log",
+        default="audience_spec_push_log.csv",
+        help="Path to write per-row results (default: audience_spec_push_log.csv)",
+    )
     args = parser.parse_args()
+    platform = clean_str(args.platform).lower()
+    if platform not in ALLOWED_PLATFORMS:
+        print(
+            f"ERROR: invalid --platform '{args.platform}'. Allowed: {', '.join(sorted(ALLOWED_PLATFORMS))}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # token only from env
     token = os.getenv("JAZEBEH_API_TOKEN", "").strip()
     if not token:
-        print("ERROR: JAZEBEH_API_TOKEN environment variable is missing or empty.", file=sys.stderr)
+        print(
+            "ERROR: JAZEBEH_API_TOKEN environment variable is missing or empty.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # load CSV
@@ -60,14 +90,18 @@ def main():
     required = {"level1", "level2", "level3", "tags", "available_audience"}
     missing = required - set(df.columns)
     if missing:
-        print(f"ERROR: CSV missing columns: {', '.join(sorted(missing))}", file=sys.stderr)
+        print(
+            f"ERROR: CSV missing columns: {', '.join(sorted(missing))}", file=sys.stderr
+        )
         sys.exit(1)
 
     df["level1"] = df["level1"].map(clean_str)
     df["level2"] = df["level2"].map(clean_str)
     df["level3"] = df["level3"].map(clean_str)
     df["tags_list"] = df["tags"].map(parse_tags)
-    df["available_audience"] = df["available_audience"].map(lambda x: int(clean_str(x) or "10000"))
+    df["available_audience"] = df["available_audience"].map(
+        lambda x: int(clean_str(x) or "10000")
+    )
 
     # optional level2 metadata columns produced by main.py
     for col in ("level2_one_line", "level2_inclusion", "level2_exclusion"):
@@ -80,10 +114,12 @@ def main():
     df = df[(df["level1"] != "") & (df["level2"] != "") & (df["level3"] != "")].copy()
 
     session = requests.Session()
-    session.headers.update({
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    })
+    session.headers.update(
+        {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+    )
 
     logs = []
     success = failed = 0
@@ -92,10 +128,13 @@ def main():
         tags = row["tags_list"]
         if not isinstance(tags, list) or len(tags) == 0:
             failed += 1
-            logs.append({"row": int(idx0) + 1, "status": "skipped", "reason": "no tags"})
+            logs.append(
+                {"row": int(idx0) + 1, "status": "skipped", "reason": "no tags"}
+            )
             continue
 
         payload = {
+            "platform": platform,
             "level1": row["level1"],
             "level2": row["level2"],
             "level3": row["level3"],
@@ -113,8 +152,6 @@ def main():
             payload["metadata"] = level2_meta
 
         try:
-            print(payload)
-            print("----")
             resp = session.post(
                 API_URL,
                 json=payload,
@@ -123,30 +160,36 @@ def main():
             )
             if resp.ok:
                 success += 1
-                logs.append({
-                    "row": int(idx0) + 1,
-                    "status": "ok",
-                    "code": resp.status_code,
-                    "levels": f"{payload['level1']}|{payload['level2']}|{payload['level3']}",
-                    "tags_count": len(payload["tags"]),
-                })
+                logs.append(
+                    {
+                        "row": int(idx0) + 1,
+                        "status": "ok",
+                        "code": resp.status_code,
+                        "levels": f"{payload['level1']}|{payload['level2']}|{payload['level3']}",
+                        "tags_count": len(payload["tags"]),
+                    }
+                )
             else:
                 failed += 1
-                logs.append({
-                    "row": int(idx0) + 1,
-                    "status": "error",
-                    "code": resp.status_code,
-                    "levels": f"{payload['level1']}|{payload['level2']}|{payload['level3']}",
-                    "body": (resp.text or "")[:500],
-                })
+                logs.append(
+                    {
+                        "row": int(idx0) + 1,
+                        "status": "error",
+                        "code": resp.status_code,
+                        "levels": f"{payload['level1']}|{payload['level2']}|{payload['level3']}",
+                        "body": (resp.text or "")[:500],
+                    }
+                )
         except requests.RequestException as e:
             failed += 1
-            logs.append({
-                "row": int(idx0) + 1,
-                "status": "exception",
-                "levels": f"{payload['level1']}|{payload['level2']}|{payload['level3']}",
-                "error": str(e),
-            })
+            logs.append(
+                {
+                    "row": int(idx0) + 1,
+                    "status": "exception",
+                    "levels": f"{payload['level1']}|{payload['level2']}|{payload['level3']}",
+                    "error": str(e),
+                }
+            )
 
         time.sleep(args.sleep)
 
