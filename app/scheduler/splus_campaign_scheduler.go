@@ -12,6 +12,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -181,9 +182,21 @@ func (c *httpSplusClient) UploadFile(ctx context.Context, botID string, path str
 	}
 	defer f.Close()
 
+	fileName := filepath.Base(path)
+	fileContentType := strings.TrimSpace(mime.TypeByExtension(strings.ToLower(filepath.Ext(fileName))))
+	if fileContentType == "" {
+		fileContentType = "application/octet-stream"
+	}
+	if fileContentType == "image/jpg" {
+		fileContentType = "image/jpeg"
+	}
+
 	buf := &bytes.Buffer{}
 	writer := multipart.NewWriter(buf)
-	part, err := writer.CreateFormFile("file", filepath.Base(path))
+	partHeaders := textproto.MIMEHeader{}
+	partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, fileName))
+	partHeaders.Set("Content-Type", fileContentType)
+	part, err := writer.CreatePart(partHeaders)
 	if err != nil {
 		return nil, err
 	}
@@ -194,12 +207,17 @@ func (c *httpSplusClient) UploadFile(ctx context.Context, botID string, path str
 		return nil, err
 	}
 
+	formContentType := writer.FormDataContentType()
+	if !strings.HasPrefix(strings.ToLower(formContentType), "multipart/form-data;") {
+		return nil, fmt.Errorf("invalid multipart content type: %s", formContentType)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/v1/file/upload", buf)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", botID)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Content-Type", formContentType)
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := c.client.Do(req)
