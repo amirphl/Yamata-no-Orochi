@@ -230,7 +230,7 @@ func (r *CampaignRepositoryImpl) AggregateClickCountsByCustomerIDs(ctx context.C
 	db := r.getDB(ctx)
 	if err := db.Table("short_link_clicks sc").
 		Select("c.customer_id, COUNT(DISTINCT sc.uid) AS clicks").
-		Joins("JOIN sms_campaigns c ON c.id = sc.campaign_id").
+		Joins("JOIN campaigns c ON c.id = sc.campaign_id").
 		Where("c.customer_id IN ?", customerIDs).
 		Where("COALESCE(sc.ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
 		Where(`NOT (
@@ -266,7 +266,7 @@ func (r *CampaignRepositoryImpl) AggregateTotalSentByCustomerIDs(ctx context.Con
 
 	db := r.getDB(ctx)
 	var rows []row
-	err := db.Table("sms_campaigns").
+	err := db.Table("campaigns").
 		Select(`customer_id, COALESCE(SUM(
 			COALESCE(
 				NULLIF(statistics->>'aggregatedTotalSent', '')::bigint,
