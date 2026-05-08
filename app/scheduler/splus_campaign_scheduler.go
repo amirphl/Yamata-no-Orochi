@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -531,7 +533,12 @@ func (s *SplusCampaignScheduler) downloadCampaignMediaViaBotAPI(ctx context.Cont
 		return "", fmt.Errorf("bot media download http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 
-	tmpFile, err := os.CreateTemp("", "splus-media-*")
+	pattern := "splus-media-*"
+	if ext := resolveDownloadedMediaExtension(resp); ext != "" {
+		pattern += ext
+	}
+
+	tmpFile, err := os.CreateTemp("", pattern)
 	if err != nil {
 		return "", err
 	}
@@ -543,6 +550,46 @@ func (s *SplusCampaignScheduler) downloadCampaignMediaViaBotAPI(ctx context.Cont
 	}
 
 	return tmpFile.Name(), nil
+}
+
+func resolveDownloadedMediaExtension(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+
+	contentDisposition := strings.TrimSpace(resp.Header.Get("Content-Disposition"))
+	if contentDisposition != "" {
+		_, params, err := mime.ParseMediaType(contentDisposition)
+		if err == nil {
+			if filename := strings.TrimSpace(params["filename"]); filename != "" {
+				if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
+					return ext
+				}
+			}
+			if filenameStar := strings.TrimSpace(params["filename*"]); filenameStar != "" {
+				if idx := strings.Index(filenameStar, "''"); idx >= 0 {
+					filenameStar = filenameStar[idx+2:]
+				}
+				if decoded, err := url.QueryUnescape(filenameStar); err == nil {
+					filenameStar = decoded
+				}
+				if ext := strings.ToLower(filepath.Ext(filenameStar)); ext != "" {
+					return ext
+				}
+			}
+		}
+	}
+
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if contentType != "" {
+		if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
+			if exts, err := mime.ExtensionsByType(mediaType); err == nil && len(exts) > 0 {
+				return exts[0]
+			}
+		}
+	}
+
+	return ""
 }
 
 func (s *SplusCampaignScheduler) sendWithRetry(ctx context.Context, botID string, req *SplusSendMessageRequest) (*SplusResponse, error) {
