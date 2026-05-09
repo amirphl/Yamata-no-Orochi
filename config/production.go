@@ -781,7 +781,17 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 	}
 
 	// Validate SMS configuration if enabled
-	if cfg.SMS.ProviderDomain != "mock" {
+	if cfg.SMS.ProviderDomain == "payamsms" {
+		if cfg.SMS.SourceNumber == "" {
+			errors = append(errors, "SMS_SOURCE_NUMBER is required for PayamSMS provider")
+		}
+		if cfg.PayamSMS.Username == "" {
+			errors = append(errors, "PAYAM_SMS_USERNAME is required for PayamSMS provider")
+		}
+		if cfg.PayamSMS.Password == "" {
+			errors = append(errors, "PAYAM_SMS_PASSWORD is required for PayamSMS provider")
+		}
+	} else if cfg.SMS.ProviderDomain != "mock" {
 		if cfg.SMS.APIKey == "" {
 			errors = append(errors, "SMS_API_KEY is required for SMS provider")
 		}

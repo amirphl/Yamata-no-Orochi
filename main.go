@@ -310,6 +310,8 @@ func initializeNotificationService(cfg *config.ProductionConfig) services.Notifi
 	switch cfg.SMS.ProviderDomain {
 	case "mock":
 		smsService = services.NewMockSMSService()
+	case "payamsms":
+		smsService = services.NewPayamSMSService(&cfg.SMS, &cfg.PayamSMS)
 	default:
 		smsService = services.NewSMSService(&cfg.SMS)
 	}
@@ -318,6 +320,13 @@ func initializeNotificationService(cfg *config.ProductionConfig) services.Notifi
 	emailProvider = services.NewMockEmailProvider()
 
 	return services.NewNotificationService(smsService, emailProvider)
+}
+
+func initializeOTPSMSService(cfg *config.ProductionConfig) services.SMSService {
+	if cfg.SMS.ProviderDomain == "mock" {
+		return services.NewMockSMSService()
+	}
+	return services.NewPayamSMSService(&cfg.SMS, &cfg.PayamSMS)
 }
 
 // initializeApplication initializes the main application components
@@ -407,6 +416,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	log.Printf("Token service initialized with issuer: %s, audience: %s", cfg.JWT.Issuer, cfg.JWT.Audience)
 
 	// Initialize flows
+	otpSMSService := initializeOTPSMSService(cfg)
+
 	signupFlow := businessflow.NewSignupFlow(
 		customerRepo,
 		accountTypeRepo,
@@ -415,6 +426,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		agencyDiscountRepo,
 		walletRepo,
 		tokenService,
+		otpSMSService,
 		notificationService,
 		cfg.Admin,
 		cfg.Message,
@@ -428,6 +440,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		auditRepo,
 		accountTypeRepo,
 		tokenService,
+		otpSMSService,
 		notificationService,
 		cfg.Message,
 		cfg.Admin,
