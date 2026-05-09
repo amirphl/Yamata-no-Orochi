@@ -37,6 +37,7 @@ type LoginFlowImpl struct {
 	auditRepo       repository.AuditLogRepository
 	accountTypeRepo repository.AccountTypeRepository
 	tokenService    services.TokenService
+	otpSMSSvc       services.SMSService
 	notificationSvc services.NotificationService
 	messageConfig   config.MessageConfig
 	adminConfig     config.AdminConfig
@@ -51,6 +52,7 @@ func NewLoginFlow(
 	auditRepo repository.AuditLogRepository,
 	accountTypeRepo repository.AccountTypeRepository,
 	tokenService services.TokenService,
+	otpSMSSvc services.SMSService,
 	notificationSvc services.NotificationService,
 	messageConfig config.MessageConfig,
 	adminConfig config.AdminConfig,
@@ -63,6 +65,7 @@ func NewLoginFlow(
 		auditRepo:       auditRepo,
 		accountTypeRepo: accountTypeRepo,
 		tokenService:    tokenService,
+		otpSMSSvc:       otpSMSSvc,
 		notificationSvc: notificationSvc,
 		messageConfig:   messageConfig,
 		adminConfig:     adminConfig,
@@ -192,7 +195,12 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 
 	message := fmt.Sprintf(lf.messageConfig.SigninVerificationCodeTemplate, otpCode)
 	customerID := int64(customer.ID)
-	if err := lf.notificationSvc.SendSMS(ctx, customer.RepresentativeMobile, message, &customerID); err != nil {
+	recipient, err := normalizeOTPMobile(customer.RepresentativeMobile)
+	if err != nil {
+		_ = lf.rc.Del(ctx, key).Err()
+		return nil, err
+	}
+	if err := lf.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID); err != nil {
 		_ = lf.rc.Del(ctx, key).Err()
 		return nil, err
 	}
@@ -318,11 +326,17 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 		// Send OTP via SMS
 		smsMessage := fmt.Sprintf(lf.messageConfig.PasswordResetVerificationCodeTemplate, otpCode)
 		customerID := int64(customer.ID)
-		if err := lf.notificationSvc.SendSMS(txCtx, customer.RepresentativeMobile, smsMessage, &customerID); err != nil {
+		recipient, err := normalizeOTPMobile(customer.RepresentativeMobile)
+		if err != nil {
+			// TODO: Delete OTP
+			return err
+		}
+		if err := lf.otpSMSSvc.SendOTP(txCtx, recipient, smsMessage, &customerID); err != nil {
 			// Log SMS failure but don't fail the entire process
 			errMsg := fmt.Sprintf("OTP generated but SMS failed: %v", err)
 			_ = lf.createAuditLog(txCtx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
 			// TODO: Retry sending OTP
+			// TODO: Delete OTP
 		}
 
 		resp = &dto.ForgetPasswordResponse{
