@@ -46,6 +46,7 @@ type SignupFlowImpl struct {
 	agencyDiscountRepo repository.AgencyDiscountRepository
 	walletRepo         repository.WalletRepository
 	tokenService       services.TokenService
+	otpSMSSvc          services.SMSService
 	notificationSvc    services.NotificationService
 	adminConfig        config.AdminConfig
 	messageConfig      config.MessageConfig
@@ -68,6 +69,7 @@ func NewSignupFlow(
 	agencyDiscountRepo repository.AgencyDiscountRepository,
 	walletRepo repository.WalletRepository,
 	tokenService services.TokenService,
+	otpSMSSvc services.SMSService,
 	notificationSvc services.NotificationService,
 	adminConfig config.AdminConfig,
 	messageConfig config.MessageConfig,
@@ -82,6 +84,7 @@ func NewSignupFlow(
 		agencyDiscountRepo: agencyDiscountRepo,
 		walletRepo:         walletRepo,
 		tokenService:       tokenService,
+		otpSMSSvc:          otpSMSSvc,
 		notificationSvc:    notificationSvc,
 		adminConfig:        adminConfig,
 		messageConfig:      messageConfig,
@@ -127,8 +130,14 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 	go func() {
 		customerID := int64(pendingID)
 		message := fmt.Sprintf(s.messageConfig.SignupVerificationCodeTemplate, otpCode)
-		_ = s.notificationSvc.SendSMS(ctx, req.RepresentativeMobile, message, &customerID)
+		recipient, err := normalizeOTPMobile(req.RepresentativeMobile)
+		if err != nil {
+			// TODO: deletePendingSignup
+			return
+		}
+		_ = s.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID)
 		// TODO: Handle error
+		// TODO: deletePendingSignup
 	}()
 
 	return &dto.SignupResponse{
@@ -256,11 +265,17 @@ func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendReques
 	message := fmt.Sprintf(s.messageConfig.OTPResendVerificationCodeTemplate, otpCode, utils.OTPExpiry.Minutes())
 	if req.OTPType == OTPTypeMobile {
 		customerID := int64(req.CustomerID)
-		err = s.notificationSvc.SendSMS(ctx, target, message, &customerID)
+		recipient, mobileErr := normalizeOTPMobile(target)
+		if mobileErr != nil {
+			err = mobileErr
+		} else {
+			err = s.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID)
+		}
 	} else {
 		err = s.notificationSvc.SendEmail(target, "Verification Code", message)
 	}
 	if err != nil {
+		// TODO: Delete OTP
 		return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", err)
 	}
 
