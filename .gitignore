@@ -267,6 +267,8 @@ py-ai/Customer Persona New.csv
 py-ai/Customer Persona New.processed.csv
 py-ai/tag-extraction/Customer Segmentation.xlsx
 py-ai/tag-extraction/stat_with_tags.csv
+py-ai/tag-extraction/audience_spec_push_log.csv
+py-ai/tag-extraction/jobs_by_category.json
 data/
 
 scripts/update-audience-spec.sh
