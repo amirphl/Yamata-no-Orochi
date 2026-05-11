@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -1366,6 +1367,180 @@ func (s *CampaignFlowImpl) notifyMissingSegmentPriceFactor(level3s []string) {
 	}()
 }
 
+// campaignDisplayEnrichments holds computed pricing and settings data for building a GetCampaignResponse.
+type campaignDisplayEnrichments struct {
+	linePriceFactor      *float64
+	segmentPriceFactor   *float64
+	platformSettingsName *string
+}
+
+// fetchCampaignDisplayEnrichments computes linePriceFactor, segmentPriceFactor, and platformSettingsName for a campaign.
+func (s *CampaignFlowImpl) fetchCampaignDisplayEnrichments(ctx context.Context, c *models.Campaign) (campaignDisplayEnrichments, error) {
+	var e campaignDisplayEnrichments
+
+	lpf, err := s.resolveLinePriceFactor(ctx, c.ID, c.Spec.LineNumber)
+	if err != nil {
+		return e, err
+	}
+	e.linePriceFactor = lpf
+
+	spf, err := s.resolveSegmentPriceFactor(ctx, c.ID, c.Spec.Level3s, c.Spec.Platform)
+	if err != nil {
+		return e, err
+	}
+	e.segmentPriceFactor = spf
+
+	name, err := s.resolvePlatformSettingsName(ctx, c.Spec.PlatformSettingsID)
+	if err != nil {
+		return e, err
+	}
+	e.platformSettingsName = name
+
+	return e, nil
+}
+
+// resolveSegmentPriceFactor reads segment price factor from transaction metadata,
+// falling back to the segment price repo if not found.
+func (s *CampaignFlowImpl) resolveSegmentPriceFactor(ctx context.Context, campaignID uint, level3s []string, platform string) (*float64, error) {
+	spf, err := s.readSegmentPriceFromMetadata(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if spf != nil {
+		return spf, nil
+	}
+	if len(level3s) == 0 {
+		return nil, nil
+	}
+	factor, err := s.fetchSegmentPriceFactor(ctx, level3s, platform)
+	if err != nil {
+		if errors.Is(err, ErrSegmentPriceFactorNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &factor, nil
+}
+
+// readSegmentPriceFromMetadata reads the segment_price_factor from the latest
+// campaign finalization transaction metadata.
+func (s *CampaignFlowImpl) readSegmentPriceFromMetadata(ctx context.Context, campaignID uint) (*float64, error) {
+	source := "campaign_update"
+	operation := "reserve_budget"
+	txs, err := s.transactionRepo.ByFilter(ctx, models.TransactionFilter{
+		CampaignID: &campaignID,
+		Source:     &source,
+		Operation:  &operation,
+	}, "id DESC", 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 || len(txs[0].Metadata) == 0 {
+		return nil, nil
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
+		return nil, nil
+	}
+	return parseMetadataFloat(meta["segment_price_factor"]), nil
+}
+
+// resolveLinePriceFactor reads line price factor from transaction metadata,
+// falling back to the line number repo if not found.
+func (s *CampaignFlowImpl) resolveLinePriceFactor(ctx context.Context, campaignID uint, lineNumber *string) (*float64, error) {
+	lpf, err := s.readLinePriceFromMetadata(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if lpf != nil {
+		return lpf, nil
+	}
+	if lineNumber == nil {
+		return nil, nil
+	}
+	ln, err := s.lineNumberRepo.ByValue(ctx, *lineNumber)
+	if err != nil {
+		return nil, err
+	}
+	if ln == nil {
+		return nil, nil
+	}
+	return &ln.PriceFactor, nil
+}
+
+// readLinePriceFromMetadata reads the line_number_price_factor from the latest
+// campaign finalization transaction metadata.
+func (s *CampaignFlowImpl) readLinePriceFromMetadata(ctx context.Context, campaignID uint) (*float64, error) {
+	source := "campaign_update"
+	operation := "reserve_budget"
+	txs, err := s.transactionRepo.ByFilter(ctx, models.TransactionFilter{
+		CampaignID: &campaignID,
+		Source:     &source,
+		Operation:  &operation,
+	}, "id DESC", 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 || len(txs[0].Metadata) == 0 {
+		return nil, nil
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
+		return nil, nil
+	}
+	return parseMetadataFloat(meta["line_number_price_factor"]), nil
+}
+
+// resolvePlatformSettingsName returns the Name of a platform settings record by ID.
+func (s *CampaignFlowImpl) resolvePlatformSettingsName(ctx context.Context, id *uint) (*string, error) {
+	if id == nil || *id == 0 {
+		return nil, nil
+	}
+	settings, err := s.platformSettingsRepo.ByID(ctx, *id)
+	if err != nil {
+		return nil, err
+	}
+	if settings == nil {
+		return nil, nil
+	}
+	return settings.Name, nil
+}
+
+// buildCampaignResponse constructs a GetCampaignResponse from a campaign model and its display enrichments.
+func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto.GetCampaignResponse {
+	return dto.GetCampaignResponse{
+		ID:                          c.ID,
+		UUID:                        c.UUID.String(),
+		Status:                      c.Status.String(),
+		CreatedAt:                   c.CreatedAt,
+		UpdatedAt:                   c.UpdatedAt,
+		Title:                       c.Spec.Title,
+		Level1:                      c.Spec.Level1,
+		Level2s:                     c.Spec.Level2s,
+		Level3s:                     c.Spec.Level3s,
+		Tags:                        c.Spec.Tags,
+		Sex:                         c.Spec.Sex,
+		City:                        c.Spec.City,
+		AdLink:                      c.Spec.AdLink,
+		Content:                     c.Spec.Content,
+		ShortLinkDomain:             c.Spec.ShortLinkDomain,
+		Category:                    c.Spec.Category,
+		Job:                         c.Spec.Job,
+		ScheduleAt:                  c.Spec.ScheduleAt,
+		LineNumber:                  c.Spec.LineNumber,
+		MediaUUID:                   c.Spec.MediaUUID,
+		PlatformSettingsID:          c.Spec.PlatformSettingsID,
+		Platform:                    c.Spec.Platform,
+		LinePriceFactor:             e.linePriceFactor,
+		SegmentPriceFactor:          e.segmentPriceFactor,
+		PlatformSettingsName:        e.platformSettingsName,
+		Budget:                      c.Spec.Budget,
+		NumAudience:                 c.NumAudience,
+		Comment:                     c.Comment,
+		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
+	}
+}
+
 // ListCampaigns retrieves user's campaigns with pagination, ordering and filters
 func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampaignsRequest, metadata *ClientMetadata) (*dto.ListCampaignsResponse, error) {
 	var err error
@@ -1477,50 +1652,17 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		}
 		totalClicks := clicks
 
-		var linePriceFactor *float64
-		if c.Spec.LineNumber != nil {
-			lineNumber, err := s.lineNumberRepo.ByValue(ctx, *c.Spec.LineNumber)
-			if err != nil {
-				return nil, err
-			}
-			if lineNumber != nil {
-				linePriceFactor = &lineNumber.PriceFactor
-			}
+		enrichments, err := s.fetchCampaignDisplayEnrichments(ctx, c)
+		if err != nil {
+			return nil, err
 		}
 
-		items = append(items, dto.GetCampaignResponse{
-			ID:                 c.ID,
-			UUID:               c.UUID.String(),
-			Status:             c.Status.String(),
-			CreatedAt:          c.CreatedAt,
-			UpdatedAt:          c.UpdatedAt,
-			Title:              c.Spec.Title,
-			Level1:             c.Spec.Level1,
-			Level2s:            c.Spec.Level2s,
-			Level3s:            c.Spec.Level3s,
-			Tags:               c.Spec.Tags,
-			Sex:                c.Spec.Sex,
-			City:               c.Spec.City,
-			AdLink:             c.Spec.AdLink,
-			Content:            c.Spec.Content,
-			ShortLinkDomain:    c.Spec.ShortLinkDomain,
-			Category:           c.Spec.Category,
-			Job:                c.Spec.Job,
-			ScheduleAt:         c.Spec.ScheduleAt,
-			LineNumber:         c.Spec.LineNumber,
-			MediaUUID:          c.Spec.MediaUUID,
-			PlatformSettingsID: c.Spec.PlatformSettingsID,
-			Platform:           c.Spec.Platform,
-			LinePriceFactor:    linePriceFactor,
-			Budget:             c.Spec.Budget,
-			NumAudience:        c.NumAudience,
-			Comment:            c.Comment,
-			Statistics:         statsMap,
-			ClickRate:          clickRate,
-			TotalClicks:        &totalClicks,
+		item := buildCampaignResponse(c, enrichments)
+		item.Statistics = statsMap
+		item.ClickRate = clickRate
+		item.TotalClicks = &totalClicks
 
-			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
-		})
+		items = append(items, item)
 	}
 
 	// Build pagination
@@ -1589,51 +1731,16 @@ func (s *CampaignFlowImpl) GetLastInitiatedCampaign(ctx context.Context, custome
 			c = initiatedCampaign
 		}
 	}
-	var linePriceFactor *float64
-	if c.Spec.LineNumber != nil {
-		lineNumber, err := s.lineNumberRepo.ByValue(ctx, *c.Spec.LineNumber)
-		if err != nil {
-			return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
-		}
-		if lineNumber != nil {
-			linePriceFactor = &lineNumber.PriceFactor
-		}
+	enrichments, err := s.fetchCampaignDisplayEnrichments(ctx, c)
+	if err != nil {
+		return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
 	}
 
-	item := &dto.GetCampaignResponse{
-		ID:                 c.ID,
-		UUID:               c.UUID.String(),
-		Status:             c.Status.String(),
-		CreatedAt:          c.CreatedAt,
-		UpdatedAt:          c.UpdatedAt,
-		Title:              c.Spec.Title,
-		Level1:             c.Spec.Level1,
-		Level2s:            c.Spec.Level2s,
-		Level3s:            c.Spec.Level3s,
-		Tags:               c.Spec.Tags,
-		Sex:                c.Spec.Sex,
-		City:               c.Spec.City,
-		AdLink:             c.Spec.AdLink,
-		Content:            c.Spec.Content,
-		ShortLinkDomain:    c.Spec.ShortLinkDomain,
-		Category:           c.Spec.Category,
-		Job:                c.Spec.Job,
-		ScheduleAt:         c.Spec.ScheduleAt,
-		LineNumber:         c.Spec.LineNumber,
-		MediaUUID:          c.Spec.MediaUUID,
-		PlatformSettingsID: c.Spec.PlatformSettingsID,
-		Platform:           c.Spec.Platform,
-		LinePriceFactor:    linePriceFactor,
-		Budget:             c.Spec.Budget,
-		NumAudience:        c.NumAudience,
-		Comment:            c.Comment,
-
-		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
-	}
+	item := buildCampaignResponse(c, enrichments)
 
 	return &dto.GetLastInitiatedCampaignResponse{
 		Message: "Last initiated campaign retrieved successfully",
-		Item:    item,
+		Item:    &item,
 	}, nil
 }
 
@@ -2491,6 +2598,7 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 				return nil
 			}
 			if campaign.NumAudience == nil || *campaign.NumAudience == 0 {
+				log.Printf("reconcileUndeliveredCampaignRefunds: campaign %d has nil or zero num_audience, skipping refund", campaign.ID)
 				return nil
 			}
 
@@ -2536,6 +2644,7 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 
 			var costPerMessage uint64
 			if costPerMessage, ok = s.resolveCampaignCostPerMessageFromMetadata(txCtx, campaign); !ok {
+				log.Printf("reconcileUndeliveredCampaignRefunds: cannot resolve cost per message for campaign %d, skipping refund reconciliation", campaign.ID)
 				return nil
 			}
 
@@ -2674,6 +2783,7 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 			if auditCustomer != nil {
 				_ = s.createAuditLog(ctx, auditCustomer, models.AuditActionCampaignRefundReconcileFailed, errMsg, false, &errMsg, nil)
 			}
+			log.Printf("%s", errMsg)
 			// Best-effort reconciliation: do not block listing/getting campaigns.
 			continue
 		}
