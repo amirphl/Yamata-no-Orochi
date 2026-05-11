@@ -32,7 +32,7 @@ const (
 	SessionTimeout = 24 * time.Hour
 
 	// OTPExpiry is the time-to-live for OTP codes (5 minutes)
-	OTPExpiry = 5 * time.Minute
+	OTPExpiry = 1*time.Minute + 30*time.Second
 )
 
 // CORS and security constants
