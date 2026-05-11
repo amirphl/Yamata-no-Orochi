@@ -70,6 +70,7 @@ type TransactionHistoryItem struct {
 	Amount              uint64            `json:"amount"`                                                    // Amount in Tomans
 	CustomerCredit      uint64            `json:"customer_credit"`                                           // Customer credit portion (when applicable)
 	AgencyShareWithTax  uint64            `json:"agency_share_with_tax"`                                     // Agency share with tax (when applicable)
+	Refund              uint64            `json:"refund"`                                                    // Refund amount (when applicable)
 	Currency            string            `json:"currency"`                                                  // Currency (usually TMN)
 	Operation           string            `json:"operation"`                                                 // Operation name for display
 	Source              string            `json:"source"`                                                    // Metadata source key
