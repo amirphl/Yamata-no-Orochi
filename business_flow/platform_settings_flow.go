@@ -90,15 +90,32 @@ func (f *PlatformSettingsFlowImpl) CreatePlatformSettings(ctx context.Context, r
 		multimediaUUID = &assetUUID
 	}
 
+	var businessLicenseID *uint
+	var businessLicenseUUID *string
+	if req.BusinessLicenseUUID != nil && *req.BusinessLicenseUUID != "" {
+		asset, err := f.multimediaRepo.ByUUID(ctx, *req.BusinessLicenseUUID)
+		if err != nil {
+			return nil, err
+		}
+		if asset == nil {
+			return nil, NewBusinessError("BUSINESS_LICENSE_NOT_FOUND", "business license multimedia not found", nil)
+		}
+		businessLicenseID = &asset.ID
+		assetUUID := asset.UUID.String()
+		businessLicenseUUID = &assetUUID
+	}
+
 	row := models.PlatformSettings{
-		UUID:         uuid.New(),
-		CustomerID:   customerID,
-		Platform:     req.Platform,
-		Name:         normalizedName,
-		Description:  req.Description,
-		MultimediaID: multimediaID,
-		Metadata:     map[string]any{},
-		Status:       status,
+		UUID:              uuid.New(),
+		CustomerID:        customerID,
+		Platform:          req.Platform,
+		Name:              normalizedName,
+		Description:       req.Description,
+		Website:           req.Website,
+		MultimediaID:      multimediaID,
+		BusinessLicenseID: businessLicenseID,
+		Metadata:          map[string]any{},
+		Status:            status,
 	}
 
 	if err := f.platformSettingsRepo.Save(ctx, &row); err != nil {
@@ -120,14 +137,16 @@ func (f *PlatformSettingsFlowImpl) CreatePlatformSettings(ctx context.Context, r
 	}
 
 	return &dto.CreatePlatformSettingsResponse{
-		Message:        "Platform settings created successfully",
-		ID:             row.ID,
-		Platform:       row.Platform,
-		Name:           row.Name,
-		Description:    row.Description,
-		MultimediaUUID: multimediaUUID,
-		Status:         string(row.Status),
-		CreatedAt:      row.CreatedAt.Format(time.RFC3339),
+		Message:             "Platform settings created successfully",
+		ID:                  row.ID,
+		Platform:            row.Platform,
+		Name:                row.Name,
+		Description:         row.Description,
+		Website:             row.Website,
+		MultimediaUUID:      multimediaUUID,
+		BusinessLicenseUUID: businessLicenseUUID,
+		Status:              string(row.Status),
+		CreatedAt:           row.CreatedAt.Format(time.RFC3339),
 	}, nil
 }
 
@@ -155,15 +174,28 @@ func (f *PlatformSettingsFlowImpl) ListPlatformSettings(ctx context.Context, cus
 				multimediaUUID = &u
 			}
 		}
+		var businessLicenseUUID *string
+		if row.BusinessLicenseID != nil {
+			asset, err := f.multimediaRepo.ByID(ctx, *row.BusinessLicenseID)
+			if err != nil {
+				return nil, err
+			}
+			if asset != nil {
+				u := asset.UUID.String()
+				businessLicenseUUID = &u
+			}
+		}
 		items = append(items, dto.PlatformSettingsItem{
-			ID:             row.ID,
-			Platform:       row.Platform,
-			Name:           row.Name,
-			Description:    row.Description,
-			MultimediaUUID: multimediaUUID,
-			Status:         string(row.Status),
-			CreatedAt:      row.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:      row.UpdatedAt.Format(time.RFC3339),
+			ID:                  row.ID,
+			Platform:            row.Platform,
+			Name:                row.Name,
+			Description:         row.Description,
+			Website:             row.Website,
+			MultimediaUUID:      multimediaUUID,
+			BusinessLicenseUUID: businessLicenseUUID,
+			Status:              string(row.Status),
+			CreatedAt:           row.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:           row.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 

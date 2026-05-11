@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0103_add_business_license_and_website_to_platform_settings_down.sql...'
+\i migrations/0103_add_business_license_and_website_to_platform_settings_down.sql
+
 \echo 'Running 0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids_down.sql...'
 \i migrations/0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids_down.sql
 

@@ -87,19 +87,32 @@ func (f *PlatformSettingsAdminFlowImpl) ListPlatformSettingsByAdmin(ctx context.
 				multimediaUUID = &u
 			}
 		}
+		var businessLicenseUUID *string
+		if row.BusinessLicenseID != nil {
+			asset, err := f.multimediaRepo.ByID(ctx, *row.BusinessLicenseID)
+			if err != nil {
+				return nil, NewBusinessError("PLATFORM_SETTINGS_LIST_FAILED", "failed to lookup business license asset", err)
+			}
+			if asset != nil {
+				u := asset.UUID.String()
+				businessLicenseUUID = &u
+			}
+		}
 
 		items = append(items, dto.AdminPlatformSettingsItem{
-			ID:             row.ID,
-			UUID:           row.UUID.String(),
-			CustomerID:     row.CustomerID,
-			Platform:       row.Platform,
-			Name:           row.Name,
-			Description:    row.Description,
-			MultimediaUUID: multimediaUUID,
-			Metadata:       row.Metadata,
-			Status:         string(row.Status),
-			CreatedAt:      row.CreatedAt.Format(time.RFC3339),
-			UpdatedAt:      row.UpdatedAt.Format(time.RFC3339),
+			ID:                  row.ID,
+			UUID:                row.UUID.String(),
+			CustomerID:          row.CustomerID,
+			Platform:            row.Platform,
+			Name:                row.Name,
+			Description:         row.Description,
+			Website:             row.Website,
+			MultimediaUUID:      multimediaUUID,
+			BusinessLicenseUUID: businessLicenseUUID,
+			Metadata:            row.Metadata,
+			Status:              string(row.Status),
+			CreatedAt:           row.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:           row.UpdatedAt.Format(time.RFC3339),
 		})
 	}
 
