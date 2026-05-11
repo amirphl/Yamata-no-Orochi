@@ -86,6 +86,10 @@ func (h *PlatformSettingsHandler) Create(c fiber.Ctx) error {
 				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request", be.Code, be.Error())
 			case "MULTIMEDIA_NOT_FOUND":
 				return h.ErrorResponse(c, fiber.StatusBadRequest, "Multimedia not found", be.Code, be.Error())
+			case "BUSINESS_LICENSE_NOT_FOUND":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Business license multimedia not found", be.Code, be.Error())
+			case "PLATFORM_SETTINGS_DUPLICATE_CHECK_FAILED":
+				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to check duplicate platform settings name", be.Code, nil)
 			case "PLATFORM_SETTINGS_NAME_ALREADY_EXISTS":
 				return h.ErrorResponse(c, fiber.StatusConflict, "Platform settings name already exists", be.Code, nil)
 			case "MISSING_CUSTOMER_ID":

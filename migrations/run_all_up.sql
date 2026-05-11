@@ -314,5 +314,8 @@
 \echo 'Running 0102_add_campaign_test_send_audit_action.sql...'
 \i migrations/0102_add_campaign_test_send_audit_action.sql
 
+\echo 'Running 0103_add_business_license_and_website_to_platform_settings.sql...'
+\i migrations/0103_add_business_license_and_website_to_platform_settings.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
