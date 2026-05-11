@@ -1,6 +1,6 @@
 # Yamata no Orochi - Makefile for testing and development
 
-.PHONY: help test test-models test-repository test-coverage test-clean test-db-check build lint fmt vet clean run run-dev run-debug run-watch swag swag-init swag-clean deploy-local run-dev-simple migrate migrate-create swagger-ui
+.PHONY: help test test-models test-repository test-coverage test-clean test-db-check build lint fmt vet clean run run-dev run-debug run-watch swag swag-init swag-clean run-dev-simple migrate migrate-create swagger-ui
 
 # Set the shell to bash for consistent behavior
 SHELL := /bin/bash
@@ -26,7 +26,6 @@ help:
 	@echo "  swag           - Generate Swagger documentation"
 	@echo "  swag-init      - Initialize Swagger documentation (first time)"
 	@echo "  swag-clean     - Clean generated Swagger files"
-	@echo "  deploy-local   - Deploy with Docker (full stack with self-signed certs)"
 	@echo "  run-dev-simple - Run app in development mode (includes Swagger generation)"
 	@echo "  migrate        - Run database migrations"
 	@echo "  migrate-create - Create database and run migrations"
@@ -83,7 +82,7 @@ test-models: test-db-check
 
 test-repository: test-db-check
 	@echo "Running repository tests..."
-	go test -v -race -run "TestAccountTypeRepository|TestCustomerRepository|TestOTPVerificationRepository|TestCustomerSessionRepository|TestAuditLogRepository|TestBaseRepository" ./tests
+	go test -v -race -run "TestAccountTypeRepository|TestCustomerRepository|TestCustomerSessionRepository|TestAuditLogRepository|TestBaseRepository" ./tests
 
 test-coverage: test-db-check
 	@echo "Running tests with coverage..."
@@ -191,18 +190,6 @@ swag-install:
 	@echo "Installing swag tool..."
 	go install github.com/swaggo/swag/cmd/swag@latest
 	@echo "swag tool installed successfully"
-
-# Deployment targets
-deploy-local:
-	@echo "Deploying with Docker (full stack with self-signed certificates)..."
-	@if [ -z "$(DOMAIN)" ]; then \
-		echo "Usage: make deploy-local DOMAIN=yourdomain.com"; \
-		echo "Example: make deploy-local DOMAIN=thewritingonthewall.com"; \
-		exit 1; \
-	fi
-	@echo "Deploying for domain: $(DOMAIN)"
-	@chmod +x scripts/deploy-local.sh
-	@./scripts/deploy-local.sh $(DOMAIN)
 
 run-dev-simple:
 	@echo "Running in simplest development mode (no Docker)..."
