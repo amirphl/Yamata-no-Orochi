@@ -54,13 +54,6 @@ This path is designed for fast development.
 make run-dev-simple  # also runs `make swag`
 ```
 
-### Dockerized local deployment (full stack, self-signed cert)
-```bash
-./scripts/deploy-local.sh
-```
-- Brings up Nginx + App + Postgres + Redis
-- Generates self-signed certificates
-
 ## Swagger / OpenAPI (development only)
 - Generate docs:
 ```bash
@@ -79,13 +72,6 @@ Production never exposes Swagger UI.
 - Scripts now use strict error handling and fail fast:
   - `psql -v ON_ERROR_STOP=1` (no output redirection)
   - Errors are surfaced and stop the script
-
-Apply via development script:
-```bash
-./scripts/run-dev.sh     # prompts to run migrations
-# or
-./scripts/init-local-database.sh
-```
 
 Recent schema changes:
 - `0014_create_sms_campaigns.sql`: adds `sms_campaigns` table
@@ -178,7 +164,6 @@ curl -X GET "http://localhost:8080/api/v1/sms-campaigns?page=1&limit=10&orderby=
 ## Makefile Targets
 - `make swag` / `make swag-init` / `make swag-clean` – generate/clean Swagger docs
 - `make run-dev-simple` – simple local run; also runs `make swag`
-- `make deploy-local` – dockerized local deployment with self-signed certs
 - `make migrate` / `make migrate-create` – migration helpers
 - `make swagger-ui` – open standalone Swagger UI
 
