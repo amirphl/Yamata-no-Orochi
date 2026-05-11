@@ -73,7 +73,7 @@ func (p *PaymentFlowImpl) AdminChargeWallet(
 	if req.CustomerID == 0 {
 		return nil, NewBusinessError("CHARGE_WALLET_BY_ADMIN_FAILED", "Charge wallet by admin failed", fmt.Errorf("customer_id is required"))
 	}
-	if err := p.validateChargeWalletRequest(&dto.ChargeWalletRequest{AmountWithTax: req.AmountWithTax}); err != nil {
+	if err := p.validateChargeWalletRequest(&dto.ChargeWalletRequest{AmountWithTax: req.AmountWithTax}, ""); err != nil {
 		return nil, NewBusinessError("CHARGE_WALLET_BY_ADMIN_FAILED", "Charge wallet by admin failed", err)
 	}
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)

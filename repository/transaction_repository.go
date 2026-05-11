@@ -324,9 +324,10 @@ func (r *TransactionRepositoryImpl) GetHistoryWithMetadata(
 	query := db.Model(&models.Transaction{}).
 		Where("wallet_id = ?", walletID).
 		Where("customer_id = ?", customerID).
-		Where(`((metadata->>'source' = ? AND metadata->>'operation' = ?) OR (metadata->>'source' = ? AND metadata->>'operation' = ?))`,
+		Where(`((metadata->>'source' = ? AND metadata->>'operation' = ?) OR (metadata->>'source' = ? AND metadata->>'operation' = ?) OR (metadata->>'source' = ? AND metadata->>'operation' = ?))`,
 			models.TransactionSourceIncreaseCustomerFreePlusCredit, "increase_customer_free_plus_credit",
-			models.TransactionSourceIncreaseAgencyShareWithTax, "increase_agency_share_with_tax")
+			models.TransactionSourceIncreaseAgencyShareWithTax, "increase_agency_share_with_tax",
+			"campaign_partial_refund", "partial_undelivered_messages_refund")
 
 	if startDate != nil {
 		query = query.Where("created_at >= ?", *startDate)

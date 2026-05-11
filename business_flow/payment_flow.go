@@ -48,6 +48,7 @@ type PaymentFlowImpl struct {
 	paymentRequestRepo  repository.PaymentRequestRepository
 	walletRepo          repository.WalletRepository
 	customerRepo        repository.CustomerRepository
+	campaignRepo        repository.CampaignRepository
 	auditRepo           repository.AuditLogRepository
 	balanceSnapshotRepo repository.BalanceSnapshotRepository
 	transactionRepo     repository.TransactionRepository
@@ -72,6 +73,7 @@ func NewPaymentFlow(
 	paymentRequestRepo repository.PaymentRequestRepository,
 	walletRepo repository.WalletRepository,
 	customerRepo repository.CustomerRepository,
+	campaignRepo repository.CampaignRepository,
 	auditRepo repository.AuditLogRepository,
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
@@ -92,6 +94,7 @@ func NewPaymentFlow(
 		paymentRequestRepo:  paymentRequestRepo,
 		walletRepo:          walletRepo,
 		customerRepo:        customerRepo,
+		campaignRepo:        campaignRepo,
 		auditRepo:           auditRepo,
 		balanceSnapshotRepo: balanceSnapshotRepo,
 		transactionRepo:     transactionRepo,
@@ -112,11 +115,6 @@ func NewPaymentFlow(
 
 // ChargeWallet handles the complete process of charging a wallet
 func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalletRequest, metadata *ClientMetadata) (*dto.ChargeWalletResponse, error) {
-	// Validate business rules
-	if err := p.validateChargeWalletRequest(req); err != nil {
-		return nil, NewBusinessError("CHARGE_WALLET_FAILED", "Charge wallet failed", err)
-	}
-
 	var customer models.Customer
 	var paymentRequest *models.PaymentRequest
 	var atipayToken string
@@ -125,6 +123,11 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 		var err error
 		customer, err = getCustomer(txCtx, p.customerRepo, req.CustomerID)
 		if err != nil {
+			return err
+		}
+
+		// Admin customer numbers can bypass the public wallet charge amount restrictions.
+		if err := p.validateChargeWalletRequest(req, customer.RepresentativeMobile); err != nil {
 			return err
 		}
 
@@ -189,14 +192,18 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 	return resp, nil
 }
 
-// validateChargeWalletRequest validates the business rules for charging a wallet
-func (p *PaymentFlowImpl) validateChargeWalletRequest(req *dto.ChargeWalletRequest) error {
+// validateChargeWalletRequest validates the business rules for charging a wallet.
+func (p *PaymentFlowImpl) validateChargeWalletRequest(req *dto.ChargeWalletRequest, representativeMobile string) error {
 	req.Lang = strings.ToUpper(strings.TrimSpace(req.Lang))
 	if req.Lang == "" {
 		req.Lang = "EN"
 	}
 	if req.Lang != "EN" && req.Lang != "FA" {
 		return ErrInvalidLanguage
+	}
+
+	if p.adminCfg.HasMobile(representativeMobile) {
+		return nil
 	}
 
 	// Validate amount (minimum 1000 Tomans and must be multiple of 1000)
@@ -809,11 +816,11 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		return ErrAgencyDiscountNotFound
 	}
 
-	real := uint64(realWithTax * 10 / 11)
+	real := uint64(float64(realWithTax) * .9)
 	tax := realWithTax - real
-	realSystemShare := uint64(systemShareWithTax * 10 / 11)
+	realSystemShare := uint64(float64(systemShareWithTax) * .9)
 	taxSystemShare := systemShareWithTax - realSystemShare
-	realAgencyShare := uint64(agencyShareWithTax * 10 / 11)
+	realAgencyShare := uint64(float64(agencyShareWithTax) * .9)
 	taxAgencyShare := agencyShareWithTax - realAgencyShare
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
@@ -1137,7 +1144,7 @@ func (p *PaymentFlowImpl) generatePaymentResultHTML(
 		return "", ErrAgencyDiscountNotFound
 	}
 
-	real := uint64(realWithTax * 10 / 11)
+	real := uint64(float64(realWithTax) * .9)
 	tax := realWithTax - real
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
@@ -1333,10 +1340,10 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	}
 
 	// Prepare external reference
-	var externalRef *string
-	if transaction.ExternalReference != "" {
-		externalRef = &transaction.ExternalReference
-	}
+	// var externalRef *string
+	// if transaction.ExternalReference != "" {
+	// 	externalRef = &transaction.ExternalReference
+	// }
 
 	var balanceBefore map[string]uint64
 	var balanceAfter map[string]uint64
@@ -1363,6 +1370,7 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	amount := toUint64(meta["amount"])
 	customerCredit := toUint64(meta["customer_credit"])
 	agencyShareWithTax := toUint64(meta["agency_share_with_tax"])
+	refund := toUint64(meta["refund_amount"])
 
 	customerInvoiceUUID := customerInvoiceUUIDFromMetadata(meta)
 
@@ -1371,10 +1379,16 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	case source == models.TransactionSourceIncreaseCustomerFreePlusCredit && operation == "increase_customer_free_plus_credit":
 		// amount & customerCredit already parsed; agency share forced to 0
 		agencyShareWithTax = 0
+		refund = 0
 	case source == models.TransactionSourceIncreaseAgencyShareWithTax && operation == "increase_agency_share_with_tax":
 		// For agency share entries, zero out amount/credit and keep agency share
 		amount = 0
 		customerCredit = 0
+		refund = 0
+	case source == "campaign_partial_refund" && operation == "partial_undelivered_messages_refund":
+		amount = 0
+		customerCredit = 0
+		agencyShareWithTax = 0
 	default:
 		// Fallback to transaction amount
 		if amount == 0 {
@@ -1383,18 +1397,19 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	}
 
 	return dto.TransactionHistoryItem{
-		UUID:                transaction.UUID.String(),
-		Status:              status,
-		Amount:              amount,
-		CustomerCredit:      customerCredit,
-		AgencyShareWithTax:  agencyShareWithTax,
-		Currency:            transaction.Currency,
-		Operation:           operation,
-		Source:              source,
-		DateTime:            transaction.CreatedAt,
-		ExternalRef:         externalRef,
-		BalanceBefore:       balanceBefore,
-		BalanceAfter:        balanceAfter,
+		UUID: transaction.UUID.String(),
+		// Status:              status,
+		Amount:             amount,
+		CustomerCredit:     customerCredit,
+		AgencyShareWithTax: agencyShareWithTax,
+		Refund:             refund,
+		// Currency:            transaction.Currency,
+		// Operation:           operation,
+		// Source:              source,
+		DateTime: transaction.CreatedAt,
+		// ExternalRef:         externalRef,
+		// BalanceBefore:       balanceBefore,
+		// BalanceAfter:        balanceAfter,
 		CustomerInvoiceUUID: customerInvoiceUUID,
 		// Metadata:           meta,
 	}, nil
@@ -1718,7 +1733,7 @@ func (p *PaymentFlowImpl) PreviewProformaInvoice(ctx context.Context, customerID
 	}
 	now := utils.UTCNow()
 	invoiceNumber := receipt.InvoiceNumber
-	real := uint64(float64(amountWithTax) * 10 / 11)
+	real := uint64(float64(amountWithTax) * .9)
 	tax := amountWithTax - real
 	serviceDesc := "Jazebeh wallet top-up"
 	notes := "This is a proforma invoice. Final invoice will be issued after payment confirmation."
@@ -1789,7 +1804,7 @@ func (p *PaymentFlowImpl) PreviewProformaInvoiceByAmount(ctx context.Context, cu
 	}
 	now := utils.UTCNow()
 	invoiceNumber := "-"
-	real := uint64(float64(amountWithTax) * 10 / 11)
+	real := uint64(float64(amountWithTax) * .9)
 	tax := amountWithTax - real
 	serviceDesc := "Jazebeh wallet top-up"
 	notes := "This is a proforma invoice. Final invoice will be issued after payment confirmation."
