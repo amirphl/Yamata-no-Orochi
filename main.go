@@ -376,6 +376,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	campaignStatusJobRepo := repository.NewCampaignStatusJobRepository(db)
 	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
 	baleStatusResultRepo := repository.NewBaleStatusResultRepository(db)
+	splusStatusResultRepo := repository.NewSplusStatusResultRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
 	multimediaRepo := repository.NewMultimediaAssetRepository(db)
 	platformSettingsRepo := repository.NewPlatformSettingsRepository(db)
@@ -480,6 +481,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		paymentRequestRepo,
 		walletRepo,
 		customerRepo,
+		campaignRepo,
 		auditRepo,
 		balanceSnapshotRepo,
 		transactionRepo,
@@ -742,6 +744,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			tagRepo,
 			sentSplusMessageRepo,
 			processedCampaignRepo,
+			campaignStatusJobRepo,
+			splusStatusResultRepo,
 			notificationService,
 			db,
 			log.Default(),
