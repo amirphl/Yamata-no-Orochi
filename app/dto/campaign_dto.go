@@ -143,6 +143,7 @@ type GetCampaignResponse struct {
 	PlatformSettingsID *uint          `json:"platform_settings_id,omitempty"`
 	Platform           string         `json:"platform"`
 	LinePriceFactor    *float64       `json:"line_price_factor,omitempty"`
+	SegmentPriceFactor *float64       `json:"segment_price_factor,omitempty"`
 	Budget             *uint64        `json:"budget,omitempty" validate:"omitempty"`
 	NumAudience        *uint64        `json:"num_audience,omitempty"`
 	Comment            *string        `json:"comment,omitempty" validate:"omitempty"`
@@ -151,6 +152,7 @@ type GetCampaignResponse struct {
 	TotalClicks        *int64         `json:"total_clicks,omitempty"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
+	PlatformSettingsName        *string `json:"platform_settings_name,omitempty"`
 }
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
