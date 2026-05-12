@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
 	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/go-playground/validator/v10"
@@ -23,6 +24,7 @@ type CampaignAdminHandlerInterface interface {
 	RejectCampaign(c fiber.Ctx) error
 	CancelCampaign(c fiber.Ctx) error
 	RemoveAudienceSpec(c fiber.Ctx) error
+	RescheduleCampaign(c fiber.Ctx) error
 }
 
 // CampaignAdminHandler handles campaign-related HTTP requests
@@ -261,6 +263,46 @@ func (h *CampaignAdminHandler) RejectCampaign(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign rejected successfully", res)
 }
 
+// RescheduleCampaign updates the scheduled time for a campaign (admin-only).
+// @Summary Reschedule Campaign
+// @Description Admin reschedules an eligible campaign; schedule_at should be provided in Tehran time.
+// @Tags Admin Campaigns
+// @Accept json
+// @Produce json
+// @Param request body dto.AdminRescheduleCampaignRequest true "Reschedule payload"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminRescheduleCampaignResponse}
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 404 {object} dto.APIResponse "Campaign not found"
+// @Failure 409 {object} dto.APIResponse "Invalid state"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/campaigns/reschedule [post]
+func (h *CampaignAdminHandler) RescheduleCampaign(c fiber.Ctx) error {
+	var req dto.AdminRescheduleCampaignRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
+	}
+
+	res, err := h.campaignFlow.RescheduleCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/reschedule"), &req)
+	if err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		if businessflow.IsCampaignRescheduleNotAllowed(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Campaign cannot be rescheduled in its current status", "INVALID_STATE", nil)
+		}
+		if businessflow.IsScheduleTimeTooSoon(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Schedule time must be at least 15 minutes in the future", "SCHEDULE_TIME_TOO_SOON", nil)
+		}
+		log.Println("Admin reschedule campaign failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reschedule campaign", "ADMIN_RESCHEDULE_CAMPAIGN_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaign rescheduled successfully", res)
+}
+
 // CancelCampaign cancels an approved campaign and refunds consumed budget.
 // @Summary Cancel Campaign
 // @Description Cancel an approved campaign by admin and refund consumed budget to customer
@@ -373,6 +415,9 @@ func (h *CampaignAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endp
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel) // Store cancel function for cleanup
+	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
+		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
+	}
 
 	return ctx
 }
