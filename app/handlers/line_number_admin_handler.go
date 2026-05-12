@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
 	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/go-playground/validator/v10"
@@ -172,5 +173,8 @@ func (h *LineNumberAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, en
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
+	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
+		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
+	}
 	return ctx
 }
