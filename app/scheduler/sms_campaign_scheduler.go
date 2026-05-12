@@ -133,7 +133,7 @@ func (s *SMSCampaignScheduler) Start(parent context.Context) func() {
 				return
 			case <-ticker.C:
 				ctx, cancel := context.WithTimeout(parent, s.interval*4/5)
-				s.runOnce(ctx)
+				s.runOnce(ctx, parent)
 				cancel()
 			}
 		}
@@ -148,7 +148,7 @@ func (s *SMSCampaignScheduler) Start(parent context.Context) func() {
 	}
 }
 
-func (s *SMSCampaignScheduler) runOnce(ctx context.Context) {
+func (s *SMSCampaignScheduler) runOnce(ctx context.Context, parent context.Context) {
 	jazzAccessToken, err := s.botClient.Login(ctx)
 	if err != nil {
 		s.logger.Printf("SMS scheduler: bot login failed: %v", err)
@@ -199,7 +199,7 @@ func (s *SMSCampaignScheduler) runOnce(ctx context.Context) {
 	for _, camp := range pending {
 		go func(c dto.BotGetCampaignResponse) {
 			// TODO: Make 4 hours configurable or use a more dynamic approach based on campaign content/size
-			ctx2, cancel2 := context.WithTimeout(context.Background(), 4*time.Hour)
+			ctx2, cancel2 := context.WithTimeout(parent, 4*time.Hour)
 			defer cancel2()
 			if err := s.processSMSCampaign(ctx2, jazzAccessToken, c); err != nil {
 				s.logger.Printf("SMS scheduler: process campaign id=%d failed: %v", c.ID, err)
@@ -224,7 +224,6 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 	}
 	s.logger.Printf("SMS scheduler: campaign id=%d moved to running", c.ID)
 
-	// First transaction: create processed_campaign and persist full audience IDs
 	var (
 		phones       []string
 		ids          []int64
@@ -645,9 +644,8 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 		return err
 	}
 
-	const (
-		errCode = "AUDIENCE_UID_NOT_FOUND"
-	)
+	const errCode = "AUDIENCE_UID_NOT_FOUND"
+
 	fakeSentSMSs := make([]*models.SentSMS, 0, len(unmatchedUIDs))
 	for i, uid := range unmatchedUIDs {
 		desc := fmt.Sprintf("Audience uid not found or has no phone number: %s", uid)
@@ -666,52 +664,57 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 	if len(fakeSentSMSs) == 0 {
 		return nil
 	}
-	err = s.sentRepo.SaveBatch(ctx, fakeSentSMSs)
-	if err != nil {
+
+	var stats map[string]any
+	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		if err := s.sentRepo.SaveBatch(txCtx, fakeSentSMSs); err != nil {
+			return err
+		}
+
+		now := utils.UTCNow()
+		executedAt := now.Add(time.Second)
+		fakeJob := &models.CampaignStatusJob{
+			ProcessedCampaignID: processedCampaignID,
+			CorrelationID:       uuid.NewString(),
+			TrackingIDs:         pq.StringArray(trackingIDs),
+			RetryCount:          0,
+			ScheduledAt:         now,
+			ExecutedAt:          &executedAt,
+			CreatedAt:           now,
+			UpdatedAt:           now.Add(time.Second),
+		}
+		if err := s.jobRepo.Save(txCtx, fakeJob); err != nil {
+			return err
+		}
+
+		zeroVal := int64(0)
+		zero := &zeroVal
+		fakeSMSStatusResults := make([]*models.SMSStatusResult, 0, len(unmatchedUIDs))
+		for _, trackingID := range trackingIDs {
+			status := errCode
+			fakeSMSStatusResults = append(fakeSMSStatusResults, &models.SMSStatusResult{
+				JobID:                 fakeJob.ID,
+				ProcessedCampaignID:   fakeJob.ProcessedCampaignID,
+				TrackingID:            trackingID,
+				ServerID:              nil,
+				TotalParts:            zero,
+				TotalDeliveredParts:   zero,
+				TotalUndeliveredParts: zero,
+				TotalUnknownParts:     zero,
+				Status:                &status,
+			})
+		}
+		if err := s.resRepo.SaveBatch(txCtx, fakeSMSStatusResults); err != nil {
+			return err
+		}
+
+		var err error
+		stats, err = s.updateProcessedCampaignStats(txCtx, processedCampaignID)
+		return err
+	}); err != nil {
 		return err
 	}
 
-	now := utils.UTCNow()
-	executedAt := now.Add(time.Second)
-	fakeJob := &models.CampaignStatusJob{
-		ProcessedCampaignID: processedCampaignID,
-		CorrelationID:       uuid.NewString(),
-		TrackingIDs:         pq.StringArray(trackingIDs),
-		RetryCount:          0,
-		ScheduledAt:         now,
-		ExecutedAt:          &executedAt,
-		CreatedAt:           now,
-		UpdatedAt:           now.Add(time.Second),
-	}
-	if err := s.jobRepo.Save(ctx, fakeJob); err != nil {
-		return err
-	}
-
-	zeroVal := int64(0)
-	zero := &zeroVal
-	fakeSMSStatusResults := make([]*models.SMSStatusResult, 0, len(unmatchedUIDs))
-	for _, trackingID := range trackingIDs {
-		status := errCode
-		fakeSMSStatusResults = append(fakeSMSStatusResults, &models.SMSStatusResult{
-			JobID:                 fakeJob.ID,
-			ProcessedCampaignID:   fakeJob.ProcessedCampaignID,
-			TrackingID:            trackingID,
-			ServerID:              nil,
-			TotalParts:            zero,
-			TotalDeliveredParts:   zero,
-			TotalUndeliveredParts: zero,
-			TotalUnknownParts:     zero,
-			Status:                &status,
-		})
-	}
-	if err := s.resRepo.SaveBatch(ctx, fakeSMSStatusResults); err != nil {
-		return err
-	}
-
-	stats, err := s.updateProcessedCampaignStats(ctx, fakeJob.ProcessedCampaignID)
-	if err != nil {
-		return err
-	}
 	if stats != nil {
 		if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
 			return err
@@ -791,19 +794,21 @@ func (s *SMSCampaignScheduler) processStatusJobs(ctx context.Context) {
 	}
 
 	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
-	for _, job := range jobs {
-		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: adjust timeout as needed
-		if err := s.handleStatusJob(jobCtx, job, atiehAccessToken); err != nil {
-			s.logger.Printf("SMS scheduler: handle status job id=%d failed: %v", job.ID, err)
-			if job.RetryCount >= smsStatusJobMaxRetry {
-				s.logger.Printf("SMS scheduler: status job id=%d reached max retries, marking as failed", job.ID)
-				// Optionally, update job status to failed in DB here
+	for _, j := range jobs {
+		func(job *models.CampaignStatusJob) {
+			jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: adjust timeout as needed
+			defer cancel()
+			if err := s.handleStatusJob(jobCtx, job, atiehAccessToken); err != nil {
+				s.logger.Printf("SMS scheduler: handle status job id=%d failed: %v", job.ID, err)
+				if job.RetryCount >= smsStatusJobMaxRetry {
+					s.logger.Printf("SMS scheduler: status job id=%d reached max retries, marking as failed", job.ID)
+					// Optionally, update job status to failed in DB here
+				}
+				// Note: The job will be retried in the next tick based on its ScheduledAt and RetryCount
+			} else {
+				s.logger.Printf("SMS scheduler: handle status job id=%d succeeded", job.ID)
 			}
-			// Note: The job will be retried in the next tick based on its ScheduledAt and RetryCount
-		} else {
-			s.logger.Printf("SMS scheduler: handle status job id=%d succeeded", job.ID)
-		}
-		cancel()
+		}(j)
 	}
 }
 
