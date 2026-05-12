@@ -68,6 +68,21 @@ type UpdateCampaignResponse struct {
 	Message string `json:"message"`
 }
 
+// CloneCampaignRequest represents the request to clone an existing campaign
+type CloneCampaignRequest struct {
+	UUID       string `json:"-" validate:"required,uuid4"`
+	CustomerID uint   `json:"-"`
+}
+
+// CloneCampaignResponse represents the response after cloning a campaign
+type CloneCampaignResponse struct {
+	Message   string `json:"message"`
+	ID        uint   `json:"id"`
+	UUID      string `json:"uuid"`
+	Status    string `json:"status"`
+	CreatedAt string `json:"created_at"`
+}
+
 type CancelCampaignRequest struct {
 	CampaignID uint    `json:"campaign_id" validate:"required"`
 	CustomerID uint    `json:"-"`
@@ -312,6 +327,17 @@ type AdminCancelCampaignRequest struct {
 
 // AdminCancelCampaignResponse represents admin cancellation result
 type AdminCancelCampaignResponse struct {
+	Message string `json:"message"`
+}
+
+// AdminRescheduleCampaignRequest represents admin reschedule input (schedule provided in Tehran time)
+type AdminRescheduleCampaignRequest struct {
+	CampaignID uint      `json:"campaign_id" validate:"required"`
+	ScheduleAt time.Time `json:"schedule_at" validate:"required"`
+}
+
+// AdminRescheduleCampaignResponse represents admin reschedule result
+type AdminRescheduleCampaignResponse struct {
 	Message string `json:"message"`
 }
 
