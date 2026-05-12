@@ -11,6 +11,7 @@ import (
 type ChargeWalletRequest struct {
 	AmountWithTax uint64 `json:"amount" validate:"required,min=1000,max=1000000000"` // Amount in Tomans (minimum 1000, maximum 1000000000)
 	CustomerID    uint   `json:"-"`
+	Lang          string `json:"lang,omitempty" validate:"omitempty,oneof=FA EN"`
 }
 
 // ChargeWalletResponse represents the response after successfully charging a wallet
@@ -37,6 +38,59 @@ type ChargeWalletByAdminResponse struct {
 	CustomerID       uint   `json:"customer_id"`
 	AdminID          uint   `json:"admin_id"`
 	AmountWithTax    uint64 `json:"amount_with_tax"`
+}
+
+// Deposit receipt statuses
+const (
+	DepositReceiptStatusPending  = "pending"
+	DepositReceiptStatusApproved = "approved"
+	DepositReceiptStatusRejected = "rejected"
+)
+
+type SubmitDepositReceiptRequest struct {
+	CustomerID  uint   `json:"-"` // from auth context
+	Amount      uint64 `json:"amount" validate:"required,min=1000,max=1000000000"`
+	Lang        string `json:"lang,omitempty" validate:"omitempty,oneof=FA EN"`
+	FileName    string `json:"file_name" validate:"required,min=3,max=255"`
+	ContentType string `json:"content_type" validate:"required,min=3,max=120"`
+	FileSize    int64  `json:"file_size" validate:"required,min=1,max=5242880"` // cap 5MB
+	FileBase64  string `json:"file_base64" validate:"required"`                 // frontend will send; backend decodes to []byte
+}
+
+type SubmitDepositReceiptResponse struct {
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	ReceiptUUID string `json:"receipt_uuid"`
+	Status      string `json:"status"`
+}
+
+type DepositReceiptItem struct {
+	UUID         string    `json:"uuid"`
+	CustomerID   uint      `json:"customer_id"`
+	Amount       uint64    `json:"amount"`
+	Currency     string    `json:"currency"`
+	Status       string    `json:"status"`
+	StatusReason string    `json:"status_reason,omitempty"`
+	Lang         string    `json:"lang"`
+	FileName     string    `json:"file_name"`
+	ContentType  string    `json:"content_type"`
+	FileSize     int64     `json:"file_size"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type ListDepositReceiptsResponse struct {
+	Items []DepositReceiptItem `json:"items"`
+}
+
+type AdminUpdateDepositReceiptStatusRequest struct {
+	ReceiptUUID string `json:"receipt_uuid" validate:"required"`
+	Action      string `json:"action" validate:"required,oneof=approve reject"`
+	Reason      string `json:"reason,omitempty" validate:"omitempty,min=3,max=500"`
+}
+
+type ProformaPreviewResponse struct {
+	Success bool                   `json:"success"`
+	Data    map[string]interface{} `json:"data"`
 }
 
 // AtipayRequest represents the callback data from Atipay after payment completion
