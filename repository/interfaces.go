@@ -301,6 +301,16 @@ type SentBaleSendResultUpdate struct {
 	Description    *string
 }
 
+// SentSplusSendResultUpdate describes send result fields update identified by tracking id.
+type SentSplusSendResultUpdate struct {
+	TrackingID     string
+	Status         models.SplusSendStatus
+	PartsDelivered int
+	ServerID       *string
+	ErrorCode      *string
+	Description    *string
+}
+
 // SentSMSRepository defines operations for sent SMS rows
 type SentSMSRepository interface {
 	Repository[models.SentSMS, models.SentSMSFilter]
@@ -324,13 +334,9 @@ type SentSplusMessageRepository interface {
 	Repository[models.SentSplusMessage, models.SentSplusMessageFilter]
 	ByID(ctx context.Context, id uint) (*models.SentSplusMessage, error)
 	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSplusMessage, error)
-	UpdateSendResultByTrackingID(
-		ctx context.Context,
-		trackingID string,
-		status models.SplusSendStatus,
-		partsDelivered int,
-		serverID, errorCode, description *string,
-	) error
+	ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentSplusMessage, error)
+	TrackingResultsFromSentRows(ctx context.Context, processedCampaignID uint) ([]SplusTrackingResult, error)
+	UpdateSendResultByTrackingIDs(ctx context.Context, updates []SentSplusSendResultUpdate) error
 }
 
 // CampaignStatusJobRepository defines operations for cross-platform status check jobs.
@@ -356,6 +362,14 @@ type BaleStatusResultRepository interface {
 	SaveBatch(ctx context.Context, rows []*models.BaleStatusResult) error
 	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*BaleStatusAggregates, error)
 	TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]BaleTrackingResult, error)
+}
+
+// SplusStatusResultRepository defines operations for Splus status check results.
+type SplusStatusResultRepository interface {
+	Repository[models.SplusStatusResult, any]
+	SaveBatch(ctx context.Context, rows []*models.SplusStatusResult) error
+	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SplusStatusAggregates, error)
+	TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SplusTrackingResult, error)
 }
 
 // MultimediaAssetRepository defines operations for multimedia assets
