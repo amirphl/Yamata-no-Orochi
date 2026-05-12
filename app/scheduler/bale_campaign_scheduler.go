@@ -130,7 +130,7 @@ func (s *BaleCampaignScheduler) Start(parent context.Context) func() {
 				return
 			case <-ticker.C:
 				ctx, cancel := context.WithTimeout(parent, s.interval*4/5)
-				s.runOnce(ctx)
+				s.runOnce(ctx, parent)
 				cancel()
 			}
 		}
@@ -145,7 +145,7 @@ func (s *BaleCampaignScheduler) Start(parent context.Context) func() {
 	}
 }
 
-func (s *BaleCampaignScheduler) runOnce(ctx context.Context) {
+func (s *BaleCampaignScheduler) runOnce(ctx context.Context, parent context.Context) {
 	jazzAccessToken, err := s.botClient.Login(ctx)
 	if err != nil {
 		s.logger.Printf("Bale scheduler: bot login failed: %v", err)
@@ -196,7 +196,7 @@ func (s *BaleCampaignScheduler) runOnce(ctx context.Context) {
 	for _, camp := range pending {
 		go func(c dto.BotGetCampaignResponse) {
 			// TODO: Make 4 hours configurable or use a more dynamic approach based on campaign content/size
-			ctx2, cancel2 := context.WithTimeout(context.Background(), 4*time.Hour)
+			ctx2, cancel2 := context.WithTimeout(parent, 4*time.Hour)
 			defer cancel2()
 			if err := s.processBaleCampaign(ctx2, jazzAccessToken, c); err != nil {
 				s.logger.Printf("Bale scheduler: process campaign id=%d failed: %v", c.ID, err)
@@ -220,7 +220,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 	}
 	s.logger.Printf("Bale scheduler: campaign id=%d moved to running", c.ID)
 
-	// First transaction: create processed_campaign and persist full audience IDs
 	var (
 		phones       []string
 		ids          []int64
@@ -261,7 +260,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = nil
 		} else {
-			// Fetch Bale audiences using tag-based selection with cache-aware exclusion fallback.
 			correlationID := uuid.NewString()
 			audienceResult, err := s.fetchBaleAudiencePhones(txCtx, c, jazzAccessToken, correlationID)
 			if err != nil {
@@ -374,9 +372,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		for i := range batchResponses {
 			resp := batchResponses[i]
 			reqID := strings.TrimSpace(resp.RequestID)
-			if reqID == "" && i < len(items) {
-				reqID = strings.TrimSpace(items[i].RequestID)
-			}
 			if reqID == "" {
 				continue
 			}
@@ -714,18 +709,20 @@ func (s *BaleCampaignScheduler) processStatusJobs(ctx context.Context) {
 	}
 
 	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
-	for _, job := range jobs {
-		jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: Make this timeout configurable
-		if err := s.handleStatusJob(jobCtx, job); err != nil {
-			s.logger.Printf("Bale scheduler: handle status job id=%d failed: %v", job.ID, err)
-			if job.RetryCount >= statusJobMaxRetry {
-				s.notifyAdmin(fmt.Sprintf("Bale scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
+	for _, j := range jobs {
+		func(job *models.CampaignStatusJob) {
+			jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: Make this timeout configurable
+			defer cancel()
+			if err := s.handleStatusJob(jobCtx, job); err != nil {
+				s.logger.Printf("Bale scheduler: handle status job id=%d failed: %v", job.ID, err)
+				if job.RetryCount >= statusJobMaxRetry {
+					s.notifyAdmin(fmt.Sprintf("Bale scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
+				}
+				// Note: The job will be retried later based on the retry logic in handleStatusJob, so we don't need to do anything else here for retries.
+			} else {
+				s.logger.Printf("Bale scheduler: handle status job id=%d succeeded", job.ID)
 			}
-			// Note: The job will be retried later based on the retry logic in handleStatusJob, so we don't need to do anything else here for retries.
-		} else {
-			s.logger.Printf("Bale scheduler: handle status job id=%d succeeded", job.ID)
-		}
-		cancel()
+		}(j)
 	}
 }
 
