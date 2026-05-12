@@ -1,22 +1,13 @@
+// Package scheduler implements campaign scheduling and execution for Splus campaigns,
 package scheduler
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"mime"
-	"mime/multipart"
-	"net/http"
-	"net/textproto"
-	"net/url"
 	"os"
-	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,20 +23,26 @@ import (
 	"github.com/lib/pq"
 )
 
+// TODO: Tx management in queries, especially around processed_campaign creation and audience fetching to ensure consistency
+
 const (
 	defaultSplusBaseURL = "https://bui.splus.ir"
 	splusSendMaxRetries = 5
 	splusMediaMaxSize   = int64(8 * 1024 * 1024)
+	splusSendBatchSize  = 100
 )
 
 type SplusCampaignScheduler struct {
-	audRepo      repository.AudienceProfileRepository
-	tagRepo      repository.TagRepository
-	sentRepo     repository.SentSplusMessageRepository
-	pcRepo       repository.ProcessedCampaignRepository
-	notifier     NotificationSender
-	logger       *log.Logger
-	interval     time.Duration
+	audRepo  repository.AudienceProfileRepository
+	tagRepo  repository.TagRepository
+	sentRepo repository.SentSplusMessageRepository
+	pcRepo   repository.ProcessedCampaignRepository
+	jobRepo  repository.CampaignStatusJobRepository
+	resRepo  repository.SplusStatusResultRepository
+	notifier NotificationSender
+	logger   *log.Logger
+	interval time.Duration
+
 	messageDelay time.Duration
 
 	db       *gorm.DB
@@ -63,200 +60,13 @@ type SplusCampaignScheduler struct {
 	audienceCache *AudienceCache
 }
 
-type SplusClient interface {
-	SendMessage(ctx context.Context, botID string, req *SplusSendMessageRequest) (*SplusResponse, error)
-	UploadFile(ctx context.Context, botID string, path string) (*SplusUploadResponse, error)
-}
-
-type SplusSendMessageRequest struct {
-	PhoneNumber string  `json:"phone_number,omitempty"`
-	UserID      string  `json:"user_id,omitempty"`
-	Text        string  `json:"text,omitempty"`
-	FileID      *string `json:"file_id,omitempty"`
-}
-
-type SplusResponse struct {
-	ResultCode    int     `json:"result_code"`
-	ResultMessage string  `json:"result_message"`
-	MessageID     *string `json:"message_id,omitempty"`
-	RequestID     *int64  `json:"request_id,omitempty"`
-	UserID        *string `json:"user_id,omitempty"`
-	HTTPStatus    int     `json:"-"`
-}
-
-type SplusUploadResponse struct {
-	ResultCode    int    `json:"result_code"`
-	ResultMessage string `json:"result_message"`
-	FileID        string `json:"file_id"`
-	HTTPStatus    int    `json:"-"`
-}
-
-type httpSplusClient struct {
-	cfg    config.SplusConfig
-	client *http.Client
-}
-
-func newHTTPSplusClient(cfg config.SplusConfig) *httpSplusClient {
-	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		baseURL = defaultSplusBaseURL
-	}
-	cfg.BaseURL = strings.TrimRight(baseURL, "/")
-
-	return &httpSplusClient{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
-	}
-}
-
-func (c *httpSplusClient) SendMessage(ctx context.Context, botID string, reqBody *SplusSendMessageRequest) (*SplusResponse, error) {
-	if strings.TrimSpace(botID) == "" {
-		return nil, fmt.Errorf("splus bot id is not configured")
-	}
-	if reqBody == nil {
-		return nil, fmt.Errorf("splus request body is nil")
-	}
-	payload, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/v1/messages/send", bytes.NewReader(payload))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", botID)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var out SplusResponse
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &out); err != nil {
-			return nil, fmt.Errorf("decode splus send message response: %w", err)
-		}
-	}
-	out.HTTPStatus = resp.StatusCode
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if out.ResultCode != 0 || strings.TrimSpace(out.ResultMessage) != "" {
-			return &out, fmt.Errorf("splus send http status: %d result_code=%d result_message=%s", resp.StatusCode, out.ResultCode, strings.TrimSpace(out.ResultMessage))
-		}
-		return nil, fmt.Errorf("splus send http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	return &out, nil
-}
-
-func (c *httpSplusClient) UploadFile(ctx context.Context, botID string, path string) (*SplusUploadResponse, error) {
-	if strings.TrimSpace(botID) == "" {
-		return nil, fmt.Errorf("splus bot id is not configured")
-	}
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("upload path is empty")
-	}
-
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() > splusMediaMaxSize {
-		return nil, fmt.Errorf("file size exceeds splus upload limit (8MB)")
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	fileName := filepath.Base(path)
-	fileContentType := strings.TrimSpace(mime.TypeByExtension(strings.ToLower(filepath.Ext(fileName))))
-	if fileContentType == "" {
-		fileContentType = "application/octet-stream"
-	}
-	if fileContentType == "image/jpg" {
-		fileContentType = "image/jpeg"
-	}
-
-	buf := &bytes.Buffer{}
-	writer := multipart.NewWriter(buf)
-	partHeaders := textproto.MIMEHeader{}
-	partHeaders.Set("Content-Disposition", fmt.Sprintf(`form-data; name="file"; filename="%s"`, fileName))
-	partHeaders.Set("Content-Type", fileContentType)
-	part, err := writer.CreatePart(partHeaders)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := io.Copy(part, f); err != nil {
-		return nil, err
-	}
-	if err := writer.Close(); err != nil {
-		return nil, err
-	}
-
-	formContentType := writer.FormDataContentType()
-	if !strings.HasPrefix(strings.ToLower(formContentType), "multipart/form-data;") {
-		return nil, fmt.Errorf("invalid multipart content type: %s", formContentType)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.BaseURL+"/v1/file/upload", buf)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", botID)
-	req.Header.Set("Content-Type", formContentType)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var out SplusUploadResponse
-	if len(body) > 0 {
-		if err := json.Unmarshal(body, &out); err != nil {
-			return nil, fmt.Errorf("decode splus upload response: %w", err)
-		}
-	}
-	out.HTTPStatus = resp.StatusCode
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if out.ResultCode != 0 || strings.TrimSpace(out.ResultMessage) != "" {
-			return &out, fmt.Errorf("splus upload http status: %d result_code=%d result_message=%s", resp.StatusCode, out.ResultCode, strings.TrimSpace(out.ResultMessage))
-		}
-		return nil, fmt.Errorf("splus upload http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	if strings.TrimSpace(out.FileID) == "" {
-		return nil, fmt.Errorf("splus upload returned empty file_id")
-	}
-
-	return &out, nil
-}
-
 func NewSplusCampaignScheduler(
 	audRepo repository.AudienceProfileRepository,
 	tagRepo repository.TagRepository,
 	sentRepo repository.SentSplusMessageRepository,
 	pcRepo repository.ProcessedCampaignRepository,
+	jobRepo repository.CampaignStatusJobRepository,
+	resRepo repository.SplusStatusResultRepository,
 	notifier NotificationSender,
 	db *gorm.DB,
 	logger *log.Logger,
@@ -278,6 +88,8 @@ func NewSplusCampaignScheduler(
 		tagRepo:       tagRepo,
 		sentRepo:      sentRepo,
 		pcRepo:        pcRepo,
+		jobRepo:       jobRepo,
+		resRepo:       resRepo,
 		notifier:      notifier,
 		logger:        logger,
 		db:            db,
@@ -294,7 +106,7 @@ func NewSplusCampaignScheduler(
 
 	if err := s.initSchedulerLogger(); err != nil {
 		s.logger = log.New(io.Discard, "splus_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
-		s.logger.Printf("splus scheduler: failed to initialize file logger: %v", err)
+		s.logger.Printf("Splus scheduler: failed to initialize file logger: %v", err)
 	}
 	return s
 }
@@ -310,105 +122,113 @@ func (s *SplusCampaignScheduler) initSchedulerLogger() error {
 }
 
 func (s *SplusCampaignScheduler) Start(parent context.Context) func() {
-	ctx, cancel := context.WithCancel(parent)
 	go func() {
 		ticker := time.NewTicker(s.interval)
 		defer ticker.Stop()
 
-		s.runOnce(context.Background())
 		for {
 			select {
-			case <-ctx.Done():
+			case <-parent.Done():
 				return
 			case <-ticker.C:
-				// TODO: This is not the correct way of context handling.
-				s.runOnce(context.Background())
+				ctx, cancel := context.WithTimeout(parent, s.interval*4/5)
+				s.runOnce(ctx, parent)
+				cancel()
 			}
 		}
 	}()
 
+	go s.startStatusJobWorker(parent)
+
 	return func() {
-		cancel()
 		if s.logFile != nil {
 			_ = s.logFile.Close()
 		}
 	}
 }
 
-func (s *SplusCampaignScheduler) runOnce(ctx context.Context) {
-	token, err := s.botClient.Login(ctx)
+func (s *SplusCampaignScheduler) runOnce(ctx context.Context, parent context.Context) {
+	jazzAccessToken, err := s.botClient.Login(ctx)
 	if err != nil {
-		s.logger.Printf("splus scheduler: bot login failed: %v", err)
-		s.notifyAdmin(fmt.Sprintf("Splus scheduler bot login failed: %v", err))
+		s.logger.Printf("Splus scheduler: bot login failed: %v", err)
+		s.notifyAdmin(fmt.Sprintf("Splus scheduler: bot login failed: %v", err))
 		return
 	}
 
-	ready, err := s.botClient.ListReadyCampaigns(ctx, token, models.CampaignPlatformSPlus)
+	ready, err := s.botClient.ListReadyCampaigns(ctx, jazzAccessToken, models.CampaignPlatformSPlus)
 	if err != nil {
-		s.logger.Printf("splus scheduler: list ready campaigns failed: %v", err)
-		s.notifyAdmin(fmt.Sprintf("Splus scheduler list ready campaigns failed: %v", err))
+		s.logger.Printf("Splus scheduler: list ready campaigns failed: %v", err)
+		s.notifyAdmin(fmt.Sprintf("Splus scheduler: list ready campaigns failed: %v", err))
 		return
 	}
 	if len(ready) == 0 {
 		return
 	}
+	s.logger.Printf("Splus scheduler: listed %d ready campaigns", len(ready))
 
 	pending := make([]dto.BotGetCampaignResponse, 0, len(ready))
 	for _, c := range ready {
 		if strings.ToLower(strings.TrimSpace(c.Platform)) != models.CampaignPlatformSPlus {
-			// NOTE: Just skip.
+			s.logger.Printf("Splus scheduler: campaign id=%d has unsupported platform %q, skipping", c.ID, c.Platform)
+			s.notifyAdmin(fmt.Sprintf("Splus scheduler: campaign id=%d has unsupported platform %q, skipping", c.ID, c.Platform))
 			continue
 		}
 		if err := s.validateSplusCampaign(c); err != nil {
-			s.logger.Printf("splus scheduler: validate campaign failed for id=%d: %v", c.ID, err)
-			s.notifyAdmin(fmt.Sprintf("Splus scheduler validate campaign failed for id=%d: %v", c.ID, err))
+			s.logger.Printf("Splus scheduler: validate campaign failed for campaign id=%d (skipped): %v", c.ID, err)
+			s.notifyAdmin(fmt.Sprintf("Splus scheduler: validate campaign failed for id=%d: %v", c.ID, err))
 			continue
 		}
-
 		pc, err := s.pcRepo.ByCampaignID(ctx, c.ID)
 		if err != nil {
-			s.logger.Printf("splus scheduler: check processed failed for id=%d: %v", c.ID, err)
-			s.notifyAdmin(fmt.Sprintf("Splus scheduler check processed failed for id=%d: %v", c.ID, err))
+			s.logger.Printf("Splus scheduler: check processed failed for campaign id=%d (skipped): %v", c.ID, err)
+			s.notifyAdmin(fmt.Sprintf("Splus scheduler: check processed failed for id=%d: %v", c.ID, err))
 			continue
 		}
 		if pc == nil {
 			pending = append(pending, c)
+		} else {
+			s.logger.Printf("Splus scheduler: campaign id=%d already processed, skipping", c.ID)
 		}
 	}
 	if len(pending) == 0 {
 		return
 	}
+	s.logger.Printf("Splus scheduler: %d campaigns pending processing...", len(pending))
 
 	for _, camp := range pending {
-		c := camp
-		go func() {
-			if err := s.processSplusCampaign(ctx, token, c); err != nil {
-				s.logger.Printf("splus scheduler: process campaign id=%d failed: %v", c.ID, err)
-				s.notifyAdmin(fmt.Sprintf("Splus scheduler process campaign failed for id=%d: %v", c.ID, err))
+		go func(c dto.BotGetCampaignResponse) {
+			// TODO: Make 4 hours configurable or use a more dynamic approach based on campaign content/size
+			ctx2, cancel2 := context.WithTimeout(parent, 4*time.Hour)
+			defer cancel2()
+			if err := s.processSplusCampaign(ctx2, jazzAccessToken, c); err != nil {
+				s.logger.Printf("Splus scheduler: process campaign id=%d failed: %v", c.ID, err)
+				s.notifyAdmin(fmt.Sprintf("Splus scheduler: process campaign failed for campaign id=%d: %v", c.ID, err))
 			}
-		}()
+		}(camp)
 	}
 }
 
-func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, token string, c dto.BotGetCampaignResponse) error {
+func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) error {
 	botID, err := extractSplusBotID(c)
 	if err != nil {
-		return fmt.Errorf("resolve splus bot id: %w", err)
+		return fmt.Errorf("resolve Splus bot id: %w", err)
+	}
+	if c.NumAudiences == nil || *c.NumAudiences <= 0 {
+		return fmt.Errorf("campaign has no audiences")
 	}
 
-	if err := s.botClient.MoveCampaignToRunning(ctx, token, c.ID); err != nil {
+	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
 		return fmt.Errorf("move to running: %w", err)
 	}
-	s.logger.Printf("splus scheduler: campaign id=%d moved to running", c.ID)
+	s.logger.Printf("Splus scheduler: campaign id=%d moved to running", c.ID)
 
-	// First transaction: create processed_campaign and persist full audience IDs
 	var (
-		phones []string
-		ids    []int64
-		uids   []string
-		pc     *models.ProcessedCampaign
+		phones       []string
+		ids          []int64
+		codes        []string
+		unmatchedUID []string
+		pc           *models.ProcessedCampaign
 	)
-
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
 			CampaignID:          c.ID,
@@ -422,78 +242,151 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, token
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
 			return err
 		}
-		s.logger.Printf("splus scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
+		s.logger.Printf("Splus scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
 
-		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
-		var (
-			selectionID uint
-			err         error
-		)
-		correlationID := uuid.NewString()
-		phones, ids, uids, selectionID, err = s.fetchSplusAudiencePhones(txCtx, c, token, correlationID)
-		if err != nil {
-			return err
+		if hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID) {
+			fileUIDs, err := fetchTargetAudienceUIDsFromExcel(txCtx, s.botClient, jazzAccessToken, c.ID)
+			if err != nil {
+				return err
+			}
+			audienceResult, err := fetchAudiencePhonesByUIDs(txCtx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
+			if err != nil {
+				return err
+			}
+			phones = audienceResult.Phones
+			ids = audienceResult.IDs
+			codes = audienceResult.Codes
+			unmatchedUID = audienceResult.UnmatchedUIDs
+			s.logger.Printf("Splus scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
+			pc.AudienceIDs = pq.Int64Array(ids)
+			pc.AudienceCodes = codes
+			pc.AudienceSelectionID = nil
+		} else {
+			correlationID := uuid.NewString()
+			audienceResult, err := s.fetchSplusAudiencePhones(txCtx, c, jazzAccessToken, correlationID)
+			if err != nil {
+				return err
+			}
+			phones = audienceResult.Phones
+			ids = audienceResult.IDs
+			codes = audienceResult.Codes
+			s.logger.Printf("Splus scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
+			pc.AudienceIDs = pq.Int64Array(ids)
+			pc.AudienceCodes = codes
+			pc.AudienceSelectionID = utils.ToPtr(audienceResult.SelectionID)
 		}
-		s.logger.Printf("splus scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
-
-		pc.AudienceIDs = pq.Int64Array(ids)
-		pc.AudienceCodes = uids
-		pc.AudienceSelectionID = utils.ToPtr(selectionID)
 		pc.UpdatedAt = utils.UTCNow()
 		if err := s.pcRepo.Update(txCtx, pc); err != nil {
 			return err
 		}
-		s.logger.Printf("splus scheduler: updated processed campaign id=%d with audience ids", pc.ID)
+		s.logger.Printf("Splus scheduler: updated processed campaign id=%d with audience ids", pc.ID)
 
 		return nil
 	}); err != nil {
 		return err
 	}
-	s.logger.Printf("splus scheduler: persisted processed campaign id=%d num_audiences=%d", pc.ID, len(ids))
-
-	fileID, err := s.uploadCampaignMedia(ctx, token, botID, c)
-	if err != nil {
-		return err
+	s.logger.Printf("Splus scheduler: persisted processed campaign id=%d num_phones=%d, num_ids=%d, num_codes=%d, num_unmatched=%d", pc.ID, len(phones), len(ids), len(codes), len(unmatchedUID))
+	if len(ids) != len(phones) {
+		return fmt.Errorf("audience ids mismatch for campaign id=%d: phones=%d ids=%d", c.ID, len(phones), len(ids))
+	}
+	if len(codes) != len(phones) {
+		return fmt.Errorf("audience codes mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
 	}
 
-	for i, phone := range phones {
-		trackingID := uuid.NewString()
-		row := &models.SentSplusMessage{
-			ProcessedCampaignID: pc.ID,
-			PhoneNumber:         phone,
-			PartsDelivered:      0,
-			Status:              models.SplusSendStatusPending,
-			TrackingID:          trackingID,
+	if len(unmatchedUID) > 0 {
+		if err := s.createUnmatchedSentSplusRows(ctx, pc.ID, unmatchedUID); err != nil {
+			return err
 		}
-		if err := s.sentRepo.Save(ctx, row); err != nil {
+	}
+
+	var fileID *string
+	if c.MediaUUID != nil {
+		// TODO: Remove botID
+		id, err := s.uploadCampaignMedia(ctx, jazzAccessToken, botID, c)
+		if err != nil {
+			return err
+		}
+		fileID = id
+	}
+
+	for start := 0; start < len(phones); start += splusSendBatchSize {
+		end := min(start+splusSendBatchSize, len(phones))
+		batchPhones := phones[start:end]
+		batchIDs := ids[start:end]
+		batchCodes := codes[start:end]
+
+		items := make([]SplusSendMessageRequest, 0, len(batchPhones))
+
+		rows := make([]*models.SentSplusMessage, 0, len(batchPhones))
+		trackingIDs, err := allocateTrackingIDs(ctx, s.db, len(batchPhones))
+		if err != nil {
 			return err
 		}
 
-		msg := &SplusSendMessageRequest{
-			PhoneNumber: phone,
-			Text:        s.buildSplusMessageBody(c, uids[i]),
-			FileID:      fileID,
+		for i, p := range batchPhones {
+			trackingID := trackingIDs[i]
+
+			items = append(items, SplusSendMessageRequest{
+				PhoneNumber: p,
+				Text:        s.buildSplusMessageBody(c, batchCodes[i]),
+				FileID:      fileID,
+			})
+
+			rows = append(rows, &models.SentSplusMessage{
+				ProcessedCampaignID: pc.ID,
+				PhoneNumber:         p,
+				PartsDelivered:      0,
+				Status:              models.SplusSendStatusPending,
+				TrackingID:          trackingID,
+			})
 		}
 
-		resp, sendErr := s.sendWithRetry(ctx, botID, msg)
-		status, parts, serverID, errorCode, desc := s.resolveSendResult(resp, sendErr)
-		if err := s.sentRepo.UpdateSendResultByTrackingID(ctx, trackingID, status, parts, serverID, errorCode, desc); err != nil {
-			return err
-		}
-
-		pc.LastAudienceID = &ids[i]
-		pc.UpdatedAt = utils.UTCNow()
-		if err := s.pcRepo.Update(ctx, pc); err != nil {
-			return err
-		}
-		if i < len(phones)-1 {
-			if err := sleepWithContext(ctx, s.messageDelay); err != nil {
+		if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+			if len(rows) > 0 {
+				if err := s.sentRepo.SaveBatch(txCtx, rows); err != nil {
+					return err
+				}
+			}
+			lastBatchID := batchIDs[len(batchIDs)-1]
+			pc.LastAudienceID = &lastBatchID
+			pc.UpdatedAt = utils.UTCNow()
+			if err := s.pcRepo.Update(txCtx, pc); err != nil {
 				return err
 			}
+			return nil
+		}); err != nil {
+			return err
+		}
+
+		sendUpdates := make([]repository.SentSplusSendResultUpdate, 0, len(items))
+		for i := range items {
+			resp, sendErr := s.sendWithRetry(ctx, botID, &items[i])
+			status, parts, serverID, errorCode, desc := s.resolveSendResult(resp, sendErr)
+			sendUpdates = append(sendUpdates, repository.SentSplusSendResultUpdate{
+				TrackingID:     trackingIDs[i],
+				Status:         status,
+				PartsDelivered: parts,
+				ServerID:       serverID,
+				ErrorCode:      errorCode,
+				Description:    desc,
+			})
+		}
+
+		if len(sendUpdates) > 0 {
+			if updateErr := s.sentRepo.UpdateSendResultByTrackingIDs(ctx, sendUpdates); updateErr != nil {
+				s.logger.Printf("Splus scheduler: failed to batch update sent_splus provider fields for campaign id=%d: %v", c.ID, updateErr)
+			}
+		}
+
+		if err := s.scheduleStatusCheckJobs(ctx, pc.ID, trackingIDs); err != nil {
+			s.logger.Printf("Splus scheduler: failed to schedule status jobs for campaign id=%d: %v", c.ID, err)
+		}
+		if err := sleepWithContext(ctx, s.messageDelay); err != nil {
+			return err
 		}
 	}
 
-	stats, err := s.updateProcessedCampaignStatsFromSentRows(ctx, pc.ID)
+	stats, err := s.updateProcessedCampaignStats(ctx, pc.ID)
 	if err != nil {
 		return err
 	}
@@ -501,250 +394,14 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, token
 		return err
 	}
 
-	s.logger.Printf("splus scheduler: campaign id=%d all batches sent", c.ID)
+	s.logger.Printf("Splus scheduler: campaign id=%d all batches sent", c.ID)
 
-	if err := s.botClient.MoveCampaignToExecuted(ctx, token, c.ID); err != nil {
-		s.logger.Printf("splus scheduler: move executed failed for campaign id=%d: %v", c.ID, err)
+	if err := s.botClient.MoveCampaignToExecuted(ctx, jazzAccessToken, c.ID); err != nil {
 		return err
 	}
-	s.logger.Printf("splus scheduler: campaign id=%d moved to executed", c.ID)
+	s.logger.Printf("Splus scheduler: campaign id=%d moved to executed", c.ID)
 
 	return nil
-}
-
-func (s *SplusCampaignScheduler) uploadCampaignMedia(ctx context.Context, token, botID string, c dto.BotGetCampaignResponse) (*string, error) {
-	if c.MediaUUID == nil {
-		return nil, nil
-	}
-
-	path, err := s.downloadCampaignMediaViaBotAPI(ctx, token, c.MediaUUID.String())
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = os.Remove(path) }()
-
-	resp, err := s.splusClient.UploadFile(ctx, botID, path)
-	if err != nil {
-		return nil, err
-	}
-	return &resp.FileID, nil
-}
-
-func (s *SplusCampaignScheduler) downloadCampaignMediaViaBotAPI(ctx context.Context, token, mediaUUID string) (string, error) {
-	url := strings.TrimRight(s.botCfg.APIDomain, "/") + "/api/v1/bot/media/" + mediaUUID
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "*/*")
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return "", fmt.Errorf("bot media download http status: %d body: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-
-	pattern := "splus-media-*"
-	if ext := resolveDownloadedMediaExtension(resp); ext != "" {
-		pattern += ext
-	}
-
-	tmpFile, err := os.CreateTemp("", pattern)
-	if err != nil {
-		return "", err
-	}
-	defer tmpFile.Close()
-
-	if _, err := io.Copy(tmpFile, resp.Body); err != nil {
-		_ = os.Remove(tmpFile.Name())
-		return "", err
-	}
-
-	return tmpFile.Name(), nil
-}
-
-func resolveDownloadedMediaExtension(resp *http.Response) string {
-	if resp == nil {
-		return ""
-	}
-
-	contentDisposition := strings.TrimSpace(resp.Header.Get("Content-Disposition"))
-	if contentDisposition != "" {
-		_, params, err := mime.ParseMediaType(contentDisposition)
-		if err == nil {
-			if filename := strings.TrimSpace(params["filename"]); filename != "" {
-				if ext := strings.ToLower(filepath.Ext(filename)); ext != "" {
-					return ext
-				}
-			}
-			if filenameStar := strings.TrimSpace(params["filename*"]); filenameStar != "" {
-				if idx := strings.Index(filenameStar, "''"); idx >= 0 {
-					filenameStar = filenameStar[idx+2:]
-				}
-				if decoded, err := url.QueryUnescape(filenameStar); err == nil {
-					filenameStar = decoded
-				}
-				if ext := strings.ToLower(filepath.Ext(filenameStar)); ext != "" {
-					return ext
-				}
-			}
-		}
-	}
-
-	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
-	if contentType != "" {
-		if mediaType, _, err := mime.ParseMediaType(contentType); err == nil {
-			if exts, err := mime.ExtensionsByType(mediaType); err == nil && len(exts) > 0 {
-				return exts[0]
-			}
-		}
-	}
-
-	return ""
-}
-
-func (s *SplusCampaignScheduler) sendWithRetry(ctx context.Context, botID string, req *SplusSendMessageRequest) (*SplusResponse, error) {
-	var (
-		resp *SplusResponse
-		err  error
-	)
-	for attempt := 0; attempt <= splusSendMaxRetries; attempt++ {
-		resp, err = s.splusClient.SendMessage(ctx, botID, req)
-		if !isRetryableSplusError(resp, err) {
-			return resp, err
-		}
-		if attempt == splusSendMaxRetries {
-			break
-		}
-		backoff := time.Duration(1<<attempt) * time.Second
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return resp, ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return resp, err
-}
-
-func (s *SplusCampaignScheduler) resolveSendResult(resp *SplusResponse, sendErr error) (models.SplusSendStatus, int, *string, *string, *string) {
-	if sendErr != nil {
-		code := "SEND_FAILED"
-		desc := sendErr.Error()
-		if resp != nil && resp.ResultCode != 0 {
-			code = strconv.Itoa(resp.ResultCode)
-			if strings.TrimSpace(resp.ResultMessage) != "" {
-				desc = resp.ResultMessage
-			}
-		}
-		return models.SplusSendStatusUnsuccessful, 0, nil, &code, &desc
-	}
-
-	if resp == nil {
-		code := "EMPTY_RESPONSE"
-		desc := "empty response from splus"
-		return models.SplusSendStatusUnsuccessful, 0, nil, &code, &desc
-	}
-
-	if resp.ResultCode == 200 || resp.ResultCode == 202 {
-		var serverID *string
-		if resp.MessageID != nil && strings.TrimSpace(*resp.MessageID) != "" {
-			id := strings.TrimSpace(*resp.MessageID)
-			serverID = &id
-		} else if resp.RequestID != nil {
-			id := strconv.FormatInt(*resp.RequestID, 10)
-			serverID = &id
-		}
-		return models.SplusSendStatusSuccessful, 1, serverID, nil, nil
-	}
-
-	code := strconv.Itoa(resp.ResultCode)
-	desc := strings.TrimSpace(resp.ResultMessage)
-	if desc == "" {
-		if msg, ok := splusErrorDescriptions[resp.ResultCode]; ok {
-			desc = msg
-		}
-	}
-	return models.SplusSendStatusUnsuccessful, 0, nil, &code, &desc
-}
-
-func isRetryableSplusError(resp *SplusResponse, err error) bool {
-	if err != nil {
-		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "429") || strings.Contains(msg, "too many requests") {
-			return true
-		}
-	}
-
-	if resp == nil {
-		return false
-	}
-
-	if resp.HTTPStatus == http.StatusTooManyRequests {
-		return true
-	}
-	if resp.HTTPStatus >= 500 && resp.HTTPStatus <= 599 {
-		return true
-	}
-
-	switch resp.ResultCode {
-	case 429, 500, 724, 730, 736, 738:
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *SplusCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx context.Context, processedCampaignID uint) (map[string]any, error) {
-	type row struct {
-		Total      int64
-		Successful int64
-	}
-	var agg row
-	if err := s.db.WithContext(ctx).Table("sent_splus_messages").
-		Select(`
-			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN status = 'successful' THEN 1 ELSE 0 END), 0) AS successful`).
-		Where("processed_campaign_id = ?", processedCampaignID).
-		Scan(&agg).Error; err != nil {
-		return nil, err
-	}
-
-	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
-	if err != nil {
-		return nil, err
-	}
-	if pc == nil {
-		return nil, fmt.Errorf("processed campaign not found for processed_campaign_id=%d", processedCampaignID)
-	}
-
-	stats := map[string]any{
-		"aggregatedTotalRecords":          agg.Total,
-		"aggregatedTotalSent":             agg.Successful,
-		"aggregatedTotalParts":            agg.Successful,
-		"aggregatedTotalDeliveredParts":   agg.Successful,
-		"aggregatedTotalUnDeliveredParts": agg.Total - agg.Successful,
-		"aggregatedTotalUnKnownParts":     int64(0),
-		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
-	}
-	data, err := json.Marshal(stats)
-	if err != nil {
-		return nil, err
-	}
-	pc.Statistics = data
-	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(ctx, pc); err != nil {
-		return nil, err
-	}
-	return stats, nil
 }
 
 func (s *SplusCampaignScheduler) validateSplusCampaign(c dto.BotGetCampaignResponse) error {
@@ -761,6 +418,9 @@ func (s *SplusCampaignScheduler) validateSplusCampaign(c dto.BotGetCampaignRespo
 	if c.UpdatedAt != nil && c.UpdatedAt.After(now) {
 		return fmt.Errorf("campaign updated_at is after now")
 	}
+	// if strings.TrimSpace(s.splusCfg.APIAccessKey) == "" {
+	// 	return fmt.Errorf("Splus api-access-key is not configured")
+	// }
 	if _, err := extractSplusBotID(c); err != nil {
 		return err
 	}
@@ -768,6 +428,588 @@ func (s *SplusCampaignScheduler) validateSplusCampaign(c dto.BotGetCampaignRespo
 		return fmt.Errorf("campaign platform is not splus")
 	}
 	return nil
+}
+
+func (s *SplusCampaignScheduler) uploadCampaignMedia(ctx context.Context, jazzAccessToken, botID string, c dto.BotGetCampaignResponse) (*string, error) {
+	if c.MediaUUID == nil || *c.MediaUUID == uuid.Nil {
+		return nil, nil
+	}
+
+	path, err := s.botClient.DownloadCampaignMedia(ctx, jazzAccessToken, c.MediaUUID.String())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.Remove(path) }()
+
+	resp, err := s.splusClient.UploadFile(ctx, botID, path)
+	if err != nil {
+		return nil, err
+	}
+	return &resp.FileID, nil
+}
+
+func buildSplusStatusMetadataDescription(existing *string, statusCode int, statusText string) string {
+	metadata := map[string]any{}
+
+	if existing != nil && strings.TrimSpace(*existing) != "" {
+		var existingJSON map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(*existing)), &existingJSON); err == nil {
+			for k, v := range existingJSON {
+				metadata[k] = v
+			}
+		} else {
+			metadata["previousDescription"] = strings.TrimSpace(*existing)
+		}
+	}
+
+	metadata["lastStatus"] = map[string]any{
+		"code": statusCode,
+		"text": strings.TrimSpace(statusText),
+		"at":   utils.UTCNow().Format(time.RFC3339),
+	}
+
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return strings.TrimSpace(statusText)
+	}
+	return string(data)
+}
+
+func buildSplusStatusResultMetadata(item SplusStatusResponse, normalizedStatus models.SplusSendStatus) json.RawMessage {
+	metadata := map[string]any{
+		"messageID":        strings.TrimSpace(item.MessageID),
+		"statusCode":       item.Status,
+		"statusText":       strings.TrimSpace(item.StatusText),
+		"normalizedStatus": string(normalizedStatus),
+	}
+	data, err := json.Marshal(metadata)
+	if err != nil {
+		return json.RawMessage(`{}`)
+	}
+	return data
+}
+
+func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
+	ctx context.Context,
+	c dto.BotGetCampaignResponse,
+	jazzAccessToken string,
+	correlationID string,
+) (*AudiencePhonesResult, error) {
+	numAudiences := int64(0)
+	if c.NumAudiences != nil {
+		numAudiences = int64(*c.NumAudiences)
+	}
+	s.logger.Printf("fetchSplusAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, numAudiences, len(c.Tags), correlationID)
+
+	if numAudiences <= 0 {
+		return nil, fmt.Errorf("campaign num_audiences must be positive")
+	}
+
+	toExtract := make([]uint, len(c.Tags))
+	for i, tag := range c.Tags {
+		tagID, err := strconv.ParseUint(tag, 10, 32)
+		if err != nil {
+			s.logger.Printf("fetchSplusAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
+			return nil, err
+		}
+		toExtract[i] = uint(tagID)
+	}
+	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
+	if err != nil {
+		s.logger.Printf("fetchSplusAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
+		return nil, err
+	}
+
+	tagIDs := make(pq.Int32Array, len(tags))
+	for i, tag := range tags {
+		tagIDs[i] = int32(tag.ID)
+	}
+	s.logger.Printf("fetchSplusAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
+	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
+
+	const limit = 10000000
+
+	tagsHash := hashTags(c.Tags)
+	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
+	if err != nil {
+		s.logger.Printf("fetchSplusAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
+		return nil, err
+	}
+	if selection != nil {
+		s.logger.Printf("fetchSplusAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
+	} else {
+		s.logger.Printf("fetchSplusAudiencePhones selection miss: campaign_id=%d", c.ID)
+	}
+
+	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
+		phones := make([]string, 0, numAudiences)
+		ids := make([]int64, 0, numAudiences)
+
+		// Splus campaigns intentionally do not segment audiences by color (white/pink).
+		// Color-based routing is SMS-specific, so Splus always queries by tag criteria only.
+		filter := models.AudienceProfileFilter{Tags: &tagIDs}
+		candidates, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
+		if err != nil {
+			s.logger.Printf("fetchSplusAudiencePhones fetch candidates failed: campaign_id=%d err=%v", c.ID, err)
+			return nil, nil, err
+		}
+		s.logger.Printf("fetchSplusAudiencePhones candidates: campaign_id=%d count=%d", c.ID, len(candidates))
+
+		appendIfFresh := func(ap *models.AudienceProfile) {
+			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
+				return
+			}
+			if exclude != nil {
+				if _, ok := exclude[int64(ap.ID)]; ok {
+					return
+				}
+			}
+			phones = append(phones, *ap.PhoneNumber)
+			ids = append(ids, int64(ap.ID))
+		}
+
+		for _, ap := range candidates {
+			if int64(len(phones)) >= numAudiences {
+				break
+			}
+			appendIfFresh(ap)
+		}
+
+		return phones, ids, nil
+	}
+
+	// First attempt excluding prior picks for this customer/tags
+	var exclude map[int64]struct{}
+	if selection != nil && selection.IDs != nil {
+		exclude = selection.IDs
+	}
+	phones, ids, err := selectAudiences(exclude)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Printf("fetchSplusAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
+
+	resetUsed := false
+	if int64(len(phones)) < numAudiences {
+		// Not enough fresh; retry from scratch without exclusions
+		resetUsed = true
+		phones, ids, err = selectAudiences(nil)
+		if err != nil {
+			return nil, err
+		}
+		s.logger.Printf("fetchSplusAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
+	}
+
+	// Persist selection history with correlation id and merged audience IDs
+	var sel *AudienceSelection
+	if resetUsed {
+		sel, err = s.audienceCache.SaveSnapshot(ctx, c.CustomerID, tagsHash, correlationID, ids)
+	} else {
+		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
+	}
+	if err != nil {
+		s.logger.Printf("fetchSplusAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
+		return nil, err
+	}
+	s.logger.Printf("fetchSplusAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
+
+	if !hasCampaignAdLink(c.AdLink) {
+		s.logger.Printf("fetchSplusAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
+		s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
+		return &AudiencePhonesResult{
+			Phones:      phones,
+			IDs:         ids,
+			Codes:       make([]string, len(phones)),
+			SelectionID: sel.ID,
+		}, nil
+	}
+
+	// Generate sequential UIDs via bot API and persist short links centrally
+	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, c.ID, c.AdLink, phones)
+	if err != nil {
+		s.logger.Printf("fetchSplusAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
+		return nil, err
+	}
+	if len(codes) != len(phones) {
+		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
+	}
+	s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
+	return &AudiencePhonesResult{
+		Phones:      phones,
+		IDs:         ids,
+		Codes:       codes,
+		SelectionID: sel.ID,
+	}, nil
+}
+
+func (s *SplusCampaignScheduler) buildSplusMessageBody(c dto.BotGetCampaignResponse, code string) string {
+	content := ""
+	if c.Content != nil {
+		content = *c.Content
+	}
+	if hasCampaignAdLink(c.AdLink) {
+		shortened := "jo1n.ir/" + code
+		return strings.ReplaceAll(content, "🔗", shortened)
+	}
+	return strings.ReplaceAll(content, "🔗", "")
+}
+
+func (s *SplusCampaignScheduler) createUnmatchedSentSplusRows(ctx context.Context, processedCampaignID uint, unmatchedUIDs []string) error {
+	if len(unmatchedUIDs) == 0 {
+		return nil
+	}
+
+	const errCode = "AUDIENCE_UID_NOT_FOUND"
+	rows := make([]*models.SentSplusMessage, 0, len(unmatchedUIDs))
+	for _, uid := range unmatchedUIDs {
+		desc := fmt.Sprintf("Audience uid not found or has no phone number: %s", uid)
+		code := errCode
+		rows = append(rows, &models.SentSplusMessage{
+			ProcessedCampaignID: processedCampaignID,
+			PhoneNumber:         "",
+			PartsDelivered:      0,
+			Status:              models.SplusSendStatusUnsuccessful,
+			TrackingID:          uuid.NewString(),
+			ServerID:            nil,
+			ErrorCode:           &code,
+			Description:         &desc,
+		})
+	}
+	return s.sentRepo.SaveBatch(ctx, rows)
+}
+
+func (s *SplusCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, trackingIDs []string) error {
+	if len(trackingIDs) == 0 || !s.splusClient.SupportsStatusTracking() || s.jobRepo == nil {
+		return nil
+	}
+	filteredTrackingIDs := make([]string, 0, len(trackingIDs))
+	for _, id := range trackingIDs {
+		if strings.TrimSpace(id) != "" {
+			filteredTrackingIDs = append(filteredTrackingIDs, strings.TrimSpace(id))
+		}
+	}
+	if len(filteredTrackingIDs) == 0 {
+		return nil
+	}
+
+	corrID := uuid.NewString()
+	now := utils.UTCNow()
+	offsets := []time.Duration{5 * time.Minute, 15 * time.Minute, 1 * time.Hour, 24 * time.Hour, 48 * time.Hour}
+	jobs := make([]*models.CampaignStatusJob, 0, len(offsets))
+	for _, off := range offsets {
+		jobs = append(jobs, &models.CampaignStatusJob{
+			ProcessedCampaignID: processedCampaignID,
+			CorrelationID:       corrID,
+			TrackingIDs:         pq.StringArray(filteredTrackingIDs),
+			RetryCount:          0,
+			ScheduledAt:         now.Add(off),
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		})
+	}
+	return s.jobRepo.SaveBatch(ctx, jobs)
+}
+
+func (s *SplusCampaignScheduler) startStatusJobWorker(ctx context.Context) {
+	ticker := time.NewTicker(statusJobWorkerInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ctx2, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			s.processStatusJobs(ctx2)
+			cancel()
+		}
+	}
+}
+
+func (s *SplusCampaignScheduler) processStatusJobs(ctx context.Context) {
+	if !s.splusClient.SupportsStatusTracking() || s.jobRepo == nil || s.resRepo == nil {
+		return
+	}
+
+	now := utils.UTCNow()
+	jobs, err := s.jobRepo.ListDue(ctx, now, numJobsPerTick)
+	if err != nil {
+		s.logger.Printf("Splus scheduler: list status jobs failed: %v", err)
+		return
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
+	for _, j := range jobs {
+		func(job *models.CampaignStatusJob) {
+			jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: Make this timeout configurable
+			defer cancel()
+			if err := s.handleStatusJob(jobCtx, job); err != nil {
+				s.logger.Printf("Splus scheduler: handle status job id=%d failed: %v", job.ID, err)
+				if job.RetryCount >= statusJobMaxRetry {
+					s.notifyAdmin(fmt.Sprintf("Splus scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
+				}
+			} else {
+				s.logger.Printf("Splus scheduler: handle status job id=%d succeeded", job.ID)
+			}
+		}(j)
+	}
+}
+
+func (s *SplusCampaignScheduler) handleStatusJob(ctx context.Context, job *models.CampaignStatusJob) error {
+	rows, err := s.sentRepo.ListByTrackingIDs(ctx, job.ProcessedCampaignID, []string(job.TrackingIDs))
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return s.markStatusJobExecuted(ctx, job, nil)
+	}
+
+	rowByServerID := make(map[string]*models.SentSplusMessage, len(rows))
+	serverIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || row.ServerID == nil {
+			continue
+		}
+		serverID := strings.TrimSpace(*row.ServerID)
+		if serverID == "" {
+			continue
+		}
+		if _, seen := rowByServerID[serverID]; seen {
+			continue
+		}
+		rowByServerID[serverID] = row
+		serverIDs = append(serverIDs, serverID)
+	}
+	if len(serverIDs) == 0 {
+		return s.markStatusJobExecuted(ctx, job, nil)
+	}
+
+	statusItems, fetchErr := s.splusClient.FetchStatus(ctx, serverIDs)
+	if fetchErr != nil {
+		now := utils.UTCNow()
+		job.RetryCount++
+		msg := fetchErr.Error()
+		job.Error = &msg
+		job.UpdatedAt = now
+		// Keep job open for retries until max retry threshold is reached.
+		if job.RetryCount >= statusJobMaxRetry {
+			job.ExecutedAt = &now
+		} else {
+			job.ExecutedAt = nil
+		}
+		if err := s.jobRepo.Update(ctx, job); err != nil {
+			return err
+		}
+		return fetchErr
+	}
+
+	var stats map[string]any
+	txErr := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		now := utils.UTCNow()
+
+		statusRows := make([]*models.SplusStatusResult, 0, len(statusItems))
+		sendUpdates := make([]repository.SentSplusSendResultUpdate, 0, len(statusItems))
+		for _, item := range statusItems {
+			serverID := strings.TrimSpace(item.MessageID)
+			if serverID == "" {
+				continue
+			}
+			row := rowByServerID[serverID]
+			if row == nil {
+				continue
+			}
+
+			totalParts, deliveredParts, undeliveredParts, unknownParts, status := mapSplusProviderStatus(item.Status)
+			statusText := strings.TrimSpace(item.StatusText)
+
+			var errorCode *string
+			var description *string
+			if status == models.SplusSendStatusUnsuccessful {
+				code := strconv.Itoa(item.Status)
+				errorCode = &code
+			}
+			if metadataDesc := buildSplusStatusMetadataDescription(row.Description, item.Status, statusText); metadataDesc != "" {
+				description = &metadataDesc
+			}
+
+			sendUpdates = append(sendUpdates, repository.SentSplusSendResultUpdate{
+				TrackingID:     row.TrackingID,
+				Status:         status,
+				PartsDelivered: int(deliveredParts),
+				ServerID:       row.ServerID,
+				ErrorCode:      errorCode,
+				Description:    description,
+			})
+
+			statusValue := strconv.Itoa(item.Status)
+			providerStatusCode := int64(item.Status)
+			var statusTextPtr *string
+			if statusText != "" {
+				statusTextPtr = &statusText
+			}
+			metadata := buildSplusStatusResultMetadata(item, status)
+
+			statusRows = append(statusRows, &models.SplusStatusResult{
+				JobID:                 job.ID,
+				ProcessedCampaignID:   job.ProcessedCampaignID,
+				TrackingID:            row.TrackingID,
+				ServerID:              row.ServerID,
+				ProviderStatusCode:    &providerStatusCode,
+				ProviderStatusText:    statusTextPtr,
+				TotalParts:            &totalParts,
+				TotalDeliveredParts:   &deliveredParts,
+				TotalUndeliveredParts: &undeliveredParts,
+				TotalUnknownParts:     &unknownParts,
+				Status:                &statusValue,
+				Metadata:              metadata,
+			})
+		}
+		if err := s.sentRepo.UpdateSendResultByTrackingIDs(txCtx, sendUpdates); err != nil {
+			return err
+		}
+		if err := s.resRepo.SaveBatch(txCtx, statusRows); err != nil {
+			return err
+		}
+
+		job.ExecutedAt = &now
+		job.Error = nil
+		job.UpdatedAt = now
+		return s.jobRepo.Update(txCtx, job)
+	})
+	if txErr != nil {
+		return txErr
+	}
+
+	if stats, err = s.updateProcessedCampaignStats(ctx, job.ProcessedCampaignID); err != nil {
+		return err
+	}
+
+	if stats != nil {
+		pc, err := s.pcRepo.ByID(ctx, job.ProcessedCampaignID)
+		if err != nil {
+			return err
+		}
+		if pc == nil {
+			return fmt.Errorf("processed campaign not found for processed campaign id=%d", job.ProcessedCampaignID)
+		}
+		if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *SplusCampaignScheduler) markStatusJobExecuted(ctx context.Context, job *models.CampaignStatusJob, errText *string) error {
+	now := utils.UTCNow()
+	job.ExecutedAt = &now
+	job.UpdatedAt = now
+	job.Error = errText
+	return s.jobRepo.Update(ctx, job)
+}
+
+func mapSplusProviderStatus(statusCode int) (totalParts int64, deliveredParts int64, undeliveredParts int64, unknownParts int64, status models.SplusSendStatus) {
+	switch statusCode {
+	case 200, 202:
+		return 1, 1, 0, 0, models.SplusSendStatusSuccessful
+	case 400, 401, 404, 470, 700, 701, 702, 712, 715, 716, 723, 726, 727, 728, 729, 731, 732, 733, 734, 735, 739, 740:
+		return 1, 0, 1, 0, models.SplusSendStatusUnsuccessful
+	default:
+		return 1, 0, 0, 1, models.SplusSendStatusPending
+	}
+}
+
+func (s *SplusCampaignScheduler) updateProcessedCampaignStats(ctx context.Context, processedCampaignID uint) (map[string]any, error) {
+	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
+	if err != nil {
+		return nil, err
+	}
+	if pc == nil {
+		return nil, fmt.Errorf("processed campaign not found for processed_campaign_id=%d", processedCampaignID)
+	}
+	if s.resRepo == nil {
+		return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
+	}
+
+	agg, err := s.resRepo.AggregateByCampaign(ctx, processedCampaignID)
+	if err != nil {
+		return nil, err
+	}
+
+	trackingResults, err := s.resRepo.TrackingResultsByCampaign(ctx, processedCampaignID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fallback before any status jobs land.
+	if agg.AggregatedTotalRecords == 0 && len(trackingResults) == 0 {
+		return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
+	}
+
+	stats := map[string]any{
+		"aggregatedTotalRecords":          agg.AggregatedTotalRecords,
+		"aggregatedTotalSent":             agg.AggregatedTotalSent,
+		"aggregatedTotalParts":            agg.AggregatedTotalParts,
+		"aggregatedTotalDeliveredParts":   agg.AggregatedDeliveredParts,
+		"aggregatedTotalUnDeliveredParts": agg.AggregatedUndelivered,
+		"aggregatedTotalUnKnownParts":     agg.AggregatedUnknown,
+		"trackingResults":                 trackingResults,
+		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return nil, err
+	}
+	pc.Statistics = data
+	pc.UpdatedAt = utils.UTCNow()
+	if err := s.pcRepo.Update(ctx, pc); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (s *SplusCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx context.Context, pc *models.ProcessedCampaign) (map[string]any, error) {
+	type row struct {
+		Total      int64
+		Successful int64
+	}
+	var agg row
+	if err := s.db.WithContext(ctx).Table("sent_splus_messages").
+		Select(`
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN LOWER(BTRIM(status::text)) = 'successful' THEN 1 ELSE 0 END), 0) AS successful`).
+		Where("processed_campaign_id = ?", pc.ID).
+		Scan(&agg).Error; err != nil {
+		return nil, err
+	}
+
+	trackingResults, err := s.sentRepo.TrackingResultsFromSentRows(ctx, pc.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	stats := map[string]any{
+		"aggregatedTotalRecords":          agg.Total,
+		"aggregatedTotalSent":             agg.Successful,
+		"aggregatedTotalParts":            agg.Total,
+		"aggregatedTotalDeliveredParts":   agg.Successful,
+		"aggregatedTotalUnDeliveredParts": agg.Total - agg.Successful,
+		"aggregatedTotalUnKnownParts":     int64(0),
+		"trackingResults":                 trackingResults,
+		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return nil, err
+	}
+	pc.Statistics = data
+	pc.UpdatedAt = utils.UTCNow()
+	if err := s.pcRepo.Update(ctx, pc); err != nil {
+		return nil, err
+	}
+	return stats, nil
 }
 
 func extractSplusBotID(c dto.BotGetCampaignResponse) (string, error) {
@@ -794,176 +1036,6 @@ func extractSplusBotID(c dto.BotGetCampaignResponse) (string, error) {
 	}
 }
 
-func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(ctx context.Context, c dto.BotGetCampaignResponse, token string, correlationID string) ([]string, []int64, []string, uint, error) {
-	numAudiences := int64(0)
-	if c.NumAudiences != nil {
-		numAudiences = int64(*c.NumAudiences)
-	}
-	if numAudiences <= 0 {
-		return nil, nil, nil, 0, fmt.Errorf("campaign num_audiences must be positive")
-	}
-
-	toExtract := make([]uint, len(c.Tags))
-	for i, tag := range c.Tags {
-		tagID, err := strconv.ParseUint(tag, 10, 32)
-		if err != nil {
-			s.logger.Printf("fetchSplusAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
-			return nil, nil, nil, 0, err
-		}
-		toExtract[i] = uint(tagID)
-	}
-	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
-	if err != nil {
-		s.logger.Printf("fetchSplusAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
-		return nil, nil, nil, 0, err
-	}
-
-	tagIDs := make(pq.Int32Array, len(tags))
-	for i, tag := range tags {
-		tagIDs[i] = int32(tag.ID)
-	}
-
-	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
-
-	const limit = 10000000
-
-	tagsHash := splusHashTags(c.Tags)
-	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
-	if err != nil {
-		s.logger.Printf("fetchSplusAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
-		return nil, nil, nil, 0, err
-	}
-	if selection != nil {
-		s.logger.Printf("fetchSplusAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
-	} else {
-		s.logger.Printf("fetchSplusAudiencePhones selection miss: campaign_id=%d", c.ID)
-	}
-
-	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
-		phones := make([]string, 0, numAudiences)
-		ids := make([]int64, 0, numAudiences)
-
-		filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("white")}
-		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
-		if err != nil {
-			s.logger.Printf("fetchSplusAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
-			return nil, nil, err
-		}
-		s.logger.Printf("fetchSplusAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
-
-		appendIfFresh := func(ap *models.AudienceProfile) {
-			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
-				return
-			}
-			if exclude != nil {
-				if _, ok := exclude[int64(ap.ID)]; ok {
-					return
-				}
-			}
-			phones = append(phones, *ap.PhoneNumber)
-			ids = append(ids, int64(ap.ID))
-		}
-
-		for _, ap := range whites {
-			if int64(len(phones)) >= numAudiences {
-				break
-			}
-			appendIfFresh(ap)
-		}
-
-		if int64(len(phones)) < numAudiences {
-			filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("pink")}
-			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
-			if err != nil {
-				s.logger.Printf("fetchSplusAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
-				return nil, nil, err
-			}
-			s.logger.Printf("fetchSplusAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
-			for _, ap := range pinks {
-				if int64(len(phones)) >= numAudiences {
-					break
-				}
-				appendIfFresh(ap)
-			}
-		}
-
-		return phones, ids, nil
-	}
-
-	// First attempt excluding prior picks for this customer/tags
-	var exclude map[int64]struct{}
-	if selection != nil && selection.IDs != nil {
-		exclude = selection.IDs
-	}
-	phones, ids, err := selectAudiences(exclude)
-	if err != nil {
-		return nil, nil, nil, 0, err
-	}
-	s.logger.Printf("fetchSplusAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
-
-	resetUsed := false
-	if int64(len(phones)) < numAudiences {
-		// Not enough fresh; retry from scratch without exclusions
-		resetUsed = true
-		phones, ids, err = selectAudiences(nil)
-		if err != nil {
-			return nil, nil, nil, 0, err
-		}
-		s.logger.Printf("fetchSplusAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), c.NumAudiences)
-	}
-
-	// Persist selection history with correlation id and merged audience IDs
-	var sel *AudienceSelection
-	if resetUsed {
-		sel, err = s.audienceCache.SaveSnapshot(ctx, c.CustomerID, tagsHash, correlationID, ids)
-	} else {
-		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
-	}
-	if err != nil {
-		s.logger.Printf("fetchSplusAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
-		return nil, nil, nil, 0, err
-	}
-	s.logger.Printf("fetchSplusAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
-
-	if !hasCampaignAdLink(c.AdLink) {
-		s.logger.Printf("fetchSplusAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
-		s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
-		return phones, ids, make([]string, len(phones)), sel.ID, nil
-	}
-
-	// Generate sequential UIDs via bot API and persist short links centrally
-	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
-	if err != nil {
-		s.logger.Printf("fetchSplusAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
-		return nil, nil, nil, 0, err
-	}
-	s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
-	return phones, ids, codes, sel.ID, nil
-}
-
-func splusHashTags(tags []string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	cp := make([]string, len(tags))
-	copy(cp, tags)
-	sort.Strings(cp)
-	h := sha1.Sum([]byte(strings.Join(cp, ",")))
-	return hex.EncodeToString(h[:])
-}
-
-func (s *SplusCampaignScheduler) buildSplusMessageBody(c dto.BotGetCampaignResponse, code string) string {
-	content := ""
-	if c.Content != nil {
-		content = *c.Content
-	}
-	if hasCampaignAdLink(c.AdLink) {
-		shortened := "jo1n.ir/" + code
-		return strings.ReplaceAll(content, "🔗", shortened)
-	}
-	return strings.ReplaceAll(content, "🔗", "")
-}
-
 func (s *SplusCampaignScheduler) notifyAdmin(message string) {
 	if s.notifier == nil {
 		return
@@ -973,35 +1045,4 @@ func (s *SplusCampaignScheduler) notifyAdmin(message string) {
 			_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
 		}
 	}(message)
-}
-
-var splusErrorDescriptions = map[int]string{
-	400: "Bad Request",
-	401: "Unauthorized",
-	404: "Not Found",
-	429: "Too Many Requests",
-	470: "Input Validation Error",
-	500: "Internal Server Error",
-	700: "Invalid Phone Number",
-	701: "No User Account",
-	702: "Suspended User",
-	712: "User Is Inactive",
-	715: "User Type Not Authorized",
-	716: "File Not Found",
-	723: "Insufficient Balance",
-	724: "Cannot Download File",
-	726: "File Invalid",
-	727: "File Size Invalid",
-	728: "File Name Invalid",
-	729: "Mime Type Invalid",
-	730: "Cannot Create User",
-	731: "No Active Conversation",
-	732: "Receiver Not Specified",
-	733: "URL Not Allowed",
-	734: "APK Not Allowed",
-	735: "Sender Is Blocked",
-	736: "Server Connection Error",
-	738: "Data Persist Error",
-	739: "Request Not Allowed",
-	740: "File Access Denied",
 }
