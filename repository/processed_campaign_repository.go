@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -108,4 +109,32 @@ func (r *ProcessedCampaignRepositoryImpl) Update(ctx context.Context, pc *models
 		}()
 	}
 	return db.Save(pc).Error
+}
+
+func (r *ProcessedCampaignRepositoryImpl) AppendAudienceData(ctx context.Context, id uint, ids []int64, codes []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	db := r.getDB(ctx)
+	return db.Exec(
+		`UPDATE processed_campaigns SET audience_ids = audience_ids || ?, audience_codes = audience_codes || ? WHERE id = ?`,
+		pq.Int64Array(ids), pq.StringArray(codes), id,
+	).Error
+}
+
+func (r *ProcessedCampaignRepositoryImpl) UpdateMeta(ctx context.Context, pc *models.ProcessedCampaign) error {
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+	return db.Omit("audience_ids", "audience_codes").Save(pc).Error
 }
