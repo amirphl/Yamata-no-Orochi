@@ -94,7 +94,7 @@ func (r *ProcessedCampaignRepositoryImpl) Exists(ctx context.Context, filter mod
 	return c > 0, nil
 }
 
-func (r *ProcessedCampaignRepositoryImpl) Update(ctx context.Context, pc *models.ProcessedCampaign) error {
+func (r *ProcessedCampaignRepositoryImpl) Update(ctx context.Context, pc *models.ProcessedCampaign) (err error) {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -104,11 +104,12 @@ func (r *ProcessedCampaignRepositoryImpl) Update(ctx context.Context, pc *models
 			if err != nil {
 				db.Rollback()
 			} else {
-				db.Commit()
+				err = db.Commit().Error
 			}
 		}()
 	}
-	return db.Save(pc).Error
+	err = db.Save(pc).Error
+	return err
 }
 
 func (r *ProcessedCampaignRepositoryImpl) AppendAudienceData(ctx context.Context, id uint, ids []int64, codes []string) error {
@@ -122,7 +123,7 @@ func (r *ProcessedCampaignRepositoryImpl) AppendAudienceData(ctx context.Context
 	).Error
 }
 
-func (r *ProcessedCampaignRepositoryImpl) UpdateMeta(ctx context.Context, pc *models.ProcessedCampaign) error {
+func (r *ProcessedCampaignRepositoryImpl) UpdateMeta(ctx context.Context, pc *models.ProcessedCampaign) (err error) {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -132,9 +133,19 @@ func (r *ProcessedCampaignRepositoryImpl) UpdateMeta(ctx context.Context, pc *mo
 			if err != nil {
 				db.Rollback()
 			} else {
-				db.Commit()
+				err = db.Commit().Error
 			}
 		}()
 	}
-	return db.Omit("audience_ids", "audience_codes").Save(pc).Error
+
+	updates := map[string]any{
+		"last_audience_id":      pc.LastAudienceID,
+		"statistics":            pc.Statistics,
+		"audience_selection_id": pc.AudienceSelectionID,
+		"updated_at":            pc.UpdatedAt,
+	}
+	err = db.Model(&models.ProcessedCampaign{}).
+		Where("id = ?", pc.ID).
+		Updates(updates).Error
+	return err
 }
