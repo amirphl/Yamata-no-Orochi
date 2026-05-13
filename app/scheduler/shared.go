@@ -228,7 +228,20 @@ func fetchAudiencePhonesByUIDs(
 		}, nil
 	}
 
-	codes, err := botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
+	items := make([]dto.PhoneWithAdLink, len(phones))
+	for i, p := range phones {
+		adLink := c.AdLink
+		if adLink != nil && strings.Contains(*adLink, "{uid}") {
+			resolved := strings.ReplaceAll(*adLink, "{uid}", matchedUIDs[i])
+			adLink = &resolved
+		}
+		items[i] = dto.PhoneWithAdLink{Phone: p, AdLink: adLink}
+	}
+	codes, err := botClient.AllocateShortLinks(ctx, token, &dto.BotAllocateShortLinksRequest{
+		CampaignID:      c.ID,
+		Items:           items,
+		ShortLinkDomain: "jo1n.ir/",
+	})
 	if err != nil {
 		logger.Printf("fetchAudiencePhonesByUIDs allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, err
