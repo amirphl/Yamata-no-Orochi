@@ -25,7 +25,7 @@ func (r *BaseRepository[T, F]) getDB(ctx context.Context) *gorm.DB {
 	if tx, ok := ctx.Value(TxContextKey).(*gorm.DB); ok && tx != nil {
 		return tx
 	}
-	return r.DB
+	return r.DB.WithContext(ctx)
 }
 
 // getDBForWrite returns database connection with transaction for write operations
@@ -35,7 +35,7 @@ func (r *BaseRepository[T, F]) getDBForWrite(ctx context.Context) (*gorm.DB, boo
 	}
 
 	// Start new transaction for write operation
-	tx := r.DB.Begin()
+	tx := r.DB.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return nil, false, fmt.Errorf("failed to begin transaction: %w", tx.Error)
 	}
@@ -309,7 +309,7 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 
 // WithTransaction executes a function within a database transaction
 func WithTransaction(ctx context.Context, db *gorm.DB, fn func(context.Context) error) (err error) {
-	tx := db.Begin()
+	tx := db.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return fmt.Errorf("failed to begin transaction: %w", tx.Error)
 	}
