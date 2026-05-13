@@ -3,8 +3,6 @@ package scheduler
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -700,6 +697,8 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(ctx context.Context,
 	if c.NumAudiences != nil {
 		numAudiences = int64(*c.NumAudiences)
 	}
+	s.logger.Printf("fetchRubikaAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, numAudiences, len(c.Tags), correlationID)
+
 	if numAudiences <= 0 {
 		return nil, nil, nil, 0, fmt.Errorf("campaign num_audiences must be positive")
 	}
@@ -708,12 +707,14 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(ctx context.Context,
 	for i, tag := range c.Tags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
+			s.logger.Printf("fetchRubikaAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
 			return nil, nil, nil, 0, err
 		}
 		toExtract[i] = uint(tagID)
 	}
 	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
 	if err != nil {
+		s.logger.Printf("fetchRubikaAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
 		return nil, nil, nil, 0, err
 	}
 
@@ -721,23 +722,33 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(ctx context.Context,
 	for i, tag := range tags {
 		tagIDs[i] = int32(tag.ID)
 	}
+	s.logger.Printf("fetchRubikaAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
 
 	const limit = 10000000
-	tagsHash := rubikaHashTags(c.Tags)
+	tagsHash := hashTags(c.Tags)
 	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
 	if err != nil {
+		s.logger.Printf("fetchRubikaAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
 		return nil, nil, nil, 0, err
 	}
+	if selection != nil {
+		s.logger.Printf("fetchRubikaAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
+	} else {
+		s.logger.Printf("fetchRubikaAudiencePhones selection miss: campaign_id=%d", c.ID)
+	}
 
-	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
+	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, []string, error) {
 		phones := make([]string, 0, numAudiences)
 		ids := make([]int64, 0, numAudiences)
+		uids := make([]string, 0, numAudiences)
 
 		filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("white")}
 		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
-			return nil, nil, err
+			s.logger.Printf("fetchRubikaAudiencePhones fetch white candidates failed: campaign_id=%d err=%v", c.ID, err)
+			return nil, nil, nil, err
 		}
+		s.logger.Printf("fetchRubikaAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
 
 		appendIfFresh := func(ap *models.AudienceProfile) {
 			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
@@ -750,6 +761,7 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(ctx context.Context,
 			}
 			phones = append(phones, *ap.PhoneNumber)
 			ids = append(ids, int64(ap.ID))
+			uids = append(uids, ap.UID)
 		}
 
 		for _, ap := range whites {
@@ -763,8 +775,10 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(ctx context.Context,
 			filter := models.AudienceProfileFilter{Tags: &tagIDs, Color: utils.ToPtr("pink")}
 			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 			if err != nil {
-				return nil, nil, err
+				s.logger.Printf("fetchRubikaAudiencePhones fetch pink candidates failed: campaign_id=%d err=%v", c.ID, err)
+				return nil, nil, nil, err
 			}
+			s.logger.Printf("fetchRubikaAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
 			for _, ap := range pinks {
 				if int64(len(phones)) >= numAudiences {
 					break
@@ -773,25 +787,27 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(ctx context.Context,
 			}
 		}
 
-		return phones, ids, nil
+		return phones, ids, uids, nil
 	}
 
 	var exclude map[int64]struct{}
 	if selection != nil && selection.IDs != nil {
 		exclude = selection.IDs
 	}
-	phones, ids, err := selectAudiences(exclude)
+	phones, ids, uids, err := selectAudiences(exclude)
 	if err != nil {
 		return nil, nil, nil, 0, err
 	}
+	s.logger.Printf("fetchRubikaAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
 
 	resetUsed := false
 	if int64(len(phones)) < numAudiences {
 		resetUsed = true
-		phones, ids, err = selectAudiences(nil)
+		phones, ids, uids, err = selectAudiences(nil)
 		if err != nil {
 			return nil, nil, nil, 0, err
 		}
+		s.logger.Printf("fetchRubikaAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
 	}
 
 	var sel *AudienceSelection
@@ -801,29 +817,40 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(ctx context.Context,
 		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
 	}
 	if err != nil {
+		s.logger.Printf("fetchRubikaAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
 		return nil, nil, nil, 0, err
 	}
+	s.logger.Printf("fetchRubikaAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
 
 	if !hasCampaignAdLink(c.AdLink) {
+		s.logger.Printf("fetchRubikaAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
+		s.logger.Printf("fetchRubikaAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
 		return phones, ids, make([]string, len(phones)), sel.ID, nil
 	}
 
-	codes, err := s.botClient.AllocateShortLinks(ctx, token, c.ID, c.AdLink, phones)
+	items := make([]dto.PhoneWithAdLink, len(phones))
+	for i, p := range phones {
+		adLink := c.AdLink
+		if adLink != nil && strings.Contains(*adLink, "{uid}") {
+			resolved := strings.ReplaceAll(*adLink, "{uid}", uids[i])
+			adLink = &resolved
+		}
+		items[i] = dto.PhoneWithAdLink{Phone: p, AdLink: adLink}
+	}
+	codes, err := s.botClient.AllocateShortLinks(ctx, token, &dto.BotAllocateShortLinksRequest{
+		CampaignID:      c.ID,
+		Items:           items,
+		ShortLinkDomain: "jo1n.ir/",
+	})
 	if err != nil {
+		s.logger.Printf("fetchRubikaAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, nil, nil, 0, err
 	}
-	return phones, ids, codes, sel.ID, nil
-}
-
-func rubikaHashTags(tags []string) string {
-	if len(tags) == 0 {
-		return ""
+	if len(codes) != len(phones) {
+		return nil, nil, nil, 0, fmt.Errorf("allocate short links length mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
 	}
-	cp := make([]string, len(tags))
-	copy(cp, tags)
-	sort.Strings(cp)
-	h := sha1.Sum([]byte(strings.Join(cp, ",")))
-	return hex.EncodeToString(h[:])
+	s.logger.Printf("fetchRubikaAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
+	return phones, ids, codes, sel.ID, nil
 }
 
 func (s *RubikaCampaignScheduler) buildRubikaMessageBody(c dto.BotGetCampaignResponse, code string) string {
