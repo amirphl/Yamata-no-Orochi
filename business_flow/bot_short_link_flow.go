@@ -19,7 +19,7 @@ import (
 type BotShortLinkFlow interface {
 	CreateShortLink(ctx context.Context, req *dto.BotCreateShortLinkRequest) (*dto.BotCreateShortLinkResponse, error)
 	CreateShortLinks(ctx context.Context, req *dto.BotCreateShortLinksRequest) (*dto.BotCreateShortLinksResponse, error)
-	GenerateAndCreateShortLinks(ctx context.Context, campaignID uint, adLink *string, phones []string, shortLinkDomain string) ([]string, error)
+	GenerateAndCreateShortLinks(ctx context.Context, req *dto.BotAllocateShortLinksRequest) ([]string, error)
 }
 
 type BotShortLinkFlowImpl struct {
@@ -115,21 +115,16 @@ func (s *BotShortLinkFlowImpl) CreateShortLinks(ctx context.Context, req *dto.Bo
 	}, nil
 }
 
-// GenerateAndCreateShortLinks generates sequential UIDs centrally and creates short links for phones
-// Returns codes in the same order as phones.
-func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, campaignID uint, adLink *string, phones []string, shortLinkDomain string) ([]string, error) {
-	// adLink = strings.TrimSpace(adLink)
-	// if adLink == "" {
-	// 	return nil, NewBusinessError("VALIDATION_ERROR", "adLink is required", nil)
-	// }
-	longLink := ""
-	if adLink != nil {
-		longLink = *adLink
+// GenerateAndCreateShortLinks generates sequential UIDs centrally and creates short links for phones.
+// Each item carries its own ad link. Returns codes in the same order as req.Items.
+func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, req *dto.BotAllocateShortLinksRequest) ([]string, error) {
+	if req == nil {
+		return nil, NewBusinessError("VALIDATION_ERROR", "request is required", nil)
 	}
-	if len(phones) == 0 {
+	if len(req.Items) == 0 {
 		return []string{}, nil
 	}
-	shortLinkDomain = normalizeDomain(shortLinkDomain)
+	shortLinkDomain := normalizeDomain(req.ShortLinkDomain)
 	if shortLinkDomain == "" {
 		return nil, NewBusinessError("VALIDATION_ERROR", "short_link_domain is required", nil)
 	}
@@ -137,7 +132,6 @@ func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, 
 	lockShortLinkGen()
 	defer unlockShortLinkGen()
 
-	// compute starting UID sequence
 	cutoff := time.Date(2025, 11, 10, 15, 45, 11, 401492000, time.UTC)
 	lastUID, err := s.shortRepo.GetMaxUIDSince(ctx, cutoff)
 	if err != nil {
@@ -150,28 +144,30 @@ func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, 
 			return nil, NewBusinessError("INVALID_EXISTING_UID", "Found invalid uid in database", err)
 		}
 		seq = n + 1
-	} else {
-		seq = 0
 	}
 
-	codes := make([]string, len(phones))
-	rows := make([]*models.ShortLink, 0, len(phones))
-	// new scenario id
 	lastScenarioID, err := s.shortRepo.GetLastScenarioID(ctx)
 	if err != nil {
 		return nil, NewBusinessError("FETCH_SCENARIO_ID_FAILED", "Failed to determine next scenario id", err)
 	}
 	newScenarioID := lastScenarioID + 1
 
-	for i := range phones {
+	codes := make([]string, len(req.Items))
+	rows := make([]*models.ShortLink, 0, len(req.Items))
+	campaignID := req.CampaignID
+
+	for i, item := range req.Items {
 		uid, err := formatSequentialUIDCompat(seq)
 		if err != nil {
 			return nil, NewBusinessError("UID_SEQUENCE_EXHAUSTED", "No more UIDs available up to zzzzz", err)
 		}
 		seq++
 		codes[i] = uid
-		shortURL := fmt.Sprintf("%s/%s", shortLinkDomain, uid)
-		p := phones[i]
+		longLink := ""
+		if item.AdLink != nil {
+			longLink = *item.AdLink
+		}
+		p := item.Phone
 		rows = append(rows, &models.ShortLink{
 			UID:         uid,
 			CampaignID:  &campaignID,
@@ -179,7 +175,7 @@ func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, 
 			ScenarioID:  &newScenarioID,
 			PhoneNumber: &p,
 			LongLink:    longLink,
-			ShortLink:   shortURL,
+			ShortLink:   fmt.Sprintf("%s/%s", shortLinkDomain, uid),
 		})
 	}
 
