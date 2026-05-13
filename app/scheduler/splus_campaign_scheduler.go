@@ -375,6 +375,7 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 		if len(sendUpdates) > 0 {
 			if updateErr := s.sentRepo.UpdateSendResultByTrackingIDs(ctx, sendUpdates); updateErr != nil {
 				s.logger.Printf("Splus scheduler: failed to batch update sent_splus provider fields for campaign id=%d: %v", c.ID, updateErr)
+				// NOTE: Error silent here; not returning to avoid blocking further processing.
 			}
 		}
 
@@ -541,9 +542,10 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 		s.logger.Printf("fetchSplusAudiencePhones selection miss: campaign_id=%d", c.ID)
 	}
 
-	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
+	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, []string, error) {
 		phones := make([]string, 0, numAudiences)
 		ids := make([]int64, 0, numAudiences)
+		uids := make([]string, 0, numAudiences)
 
 		// Splus campaigns intentionally do not segment audiences by color (white/pink).
 		// Color-based routing is SMS-specific, so Splus always queries by tag criteria only.
@@ -551,7 +553,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 		candidates, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
 			s.logger.Printf("fetchSplusAudiencePhones fetch candidates failed: campaign_id=%d err=%v", c.ID, err)
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		s.logger.Printf("fetchSplusAudiencePhones candidates: campaign_id=%d count=%d", c.ID, len(candidates))
 
@@ -566,6 +568,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 			}
 			phones = append(phones, *ap.PhoneNumber)
 			ids = append(ids, int64(ap.ID))
+			uids = append(uids, ap.UID)
 		}
 
 		for _, ap := range candidates {
@@ -575,7 +578,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 			appendIfFresh(ap)
 		}
 
-		return phones, ids, nil
+		return phones, ids, uids, nil
 	}
 
 	// First attempt excluding prior picks for this customer/tags
@@ -583,7 +586,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 	if selection != nil && selection.IDs != nil {
 		exclude = selection.IDs
 	}
-	phones, ids, err := selectAudiences(exclude)
+	phones, ids, uids, err := selectAudiences(exclude)
 	if err != nil {
 		return nil, err
 	}
@@ -593,7 +596,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 	if int64(len(phones)) < numAudiences {
 		// Not enough fresh; retry from scratch without exclusions
 		resetUsed = true
-		phones, ids, err = selectAudiences(nil)
+		phones, ids, uids, err = selectAudiences(nil)
 		if err != nil {
 			return nil, err
 		}
@@ -625,7 +628,20 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 	}
 
 	// Generate sequential UIDs via bot API and persist short links centrally
-	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, c.ID, c.AdLink, phones)
+	items := make([]dto.PhoneWithAdLink, len(phones))
+	for i, p := range phones {
+		adLink := c.AdLink
+		if adLink != nil && strings.Contains(*adLink, "{uid}") {
+			resolved := strings.ReplaceAll(*adLink, "{uid}", uids[i])
+			adLink = &resolved
+		}
+		items[i] = dto.PhoneWithAdLink{Phone: p, AdLink: adLink}
+	}
+	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
+		CampaignID:      c.ID,
+		Items:           items,
+		ShortLinkDomain: "jo1n.ir/",
+	})
 	if err != nil {
 		s.logger.Printf("fetchSplusAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, err
