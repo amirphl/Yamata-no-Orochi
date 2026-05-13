@@ -27,7 +27,7 @@ type BotClient interface {
 	MoveCampaignToRunning(ctx context.Context, token string, id uint) error
 	MoveCampaignToExecuted(ctx context.Context, token string, id uint) error
 	DownloadTargetAudienceExcelFile(ctx context.Context, token string, campaignID uint) ([]byte, error)
-	AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error)
+	AllocateShortLinks(ctx context.Context, token string, req *dto.BotAllocateShortLinksRequest) ([]string, error)
 	PushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error
 	CreateShortLinks(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error
 	DownloadCampaignMedia(ctx context.Context, token, mediaUUID string) (string, error)
@@ -237,25 +237,18 @@ func (c *httpBotClient) DownloadTargetAudienceExcelFile(ctx context.Context, tok
 	return body, nil
 }
 
-func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, campaignID uint, adLink *string, phones []string) ([]string, error) {
-	payload := dto.BotGenerateShortLinksRequest{
-		CampaignID:      campaignID,
-		AdLink:          adLink,
-		Phones:          phones,
-		ShortLinkDomain: "jo1n.ir/",
-	}
-	b, err := marshalJSON(payload)
+func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, req *dto.BotAllocateShortLinksRequest) ([]string, error) {
+	b, err := marshalJSON(req)
 	if err != nil {
 		return nil, err
 	}
-	endpoint := c.endpoint("/api/v1/bot/short-links/allocate")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(b))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint("/api/v1/bot/short-links/allocate"), bytes.NewReader(b))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.client.Do(req)
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +267,7 @@ func (c *httpBotClient) AllocateShortLinks(ctx context.Context, token string, ca
 	if err != nil {
 		return nil, err
 	}
-	var out dto.BotGenerateShortLinksResponse
+	var out dto.BotAllocateShortLinksResponse
 	if err := json.Unmarshal(dataBytes, &out); err != nil {
 		return nil, err
 	}
