@@ -97,17 +97,22 @@ type BotCreateShortLinksResponse struct {
 	Items   []ShortLinkDTO `json:"items"`
 }
 
-// BotGenerateShortLinksRequest is used by scheduler/bots to allocate sequential short links centrally
-// and persist them mapped to provided phones for a campaign.
-type BotGenerateShortLinksRequest struct {
-	CampaignID      uint     `json:"campaign_id" validate:"required"`
-	AdLink          *string  `json:"ad_link" validate:"omitempty,max=10000"`
-	Phones          []string `json:"phones" validate:"required,min=1,dive,required,max=20"`
-	ShortLinkDomain string   `json:"short_link_domain" validate:"required"`
+// PhoneWithAdLink pairs a phone number with its specific ad link for short link allocation.
+type PhoneWithAdLink struct {
+	Phone  string  `json:"phone" validate:"required,max=20"`
+	AdLink *string `json:"ad_link" validate:"omitempty,max=10000"`
 }
 
-// BotGenerateShortLinksResponse returns allocated codes in order
-type BotGenerateShortLinksResponse struct {
+// BotAllocateShortLinksRequest is used by scheduler/bots to allocate sequential short links
+// with a distinct ad link per phone for a campaign.
+type BotAllocateShortLinksRequest struct {
+	CampaignID      uint              `json:"campaign_id" validate:"required"`
+	Items           []PhoneWithAdLink `json:"items" validate:"required,min=1,dive"`
+	ShortLinkDomain string            `json:"short_link_domain" validate:"required"`
+}
+
+// BotAllocateShortLinksResponse returns allocated codes in input order.
+type BotAllocateShortLinksResponse struct {
 	Message string   `json:"message"`
 	Codes   []string `json:"codes"`
 }
