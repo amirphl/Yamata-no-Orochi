@@ -258,8 +258,6 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 			codes = audienceResult.Codes
 			unmatchedUID = audienceResult.UnmatchedUIDs
 			s.logger.Printf("Splus scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
-			pc.AudienceIDs = pq.Int64Array(ids)
-			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = nil
 		} else {
 			correlationID := uuid.NewString()
@@ -271,12 +269,16 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 			ids = audienceResult.IDs
 			codes = audienceResult.Codes
 			s.logger.Printf("Splus scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
-			pc.AudienceIDs = pq.Int64Array(ids)
-			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = utils.ToPtr(audienceResult.SelectionID)
 		}
+		for start := 0; start < len(ids); start += audienceAppendBatchSize {
+			end := min(start+audienceAppendBatchSize, len(ids))
+			if err := s.pcRepo.AppendAudienceData(txCtx, pc.ID, ids[start:end], codes[start:end]); err != nil {
+				return err
+			}
+		}
 		pc.UpdatedAt = utils.UTCNow()
-		if err := s.pcRepo.Update(txCtx, pc); err != nil {
+		if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
 			return err
 		}
 		s.logger.Printf("Splus scheduler: updated processed campaign id=%d with audience ids", pc.ID)
@@ -350,7 +352,7 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 			lastBatchID := batchIDs[len(batchIDs)-1]
 			pc.LastAudienceID = &lastBatchID
 			pc.UpdatedAt = utils.UTCNow()
-			if err := s.pcRepo.Update(txCtx, pc); err != nil {
+			if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
 				return err
 			}
 			return nil
@@ -980,7 +982,7 @@ func (s *SplusCampaignScheduler) updateProcessedCampaignStats(ctx context.Contex
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(ctx, pc); err != nil {
+	if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
 		return nil, err
 	}
 	return stats, nil
@@ -1022,7 +1024,7 @@ func (s *SplusCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx co
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(ctx, pc); err != nil {
+	if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
 		return nil, err
 	}
 	return stats, nil
