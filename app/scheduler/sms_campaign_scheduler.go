@@ -260,8 +260,6 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			codes = audienceResult.Codes
 			unmatchedUID = audienceResult.UnmatchedUIDs
 			s.logger.Printf("SMS scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
-			pc.AudienceIDs = pq.Int64Array(ids)
-			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = nil
 		} else {
 			// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
@@ -275,13 +273,17 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			ids = audienceResult.IDs
 			codes = audienceResult.Codes
 			s.logger.Printf("SMS scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
-			pc.AudienceIDs = pq.Int64Array(ids)
-			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = utils.ToPtr(audienceResult.SelectionID)
+		}
+		for start := 0; start < len(ids); start += audienceAppendBatchSize {
+			end := min(start+audienceAppendBatchSize, len(ids))
+			if err := s.pcRepo.AppendAudienceData(txCtx, pc.ID, ids[start:end], codes[start:end]); err != nil {
+				return err
+			}
 		}
 
 		pc.UpdatedAt = utils.UTCNow()
-		if err := s.pcRepo.Update(txCtx, pc); err != nil {
+		if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
 			return err
 		}
 		s.logger.Printf("SMS scheduler: updated processed campaign id=%d with audience ids", pc.ID)
@@ -347,7 +349,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			lastBatchID := batchIDs[len(batchIDs)-1]
 			pc.LastAudienceID = &lastBatchID
 			pc.UpdatedAt = utils.UTCNow()
-			if err := s.pcRepo.Update(txCtx, pc); err != nil {
+			if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
 				return err
 			}
 
@@ -938,7 +940,7 @@ func (s *SMSCampaignScheduler) updateProcessedCampaignStats(txCtx context.Contex
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(txCtx, pc); err != nil {
+	if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
 		return nil, err
 	}
 	return stats, nil
