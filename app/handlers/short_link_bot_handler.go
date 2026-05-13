@@ -89,30 +89,30 @@ func (h *ShortLinkBotHandler) CreateShortLinks(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusCreated, "Short links created", res)
 }
 
-// AllocateShortLinks generates sequential UIDs and creates short links for provided phones
+// AllocateShortLinks generates sequential UIDs and creates per-phone short links for a campaign.
 // @Summary Bot Allocate Short Links
 // @Tags Bot ShortLinks
 // @Accept json
 // @Produce json
-// @Param request body dto.BotGenerateShortLinksRequest true "Generate and create short links"
-// @Success 200 {object} dto.APIResponse{data=dto.BotGenerateShortLinksResponse}
+// @Param request body dto.BotAllocateShortLinksRequest true "Allocate per-phone short links"
+// @Success 200 {object} dto.APIResponse{data=dto.BotAllocateShortLinksResponse}
 // @Failure 400 {object} dto.APIResponse
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/bot/short-links/allocate [post]
 func (h *ShortLinkBotHandler) AllocateShortLinks(c fiber.Ctx) error {
-	var req dto.BotGenerateShortLinksRequest
+	var req dto.BotAllocateShortLinksRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	codes, err := h.flow.GenerateAndCreateShortLinks(h.createRequestContext(c, "/api/v1/bot/short-links/allocate"), req.CampaignID, req.AdLink, req.Phones, req.ShortLinkDomain)
+	codes, err := h.flow.GenerateAndCreateShortLinks(h.createRequestContext(c, "/api/v1/bot/short-links/allocate"), &req)
 	if err != nil {
 		log.Println("Bot allocate short links failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to allocate short links", "ALLOCATE_SHORT_LINKS_FAILED", nil)
 	}
-	return h.SuccessResponse(c, fiber.StatusOK, "Short links allocated", dto.BotGenerateShortLinksResponse{Message: "Short links allocated", Codes: codes})
+	return h.SuccessResponse(c, fiber.StatusOK, "Short links allocated", dto.BotAllocateShortLinksResponse{Message: "Short links allocated", Codes: codes})
 }
 
 func (h *ShortLinkBotHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
