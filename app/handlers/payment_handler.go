@@ -20,6 +20,10 @@ type PaymentHandlerInterface interface {
 	PaymentCallback(c fiber.Ctx) error
 	GetTransactionHistory(c fiber.Ctx) error
 	GetWalletBalance(c fiber.Ctx) error
+	SubmitDepositReceipt(c fiber.Ctx) error
+	ListDepositReceipts(c fiber.Ctx) error
+	PreviewProformaInvoice(c fiber.Ctx) error
+	DownloadProformaInvoice(c fiber.Ctx) error
 }
 
 // PaymentHandler handles payment-related HTTP requests
@@ -125,6 +129,9 @@ func (h *PaymentHandler) ChargeWallet(c fiber.Ctx) error {
 		}
 		if businessflow.IsAmountNotMultiple(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Amount must be a multiple of the required increment", "AMOUNT_NOT_MULTIPLE", nil)
+		}
+		if businessflow.IsInvalidLanguage(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language (allowed: FA, EN)", "INVALID_LANGUAGE", nil)
 		}
 		if businessflow.IsAtipayTokenEmpty(err) {
 			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get payment token", "ATIPAY_TOKEN_ERROR", nil)
@@ -492,4 +499,107 @@ func (h *PaymentHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint s
 func (h *PaymentHandler) setupCustomValidations() {
 	// Add custom validation rules if needed
 	// Example: h.validator.RegisterValidation("custom_rule", customValidationFunc)
+}
+
+// SubmitDepositReceipt allows customer to upload deposit receipt (base64 payload).
+func (h *PaymentHandler) SubmitDepositReceipt(c fiber.Ctx) error {
+	var req dto.SubmitDepositReceiptRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	req.CustomerID, _ = c.Locals("customer_id").(uint)
+	if req.CustomerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	res, err := h.paymentFlow.SubmitDepositReceipt(h.createRequestContext(c, "/api/v1/payments/deposit-receipts"), &req, metadata)
+	if err != nil {
+		switch {
+		case businessflow.IsInvalidLanguage(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
+		case businessflow.IsDepositReceiptFileEmpty(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "File is empty", "FILE_EMPTY", nil)
+		case businessflow.IsDepositReceiptFileTooLarge(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "File too large (max 5MB)", "FILE_TOO_LARGE", nil)
+		case businessflow.IsDepositReceiptFileInvalidType(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Unsupported file type", "INVALID_FILE_TYPE", nil)
+		default:
+			log.Println("Submit deposit receipt failed", err)
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Submit deposit receipt failed", "SUBMIT_DEPOSIT_RECEIPT_FAILED", nil)
+		}
+	}
+	return h.SuccessResponse(c, fiber.StatusCreated, "Deposit receipt submitted", res)
+}
+
+// ListDepositReceipts returns current user's receipts.
+func (h *PaymentHandler) ListDepositReceipts(c fiber.Ctx) error {
+	customerID, _ := c.Locals("customer_id").(uint)
+	if customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	lang := c.Query("lang")
+	resp, err := h.paymentFlow.ListDepositReceipts(h.createRequestContext(c, "/api/v1/payments/deposit-receipts"), customerID, lang)
+	if err != nil {
+		if businessflow.IsInvalidLanguage(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
+		}
+		log.Println("List deposit receipts failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list deposit receipts", "LIST_DEPOSIT_RECEIPTS_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Deposit receipts retrieved", resp)
+}
+
+// PreviewProformaInvoice returns JSON data.
+func (h *PaymentHandler) PreviewProformaInvoice(c fiber.Ctx) error {
+	customerID, _ := c.Locals("customer_id").(uint)
+	if customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	amountStr := c.Query("amount")
+	lang := c.Query("lang")
+	amount, err := strconv.ParseUint(amountStr, 10, 64)
+	if err != nil || amount == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
+	}
+	resp, err := h.paymentFlow.PreviewProformaInvoice(h.createRequestContext(c, "/api/v1/payments/proforma/preview"), customerID, amount, lang)
+	if err != nil {
+		if businessflow.IsInvalidLanguage(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
+		}
+		log.Println("Preview proforma failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to preview proforma invoice", "PROFORMA_PREVIEW_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Proforma preview generated", resp)
+}
+
+// DownloadProformaInvoice returns HTML (caller can treat as PDF content after conversion).
+func (h *PaymentHandler) DownloadProformaInvoice(c fiber.Ctx) error {
+	customerID, _ := c.Locals("customer_id").(uint)
+	if customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	amountStr := c.Query("amount")
+	lang := c.Query("lang")
+	amount, err := strconv.ParseUint(amountStr, 10, 64)
+	if err != nil || amount == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
+	}
+	data, filename, err := h.paymentFlow.DownloadProformaInvoicePDF(h.createRequestContext(c, "/api/v1/payments/proforma/download"), customerID, amount, lang)
+	if err != nil {
+		if businessflow.IsInvalidLanguage(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
+		}
+		log.Println("Download proforma failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate proforma invoice", "PROFORMA_DOWNLOAD_FAILED", nil)
+	}
+	c.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	c.Type("html", "utf-8")
+	return c.Status(fiber.StatusOK).Send(data)
 }
