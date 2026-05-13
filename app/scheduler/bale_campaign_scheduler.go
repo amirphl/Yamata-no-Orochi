@@ -372,6 +372,10 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		for i := range batchResponses {
 			resp := batchResponses[i]
 			reqID := strings.TrimSpace(resp.RequestID)
+			if reqID == "" && i < len(items) {
+				// Fallback: some Bale API responses omit request_id; match by position.
+				reqID = strings.TrimSpace(items[i].RequestID)
+			}
 			if reqID == "" {
 				continue
 			}
@@ -508,9 +512,10 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 		s.logger.Printf("fetchBaleAudiencePhones selection miss: campaign_id=%d", c.ID)
 	}
 
-	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, error) {
+	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, []string, error) {
 		phones := make([]string, 0, numAudiences)
 		ids := make([]int64, 0, numAudiences)
+		uids := make([]string, 0, numAudiences)
 
 		// Bale campaigns intentionally do not segment audiences by color (white/pink).
 		// Color-based routing is SMS-specific, so Bale always queries by tag criteria only.
@@ -518,7 +523,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 		candidates, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
 			s.logger.Printf("fetchBaleAudiencePhones fetch candidates failed: campaign_id=%d err=%v", c.ID, err)
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		s.logger.Printf("fetchBaleAudiencePhones candidates: campaign_id=%d count=%d", c.ID, len(candidates))
 
@@ -533,6 +538,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 			}
 			phones = append(phones, *ap.PhoneNumber)
 			ids = append(ids, int64(ap.ID))
+			uids = append(uids, ap.UID)
 		}
 
 		for _, ap := range candidates {
@@ -542,7 +548,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 			appendIfFresh(ap)
 		}
 
-		return phones, ids, nil
+		return phones, ids, uids, nil
 	}
 
 	// First attempt excluding prior picks for this customer/tags
@@ -550,7 +556,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	if selection != nil && selection.IDs != nil {
 		exclude = selection.IDs
 	}
-	phones, ids, err := selectAudiences(exclude)
+	phones, ids, uids, err := selectAudiences(exclude)
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +566,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	if int64(len(phones)) < numAudiences {
 		// Not enough fresh; retry from scratch without exclusions
 		resetUsed = true
-		phones, ids, err = selectAudiences(nil)
+		phones, ids, uids, err = selectAudiences(nil)
 		if err != nil {
 			return nil, err
 		}
@@ -592,7 +598,20 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	}
 
 	// Generate sequential UIDs via bot API and persist short links centrally
-	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, c.ID, c.AdLink, phones)
+	items := make([]dto.PhoneWithAdLink, len(phones))
+	for i, p := range phones {
+		adLink := c.AdLink
+		if adLink != nil && strings.Contains(*adLink, "{uid}") {
+			resolved := strings.ReplaceAll(*adLink, "{uid}", uids[i])
+			adLink = &resolved
+		}
+		items[i] = dto.PhoneWithAdLink{Phone: p, AdLink: adLink}
+	}
+	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
+		CampaignID:      c.ID,
+		Items:           items,
+		ShortLinkDomain: "jo1n.ir/",
+	})
 	if err != nil {
 		s.logger.Printf("fetchBaleAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
 		return nil, err
