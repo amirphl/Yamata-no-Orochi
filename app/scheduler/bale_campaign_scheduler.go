@@ -26,8 +26,9 @@ import (
 // TODO: Tx management in queries, especially around processed_campaign creation and audience fetching to ensure consistency
 
 const (
-	baleSendBatchSize = 100
-	statusJobMaxRetry = 3
+	baleSendBatchSize       = 100
+	statusJobMaxRetry       = 3
+	audienceAppendBatchSize = 2000
 )
 
 type BaleCampaignScheduler struct {
@@ -256,8 +257,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			codes = audienceResult.Codes
 			unmatchedUID = audienceResult.UnmatchedUIDs
 			s.logger.Printf("Bale scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
-			pc.AudienceIDs = pq.Int64Array(ids)
-			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = nil
 		} else {
 			correlationID := uuid.NewString()
@@ -269,12 +268,16 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			ids = audienceResult.IDs
 			codes = audienceResult.Codes
 			s.logger.Printf("Bale scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
-			pc.AudienceIDs = pq.Int64Array(ids)
-			pc.AudienceCodes = codes
 			pc.AudienceSelectionID = utils.ToPtr(audienceResult.SelectionID)
 		}
+		for start := 0; start < len(ids); start += audienceAppendBatchSize {
+			end := min(start+audienceAppendBatchSize, len(ids))
+			if err := s.pcRepo.AppendAudienceData(txCtx, pc.ID, ids[start:end], codes[start:end]); err != nil {
+				return err
+			}
+		}
 		pc.UpdatedAt = utils.UTCNow()
-		if err := s.pcRepo.Update(txCtx, pc); err != nil {
+		if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
 			return err
 		}
 		s.logger.Printf("Bale scheduler: updated processed campaign id=%d with audience ids", pc.ID)
@@ -355,7 +358,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			lastBatchID := batchIDs[len(batchIDs)-1]
 			pc.LastAudienceID = &lastBatchID
 			pc.UpdatedAt = utils.UTCNow()
-			if err := s.pcRepo.Update(txCtx, pc); err != nil {
+			if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
 				return err
 			}
 
@@ -1104,7 +1107,7 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStats(ctx context.Context
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(ctx, pc); err != nil {
+	if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
 		return nil, err
 	}
 	return stats, nil
@@ -1146,7 +1149,7 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx con
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(ctx, pc); err != nil {
+	if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
 		return nil, err
 	}
 	return stats, nil
