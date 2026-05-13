@@ -281,6 +281,8 @@ type ProcessedCampaignRepository interface {
 	ByID(ctx context.Context, id uint) (*models.ProcessedCampaign, error)
 	ByCampaignID(ctx context.Context, campaignID uint) (*models.ProcessedCampaign, error)
 	Update(ctx context.Context, pc *models.ProcessedCampaign) error
+	AppendAudienceData(ctx context.Context, id uint, ids []int64, codes []string) error
+	UpdateMeta(ctx context.Context, pc *models.ProcessedCampaign) error
 }
 
 // SentSMSProviderUpdate describes provider fields update identified by tracking id
