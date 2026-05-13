@@ -412,11 +412,15 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 			return err
 		}
 
-		pc.AudienceIDs = pq.Int64Array(ids)
-		pc.AudienceCodes = uids
+		for start := 0; start < len(ids); start += audienceAppendBatchSize {
+			end := min(start+audienceAppendBatchSize, len(ids))
+			if err := s.pcRepo.AppendAudienceData(txCtx, pc.ID, ids[start:end], uids[start:end]); err != nil {
+				return err
+			}
+		}
 		pc.AudienceSelectionID = utils.ToPtr(selectionID)
 		pc.UpdatedAt = utils.UTCNow()
-		return s.pcRepo.Update(txCtx, pc)
+		return s.pcRepo.UpdateMeta(txCtx, pc)
 	}); err != nil {
 		return err
 	}
@@ -447,7 +451,7 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 
 		pc.LastAudienceID = &ids[i]
 		pc.UpdatedAt = utils.UTCNow()
-		if err := s.pcRepo.Update(ctx, pc); err != nil {
+		if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
 			return err
 		}
 		if i < len(phones)-1 {
@@ -472,7 +476,7 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.Update(ctx, pc); err != nil {
+	if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
 		return err
 	}
 
