@@ -41,10 +41,11 @@ type AdminShortLinkFlow interface {
 type AdminShortLinkFlowImpl struct {
 	repo      repository.ShortLinkRepository
 	clickRepo repository.ShortLinkClickRepository
+	auditRepo repository.AuditLogRepository
 }
 
-func NewAdminShortLinkFlow(repo repository.ShortLinkRepository, clickRepo repository.ShortLinkClickRepository) AdminShortLinkFlow {
-	return &AdminShortLinkFlowImpl{repo: repo, clickRepo: clickRepo}
+func NewAdminShortLinkFlow(repo repository.ShortLinkRepository, clickRepo repository.ShortLinkClickRepository, auditRepo repository.AuditLogRepository) AdminShortLinkFlow {
+	return &AdminShortLinkFlowImpl{repo: repo, clickRepo: clickRepo, auditRepo: auditRepo}
 }
 
 func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, csvReader io.Reader, shortLinkDomain string, scenarioName string) (*dto.AdminCreateShortLinksResponse, error) {
@@ -168,13 +169,19 @@ func (f *AdminShortLinkFlowImpl) CreateShortLinksFromCSV(ctx context.Context, cs
 	}(buf.Bytes(), shortLinkDomain, scenarioName, newScenarioID)
 
 	// Return immediately with accepted message and the scenario id
-	return &dto.AdminCreateShortLinksResponse{
+	resp := &dto.AdminCreateShortLinksResponse{
 		Message:    "Upload accepted; processing asynchronously",
 		TotalRows:  0,
 		Created:    0,
 		Skipped:    0,
 		ScenarioID: newScenarioID,
-	}, nil
+	}
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminCreateShortLinks, "Admin upload short link CSV", true, nil, map[string]any{
+		"scenario_id":   newScenarioID,
+		"scenario_name": scenarioName,
+		"domain":        shortLinkDomain,
+	}, nil)
+	return resp, nil
 }
 
 func normalizeDomain(domain string) string {
@@ -320,6 +327,10 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksCSV(ctx context.Context, scen
 		w.Flush()
 		alreadyFlushed = true
 	}
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminDownloadShortLinks, "Admin downloaded short links CSV", true, nil, map[string]any{
+		"scenario_id": scenarioID,
+		"rows":        len(rows),
+	}, nil)
 	return filename, buf.Bytes(), nil
 }
 
@@ -375,6 +386,10 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSV(ctx context.Con
 		w.Flush()
 		alreadyFlushed = true
 	}
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminDownloadShortLinksWithClicks, "Admin downloaded short links with clicks CSV", true, nil, map[string]any{
+		"scenario_id": scenarioID,
+		"rows":        len(records),
+	}, nil)
 	return filename, buf.Bytes(), nil
 }
 
@@ -432,6 +447,11 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksCSVRange(ctx contex
 		w.Flush()
 		alreadyFlushed = true
 	}
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminDownloadShortLinksRange, "Admin downloaded short links with clicks by range", true, nil, map[string]any{
+		"scenario_from": scenarioFrom,
+		"scenario_to":   scenarioTo,
+		"rows":          len(records),
+	}, nil)
 	return filename, buf.Bytes(), nil
 }
 
@@ -513,6 +533,10 @@ func (f *AdminShortLinkFlowImpl) DownloadShortLinksWithClicksExcelByScenarioName
 		return "", nil, NewBusinessError("EXCEL_WRITE_ERROR", "Failed to write Excel file", err)
 	}
 	filename := "short_links_with_clicks_by_scenario_name.xlsx"
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminDownloadShortLinksByScenarioName, "Admin downloaded short links with clicks by scenario name regex", true, nil, map[string]any{
+		"scenario_name_regex": pattern,
+		"scenarios":           len(order),
+	}, nil)
 	return filename, buf.Bytes(), nil
 }
 
