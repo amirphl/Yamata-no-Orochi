@@ -265,6 +265,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
 	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
 	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
+	adminCampaigns.Post("/reschedule", r.campaignAdminHandler.RescheduleCampaign)
 	adminCampaigns.Post("/cancel", r.campaignAdminHandler.CancelCampaign)
 	adminCampaigns.Delete("/audience-spec", r.campaignAdminHandler.RemoveAudienceSpec)
 
@@ -368,12 +369,21 @@ func (r *FiberRouter) SetupRoutes() {
 	payments.Post("/callback/:invoice_number", r.paymentHandler.PaymentCallback)
 	// Transaction history endpoint (protected with authentication)
 	payments.Get("/history", r.authMiddleware.Authenticate(), r.paymentHandler.GetTransactionHistory)
+	// Deposit receipt submission & listing
+	payments.Post("/deposit-receipts", r.authMiddleware.Authenticate(), r.paymentHandler.SubmitDepositReceipt)
+	payments.Get("/deposit-receipts", r.authMiddleware.Authenticate(), r.paymentHandler.ListDepositReceipts)
+	// Proforma invoice preview/download
+	payments.Get("/proforma/preview", r.authMiddleware.Authenticate(), r.paymentHandler.PreviewProformaInvoice)
+	payments.Get("/proforma/download", r.authMiddleware.Authenticate(), r.paymentHandler.DownloadProformaInvoice)
 
 	// Admin payment routes (protected)
 	adminPayments := api.Group("/admin/payments")
 	adminPayments.Use(r.authMiddleware.AdminAuthenticate())
 	adminPayments.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
 	adminPayments.Post("/charge-wallet", r.paymentAdminHandler.ChargeWalletByAdmin)
+	adminPayments.Get("/deposit-receipts", r.paymentAdminHandler.ListDepositReceipts)
+	adminPayments.Get("/deposit-receipts/:uuid/file", r.paymentAdminHandler.GetDepositReceiptFile)
+	adminPayments.Post("/deposit-receipts/status", r.paymentAdminHandler.UpdateDepositReceiptStatus)
 
 	// Crypto payment routes
 	crypto := api.Group("/crypto")
