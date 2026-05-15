@@ -34,6 +34,7 @@ type CampaignFlow interface {
 	ListAudienceSpec(ctx context.Context, platform *string) (*dto.ListAudienceSpecResponse, error)
 	GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error)
 	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
+	CloneCampaign(ctx context.Context, req *dto.CloneCampaignRequest, metadata *ClientMetadata) (*dto.CloneCampaignResponse, error)
 }
 
 // CampaignFlowImpl implements the campaign business flow
@@ -57,9 +58,16 @@ type CampaignFlowImpl struct {
 
 const (
 	defaultShortLinkDomain = "jo1n.ir"
-	basePrice              = uint64(200)
+	basePriceSMS           = uint64(200)
+	basePriceBale          = uint64(150)
+	basePriceRubika        = uint64(200)
+	basePriceSPlus         = uint64(200)
 	pagePrice              = uint64(200)
+	minCampaignBudget      = uint64(100_000)
+	maxCampaignBudget      = uint64(160_000_000)
 )
+
+var tehranLoc *time.Location
 
 var allowedShortLinkDomains = []string{defaultShortLinkDomain, "joinsahel.ir"}
 
@@ -318,6 +326,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	req.Platform = &sanitizedPlatform
 
+	finalize := req.Finalize != nil && *req.Finalize
+
 	ensureCampaignSpecDefaults(&campaign.Spec)
 	if err := s.ensureUpdateCampaignRefs(
 		ctx,
@@ -327,6 +337,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		sanitizedPlatform,
 		mediaUUID,
 		platformSettingsID,
+		finalize,
 	); err != nil {
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
 	}
@@ -467,6 +478,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 			numPages := s.calculateSMSParts(content)
 
+			selectedBasePrice := s.selectBasePrice(campaign.Spec.Platform)
+
 			// Build metadata with full campaign spec
 			meta := map[string]any{
 				"source":                   "campaign_update",
@@ -475,7 +488,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				"amount":                   cost.TotalCost,
 				"currency":                 utils.TomanCurrency,
 				"campaign_spec":            campaign.Spec,
-				"base_price":               basePrice,
+				"base_price":               selectedBasePrice,
 				"page_price":               pagePrice,
 				"num_pages":                numPages,
 				"line_number_price_factor": lineNumberPriceFactor,
@@ -570,6 +583,50 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 
 	return resp, nil
+}
+
+// CloneCampaign clones an existing campaign for the same customer with a fresh identity and reset state.
+func (s *CampaignFlowImpl) CloneCampaign(ctx context.Context, req *dto.CloneCampaignRequest, metadata *ClientMetadata) (*dto.CloneCampaignResponse, error) {
+	if req == nil || strings.TrimSpace(req.UUID) == "" {
+		return nil, NewBusinessError("CLONE_CAMPAIGN_VALIDATION_FAILED", "Campaign UUID is required", ErrCampaignUUIDRequired)
+	}
+
+	customer, err := getCustomer(ctx, s.customerRepo, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("CUSTOMER_LOOKUP_FAILED", "Failed to lookup customer", err)
+	}
+
+	src, err := getCampaign(ctx, s.campaignRepo, req.UUID, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
+	}
+
+	clone := models.Campaign{
+		UUID:        uuid.New(),
+		CustomerID:  src.CustomerID,
+		Status:      models.CampaignStatusInitiated,
+		Spec:        src.Spec,
+		Comment:     nil,
+		Statistics:  json.RawMessage(`{}`),
+		NumAudience: utils.ToPtr(uint64(0)),
+	}
+
+	if err := s.campaignRepo.Save(ctx, &clone); err != nil {
+		errMsg := fmt.Sprintf("Campaign clone failed from %s: %v", src.UUID.String(), err)
+		_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignCreationFailed, errMsg, false, &errMsg, metadata)
+		return nil, NewBusinessError("CAMPAIGN_CLONE_FAILED", "Campaign clone failed", err)
+	}
+
+	msg := fmt.Sprintf("Campaign cloned from %s to %s", src.UUID.String(), clone.UUID.String())
+	_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignCreated, msg, true, nil, metadata)
+
+	return &dto.CloneCampaignResponse{
+		Message:   "Campaign cloned successfully",
+		ID:        clone.ID,
+		UUID:      clone.UUID.String(),
+		Status:    string(clone.Status),
+		CreatedAt: clone.CreatedAt.Format(time.RFC3339),
+	}, nil
 }
 
 // CancelCampaign allows a customer to cancel their own campaign waiting for approval and refunds the reserved budget.
@@ -904,9 +961,9 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		return 0, 0, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required for SMS campaigns", ErrCampaignLineNumberRequired)
 	}
 
-	if platform != models.CampaignPlatformSMS && lineNumber != nil {
-		return 0, 0, NewBusinessError("LINE_NUMBER_NOT_APPLICABLE", "Line number is only applicable for SMS campaigns", ErrCampaignLineNumberNotApplicable)
-	}
+	// if platform != models.CampaignPlatformSMS && lineNumber != nil {
+	// 	return 0, 0, NewBusinessError("LINE_NUMBER_NOT_APPLICABLE", "Line number is only applicable for SMS campaigns", ErrCampaignLineNumberNotApplicable)
+	// }
 
 	if len(level3s) == 0 {
 		return 0, 0, NewBusinessError("LEVEL3_REQUIRED", "At least one level3 option is required for cost calculation", ErrLevel3Required)
@@ -944,10 +1001,11 @@ func (s *CampaignFlowImpl) computeCostInputs(
 	}
 
 	pricePerMsg := uint64(0)
+	base := s.selectBasePrice(platform)
 	if platform == models.CampaignPlatformSMS {
-		pricePerMsg = uint64(pagePrice*numPages) + basePrice*uint64(float64(lineNumberFactor)*segmentPriceFactor)
+		pricePerMsg = uint64(pagePrice*numPages) + base*uint64(float64(lineNumberFactor)*segmentPriceFactor)
 	} else {
-		pricePerMsg = uint64(pagePrice*1) + basePrice*uint64(float64(1)*segmentPriceFactor)
+		pricePerMsg = uint64(pagePrice*1) + base*uint64(float64(1)*segmentPriceFactor)
 	}
 
 	// Calculate campaign capacity (target audience size)
@@ -1165,30 +1223,57 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	}, nil
 }
 
-// GetLastInitiatedCampaign retrieves the most recent initiated campaign for the given customer.
+// GetLastInitiatedCampaign retrieves the most recent initiated or in-progress campaign for the given customer.
 func (s *CampaignFlowImpl) GetLastInitiatedCampaign(ctx context.Context, customerID uint, metadata *ClientMetadata) (*dto.GetLastInitiatedCampaignResponse, error) {
 	_, err := getCustomer(ctx, s.customerRepo, customerID)
 	if err != nil {
 		return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
 	}
 
-	status := models.CampaignStatusInitiated
-	rows, err := s.campaignRepo.ByFilter(ctx, models.CampaignFilter{
-		CustomerID: &customerID,
-		Status:     &status,
-	}, "created_at DESC", 1, 0)
+	fetchLatest := func(status models.CampaignStatus) (*models.Campaign, error) {
+		rows, err := s.campaignRepo.ByFilter(ctx, models.CampaignFilter{
+			CustomerID: &customerID,
+			Status:     &status,
+		}, "created_at DESC", 1, 0)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(rows) == 0 {
+			return nil, nil
+		}
+
+		return rows[0], nil
+	}
+
+	initiatedCampaign, err := fetchLatest(models.CampaignStatusInitiated)
 	if err != nil {
 		return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
 	}
 
-	if len(rows) == 0 {
-		return &dto.GetLastInitiatedCampaignResponse{
-			Message: "No initiated campaign found",
-			Item:    nil,
-		}, nil
+	inProgressCampaign, err := fetchLatest(models.CampaignStatusInProgress)
+	if err != nil {
+		return nil, NewBusinessError("GET_LAST_INITIATED_CAMPAIGN_FAILED", "Failed to get last initiated campaign", err)
 	}
 
-	c := rows[0]
+	var c *models.Campaign
+	switch {
+	case initiatedCampaign == nil && inProgressCampaign == nil:
+		return &dto.GetLastInitiatedCampaignResponse{
+			Message: "No initiated or in-progress campaign found",
+			Item:    nil,
+		}, nil
+	case initiatedCampaign == nil:
+		c = inProgressCampaign
+	case inProgressCampaign == nil:
+		c = initiatedCampaign
+	default:
+		if inProgressCampaign.CreatedAt.After(initiatedCampaign.CreatedAt) {
+			c = inProgressCampaign
+		} else {
+			c = initiatedCampaign
+		}
+	}
 	var linePriceFactor *float64
 	if c.Spec.LineNumber != nil {
 		lineNumber, err := s.lineNumberRepo.ByValue(ctx, *c.Spec.LineNumber)
@@ -1261,8 +1346,13 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 	if req.LineNumber != nil && *req.LineNumber == "" {
 		return ErrCampaignLineNumberRequired
 	}
-	if req.Budget != nil && *req.Budget <= 0 {
-		return ErrCampaignBudgetRequired
+	if req.Budget != nil {
+		if *req.Budget <= 0 {
+			return ErrCampaignBudgetRequired
+		}
+		if *req.Budget < minCampaignBudget || *req.Budget > maxCampaignBudget {
+			return ErrCampaignBudgetOutOfRange
+		}
 	}
 	if req.Sex != nil && *req.Sex == "" {
 		return ErrCampaignSexRequired
@@ -1288,6 +1378,9 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 	if scheduleTime != nil && !scheduleTime.IsZero() {
 		if scheduleTime.Before(utils.UTCNow().Add(10 * time.Minute)) {
 			return ErrScheduleTimeTooSoon
+		}
+		if !isScheduleWithinTehranWindow(*scheduleTime) {
+			return ErrScheduleTimeOutsideWindow
 		}
 	}
 
@@ -1325,6 +1418,24 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(req *dto.CreateCampaign
 	}
 
 	return nil
+}
+
+func isScheduleWithinTehranWindow(t time.Time) bool {
+	loc := getTehranLocation()
+	tt := t.In(time.UTC).In(loc)
+	minutes := tt.Hour()*60 + tt.Minute()
+	return minutes >= 8*60 && minutes <= 21*60
+}
+
+func getTehranLocation() *time.Location {
+	if tehranLoc == nil || tehranLoc.String() != "Asia/Tehran" {
+		if loaded, err := time.LoadLocation("Asia/Tehran"); err == nil {
+			tehranLoc = loaded
+		} else {
+			tehranLoc = time.FixedZone("Asia/Tehran", 3*3600+1800)
+		}
+	}
+	return tehranLoc
 }
 
 // createCampaign creates the campaign in the database
@@ -1493,17 +1604,25 @@ func (s *CampaignFlowImpl) ensureUpdateCampaignRefs(
 	platform string,
 	mediaUUID *uuid.UUID,
 	platformSettingsID *uint,
+	finalize bool,
 ) error {
-	if platform != models.CampaignPlatformSMS && lineNumber != nil {
-		return ErrCampaignLineNumberNotApplicable
-	}
+	if finalize {
+		// TODO: Nullify
+		// if platform != models.CampaignPlatformSMS && lineNumber != nil {
+		// 	return ErrCampaignLineNumberNotApplicable
+		// }
 
-	if platform == models.CampaignPlatformSMS && platformSettingsID != nil && *platformSettingsID != 0 {
-		return ErrCampaignPlatformSettingNotApplicable
-	}
+		// if platform == models.CampaignPlatformSMS && platformSettingsID != nil && *platformSettingsID != 0 {
+		// 	return ErrCampaignPlatformSettingNotApplicable
+		// }
 
-	if platform == models.CampaignPlatformSMS && lineNumber == nil {
-		return ErrCampaignLineNumberRequired
+		if platform == models.CampaignPlatformSMS && lineNumber == nil {
+			return ErrCampaignLineNumberRequired
+		}
+
+		if platform != models.CampaignPlatformSMS && (platformSettingsID == nil || *platformSettingsID == 0) {
+			return ErrCampaignPlatformSettingRequired
+		}
 	}
 
 	if lineNumber != nil {
@@ -1531,10 +1650,6 @@ func (s *CampaignFlowImpl) ensureUpdateCampaignRefs(
 		if len(mediaRows) == 0 {
 			return ErrCampaignMediaNotFound
 		}
-	}
-
-	if platform != models.CampaignPlatformSMS && (platformSettingsID == nil || *platformSettingsID == 0) {
-		return ErrCampaignPlatformSettingRequired
 	}
 
 	if platformSettingsID != nil && *platformSettingsID != 0 {
@@ -1575,6 +1690,21 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 
 	if !hasUpdateFields {
 		return ErrCampaignUpdateRequired
+	}
+
+	if req.Budget != nil {
+		if *req.Budget <= 0 {
+			return ErrCampaignBudgetRequired
+		}
+		if *req.Budget < minCampaignBudget || *req.Budget > maxCampaignBudget {
+			return ErrCampaignBudgetOutOfRange
+		}
+	}
+
+	if req.ScheduleAt != nil && !req.ScheduleAt.IsZero() {
+		if !isScheduleWithinTehranWindow(*req.ScheduleAt) {
+			return ErrScheduleTimeOutsideWindow
+		}
 	}
 
 	return nil
@@ -1670,6 +1800,7 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 		campaign.Spec.Platform,
 		campaign.Spec.MediaUUID,
 		campaign.Spec.PlatformSettingsID,
+		true,
 	); err != nil {
 		return err
 	}
@@ -1956,6 +2087,21 @@ func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
 		}
 	}
 	return count
+}
+
+func (s *CampaignFlowImpl) selectBasePrice(platform string) uint64 {
+	switch platform {
+	case models.CampaignPlatformSMS:
+		return basePriceSMS
+	case models.CampaignPlatformBale:
+		return basePriceBale
+	case models.CampaignPlatformRubika:
+		return basePriceRubika
+	case models.CampaignPlatformSPlus:
+		return basePriceSPlus
+	default:
+		return basePriceSMS
+	}
 }
 
 func sanitizeShortLinkDomain(domain *string) (string, error) {
