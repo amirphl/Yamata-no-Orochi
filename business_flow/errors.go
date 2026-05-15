@@ -72,6 +72,9 @@ var (
 	ErrCampaignPlatformSettingNotFound      = errors.New("campaign platform settings not found")
 	ErrCampaignPlatformRequired             = errors.New("campaign platform is required")
 	ErrCampaignPlatformInvalid              = errors.New("campaign platform is invalid")
+	ErrCampaignBudgetOutOfRange             = errors.New("campaign budget must be between 100000 and 160000000 tomans")
+	ErrScheduleTimeOutsideWindow            = errors.New("schedule time must be between 08:00 and 21:00 Asia/Tehran")
+	ErrCampaignRescheduleNotAllowed         = errors.New("campaign cannot be rescheduled in its current status")
 
 	ErrCampaignNotWaitingForApproval          = errors.New("campaign is not waiting for approval")
 	ErrCampaignNotApproved                    = errors.New("campaign is not approved")
@@ -86,6 +89,7 @@ var (
 	ErrAmountNotMultiple        = errors.New("amount must be a multiple of 10000")
 	ErrAtipayTokenEmpty         = errors.New("atipay token is empty")
 	ErrInsufficientFunds        = errors.New("insufficient funds")
+	ErrInvalidLanguage          = errors.New("invalid language")
 	ErrReferrerAgencyIDRequired = errors.New("referrer agency ID is required")
 	ErrAgencyDiscountNotFound   = errors.New("agency discount not found")
 
@@ -160,6 +164,16 @@ var (
 	ErrCryptoAddressProvisionFailed  = errors.New("failed to provision deposit address")
 	ErrCryptoProviderError           = errors.New("crypto provider error")
 	ErrCryptoDepositNotFound         = errors.New("crypto deposit not found")
+
+	// Deposit receipts
+	ErrDepositReceiptNotFound         = errors.New("deposit receipt not found")
+	ErrDepositReceiptAlreadyFinalized = errors.New("deposit receipt already finalized")
+	ErrDepositReceiptAlreadyApproved  = errors.New("deposit receipt already approved")
+	ErrDepositReceiptAlreadyRejected  = errors.New("deposit receipt already rejected")
+	ErrDepositReceiptInvalidStatus    = errors.New("deposit receipt status is invalid")
+	ErrDepositReceiptFileTooLarge     = errors.New("deposit receipt file too large")
+	ErrDepositReceiptFileInvalidType  = errors.New("deposit receipt file type is not allowed")
+	ErrDepositReceiptFileEmpty        = errors.New("deposit receipt file is empty")
 )
 
 type BusinessError struct {
@@ -307,6 +321,10 @@ func IsCampaignBudgetRequired(err error) bool {
 	return errors.Is(err, ErrCampaignBudgetRequired)
 }
 
+func IsCampaignBudgetOutOfRange(err error) bool {
+	return errors.Is(err, ErrCampaignBudgetOutOfRange)
+}
+
 func IsCampaignSexRequired(err error) bool {
 	return errors.Is(err, ErrCampaignSexRequired)
 }
@@ -329,6 +347,14 @@ func IsScheduleTimeNotPresent(err error) bool {
 
 func IsScheduleTimeTooSoon(err error) bool {
 	return errors.Is(err, ErrScheduleTimeTooSoon)
+}
+
+func IsScheduleTimeOutsideWindow(err error) bool {
+	return errors.Is(err, ErrScheduleTimeOutsideWindow)
+}
+
+func IsCampaignRescheduleNotAllowed(err error) bool {
+	return errors.Is(err, ErrCampaignRescheduleNotAllowed)
 }
 
 func IsCampaignCityRequired(err error) bool {
@@ -449,6 +475,10 @@ func IsAmountNotMultiple(err error) bool {
 
 func IsAtipayTokenEmpty(err error) bool {
 	return errors.Is(err, ErrAtipayTokenEmpty)
+}
+
+func IsInvalidLanguage(err error) bool {
+	return errors.Is(err, ErrInvalidLanguage)
 }
 
 func IsInsufficientFunds(err error) bool {
@@ -630,3 +660,18 @@ func IsCryptoAddressProvisionFailed(err error) bool {
 }
 func IsCryptoProviderError(err error) bool   { return errors.Is(err, ErrCryptoProviderError) }
 func IsCryptoDepositNotFound(err error) bool { return errors.Is(err, ErrCryptoDepositNotFound) }
+
+func IsDepositReceiptNotFound(err error) bool { return errors.Is(err, ErrDepositReceiptNotFound) }
+func IsDepositReceiptAlreadyApproved(err error) bool {
+	return errors.Is(err, ErrDepositReceiptAlreadyApproved)
+}
+func IsDepositReceiptAlreadyRejected(err error) bool {
+	return errors.Is(err, ErrDepositReceiptAlreadyRejected)
+}
+func IsDepositReceiptFileTooLarge(err error) bool {
+	return errors.Is(err, ErrDepositReceiptFileTooLarge)
+}
+func IsDepositReceiptFileInvalidType(err error) bool {
+	return errors.Is(err, ErrDepositReceiptFileInvalidType)
+}
+func IsDepositReceiptFileEmpty(err error) bool { return errors.Is(err, ErrDepositReceiptFileEmpty) }
