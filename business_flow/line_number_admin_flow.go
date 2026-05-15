@@ -24,12 +24,14 @@ type AdminLineNumberFlow interface {
 type AdminLineNumberFlowImpl struct {
 	lineRepo repository.LineNumberRepository
 	db       *gorm.DB
+	auditRepo repository.AuditLogRepository
 }
 
-func NewAdminLineNumberFlow(lineRepo repository.LineNumberRepository, db *gorm.DB) AdminLineNumberFlow {
+func NewAdminLineNumberFlow(lineRepo repository.LineNumberRepository, db *gorm.DB, auditRepo repository.AuditLogRepository) AdminLineNumberFlow {
 	return &AdminLineNumberFlowImpl{
 		lineRepo: lineRepo,
 		db:       db,
+		auditRepo: auditRepo,
 	}
 }
 
@@ -72,10 +74,16 @@ func (f *AdminLineNumberFlowImpl) Create(ctx context.Context, req *dto.AdminCrea
 
 	// Save
 	if err := f.lineRepo.Save(ctx, &ln); err != nil {
+		logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberCreate, "Admin create line number", false, nil, map[string]any{
+			"line_number": value,
+		}, err)
 		return nil, err
 	}
 
 	resp := ToLineNumberDTO(ln)
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberCreate, "Admin create line number", true, nil, map[string]any{
+		"line_number": value,
+	}, nil)
 	return &resp, nil
 }
 
@@ -89,6 +97,9 @@ func (f *AdminLineNumberFlowImpl) ListAll(ctx context.Context, metadata *ClientM
 		dtoItem := ToLineNumberDTO(*ln)
 		result = append(result, &dtoItem)
 	}
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberList, "Admin list line numbers", true, nil, map[string]any{
+		"count": len(result),
+	}, nil)
 	return result, nil
 }
 
@@ -112,12 +123,22 @@ func (f *AdminLineNumberFlowImpl) UpdateBatch(ctx context.Context, req *dto.Admi
 	}
 	// Persist
 	if err := f.lineRepo.UpdateBatch(ctx, updates); err != nil {
+		logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberUpdate, "Admin batch update line numbers", false, nil, map[string]any{
+			"updates": len(updates),
+		}, err)
 		return NewBusinessError("LINE_NUMBER_BATCH_UPDATE_FAILED", "Failed to update line numbers", err)
 	}
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberUpdate, "Admin batch update line numbers", true, nil, map[string]any{
+		"updates": len(updates),
+	}, nil)
 	return nil
 }
 
 func (f *AdminLineNumberFlowImpl) GetReport(ctx context.Context, metadata *ClientMetadata) ([]*dto.AdminLineNumberReportItem, error) {
 	// TODO: implement aggregation logic across messages/campaigns/transactions
-	return []*dto.AdminLineNumberReportItem{}, nil
+	items := []*dto.AdminLineNumberReportItem{}
+	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberReport, "Admin requested line number report", true, nil, map[string]any{
+		"items": len(items),
+	}, nil)
+	return items, nil
 }
