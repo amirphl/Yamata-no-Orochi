@@ -310,7 +310,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 		}
 
 		// Generate new OTP (Redis)
-		otpCode, expiresAt, err := lf.generateAndSavePasswordResetOTP(txCtx, customer, metadata)
+		otpCode, expiresAt, err := lf.generateAndSavePasswordResetOTP(txCtx, customer)
 		if err != nil {
 			return err
 		}
@@ -503,7 +503,7 @@ func generateOTP() (string, error) {
 }
 
 // generateAndSavePasswordResetOTP creates a new OTP and stores it in Redis with expiry
-func (lf *LoginFlowImpl) generateAndSavePasswordResetOTP(ctx context.Context, customer *models.Customer, metadata *ClientMetadata) (string, time.Time, error) {
+func (lf *LoginFlowImpl) generateAndSavePasswordResetOTP(ctx context.Context, customer *models.Customer) (string, time.Time, error) {
 	if lf.rc == nil {
 		return "", time.Time{}, ErrCacheNotAvailable
 	}
