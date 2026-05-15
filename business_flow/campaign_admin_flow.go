@@ -29,6 +29,7 @@ type AdminCampaignFlow interface {
 	RejectCampaign(ctx context.Context, req *dto.AdminRejectCampaignRequest) (*dto.AdminRejectCampaignResponse, error)
 	CancelCampaign(ctx context.Context, req *dto.AdminCancelCampaignRequest) (*dto.AdminCancelCampaignResponse, error)
 	RemoveAudienceSpec(ctx context.Context, platform *string) (*dto.AdminRemoveAudienceSpecResponse, error)
+	RescheduleCampaign(ctx context.Context, req *dto.AdminRescheduleCampaignRequest) (*dto.AdminRescheduleCampaignResponse, error)
 }
 
 // AdminCampaignFlowImpl implements the campaign business flow
@@ -49,6 +50,8 @@ type AdminCampaignFlowImpl struct {
 	rc                   *redis.Client
 	db                   *gorm.DB
 }
+
+var adminTehranLoc *time.Location = time.FixedZone("Asia/Tehran", 3*3600+1800)
 
 // NewAdminCampaignFlow creates a new campaign flow instance
 func NewAdminCampaignFlow(
@@ -114,6 +117,9 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 
 	rows, err := s.campaignRepo.ByFilter(ctx, cf, "created_at DESC", 0, 0)
 	if err != nil {
+		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", false, nil, map[string]any{
+			"status": filter.Status,
+		}, err)
 		return nil, NewBusinessError("ADMIN_LIST_CAMPAIGNS_FAILED", "Failed to list campaigns", err)
 	}
 	// Click counts and stats
@@ -181,10 +187,14 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		})
 	}
 
-	return &dto.AdminListCampaignsResponse{
+	resp := &dto.AdminListCampaignsResponse{
 		Message: "Campaigns retrieved successfully",
 		Items:   items,
-	}, nil
+	}
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", true, nil, map[string]any{
+		"items": len(items),
+	}, nil)
+	return resp, nil
 }
 
 // GetCampaign retrieves a single campaign by ID for admin
@@ -290,6 +300,9 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		TotalClicks:           &totalClicks,
 		ClickRate:             clickRate,
 	}
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignGet, "Admin fetched campaign", true, &c.CustomerID, map[string]any{
+		"campaign_id": c.ID,
+	}, nil)
 	return resp, nil
 }
 
@@ -470,6 +483,9 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		return nil
 	})
 	if err != nil {
+		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignApproved, "Admin approved campaign", false, nil, map[string]any{
+			"campaign_id": req.CampaignID,
+		}, err)
 		return nil, NewBusinessError("ADMIN_APPROVE_CAMPAIGN_FAILED", "Failed to approve campaign", err)
 	}
 
@@ -487,6 +503,10 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		_ = s.notifier.SendSMS(smsCtx, customerMobile, msgCustomer, &id64)
 	}
 
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignApproved, "Admin approved campaign", true, &customer.ID, map[string]any{
+		"campaign_id": campaign.ID,
+		"comment":     req.Comment,
+	}, nil)
 	return &dto.AdminApproveCampaignResponse{Message: "Campaign approved successfully"}, nil
 }
 
@@ -755,6 +775,10 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		return nil
 	})
 	if err != nil {
+		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignRejected, "Admin rejected campaign", false, nil, map[string]any{
+			"campaign_id": req.CampaignID,
+			"comment":     req.Comment,
+		}, err)
 		return nil, NewBusinessError("ADMIN_REJECT_CAMPAIGN_FAILED", "Failed to reject campaign", err)
 	}
 
@@ -782,8 +806,59 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		}
 	}
 
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignRejected, "Admin rejected campaign", true, &customer.ID, map[string]any{
+		"campaign_id": campaign.ID,
+		"comment":     req.Comment,
+	}, nil)
 	return &dto.AdminRejectCampaignResponse{
 		Message: "Campaign rejected and budget refunded successfully",
+	}, nil
+}
+
+// RescheduleCampaign updates the scheduled time for eligible campaigns (admin action).
+func (s *AdminCampaignFlowImpl) RescheduleCampaign(ctx context.Context, req *dto.AdminRescheduleCampaignRequest) (*dto.AdminRescheduleCampaignResponse, error) {
+	if req == nil || req.CampaignID == 0 {
+		return nil, NewBusinessError("ADMIN_RESCHEDULE_CAMPAIGN_FAILED", "campaign_id is required", ErrCampaignNotFound)
+	}
+
+	campaign, err := s.campaignRepo.ByID(ctx, req.CampaignID)
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_RESCHEDULE_CAMPAIGN_FAILED", "Failed to fetch campaign", err)
+	}
+	if campaign == nil {
+		return nil, ErrCampaignNotFound
+	}
+	if !isAdminReschedulable(campaign.Status) {
+		return nil, ErrCampaignRescheduleNotAllowed
+	}
+
+	scheduleUTC := toUTCFromTehran(req.ScheduleAt)
+	if scheduleUTC.Before(utils.UTCNow().Add(15 * time.Minute)) {
+		return nil, ErrScheduleTimeTooSoon
+	}
+
+	tehranTime := scheduleUTC.In(tehranLocation())
+	if !isWithinRescheduleWindow(tehranTime) {
+		return nil, NewBusinessError("SCHEDULE_TIME_OUTSIDE_WINDOW", "Schedule time must be between 08:00 and 21:00 Asia/Tehran", ErrScheduleTimeOutsideWindow)
+	}
+
+	campaign.Spec.ScheduleAt = utils.ToPtr(scheduleUTC)
+	campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+
+	if err := s.campaignRepo.Update(ctx, *campaign); err != nil {
+		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignRescheduled, "Admin rescheduled campaign", false, &campaign.CustomerID, map[string]any{
+			"campaign_id": req.CampaignID,
+			"schedule_at": scheduleUTC,
+		}, err)
+		return nil, NewBusinessError("ADMIN_RESCHEDULE_CAMPAIGN_FAILED", "Failed to reschedule campaign", err)
+	}
+
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignRescheduled, "Admin rescheduled campaign", true, &campaign.CustomerID, map[string]any{
+		"campaign_id": req.CampaignID,
+		"schedule_at": scheduleUTC,
+	}, nil)
+	return &dto.AdminRescheduleCampaignResponse{
+		Message: "Campaign rescheduled successfully",
 	}, nil
 }
 
@@ -916,6 +991,10 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 		return nil
 	})
 	if err != nil {
+		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignCancelled, "Admin cancelled campaign", false, nil, map[string]any{
+			"campaign_id": req.CampaignID,
+			"comment":     req.Comment,
+		}, err)
 		return nil, NewBusinessError("ADMIN_CANCEL_CAMPAIGN_FAILED", "Failed to cancel campaign", err)
 	}
 
@@ -937,6 +1016,10 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 		}
 	}
 
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignCancelled, "Admin cancelled campaign", true, &customer.ID, map[string]any{
+		"campaign_id": campaign.ID,
+		"comment":     req.Comment,
+	}, nil)
 	return &dto.AdminCancelCampaignResponse{
 		Message: "Campaign cancelled and budget refunded successfully",
 	}, nil
@@ -985,10 +1068,54 @@ func (s *AdminCampaignFlowImpl) RemoveAudienceSpec(ctx context.Context, platform
 		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_CACHE_FAILED", "Failed to clear audience spec cache", err)
 	}
 
-	return &dto.AdminRemoveAudienceSpecResponse{
+	resp := &dto.AdminRemoveAudienceSpecResponse{
 		Message:  "Audience spec removed successfully",
 		Platform: normalizedPlatform,
-	}, nil
+	}
+	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminRemoveAudienceSpec, "Admin removed audience spec", true, nil, map[string]any{
+		"platform": normalizedPlatform,
+	}, nil)
+	return resp, nil
+}
+
+func isAdminReschedulable(status models.CampaignStatus) bool {
+	switch status {
+	case models.CampaignStatusInProgress, models.CampaignStatusWaitingForApproval, models.CampaignStatusApproved:
+		return true
+	default:
+		return false
+	}
+}
+
+func toUTCFromTehran(t time.Time) time.Time {
+	loc := tehranLocation()
+	tehranTime := time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), loc)
+	return tehranTime.UTC()
+}
+
+func tehranLocation() *time.Location {
+	if adminTehranLoc == nil || adminTehranLoc.String() != "Asia/Tehran" {
+		if loaded, err := time.LoadLocation("Asia/Tehran"); err == nil {
+			adminTehranLoc = loaded
+		} else {
+			adminTehranLoc = time.FixedZone("Asia/Tehran", 3*3600+1800)
+		}
+	}
+	return adminTehranLoc
+}
+
+func isWithinRescheduleWindow(tehranTime time.Time) bool {
+	hour := tehranTime.Hour()
+	if hour < 8 {
+		return false
+	}
+	if hour > 21 {
+		return false
+	}
+	if hour == 21 && (tehranTime.Minute() > 0 || tehranTime.Second() > 0 || tehranTime.Nanosecond() > 0) {
+		return false
+	}
+	return true
 }
 
 func normalizeIranMobile(m string) string {
