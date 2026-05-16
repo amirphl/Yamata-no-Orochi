@@ -20,6 +20,9 @@ import (
 // PaymentAdminFlow handles admin-only payment business logic.
 type PaymentAdminFlow interface {
 	ChargeWalletByAdmin(ctx context.Context, req *dto.ChargeWalletByAdminRequest, metadata *ClientMetadata, adminID uint) (*dto.ChargeWalletByAdminResponse, error)
+	AdminListDepositReceipts(ctx context.Context, f models.DepositReceiptFilter, limit, offset int, order string) (*dto.ListDepositReceiptsResponse, error)
+	AdminGetDepositReceiptFile(ctx context.Context, receiptUUID string) ([]byte, string, string, error)
+	AdminUpdateDepositReceiptStatus(ctx context.Context, req *dto.AdminUpdateDepositReceiptStatusRequest, adminID uint, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error)
 }
 
 // NewPaymentAdminFlow creates a new admin payment flow instance.
@@ -31,6 +34,7 @@ func NewPaymentAdminFlow(
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
 	agencyDiscountRepo repository.AgencyDiscountRepository,
+	depositReceiptRepo repository.DepositReceiptRepository,
 	db *gorm.DB,
 	atipayCfg config.AtipayConfig,
 	sysCfg config.SystemConfig,
@@ -44,6 +48,7 @@ func NewPaymentAdminFlow(
 		balanceSnapshotRepo: balanceSnapshotRepo,
 		transactionRepo:     transactionRepo,
 		agencyDiscountRepo:  agencyDiscountRepo,
+		depositReceiptRepo:  depositReceiptRepo,
 		db:                  db,
 		atipayCfg:           atipayCfg,
 		sysCfg:              sysCfg,
@@ -120,7 +125,7 @@ func (p *PaymentFlowImpl) ChargeWalletByAdmin(
 		}
 		customer.Wallet = wallet
 
-		paymentRequest, err = p.createPaymentRequest(txCtx, customer, req.AmountWithTax)
+		paymentRequest, err = p.createPaymentRequest(txCtx, customer, req.AmountWithTax, "EN")
 		if err != nil {
 			return err
 		}
@@ -207,6 +212,169 @@ func (p *PaymentFlowImpl) ChargeWalletByAdmin(
 		CustomerID:       req.CustomerID,
 		AdminID:          adminID,
 		AmountWithTax:    req.AmountWithTax,
+	}, nil
+}
+
+// AdminListDepositReceipts lists receipts with optional filters.
+func (p *PaymentFlowImpl) AdminListDepositReceipts(ctx context.Context, f models.DepositReceiptFilter, limit, offset int, order string) (*dto.ListDepositReceiptsResponse, error) {
+	items, err := p.depositReceiptRepo.List(ctx, f, limit, offset, order)
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_LIST_DEPOSIT_RECEIPTS_FAILED", "Failed to list deposit receipts", err)
+	}
+	resp := &dto.ListDepositReceiptsResponse{Items: make([]dto.DepositReceiptItem, 0, len(items))}
+	for _, r := range items {
+		resp.Items = append(resp.Items, dto.DepositReceiptItem{
+			UUID:         r.UUID.String(),
+			CustomerID:   r.CustomerID,
+			Amount:       r.Amount,
+			Currency:     r.Currency,
+			Status:       string(r.Status),
+			StatusReason: r.StatusReason,
+			Lang:         r.Lang,
+			FileName:     r.FileName,
+			ContentType:  r.ContentType,
+			FileSize:     r.FileSize,
+			CreatedAt:    r.CreatedAt,
+		})
+	}
+	return resp, nil
+}
+
+// AdminGetDepositReceiptFile returns raw file bytes and metadata.
+func (p *PaymentFlowImpl) AdminGetDepositReceiptFile(ctx context.Context, receiptUUID string) ([]byte, string, string, error) {
+	rec, err := p.depositReceiptRepo.ByUUID(ctx, receiptUUID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if rec == nil {
+		return nil, "", "", ErrDepositReceiptNotFound
+	}
+	return rec.FileData, rec.FileName, rec.ContentType, nil
+}
+
+// AdminUpdateDepositReceiptStatus approves or rejects a receipt and on approval credits wallet like normal flow.
+func (p *PaymentFlowImpl) AdminUpdateDepositReceiptStatus(ctx context.Context, req *dto.AdminUpdateDepositReceiptStatusRequest, adminID uint, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error) {
+	if req == nil {
+		return nil, NewBusinessError("ADMIN_RECEIPT_UPDATE_INVALID", "Invalid request", fmt.Errorf("nil request"))
+	}
+	action := strings.ToLower(strings.TrimSpace(req.Action))
+	if action != "approve" && action != "reject" {
+		return nil, ErrDepositReceiptInvalidStatus
+	}
+
+	var receipt *models.DepositReceipt
+	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		var err error
+		receipt, err = p.depositReceiptRepo.ByUUID(txCtx, req.ReceiptUUID)
+		if err != nil {
+			return err
+		}
+		if receipt == nil {
+			return ErrDepositReceiptNotFound
+		}
+		if receipt.Status == models.DepositReceiptStatusApproved {
+			return ErrDepositReceiptAlreadyApproved
+		}
+		if receipt.Status == models.DepositReceiptStatusRejected {
+			return ErrDepositReceiptAlreadyRejected
+		}
+
+		if action == "reject" {
+			receipt.Status = models.DepositReceiptStatusRejected
+			receipt.StatusReason = "Rejected by admin"
+			receipt.ReviewerID = &adminID
+			if req.Reason != "" {
+				receipt.RejectionNote = &req.Reason
+				receipt.StatusReason = req.Reason
+			}
+			if err := p.depositReceiptRepo.Update(txCtx, receipt); err != nil {
+				return err
+			}
+			desc := fmt.Sprintf("Deposit receipt %s rejected by admin %d", req.ReceiptUUID, adminID)
+			_ = createAuditLog(txCtx, p.auditRepo, nil, models.AuditActionPaymentFailed, desc, false, nil, metadata)
+			return nil
+		}
+
+		// Approve path mirrors ChargeWalletByAdmin + PaymentCallback success.
+		customer, err := getCustomer(txCtx, p.customerRepo, receipt.CustomerID)
+		if err != nil {
+			return err
+		}
+		wallet, err := p.walletRepo.ByCustomerID(txCtx, customer.ID)
+		if err != nil {
+			return err
+		}
+		customer.Wallet = wallet
+
+		paymentRequest, err := p.createPaymentRequest(txCtx, customer, receipt.Amount, receipt.Lang)
+		if err != nil {
+			return err
+		}
+
+		// Mark metadata
+		var m map[string]any
+		if err := json.Unmarshal(paymentRequest.Metadata, &m); err != nil {
+			return err
+		}
+		m["source"] = "deposit_receipt"
+		m["deposit_receipt_uuid"] = receipt.UUID.String()
+		m["admin_id"] = adminID
+		m["payment_channel"] = "deposit_receipt_manual"
+		metaJSON, err := json.Marshal(m)
+		if err != nil {
+			return err
+		}
+		paymentRequest.Metadata = metaJSON
+		paymentRequest.Description = "wallet charge via deposit receipt"
+		paymentRequest.RedirectURL = fmt.Sprintf("https://%s/api/v1/payments/deposit-receipt", p.deploymentCfg.Domain)
+		paymentRequest.AtipayToken = "ADMIN_DEPOSIT_RECEIPT"
+		paymentRequest.AtipayStatus = "OK"
+		paymentRequest.Status = models.PaymentRequestStatusPending
+		paymentRequest.StatusReason = "payment request pending for deposit receipt approval"
+		paymentRequest.UpdatedAt = utils.UTCNow()
+		if err := p.paymentRequestRepo.Update(txCtx, paymentRequest); err != nil {
+			return err
+		}
+
+		callbackReq := &dto.AtipayRequest{
+			State:             "OK",
+			Status:            "2",
+			ReferenceNumber:   fmt.Sprintf("DEPOSIT-REF-%s", uuid.New().String()),
+			ReservationNumber: paymentRequest.InvoiceNumber,
+			TerminalID:        "DEPOSIT_RECEIPT",
+			TraceNumber:       fmt.Sprintf("DEPOSIT-TRACE-%s", uuid.New().String()),
+			MaskedPAN:         "DEPOSIT-RECEIPT",
+			RRN:               fmt.Sprintf("DEPOSIT-RRN-%s", uuid.New().String()),
+		}
+		mapping := p.getPaymentStatusMapping(callbackReq.Status, callbackReq.State)
+		mapping.Description = "Payment completed via deposit receipt approval"
+		if err := p.updatePaymentRequest(txCtx, paymentRequest, callbackReq, mapping); err != nil {
+			return err
+		}
+		if err := p.updateBalances(txCtx, paymentRequest, callbackReq); err != nil {
+			return err
+		}
+
+		receipt.Status = models.DepositReceiptStatusApproved
+		receipt.StatusReason = "Approved and credited"
+		receipt.ReviewerID = &adminID
+		if err := p.depositReceiptRepo.Update(txCtx, receipt); err != nil {
+			return err
+		}
+
+		desc := fmt.Sprintf("Deposit receipt %s approved by admin %d and credited", req.ReceiptUUID, adminID)
+		_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionPaymentCallbackProcessed, desc, true, nil, metadata)
+		return nil
+	})
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_RECEIPT_UPDATE_FAILED", "Failed to update deposit receipt", err)
+	}
+
+	return &dto.SubmitDepositReceiptResponse{
+		Success:     true,
+		Message:     fmt.Sprintf("Receipt %s %sed", req.ReceiptUUID, req.Action),
+		ReceiptUUID: req.ReceiptUUID,
+		Status:      string(receipt.Status),
 	}, nil
 }
 
