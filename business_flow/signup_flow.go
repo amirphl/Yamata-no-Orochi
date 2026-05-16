@@ -25,6 +25,11 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	OTPTypeMobile = "mobile"
+	OTPTypeEmail  = "email"
+)
+
 // SignupFlow handles the complete signup business logic
 type SignupFlow interface {
 	Signup(ctx context.Context, req *dto.SignupRequest, metadata *ClientMetadata) (*dto.SignupResponse, error)
@@ -112,7 +117,7 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 	if err != nil {
 		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", err)
 	}
-	otpCode, err := s.generateAndSaveOTP(ctx, pendingID, req.RepresentativeMobile, models.OTPTypeMobile)
+	otpCode, err := s.generateAndSaveOTP(ctx, pendingID, OTPTypeMobile)
 	if err != nil {
 		_ = s.deletePendingSignup(ctx, pendingID)
 		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", err)
@@ -239,17 +244,17 @@ func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendReques
 
 	var target string
 	target = pending.Request.RepresentativeMobile
-	if req.OTPType == models.OTPTypeEmail {
+	if req.OTPType == OTPTypeEmail {
 		target = pending.Request.Email
 	}
 
-	otpCode, err := s.generateAndSaveOTP(ctx, req.CustomerID, target, req.OTPType)
+	otpCode, err := s.generateAndSaveOTP(ctx, req.CustomerID, req.OTPType)
 	if err != nil {
 		return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", err)
 	}
 
 	message := fmt.Sprintf(s.messageConfig.OTPResendVerificationCodeTemplate, otpCode, utils.OTPExpiry.Minutes())
-	if req.OTPType == models.OTPTypeMobile {
+	if req.OTPType == OTPTypeMobile {
 		customerID := int64(req.CustomerID)
 		err = s.notificationSvc.SendSMS(ctx, target, message, &customerID)
 	} else {
@@ -410,7 +415,7 @@ func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequ
 	return customer, nil
 }
 
-func (s *SignupFlowImpl) generateAndSaveOTP(ctx context.Context, customerID uint, target, otpType string) (string, error) {
+func (s *SignupFlowImpl) generateAndSaveOTP(ctx context.Context, customerID uint, otpType string) (string, error) {
 	// Generate 6-digit OTP
 	otpCode, err := generateOTP()
 	if err != nil {
@@ -455,10 +460,10 @@ func (s *SignupFlowImpl) completeSignup(ctx context.Context, customer *models.Cu
 	var mobileVerifiedAt, emailVerifiedAt *time.Time
 
 	switch otpType {
-	case models.OTPTypeMobile:
+	case OTPTypeMobile:
 		isMobileVerified = utils.ToPtr(true)
 		mobileVerifiedAt = utils.UTCNowPtr()
-	case models.OTPTypeEmail:
+	case OTPTypeEmail:
 		isEmailVerified = utils.ToPtr(true)
 		emailVerifiedAt = utils.UTCNowPtr()
 	default:
@@ -566,7 +571,7 @@ func (s *SignupFlowImpl) maskMobileNumber(mobile string) string {
 
 func (s *SignupFlowImpl) validateOTPVerificationRequest(ctx context.Context, req *dto.OTPVerificationRequest) error {
 	// Validate OTP type
-	if req.OTPType != models.OTPTypeMobile && req.OTPType != models.OTPTypeEmail {
+	if req.OTPType != OTPTypeMobile && req.OTPType != OTPTypeEmail {
 		return ErrInvalidOTPType
 	}
 
@@ -584,7 +589,7 @@ func (s *SignupFlowImpl) validateOTPVerificationRequest(ctx context.Context, req
 
 func (s *SignupFlowImpl) validateOTPResendRequest(ctx context.Context, req *dto.OTPResendRequest) error {
 	// Validate OTP type
-	if req.OTPType != models.OTPTypeMobile && req.OTPType != models.OTPTypeEmail {
+	if req.OTPType != OTPTypeMobile && req.OTPType != OTPTypeEmail {
 		return ErrInvalidOTPType
 	}
 
