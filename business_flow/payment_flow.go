@@ -4,6 +4,7 @@ package businessflow
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -26,6 +27,10 @@ type PaymentFlow interface {
 	PaymentCallback(ctx context.Context, callback *dto.AtipayRequest, metadata *ClientMetadata) (string, error)
 	GetTransactionHistory(ctx context.Context, req *dto.GetTransactionHistoryRequest, metadata *ClientMetadata) (*dto.TransactionHistoryResponse, error)
 	GetWalletBalance(ctx context.Context, req *dto.GetWalletBalanceRequest, metadata *ClientMetadata) (*dto.GetWalletBalanceResponse, error)
+	SubmitDepositReceipt(ctx context.Context, req *dto.SubmitDepositReceiptRequest, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error)
+	ListDepositReceipts(ctx context.Context, customerID uint, lang string) (*dto.ListDepositReceiptsResponse, error)
+	PreviewProformaInvoice(ctx context.Context, customerID uint, amountWithTax uint64, lang string) (*dto.ProformaPreviewResponse, error)
+	DownloadProformaInvoicePDF(ctx context.Context, customerID uint, amountWithTax uint64, lang string) ([]byte, string, error)
 }
 
 // PaymentFlowImpl implements the payment business flow
@@ -37,6 +42,7 @@ type PaymentFlowImpl struct {
 	balanceSnapshotRepo repository.BalanceSnapshotRepository
 	transactionRepo     repository.TransactionRepository
 	agencyDiscountRepo  repository.AgencyDiscountRepository
+	depositReceiptRepo  repository.DepositReceiptRepository
 	db                  *gorm.DB
 
 	// Atipay configuration
@@ -54,6 +60,7 @@ func NewPaymentFlow(
 	balanceSnapshotRepo repository.BalanceSnapshotRepository,
 	transactionRepo repository.TransactionRepository,
 	agencyDiscountRepo repository.AgencyDiscountRepository,
+	depositReceiptRepo repository.DepositReceiptRepository,
 	db *gorm.DB,
 	atipayCfg config.AtipayConfig,
 	sysCfg config.SystemConfig,
@@ -67,6 +74,7 @@ func NewPaymentFlow(
 		balanceSnapshotRepo: balanceSnapshotRepo,
 		transactionRepo:     transactionRepo,
 		agencyDiscountRepo:  agencyDiscountRepo,
+		depositReceiptRepo:  depositReceiptRepo,
 		db:                  db,
 		atipayCfg:           atipayCfg,
 		sysCfg:              sysCfg,
@@ -101,7 +109,7 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 		customer.Wallet = wallet
 
 		// Create payment request
-		paymentRequest, err = p.createPaymentRequest(txCtx, customer, req.AmountWithTax)
+		paymentRequest, err = p.createPaymentRequest(txCtx, customer, req.AmountWithTax, req.Lang)
 		if err != nil {
 			return err
 		}
@@ -155,6 +163,14 @@ func (p *PaymentFlowImpl) ChargeWallet(ctx context.Context, req *dto.ChargeWalle
 
 // validateChargeWalletRequest validates the business rules for charging a wallet
 func (p *PaymentFlowImpl) validateChargeWalletRequest(req *dto.ChargeWalletRequest) error {
+	req.Lang = strings.ToUpper(strings.TrimSpace(req.Lang))
+	if req.Lang == "" {
+		req.Lang = "EN"
+	}
+	if req.Lang != "EN" && req.Lang != "FA" {
+		return ErrInvalidLanguage
+	}
+
 	// Validate amount (minimum 1000 Tomans and must be multiple of 1000)
 	if req.AmountWithTax < 1000 {
 		return ErrAmountTooLow
@@ -167,7 +183,7 @@ func (p *PaymentFlowImpl) validateChargeWalletRequest(req *dto.ChargeWalletReque
 }
 
 // createPaymentRequest creates a new payment request record
-func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer models.Customer, amountWithTax uint64) (*models.PaymentRequest, error) {
+func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer models.Customer, amountWithTax uint64, lang string) (*models.PaymentRequest, error) {
 	if customer.ReferrerAgencyID == nil {
 		return nil, ErrReferrerAgencyIDRequired
 	}
@@ -210,6 +226,7 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 		Amount:        amountWithTax,
 		Currency:      utils.TomanCurrency,
 		Description:   "charge wallet",
+		Lang:          lang,
 		InvoiceNumber: invoiceNumber,
 		CellNumber:    customer.RepresentativeMobile,
 		RedirectURL:   fmt.Sprintf("https://%s/api/v1/payments/callback/%s", p.deploymentCfg.Domain, invoiceNumber),
@@ -226,6 +243,181 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 	}
 
 	return paymentRequest, nil
+}
+
+// SubmitDepositReceipt lets customer upload a deposit receipt for manual review.
+func (p *PaymentFlowImpl) SubmitDepositReceipt(ctx context.Context, req *dto.SubmitDepositReceiptRequest, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error) {
+	if req == nil {
+		return nil, NewBusinessError("DEPOSIT_RECEIPT_INVALID_REQUEST", "Submit deposit receipt failed", fmt.Errorf("request is nil"))
+	}
+	lang := strings.ToUpper(strings.TrimSpace(req.Lang))
+	if lang == "" {
+		lang = "EN"
+	}
+	if lang != "EN" && lang != "FA" {
+		return nil, ErrInvalidLanguage
+	}
+	if req.FileSize <= 0 {
+		return nil, ErrDepositReceiptFileEmpty
+	}
+	if req.FileSize > 5*1024*1024 {
+		return nil, ErrDepositReceiptFileTooLarge
+	}
+	ct := strings.ToLower(strings.TrimSpace(req.ContentType))
+	allowed := map[string]bool{
+		"image/jpeg":               true,
+		"image/png":                true,
+		"application/pdf":          true,
+		"image/jpg":                true,
+		"application/octet-stream": true, // fallback when browsers mislabel
+	}
+	if !allowed[ct] {
+		return nil, ErrDepositReceiptFileInvalidType
+	}
+	data, err := base64.StdEncoding.DecodeString(req.FileBase64)
+	if err != nil {
+		return nil, NewBusinessError("DEPOSIT_RECEIPT_DECODE_FAILED", "Failed to decode file", err)
+	}
+	if int64(len(data)) != req.FileSize {
+		// trust actual length
+		req.FileSize = int64(len(data))
+	}
+
+	var receiptUUID string
+	err = repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		customer, err := getCustomer(txCtx, p.customerRepo, req.CustomerID)
+		if err != nil {
+			return err
+		}
+		rec := &models.DepositReceipt{
+			CustomerID:   customer.ID,
+			Amount:       req.Amount,
+			Currency:     utils.TomanCurrency,
+			Status:       models.DepositReceiptStatusPending,
+			FileName:     req.FileName,
+			ContentType:  ct,
+			FileSize:     req.FileSize,
+			FileData:     data,
+			Lang:         lang,
+			StatusReason: "submitted by customer",
+		}
+		if err := p.depositReceiptRepo.Save(txCtx, rec); err != nil {
+			return err
+		}
+		receiptUUID = rec.UUID.String()
+
+		desc := fmt.Sprintf("Deposit receipt submitted amount %d by customer %d", req.Amount, req.CustomerID)
+		_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionPaymentCallbackProcessed, desc, true, nil, metadata)
+		return nil
+	})
+	if err != nil {
+		return nil, NewBusinessError("DEPOSIT_RECEIPT_SUBMIT_FAILED", "Failed to submit deposit receipt", err)
+	}
+
+	return &dto.SubmitDepositReceiptResponse{
+		Success:     true,
+		Message:     "Deposit receipt submitted for review",
+		ReceiptUUID: receiptUUID,
+		Status:      string(models.DepositReceiptStatusPending),
+	}, nil
+}
+
+// ListDepositReceipts lists receipts for a customer.
+func (p *PaymentFlowImpl) ListDepositReceipts(ctx context.Context, customerID uint, lang string) (*dto.ListDepositReceiptsResponse, error) {
+	lang = strings.ToUpper(strings.TrimSpace(lang))
+	if lang != "" && lang != "EN" && lang != "FA" {
+		return nil, ErrInvalidLanguage
+	}
+	f := models.DepositReceiptFilter{CustomerID: &customerID}
+	if lang != "" {
+		f.Lang = &lang
+	}
+	items, err := p.depositReceiptRepo.List(ctx, f, 50, 0, "id DESC")
+	if err != nil {
+		return nil, NewBusinessError("DEPOSIT_RECEIPT_LIST_FAILED", "Failed to list deposit receipts", err)
+	}
+	resp := &dto.ListDepositReceiptsResponse{Items: make([]dto.DepositReceiptItem, 0, len(items))}
+	for _, r := range items {
+		resp.Items = append(resp.Items, dto.DepositReceiptItem{
+			UUID:         r.UUID.String(),
+			CustomerID:   r.CustomerID,
+			Amount:       r.Amount,
+			Currency:     r.Currency,
+			Status:       string(r.Status),
+			StatusReason: r.StatusReason,
+			Lang:         r.Lang,
+			FileName:     r.FileName,
+			ContentType:  r.ContentType,
+			FileSize:     r.FileSize,
+			CreatedAt:    r.CreatedAt,
+		})
+	}
+	return resp, nil
+}
+
+// PreviewProformaInvoice builds data for a proforma invoice JSON preview.
+func (p *PaymentFlowImpl) PreviewProformaInvoice(ctx context.Context, customerID uint, amountWithTax uint64, lang string) (*dto.ProformaPreviewResponse, error) {
+	lang = strings.ToUpper(strings.TrimSpace(lang))
+	if lang == "" {
+		lang = "EN"
+	}
+	if lang != "EN" && lang != "FA" {
+		return nil, ErrInvalidLanguage
+	}
+	customer, err := getCustomer(ctx, p.customerRepo, customerID)
+	if err != nil {
+		return nil, err
+	}
+	now := utils.UTCNow()
+	invoiceNumber := fmt.Sprintf("PRF-%s", uuid.New().String())
+	real := uint64(float64(amountWithTax) * 10 / 11)
+	tax := amountWithTax - real
+	data := map[string]any{
+		"invoice_number":  invoiceNumber,
+		"date":            now.Format("2006-01-02"),
+		"amount_with_tax": amountWithTax,
+		"amount":          real,
+		"tax":             tax,
+		"service": map[string]any{
+			"description": "Jazebeh wallet top-up",
+		},
+		"buyer": map[string]any{
+			"customer_id":   customer.ID,
+			"customer_uuid": customer.UUID.String(),
+			"name":          strings.TrimSpace(customer.RepresentativeFirstName + " " + customer.RepresentativeLastName),
+			"company_name":  customer.CompanyName,
+			"mobile":        customer.RepresentativeMobile,
+			"company_phone": customer.CompanyPhone,
+			"address":       customer.CompanyAddress,
+			"national_id":   customer.NationalID,
+			"postal_code":   customer.PostalCode,
+			"email":         customer.Email,
+		},
+		"seller": map[string]any{
+			"name":           "Jazebeh Platform",
+			"economic_code":  "N/A",
+			"national_id":    p.sysCfg.SystemUserUUID,
+			"sheba":          p.sysCfg.SystemShebaNumber,
+			"bank_name":      "N/A",
+			"account_number": "N/A",
+			"card_number":    "N/A",
+			"iban":           p.sysCfg.SystemShebaNumber,
+		},
+		"notes": "This is a proforma invoice. Final invoice will be issued after payment confirmation.",
+		"lang":  lang,
+	}
+	return &dto.ProformaPreviewResponse{Success: true, Data: data}, nil
+}
+
+// DownloadProformaInvoicePDF returns a rendered HTML (caller can set content-type PDF after conversion).
+func (p *PaymentFlowImpl) DownloadProformaInvoicePDF(ctx context.Context, customerID uint, amountWithTax uint64, lang string) ([]byte, string, error) {
+	preview, err := p.PreviewProformaInvoice(ctx, customerID, amountWithTax, lang)
+	if err != nil {
+		return nil, "", err
+	}
+	html := renderProformaHTML(preview.Data, preview.Data["lang"].(string))
+	filename := fmt.Sprintf("proforma-%s.html", preview.Data["invoice_number"])
+	return []byte(html), filename, nil
 }
 
 type ScatteredSettlementItem struct {
@@ -859,7 +1051,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	}
 
 	newAgencyShareWithTax := agencyBalance.AgencyShareWithTax + agencyShareWithTax
-	metadata["source"] = "payment_callback_increase_agency_share_with_tax"
+	metadata["source"] = models.TransactionSourceIncreaseAgencyShareWithTax
 	metadata["operation"] = "increase_agency_share_with_tax"
 	metadataJSON, err = json.Marshal(metadata)
 	if err != nil {
@@ -918,7 +1110,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 
 	// Update tax wallet balance
 	newTaxLockedBalance := taxBalance.LockedBalance + taxSystemShare
-	metadata["source"] = "payment_callback_increase_tax_locked_(tax_system_share)"
+	metadata["source"] = models.TransactionSourceIncreaseTaxSystemShare
 	metadata["operation"] = "increase_tax_locked"
 	metadataJSON, err = json.Marshal(metadata)
 	if err != nil {
@@ -977,7 +1169,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 
 	// Update system wallet balance
 	newSystemLockedBalance := systemBalance.LockedBalance + realSystemShare
-	metadata["source"] = "payment_callback_increase_system_locked_(real_system_share)"
+	metadata["source"] = models.TransactionSourceIncreaseRealSystemShare
 	metadata["operation"] = "increase_system_locked"
 	metadataJSON, err = json.Marshal(metadata)
 	if err != nil {
@@ -1047,11 +1239,23 @@ func (p *PaymentFlowImpl) generatePaymentResultHTML(
 	// Read template files
 	var templateContent string
 	var err error
+	lang := strings.ToUpper(strings.TrimSpace(paymentRequest.Lang))
+	if lang == "" {
+		lang = "EN"
+	}
 
 	if mapping.Success {
-		templateContent, err = p.readTemplate("templates/payment_success.html")
+		filename := "templates/payment_success.html"
+		if lang == "FA" {
+			filename = "templates/payment_success_fa.html"
+		}
+		templateContent, err = p.readTemplate(filename)
 	} else {
-		templateContent, err = p.readTemplate("templates/payment_failure.html")
+		filename := "templates/payment_failure.html"
+		if lang == "FA" {
+			filename = "templates/payment_failure_fa.html"
+		}
+		templateContent, err = p.readTemplate(filename)
 	}
 
 	if err != nil {
@@ -1363,4 +1567,80 @@ func (p *PaymentFlowImpl) GetWalletBalance(ctx context.Context, req *dto.GetWall
 	}
 
 	return resp, nil
+}
+
+// renderProformaHTML builds a minimal HTML representation. Caller may convert to PDF externally.
+func renderProformaHTML(data map[string]any, lang string) string {
+	rtl := lang == "FA"
+	dir := "ltr"
+	align := "left"
+	if rtl {
+		dir = "rtl"
+		align = "right"
+	}
+	invoiceNumber, _ := data["invoice_number"].(string)
+	date, _ := data["date"].(string)
+	amountWithTax := data["amount_with_tax"]
+	amount := data["amount"]
+	tax := data["tax"]
+	notes, _ := data["notes"].(string)
+	buyer := data["buyer"].(map[string]any)
+	seller := data["seller"].(map[string]any)
+
+	html := fmt.Sprintf(`<!DOCTYPE html>
+<html lang="%s" dir="%s">
+<head>
+<meta charset="UTF-8">
+<title>Proforma %s</title>
+<style>
+body { font-family: sans-serif; direction:%s; text-align:%s; }
+.card { border:1px solid #ccc; padding:16px; margin:12px auto; max-width:720px; }
+.row { display:flex; justify-content:space-between; }
+.section { margin-top:12px; }
+table { width:100%%; border-collapse: collapse; }
+td, th { border:1px solid #ddd; padding:8px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Proforma Invoice</h2>
+  <div class="row"><div><strong>No:</strong> %s</div><div><strong>Date:</strong> %s</div></div>
+  <div class="section">
+    <h3>Seller</h3>
+    <div>%v</div>
+    <div>Economic Code: %v</div>
+    <div>National ID: %v</div>
+    <div>IBAN: %v</div>
+  </div>
+  <div class="section">
+    <h3>Buyer</h3>
+    <div>%v</div>
+    <div>Mobile: %v</div>
+    <div>Company: %v</div>
+    <div>Address: %v</div>
+    <div>Postal Code: %v</div>
+  </div>
+  <div class="section">
+    <h3>Service</h3>
+    <table>
+      <tr><th>Description</th><th>Amount</th><th>Tax</th><th>Total</th></tr>
+      <tr><td>Jazebeh wallet top-up</td><td>%v</td><td>%v</td><td>%v</td></tr>
+    </table>
+  </div>
+  <div class="section">
+    <h3>Bank Account</h3>
+    <div>IBAN: %v</div>
+  </div>
+  <div class="section"><em>%s</em></div>
+</div>
+</body></html>`,
+		lang, dir, invoiceNumber, dir, align,
+		invoiceNumber, date,
+		seller["name"], seller["economic_code"], seller["national_id"], seller["iban"],
+		buyer["name"], buyer["mobile"], buyer["company_name"], buyer["address"], buyer["postal_code"],
+		amount, tax, amountWithTax,
+		seller["iban"],
+		notes,
+	)
+	return html
 }
