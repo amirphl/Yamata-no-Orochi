@@ -22,6 +22,8 @@ volumes:
     driver: local
   frontend_logs_beta:
     driver: local
+  postgres_backups_beta:
+    driver: local
 
 services:
   # PostgreSQL Database
@@ -83,6 +85,41 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+
+  # Postgres daily backup
+  postgres-backup-beta:
+    image: postgres:15-alpine
+    container_name: yamata-postgres-backup-beta
+    restart: unless-stopped
+    depends_on:
+      postgres-beta:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres-beta
+      DB_PORT: ${DB_PORT}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+    command: >
+      sh -c "
+        mkdir -p /backups &&
+        while true; do
+          ts=$(date -u +%Y%m%dT%H%M%SZ) &&
+          PGPASSWORD=\"$DB_PASSWORD\" pg_dump -h \"$DB_HOST\" -p \"$DB_PORT\" -U \"$DB_USER\" -d \"$DB_NAME\" -Fc \
+            -f \"/backups/${DB_NAME}-${ts}.dump\" &&
+          echo \"[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup completed: ${DB_NAME}-${ts}.dump\" || \
+          echo \"[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup FAILED\" >&2;
+          sleep \"${BACKUP_INTERVAL_SECONDS:-86400}\";
+        done
+      "
+    volumes:
+      - postgres_backups_beta:/backups
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.92
+    security_opt:
+      - no-new-privileges:true
 
   # Application
   app-beta:
@@ -386,6 +423,40 @@ services:
     tmpfs:
       - /var/cache/nginx
       - /var/run
+      - /tmp
+
+  cert-monitor-beta:
+    image: python:3.11-slim
+    container_name: yamata-cert-monitor-beta
+    restart: unless-stopped
+    depends_on:
+      nginx-beta:
+        condition: service_started
+    environment:
+      DOMAIN: ${DOMAIN}
+      API_DOMAIN: ${API_DOMAIN}
+      CERT_ALERT_PHONE: ${CERT_ALERT_PHONE}
+      CERT_ALERT_THRESHOLD_DAYS: ${CERT_ALERT_THRESHOLD_DAYS:-7}
+      CERT_ALERT_CONF_PATH: /etc/nginx/sites-available/yamata-beta.conf
+      CERT_ALERT_CERT_PATHS: ${CERT_ALERT_CERT_PATHS:-}
+      SMS_PROVIDER_DOMAIN: ${SMS_PROVIDER_DOMAIN}
+      SMS_API_KEY: ${SMS_API_KEY}
+      SMS_SOURCE_NUMBER: ${SMS_SOURCE_NUMBER}
+      SMS_RETRY_COUNT: ${SMS_RETRY_COUNT}
+      SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD}
+      SMS_TIMEOUT: ${SMS_TIMEOUT}
+      PYTHONPATH: /tmp/pip/lib/python3.11/site-packages
+    volumes:
+      - ./scripts/cert_monitor.py:/app/cert_monitor.py:ro
+      - ./docker/nginx/sites-available/yamata-beta.conf:/etc/nginx/sites-available/yamata-beta.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    command: >
+      sh -c "pip install --no-cache-dir --prefix /tmp/pip requests cryptography
+      && PYTHONPATH=/tmp/pip/lib/python3.11/site-packages python /app/cert_monitor.py"
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.90
+    tmpfs:
       - /tmp
 
   # Prometheus (Optional - for monitoring)
