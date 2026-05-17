@@ -28,7 +28,7 @@ import (
 const (
 	baleSendBatchSize       = 100
 	statusJobMaxRetry       = 3
-	audienceAppendBatchSize = 2000
+	audienceAppendBatchSize = 1000
 )
 
 type BaleCampaignScheduler struct {
@@ -130,9 +130,11 @@ func (s *BaleCampaignScheduler) Start(parent context.Context) func() {
 			case <-parent.Done():
 				return
 			case <-ticker.C:
-				ctx, cancel := context.WithTimeout(parent, s.interval*4/5)
-				s.runOnce(ctx, parent)
-				cancel()
+				func() {
+					ctx, cancel := context.WithTimeout(parent, 15*time.Minute) // TODO:
+					defer cancel()
+					s.runOnce(ctx, parent)
+				}()
 			}
 		}
 	}()
@@ -210,24 +212,77 @@ func (s *BaleCampaignScheduler) runOnce(ctx context.Context, parent context.Cont
 func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) error {
 	botID, err := extractBaleBotID(c)
 	if err != nil {
-		return fmt.Errorf("resolve Bale bot id: %w", err)
+		return fmt.Errorf("resolve Bale bot id for campaign id=%d: %w", c.ID, err)
 	}
 	if c.NumAudiences == nil || *c.NumAudiences <= 0 {
-		return fmt.Errorf("campaign has no audiences")
+		return fmt.Errorf("campaign id=%d has no audiences", c.ID)
 	}
 
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
-		return fmt.Errorf("move to running: %w", err)
+		return fmt.Errorf("move campaign id=%d to running: %w", c.ID, err)
 	}
 	s.logger.Printf("Bale scheduler: campaign id=%d moved to running", c.ID)
 
+	// Fetch audience data OUTSIDE any DB transaction.
+	// AllocateShortLinks and DownloadTargetAudienceExcelFile are external HTTP calls that can
+	// take 60+ seconds for large audiences. Holding a Postgres transaction open during these
+	// calls triggers idle_in_transaction_session_timeout, killing the connection with
+	// "driver: bad connection" on the next SQL statement.
 	var (
 		phones       []string
 		ids          []int64
 		codes        []string
 		unmatchedUID []string
-		pc           *models.ProcessedCampaign
+		selectionID  *uint
 	)
+	if hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID) {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context expired before fetching excel UIDs for campaign id=%d: %w", c.ID, err)
+		}
+		s.logger.Printf("Bale scheduler: campaign id=%d fetching audience UIDs from excel", c.ID)
+		fileUIDs, err := fetchTargetAudienceUIDsFromExcel(ctx, s.botClient, jazzAccessToken, c.ID)
+		if err != nil {
+			return fmt.Errorf("fetch excel UIDs for campaign id=%d: %w", c.ID, err)
+		}
+		s.logger.Printf("Bale scheduler: campaign id=%d resolving %d UIDs to phones", c.ID, len(fileUIDs))
+		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
+		if err != nil {
+			return fmt.Errorf("fetch audience phones by UIDs for campaign id=%d: %w", c.ID, err)
+		}
+		phones = audienceResult.Phones
+		ids = audienceResult.IDs
+		codes = audienceResult.Codes
+		unmatchedUID = audienceResult.UnmatchedUIDs
+		selectionID = nil
+		s.logger.Printf("Bale scheduler: campaign id=%d fetched %d phones via excel (unmatched=%d)", c.ID, len(phones), len(unmatchedUID))
+	} else {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context expired before fetching audiences for campaign id=%d: %w", c.ID, err)
+		}
+		correlationID := uuid.NewString()
+		s.logger.Printf("Bale scheduler: campaign id=%d fetching audience phones (correlation_id=%s)", c.ID, correlationID)
+		audienceResult, err := s.fetchBaleAudiencePhones(ctx, c, jazzAccessToken, correlationID)
+		if err != nil {
+			return fmt.Errorf("fetch audience phones for campaign id=%d: %w", c.ID, err)
+		}
+		phones = audienceResult.Phones
+		ids = audienceResult.IDs
+		codes = audienceResult.Codes
+		selectionID = utils.ToPtr(audienceResult.SelectionID)
+		s.logger.Printf("Bale scheduler: campaign id=%d fetched %d phones (selection_id=%d)", c.ID, len(phones), audienceResult.SelectionID)
+	}
+
+	if len(ids) != len(phones) {
+		return fmt.Errorf("audience ids mismatch for campaign id=%d: phones=%d ids=%d", c.ID, len(phones), len(ids))
+	}
+	if len(codes) != len(phones) {
+		return fmt.Errorf("audience codes mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
+	}
+	s.logger.Printf("Bale scheduler: campaign id=%d audience ready: phones=%d unmatched=%d", c.ID, len(phones), len(unmatchedUID))
+
+	// Persist ProcessedCampaign and all audience data in one focused transaction.
+	// No external calls here — the transaction stays short and the connection stays active.
+	var pc *models.ProcessedCampaign
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
 			CampaignID:          c.ID,
@@ -235,101 +290,76 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			AudienceIDs:         pq.Int64Array{},
 			AudienceCodes:       []string{},
 			LastAudienceID:      nil,
-			AudienceSelectionID: nil,
+			AudienceSelectionID: selectionID,
 			Statistics:          nil,
 		}
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
-			return err
+			return fmt.Errorf("save processed campaign: %w", err)
 		}
 		s.logger.Printf("Bale scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
 
-		if hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID) {
-			fileUIDs, err := fetchTargetAudienceUIDsFromExcel(txCtx, s.botClient, jazzAccessToken, c.ID)
-			if err != nil {
-				return err
-			}
-			audienceResult, err := fetchAudiencePhonesByUIDs(txCtx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
-			if err != nil {
-				return err
-			}
-			phones = audienceResult.Phones
-			ids = audienceResult.IDs
-			codes = audienceResult.Codes
-			unmatchedUID = audienceResult.UnmatchedUIDs
-			s.logger.Printf("Bale scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
-			pc.AudienceSelectionID = nil
-		} else {
-			correlationID := uuid.NewString()
-			audienceResult, err := s.fetchBaleAudiencePhones(txCtx, c, jazzAccessToken, correlationID)
-			if err != nil {
-				return err
-			}
-			phones = audienceResult.Phones
-			ids = audienceResult.IDs
-			codes = audienceResult.Codes
-			s.logger.Printf("Bale scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
-			pc.AudienceSelectionID = utils.ToPtr(audienceResult.SelectionID)
-		}
 		for start := 0; start < len(ids); start += audienceAppendBatchSize {
 			end := min(start+audienceAppendBatchSize, len(ids))
 			if err := s.pcRepo.AppendAudienceData(txCtx, pc.ID, ids[start:end], codes[start:end]); err != nil {
-				return err
+				return fmt.Errorf("append audience batch [%d,%d): %w", start, end, err)
 			}
 		}
 		pc.UpdatedAt = utils.UTCNow()
 		if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
-			return err
+			return fmt.Errorf("update processed campaign meta: %w", err)
 		}
-		s.logger.Printf("Bale scheduler: updated processed campaign id=%d with audience ids", pc.ID)
-
+		s.logger.Printf("Bale scheduler: updated processed campaign id=%d with %d audience ids", pc.ID, len(ids))
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("persist campaign data for campaign id=%d: %w", c.ID, err)
 	}
 	s.logger.Printf("Bale scheduler: persisted processed campaign id=%d num_phones=%d, num_ids=%d, num_codes=%d, num_unmatched=%d", pc.ID, len(phones), len(ids), len(codes), len(unmatchedUID))
-	if len(ids) != len(phones) {
-		return fmt.Errorf("audience ids mismatch for campaign id=%d: phones=%d ids=%d", c.ID, len(phones), len(ids))
-	}
-	if len(codes) != len(phones) {
-		return fmt.Errorf("audience codes mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
-	}
 
 	if len(unmatchedUID) > 0 {
+		s.logger.Printf("Bale scheduler: campaign id=%d creating %d unmatched sent rows for processed_campaign_id=%d", c.ID, len(unmatchedUID), pc.ID)
 		if err := s.createUnmatchedSentBaleRows(ctx, pc.ID, unmatchedUID); err != nil {
-			return err
+			return fmt.Errorf("create unmatched sent rows for campaign id=%d: %w", c.ID, err)
 		}
 	}
 
 	var fileID *string
 	if c.MediaUUID != nil {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context expired before uploading media for campaign id=%d: %w", c.ID, err)
+		}
+		s.logger.Printf("Bale scheduler: campaign id=%d uploading media uuid=%s", c.ID, c.MediaUUID)
 		id, err := s.uploadCampaignMedia(ctx, jazzAccessToken, c)
 		if err != nil {
-			return err
+			return fmt.Errorf("upload media for campaign id=%d: %w", c.ID, err)
 		}
 		fileID = id
+		s.logger.Printf("Bale scheduler: campaign id=%d media uploaded file_id=%v", c.ID, fileID)
 	}
 
 	for start := 0; start < len(phones); start += baleSendBatchSize {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context expired at batch start=%d for campaign id=%d: %w", start, c.ID, err)
+		}
+
 		end := min(start+baleSendBatchSize, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
 		batchCodes := codes[start:end]
 
 		items := make([]BaleSendMessageRequest, 0, len(batchPhones))
-
 		rows := make([]*models.SentBaleMessage, 0, len(batchPhones))
+
+		s.logger.Printf("Bale scheduler: campaign id=%d allocating tracking ids for batch [%d,%d)", c.ID, start, end)
 		trackingIDs, err := allocateTrackingIDs(ctx, s.db, len(batchPhones))
 		if err != nil {
-			return err
+			return fmt.Errorf("allocate tracking ids for batch [%d,%d) campaign id=%d: %w", start, end, c.ID, err)
 		}
 
 		for i, p := range batchPhones {
 			body := s.buildBaleMessageBody(c, batchCodes[i])
-
 			trackingID := trackingIDs[i]
-
 			items = append(items, BaleSendMessageRequest{
-				RequestID:   trackingIDs[i],
+				RequestID:   trackingID,
 				BotID:       botID,
 				PhoneNumber: p,
 				MessageData: BaleSendMessageData{
@@ -339,7 +369,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 					},
 				},
 			})
-
 			rows = append(rows, &models.SentBaleMessage{
 				ProcessedCampaignID: pc.ID,
 				PhoneNumber:         p,
@@ -349,27 +378,27 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			})
 		}
 
+		lastBatchID := batchIDs[len(batchIDs)-1]
 		if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 			if len(rows) > 0 {
 				if err := s.sentRepo.SaveBatch(txCtx, rows); err != nil {
-					return err
+					return fmt.Errorf("save batch rows: %w", err)
 				}
 			}
-			lastBatchID := batchIDs[len(batchIDs)-1]
-			pc.LastAudienceID = &lastBatchID
+			pc.LastAudienceID = utils.ToPtr(lastBatchID)
 			pc.UpdatedAt = utils.UTCNow()
 			if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
-				return err
+				return fmt.Errorf("update meta: %w", err)
 			}
-
 			return nil
 		}); err != nil {
-			return err
+			return fmt.Errorf("save batch [%d,%d) for campaign id=%d: %w", start, end, c.ID, err)
 		}
+		s.logger.Printf("Bale scheduler: campaign id=%d batch [%d,%d) saved, sending to Bale", c.ID, start, end)
 
 		batchResponses, batchErr := s.baleClient.SendBatch(ctx, items)
 		if batchErr != nil {
-			s.logger.Printf("Bale scheduler: send batch failed campaign id=%d err=%v", c.ID, batchErr)
+			s.logger.Printf("Bale scheduler: send batch [%d,%d) failed for campaign id=%d: %v", start, end, c.ID, batchErr)
 		}
 		responseByRequestID := make(map[string]*BaleSendMessageResponse, len(batchResponses))
 		for i := range batchResponses {
@@ -385,6 +414,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			respCopy := resp
 			responseByRequestID[reqID] = &respCopy
 		}
+		s.logger.Printf("Bale scheduler: campaign id=%d batch [%d,%d) Bale responded: sent=%d responses=%d", c.ID, start, end, len(items), len(batchResponses))
 
 		sendUpdates := make([]repository.SentBaleSendResultUpdate, 0, len(items))
 		for _, item := range items {
@@ -402,7 +432,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		}
 
 		if len(sendUpdates) > 0 {
-			// TODO: Start tx here if needed?
 			if updateErr := s.sentRepo.UpdateSendResultByTrackingIDs(ctx, sendUpdates); updateErr != nil {
 				s.logger.Printf("Bale scheduler: failed to batch update sent_bale provider fields for campaign id=%d: %v", c.ID, updateErr)
 				// NOTE: Error silent here; not returning to avoid blocking further processing
@@ -411,25 +440,26 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 
 		if err := s.scheduleStatusCheckJobs(ctx, pc.ID, trackingIDs); err != nil {
 			s.logger.Printf("Bale scheduler: failed to schedule status jobs for campaign id=%d: %v", c.ID, err)
-			// TODO: How to handle this error? Retry scheduling? Skip status checks for this batch?
+			// NOTE: Error silent here; not returning to avoid blocking further processing
 		}
+		s.logger.Printf("Bale scheduler: campaign id=%d batch [%d,%d) done, sleeping message_delay", c.ID, start, end)
 		if err := sleepWithContext(ctx, s.messageDelay); err != nil {
-			return err
+			return fmt.Errorf("interrupted during batch delay at [%d,%d) for campaign id=%d: %w", start, end, c.ID, err)
 		}
 	}
 
 	stats, err := s.updateProcessedCampaignStats(ctx, pc.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
 	}
 	if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
-		return err
+		return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
 	}
 
 	s.logger.Printf("Bale scheduler: campaign id=%d all batches sent", c.ID)
 
 	if err := s.botClient.MoveCampaignToExecuted(ctx, jazzAccessToken, c.ID); err != nil {
-		return err
+		return fmt.Errorf("move campaign id=%d to executed: %w", c.ID, err)
 	}
 	s.logger.Printf("Bale scheduler: campaign id=%d moved to executed", c.ID)
 
@@ -613,7 +643,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
 		CampaignID:      c.ID,
 		Items:           items,
-		ShortLinkDomain: "jo1n.ir/",
+		ShortLinkDomain: "jo1n.ir/", // TODO:
 	})
 	if err != nil {
 		s.logger.Printf("fetchBaleAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
@@ -637,7 +667,7 @@ func (s *BaleCampaignScheduler) buildBaleMessageBody(c dto.BotGetCampaignRespons
 		content = *c.Content
 	}
 	if hasCampaignAdLink(c.AdLink) {
-		shortened := "jo1n.ir/" + code
+		shortened := "jo1n.ir/" + code // TODO:
 		return strings.ReplaceAll(content, "🔗", shortened)
 	}
 	return strings.ReplaceAll(content, "🔗", "")
@@ -708,9 +738,11 @@ func (s *BaleCampaignScheduler) startStatusJobWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ctx2, cancel := context.WithTimeout(ctx, 10*time.Minute)
-			s.processStatusJobs(ctx2)
-			cancel()
+			func() {
+				ctx2, cancel := context.WithTimeout(ctx, 5*time.Minute) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
+				defer cancel()
+				s.processStatusJobs(ctx2)
+			}()
 		}
 	}
 }
@@ -733,7 +765,7 @@ func (s *BaleCampaignScheduler) processStatusJobs(ctx context.Context) {
 	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
 	for _, j := range jobs {
 		func(job *models.CampaignStatusJob) {
-			jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: Make this timeout configurable
+			jobCtx, cancel := context.WithTimeout(ctx, 2*time.Minute) // TODO: Make this timeout configurable
 			defer cancel()
 			if err := s.handleStatusJob(jobCtx, job); err != nil {
 				s.logger.Printf("Bale scheduler: handle status job id=%d failed: %v", job.ID, err)
@@ -796,7 +828,6 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		return fetchErr
 	}
 
-	var stats map[string]any
 	txErr := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		now := utils.UTCNow()
 
@@ -863,6 +894,9 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 				Metadata:              metadata,
 			})
 		}
+		if len(sendUpdates) == 0 {
+			s.logger.Printf("handleStatusJob: all status items filtered out (no valid server_id or matched row) for job_id=%d processed_campaign_id=%d", job.ID, job.ProcessedCampaignID)
+		}
 		if err := s.sentRepo.UpdateSendResultByTrackingIDs(txCtx, sendUpdates); err != nil {
 			return err
 		}
@@ -879,7 +913,8 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		return txErr
 	}
 
-	if stats, err = s.updateProcessedCampaignStats(ctx, job.ProcessedCampaignID); err != nil {
+	stats, err := s.updateProcessedCampaignStats(ctx, job.ProcessedCampaignID)
+	if err != nil {
 		return err
 	}
 
@@ -1072,22 +1107,21 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStats(ctx context.Context
 	if pc == nil {
 		return nil, fmt.Errorf("processed campaign not found for processed_campaign_id=%d", processedCampaignID)
 	}
-	if s.resRepo == nil {
-		return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
-	}
 
 	agg, err := s.resRepo.AggregateByCampaign(ctx, processedCampaignID)
 	if err != nil {
 		return nil, err
 	}
 
-	trackingResults, err := s.resRepo.TrackingResultsByCampaign(ctx, processedCampaignID)
-	if err != nil {
-		return nil, err
-	}
+	// trackingResults, err := s.resRepo.TrackingResultsByCampaign(ctx, processedCampaignID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	// Fallback before any status jobs land.
-	if agg.AggregatedTotalRecords == 0 && len(trackingResults) == 0 {
+	// if agg.AggregatedTotalRecords == 0 && len(trackingResults) == 0 {
+	if agg.AggregatedTotalRecords == 0 {
+		s.logger.Printf("updateProcessedCampaignStats: no status results yet for processed_campaign_id=%d, falling back to sent rows", processedCampaignID)
 		return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
 	}
 
@@ -1098,8 +1132,8 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStats(ctx context.Context
 		"aggregatedTotalDeliveredParts":   agg.AggregatedDeliveredParts,
 		"aggregatedTotalUnDeliveredParts": agg.AggregatedUndelivered,
 		"aggregatedTotalUnKnownParts":     agg.AggregatedUnknown,
-		"trackingResults":                 trackingResults,
-		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+		// "trackingResults":                 trackingResults,
+		"updatedAt": utils.UTCNow().Format(time.RFC3339),
 	}
 	data, err := json.Marshal(stats)
 	if err != nil {
@@ -1114,6 +1148,7 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStats(ctx context.Context
 }
 
 func (s *BaleCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx context.Context, pc *models.ProcessedCampaign) (map[string]any, error) {
+	s.logger.Printf("updateProcessedCampaignStatsFromSentRows: computing stats from sent rows for processed_campaign_id=%d", pc.ID)
 	type row struct {
 		Total      int64
 		Successful int64
@@ -1128,10 +1163,10 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx con
 		return nil, err
 	}
 
-	trackingResults, err := s.sentRepo.TrackingResultsFromSentRows(ctx, pc.ID)
-	if err != nil {
-		return nil, err
-	}
+	// trackingResults, err := s.sentRepo.TrackingResultsFromSentRows(ctx, pc.ID)
+	// if err != nil {
+	// 	return nil, err
+	// }
 
 	stats := map[string]any{
 		"aggregatedTotalRecords":          agg.Total,
@@ -1140,8 +1175,8 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx con
 		"aggregatedTotalDeliveredParts":   agg.Successful,
 		"aggregatedTotalUnDeliveredParts": agg.Total - agg.Successful,
 		"aggregatedTotalUnKnownParts":     int64(0),
-		"trackingResults":                 trackingResults,
-		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+		// "trackingResults":                 trackingResults,
+		"updatedAt": utils.UTCNow().Format(time.RFC3339),
 	}
 	data, err := json.Marshal(stats)
 	if err != nil {
