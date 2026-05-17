@@ -816,11 +816,11 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		return ErrAgencyDiscountNotFound
 	}
 
-	real := uint64(float64(realWithTax) * .9)
+	real := uint64(realWithTax * 10 / 11)
 	tax := realWithTax - real
-	realSystemShare := uint64(float64(systemShareWithTax) * .9)
+	realSystemShare := uint64(systemShareWithTax * 10 / 11)
 	taxSystemShare := systemShareWithTax - realSystemShare
-	realAgencyShare := uint64(float64(agencyShareWithTax) * .9)
+	realAgencyShare := uint64(agencyShareWithTax * 10 / 11)
 	taxAgencyShare := agencyShareWithTax - realAgencyShare
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
@@ -1144,7 +1144,7 @@ func (p *PaymentFlowImpl) generatePaymentResultHTML(
 		return "", ErrAgencyDiscountNotFound
 	}
 
-	real := uint64(float64(realWithTax) * .9)
+	real := uint64(realWithTax * 10 / 11)
 	tax := realWithTax - real
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
@@ -1733,7 +1733,7 @@ func (p *PaymentFlowImpl) PreviewProformaInvoice(ctx context.Context, customerID
 	}
 	now := utils.UTCNow()
 	invoiceNumber := receipt.InvoiceNumber
-	real := uint64(float64(amountWithTax) * .9)
+	real := uint64(float64(amountWithTax) * 10 / 11)
 	tax := amountWithTax - real
 	serviceDesc := "Jazebeh wallet top-up"
 	notes := "This is a proforma invoice. Final invoice will be issued after payment confirmation."
@@ -1804,7 +1804,7 @@ func (p *PaymentFlowImpl) PreviewProformaInvoiceByAmount(ctx context.Context, cu
 	}
 	now := utils.UTCNow()
 	invoiceNumber := "-"
-	real := uint64(float64(amountWithTax) * .9)
+	real := uint64(float64(amountWithTax) * 10 / 11)
 	tax := amountWithTax - real
 	serviceDesc := "Jazebeh wallet top-up"
 	notes := "This is a proforma invoice. Final invoice will be issued after payment confirmation."
