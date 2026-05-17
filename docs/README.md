@@ -11,12 +11,6 @@ A production-ready, secure, and scalable Go API built with clean architecture pr
 
 ## 🎯 **Quick Start**
 
-### **🚀 One-Command Local Deployment**
-```bash
-git clone https://github.com/amirphl/yamata-no-orochi.git
-cd yamata-no-orochi
-./scripts/deploy-local.sh thewritingonthewall.com
-```
 **Your API will be running at `https://thewritingonthewall.com` with full monitoring!**
 
 ### **🚀 Production Deployment (3 Commands)**
@@ -155,7 +149,6 @@ yamata-no-orochi/
 ### **Core Tables**
 - **`account_types`**: Account type definitions (individual, company, agency)
 - **`customers`**: Unified customer entity with conditional fields
-- **`otp_verifications`**: OTP management with expiration
 - **`customer_sessions`**: JWT session tracking
 - **`audit_log`**: Comprehensive audit trail
 
