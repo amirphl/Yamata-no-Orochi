@@ -19,6 +19,7 @@ type ProductionConfig struct {
 	Server     ServerConfig     `json:"server"`
 	Security   SecurityConfig   `json:"security"`
 	JWT        JWTConfig        `json:"jwt"`
+	Sentry     SentryConfig     `json:"sentry"`
 	SMS        SMSConfig        `json:"sms"`
 	Email      EmailConfig      `json:"email"`
 	Logging    LoggingConfig    `json:"logging"`
@@ -132,6 +133,16 @@ type JWTConfig struct {
 	Issuer          string        `json:"issuer"`
 	Audience        string        `json:"audience"`
 	Algorithm       string        `json:"algorithm"`
+}
+
+type SentryConfig struct {
+	DSN         string        `json:"dsn"`
+	Environment string        `json:"environment"`
+	Release     string        `json:"release"`
+	ServerName  string        `json:"server_name"`
+	Timeout     time.Duration `json:"timeout"`
+	Capture4xx  bool          `json:"capture_4xx"`
+	Capture5xx  bool          `json:"capture_5xx"`
 }
 
 type SMSConfig struct {
@@ -453,6 +464,15 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Issuer:          getEnvString("JWT_ISSUER", "yamata-no-orochi"),
 			Audience:        getEnvString("JWT_AUDIENCE", "yamata-no-orochi-api"),
 			Algorithm:       getEnvString("JWT_ALGORITHM", "HS256"),
+		},
+		Sentry: SentryConfig{
+			DSN:         getEnvString("SENTRY_DSN", ""),
+			Environment: getEnvString("SENTRY_ENVIRONMENT", getEnvString("APP_ENV", "production")),
+			Release:     getEnvString("SENTRY_RELEASE", getEnvString("VERSION", "1.0.0")),
+			ServerName:  getEnvString("SENTRY_SERVER_NAME", ""),
+			Timeout:     getEnvDuration("SENTRY_TIMEOUT", 5*time.Second),
+			Capture4xx:  getEnvBool("SENTRY_CAPTURE_4XX", true),
+			Capture5xx:  getEnvBool("SENTRY_CAPTURE_5XX", true),
 		},
 		SMS: SMSConfig{
 			ProviderDomain: getEnvString("SMS_PROVIDER_DOMAIN", "mock"),
