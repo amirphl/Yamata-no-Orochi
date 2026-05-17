@@ -24,6 +24,10 @@ volumes:
     driver: local
   postgres_backups_beta:
     driver: local
+  sentry_postgres_data_beta:
+    driver: local
+  sentry_redis_data_beta:
+    driver: local
 
 services:
   # PostgreSQL Database
@@ -118,6 +122,63 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.92
+    security_opt:
+      - no-new-privileges:true
+
+  # Sentry-compatible error tracking (GlitchTip)
+  sentry-postgres-beta:
+    image: postgres:15-alpine
+    container_name: yamata-sentry-postgres-beta
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${SENTRY_POSTGRES_DB}
+      POSTGRES_USER: ${SENTRY_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${SENTRY_POSTGRES_PASSWORD}
+    volumes:
+      - sentry_postgres_data_beta:/var/lib/postgresql/data
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.12
+    security_opt:
+      - no-new-privileges:true
+
+  sentry-redis-beta:
+    image: redis:8.0.3-alpine
+    container_name: yamata-sentry-redis-beta
+    restart: unless-stopped
+    volumes:
+      - sentry_redis_data_beta:/data
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.13
+    security_opt:
+      - no-new-privileges:true
+
+  sentry-beta:
+    image: glitchtip/glitchtip:latest
+    container_name: yamata-sentry-beta
+    restart: unless-stopped
+    depends_on:
+      - sentry-postgres-beta
+      - sentry-redis-beta
+    environment:
+      DATABASE_URL: postgres://${SENTRY_POSTGRES_USER}:${SENTRY_POSTGRES_PASSWORD}@sentry-postgres-beta:5432/${SENTRY_POSTGRES_DB}
+      REDIS_URL: redis://sentry-redis-beta:6379/0
+      SECRET_KEY: ${SENTRY_GLITCHTIP_SECRET_KEY}
+      PORT: 8000
+      GLITCHTIP_DOMAIN: https://${SENTRY_UI_DOMAIN}
+      ALLOWED_HOSTS: ${SENTRY_UI_DOMAIN}
+      CSRF_TRUSTED_ORIGINS: https://${SENTRY_UI_DOMAIN}
+      DEFAULT_FROM_EMAIL: ${SENTRY_DEFAULT_FROM_EMAIL}
+      ENABLE_USER_REGISTRATION: ${SENTRY_ENABLE_USER_REGISTRATION}
+      DJANGO_SUPERUSER_USERNAME: ${SENTRY_SUPERUSER_USERNAME}
+      DJANGO_SUPERUSER_PASSWORD: ${SENTRY_SUPERUSER_PASSWORD}
+      DJANGO_SUPERUSER_EMAIL: ${SENTRY_SUPERUSER_EMAIL}
+      EMAIL_URL: ${SENTRY_EMAIL_URL}
+    command: ["./bin/start-all-in-one.sh"]
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.14
     security_opt:
       - no-new-privileges:true
 
@@ -303,6 +364,13 @@ services:
       VERSION: ${VERSION:-1.0.0}
       COMMIT_HASH: ${COMMIT_HASH:-unknown}
       BUILD_TIME: ${BUILD_TIME:-unknown}
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      SENTRY_RELEASE: ${SENTRY_RELEASE}
+      SENTRY_SERVER_NAME: ${SENTRY_SERVER_NAME}
+      SENTRY_TIMEOUT: ${SENTRY_TIMEOUT}
+      SENTRY_CAPTURE_4XX: ${SENTRY_CAPTURE_4XX}
+      SENTRY_CAPTURE_5XX: ${SENTRY_CAPTURE_5XX}
 
       # Atipay Configuration
       ATIPAY_API_KEY: ${ATIPAY_API_KEY}
@@ -446,6 +514,34 @@ services:
       - /var/cache/nginx
       - /var/run
       - /tmp
+
+  nginx-sentry-forwarder-beta:
+    image: python:3.12-alpine
+    container_name: yamata-nginx-sentry-forwarder-beta
+    restart: unless-stopped
+    depends_on:
+      - nginx-beta
+      - sentry-beta
+    command: ["python", "/app/nginx_sentry_forwarder.py"]
+    environment:
+      SENTRY_DSN: ${SENTRY_DSN}
+      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+      SENTRY_RELEASE: ${SENTRY_RELEASE}
+      SENTRY_SERVER_NAME: nginx-beta
+      SENTRY_TIMEOUT_SECONDS: 5
+      SENTRY_PUBLIC_BASE_URL: https://${DOMAIN}
+      SENTRY_UI_DOMAIN: ${SENTRY_UI_DOMAIN}
+      NGINX_ACCESS_LOG: /var/log/nginx/access.log
+      NGINX_ERROR_LOG: /var/log/nginx/error.log
+      NGINX_LOG_POLL_INTERVAL_SECONDS: 0.5
+    volumes:
+      - ./scripts/nginx_sentry_forwarder.py:/app/nginx_sentry_forwarder.py:ro
+      - nginx_logs_beta:/var/log/nginx:ro
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.31
+    security_opt:
+      - no-new-privileges:true
 
   cert-monitor-beta:
     image: yamata-cert-monitor-beta
