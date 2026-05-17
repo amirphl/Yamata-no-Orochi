@@ -200,6 +200,7 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 		_ = lf.rc.Del(ctx, key).Err()
 		return nil, err
 	}
+	// TODO: Async
 	if err := lf.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID); err != nil {
 		_ = lf.rc.Del(ctx, key).Err()
 		return nil, err
@@ -331,6 +332,7 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 			// TODO: Delete OTP
 			return err
 		}
+		// TODO: Outside of TX
 		if err := lf.otpSMSSvc.SendOTP(txCtx, recipient, smsMessage, &customerID); err != nil {
 			// Log SMS failure but don't fail the entire process
 			errMsg := fmt.Sprintf("OTP generated but SMS failed: %v", err)
