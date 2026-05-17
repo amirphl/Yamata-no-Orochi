@@ -20,6 +20,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/gofiber/fiber/v3/log"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -132,11 +133,14 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 		message := fmt.Sprintf(s.messageConfig.SignupVerificationCodeTemplate, otpCode)
 		recipient, err := normalizeOTPMobile(req.RepresentativeMobile)
 		if err != nil {
+			log.Errorf("Signup: Error occurred while normalizing OTP mobile number: %v", err)
 			// TODO: deletePendingSignup
 			return
 		}
-		_ = s.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID)
-		// TODO: Handle error
+		err2 := s.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID)
+		if err2 != nil {
+			log.Errorf("Signup: Error occurred while sending OTP: %v", err2)
+		}
 		// TODO: deletePendingSignup
 	}()
 
@@ -275,6 +279,7 @@ func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendReques
 		err = s.notificationSvc.SendEmail(target, "Verification Code", message)
 	}
 	if err != nil {
+		log.Errorf("ResendOTP: Error occurred while resending OTP: %v", err)
 		// TODO: Delete OTP
 		return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", err)
 	}
