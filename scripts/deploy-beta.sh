@@ -64,6 +64,19 @@ generate_jwt_secret() {
 	openssl rand -hex 32
 }
 
+# Export the variables required to render the beta nginx template safely.
+export_beta_nginx_template_vars() {
+	local domain=$1
+
+	export DOMAIN="$domain"
+	export API_DOMAIN="api.$domain"
+	export MONITORING_DOMAIN="monitoring.$domain"
+	export SENTRY_UI_DOMAIN="sentry.$domain"
+	export HSTS_MAX_AGE="31536000"
+	export GLOBAL_RATE_LIMIT="1000"
+	export AUTH_RATE_LIMIT="10"
+}
+
 # Function to check if acme.sh is installed
 check_acme_sh() {
 	if ! command_exists "$ACME_SH_DIR/acme.sh"; then
@@ -107,14 +120,9 @@ validate_nginx_certificates() {
 	local tmp_conf
 	tmp_conf=$(mktemp)
 
-	export DOMAIN="$domain"
-	export API_DOMAIN="api.$domain"
-	export MONITORING_DOMAIN="monitoring.$domain"
-	export HSTS_MAX_AGE="31536000"
-	export GLOBAL_RATE_LIMIT="1000"
-	export AUTH_RATE_LIMIT="10"
+	export_beta_nginx_template_vars "$domain"
 
-	if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$tmp_conf"; then
+	if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$tmp_conf"; then
 		rm -f "$tmp_conf"
 		print_error "Failed to render nginx template for certificate validation"
 		exit 1
@@ -196,7 +204,7 @@ obtain_letsencrypt_certificates() {
 	fi
 	
 	# Obtain certificate using acme.sh with HTTP challenge
-	if "$ACME_SH_DIR/acme.sh" --issue -d "$domain" -d "www.$domain" -d "api.$domain" -d "monitoring.$domain" \
+	if "$ACME_SH_DIR/acme.sh" --issue -d "$domain" -d "www.$domain" -d "api.$domain" -d "monitoring.$domain" -d "sentry.$domain" \
 			--webroot /var/www/html --server letsencrypt; then
 		
 		print_success "Certificate obtained successfully for $domain"
@@ -243,20 +251,15 @@ generate_nginx_config() {
 	
 	# Create generated directory if it doesn't exist
 	mkdir -p "$NGINX_CONF_DIR/generated/beta"
-	
+
 	# Set environment variables for template processing
-	export DOMAIN="$domain"
-	export API_DOMAIN="api.$domain"
-	export MONITORING_DOMAIN="monitoring.$domain"
-	export HSTS_MAX_AGE="31536000"
-	export GLOBAL_RATE_LIMIT="1000"
-	export AUTH_RATE_LIMIT="10"
+	export_beta_nginx_template_vars "$domain"
 	
 	# Read the template and replace environment variables
 	if [ -f "$NGINX_TEMPLATE" ]; then
 		# Process the template with only specific environment variable substitution
 		# Use envsubst with specific variables to avoid interfering with Nginx variables
-		envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$NGINX_CONF_DIR/generated/beta/yamata.conf"
+		envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$NGINX_CONF_DIR/generated/beta/yamata.conf"
 		
 		# SSL certificate paths are already correct for Let's Encrypt
 		# No need to replace paths as they already point to /etc/letsencrypt/live/
@@ -421,15 +424,17 @@ start_services() {
 	$docker_cmd compose -f docker-compose.beta.yml up -d \
 		postgres-beta \
 		redis-beta \
+		sentry-postgres-beta \
+		sentry-redis-beta \
+		sentry-beta \
 		prometheus-beta \
 		grafana-beta \
 		frontend-beta \
 		postgres-backup-beta \
 		postgres-exporter-beta \
 		node-exporter-beta \
-		cadvisor-beta \
-		cert-monitor-beta
-	
+		cadvisor-beta
+
 	print_success "Core services started successfully (app-beta not started)"
 }
 
@@ -491,6 +496,11 @@ start_app_service() {
 	# Start nginx after app-beta to avoid implicit dependency startup
 	$docker_cmd compose -f docker-compose.beta.yml up -d nginx-beta
 	print_success "nginx-beta started"
+	# Start services that depend on nginx after the proxy is up.
+	$docker_cmd compose -f docker-compose.beta.yml up -d cert-monitor-beta
+	print_success "cert-monitor-beta started"
+	$docker_cmd compose -f docker-compose.beta.yml up -d nginx-sentry-forwarder-beta
+	print_success "nginx-sentry-forwarder-beta started"
 }
 
 # Function to display deployment information
@@ -503,6 +513,7 @@ show_deployment_info() {
 	echo "  Domain: https://$domain"
 	echo "  API: https://api.$domain"
 	echo "  Monitoring: https://monitoring.$domain"
+	echo "  Sentry: https://sentry.$domain"
 	echo ""
 	echo "⚠️  Important Notes:"
 	echo "  - Let's Encrypt certificates are used (browser will show valid SSL)"
