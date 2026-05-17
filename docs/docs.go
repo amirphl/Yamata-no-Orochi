@@ -3939,12 +3939,12 @@ const docTemplate = `{
                 "summary": "Bot Allocate Short Links",
                 "parameters": [
                     {
-                        "description": "Generate and create short links",
+                        "description": "Allocate per-phone short links",
                         "name": "request",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/dto.BotGenerateShortLinksRequest"
+                            "$ref": "#/definitions/dto.BotAllocateShortLinksRequest"
                         }
                     }
                 ],
@@ -3960,7 +3960,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.BotGenerateShortLinksResponse"
+                                            "$ref": "#/definitions/dto.BotAllocateShortLinksResponse"
                                         }
                                     }
                                 }
@@ -8076,6 +8076,9 @@ const docTemplate = `{
         "dto.AdminPlatformSettingsItem": {
             "type": "object",
             "properties": {
+                "business_license_uuid": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -8108,6 +8111,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "uuid": {
+                    "type": "string"
+                },
+                "website": {
                     "type": "string"
                 }
             }
@@ -8668,6 +8674,43 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.BotAllocateShortLinksRequest": {
+            "type": "object",
+            "required": [
+                "campaign_id",
+                "items",
+                "short_link_domain"
+            ],
+            "properties": {
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/dto.PhoneWithAdLink"
+                    }
+                },
+                "short_link_domain": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BotAllocateShortLinksResponse": {
+            "type": "object",
+            "properties": {
+                "codes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.BotCampaignPlatformSettingsSpec": {
             "type": "object",
             "properties": {
@@ -8781,47 +8824,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "uuid": {
-                    "type": "string"
-                }
-            }
-        },
-        "dto.BotGenerateShortLinksRequest": {
-            "type": "object",
-            "required": [
-                "campaign_id",
-                "phones",
-                "short_link_domain"
-            ],
-            "properties": {
-                "ad_link": {
-                    "type": "string",
-                    "maxLength": 10000
-                },
-                "campaign_id": {
-                    "type": "integer"
-                },
-                "phones": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "short_link_domain": {
-                    "type": "string"
-                }
-            }
-        },
-        "dto.BotGenerateShortLinksResponse": {
-            "type": "object",
-            "properties": {
-                "codes": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "message": {
                     "type": "string"
                 }
             }
@@ -9124,7 +9126,7 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string",
-                    "maxLength": 512,
+                    "maxLength": 4096,
                     "minLength": 1
                 },
                 "job": {
@@ -9230,7 +9232,7 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string",
-                    "maxLength": 512,
+                    "maxLength": 4096,
                     "minLength": 1
                 },
                 "job": {
@@ -9341,7 +9343,7 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string",
-                    "maxLength": 512,
+                    "maxLength": 4096,
                     "minLength": 1
                 },
                 "job": {
@@ -9552,7 +9554,7 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string",
-                    "maxLength": 512,
+                    "maxLength": 4096,
                     "minLength": 1
                 },
                 "job": {
@@ -9713,6 +9715,9 @@ const docTemplate = `{
                 "platform"
             ],
             "properties": {
+                "business_license_uuid": {
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -9740,12 +9745,18 @@ const docTemplate = `{
                         "active",
                         "inactive"
                     ]
+                },
+                "website": {
+                    "type": "string"
                 }
             }
         },
         "dto.CreatePlatformSettingsResponse": {
             "type": "object",
             "properties": {
+                "business_license_uuid": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -9768,6 +9779,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
+                    "type": "string"
+                },
+                "website": {
                     "type": "string"
                 }
             }
@@ -10017,8 +10031,14 @@ const docTemplate = `{
                 "platform_settings_id": {
                     "type": "integer"
                 },
+                "platform_settings_name": {
+                    "type": "string"
+                },
                 "scheduleat": {
                     "type": "string"
+                },
+                "segment_price_factor": {
+                    "type": "number"
                 },
                 "sex": {
                     "type": "string"
@@ -10510,6 +10530,22 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.PhoneWithAdLink": {
+            "type": "object",
+            "required": [
+                "phone"
+            ],
+            "properties": {
+                "ad_link": {
+                    "type": "string",
+                    "maxLength": 10000
+                },
+                "phone": {
+                    "type": "string",
+                    "maxLength": 20
+                }
+            }
+        },
         "dto.PlatformBasePriceItem": {
             "type": "object",
             "properties": {
@@ -10524,6 +10560,9 @@ const docTemplate = `{
         "dto.PlatformSettingsItem": {
             "type": "object",
             "properties": {
+                "business_license_uuid": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -10546,6 +10585,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                },
+                "website": {
                     "type": "string"
                 }
             }
@@ -11027,6 +11069,10 @@ const docTemplate = `{
                     "description": "Operation name for display",
                     "type": "string"
                 },
+                "refund": {
+                    "description": "Refund amount (when applicable)",
+                    "type": "integer"
+                },
                 "source": {
                     "description": "Metadata source key",
                     "type": "string"
@@ -11109,7 +11155,7 @@ const docTemplate = `{
                 },
                 "content": {
                     "type": "string",
-                    "maxLength": 512,
+                    "maxLength": 4096,
                     "minLength": 1
                 },
                 "finalize": {
