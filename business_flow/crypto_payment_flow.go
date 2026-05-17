@@ -903,11 +903,11 @@ func (f *CryptoPaymentFlowImpl) creditOnConfirmed(ctx context.Context, cpr *mode
 		return ErrAgencyDiscountNotFound
 	}
 
-	real := uint64(float64(realWithTax) * .9)
+	real := uint64(realWithTax * 10 / 11)
 	tax := realWithTax - real
-	realSystemShare := uint64(float64(systemShareWithTax) * .9)
+	realSystemShare := uint64(systemShareWithTax * 10 / 11)
 	taxSystemShare := systemShareWithTax - realSystemShare
-	realAgencyShare := uint64(float64(agencyShareWithTax) * .9)
+	realAgencyShare := uint64(agencyShareWithTax * 10 / 11)
 	taxAgencyShare := agencyShareWithTax - realAgencyShare
 	customerCredit := uint64(float64(real)/(1-agencyDiscount.DiscountRate)) - real
 
