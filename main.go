@@ -21,6 +21,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
 	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
+	"github.com/amirphl/Yamata-no-Orochi/app/observability"
 	"github.com/amirphl/Yamata-no-Orochi/app/router"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
 	businessflow "github.com/amirphl/Yamata-no-Orochi/business_flow"
@@ -170,6 +171,18 @@ func main() {
 
 	log.Println("Starting Yamata no Orochi application...")
 
+	if err := observability.InitSentry(observability.SentryConfig{
+		DSN:         cfg.Sentry.DSN,
+		Environment: cfg.Sentry.Environment,
+		Release:     cfg.Sentry.Release,
+		ServerName:  cfg.Sentry.ServerName,
+		Timeout:     cfg.Sentry.Timeout,
+		Capture4xx:  cfg.Sentry.Capture4xx,
+		Capture5xx:  cfg.Sentry.Capture5xx,
+	}); err != nil {
+		log.Fatalf("Failed to initialize sentry transport: %v", err)
+	}
+
 	// Initialize application
 	app, err := initializeApplication(cfg)
 	if err != nil {
@@ -213,6 +226,7 @@ func main() {
 	if err := app.server.ShutdownWithContext(shutdownCtx); err != nil {
 		log.Printf("Error during shutdown: %v", err)
 	}
+	observability.ShutdownSentry(shutdownCtx)
 
 	log.Println("Server stopped")
 }
