@@ -24,12 +24,18 @@ func NewCampaignRepository(db *gorm.DB) CampaignRepository {
 	}
 }
 
+// statisticsWithoutTrackingResults is the SELECT expression that returns all statistics
+// keys except "trackingResults", which can be very large and is excluded from read queries.
+const statisticsWithoutTrackingResults = "id, uuid, customer_id, status, created_at, updated_at, spec, comment, " +
+	"(statistics - 'trackingResults') AS statistics, num_audience"
+
 // ByID retrieves an campaign by ID
 func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Campaign, error) {
 	db := r.getDB(ctx)
 
 	var campaign models.Campaign
-	err := db.Preload("Customer").
+	err := db.Select(statisticsWithoutTrackingResults).
+		Preload("Customer").
 		Preload("Customer.AccountType").
 		Last(&campaign, id).Error
 	if err != nil {
@@ -111,6 +117,24 @@ func (r *CampaignRepositoryImpl) UpdateStatistics(ctx context.Context, id uint, 
 			"statistics": stats,
 			"updated_at": utils.UTCNow(),
 		}).Error
+}
+
+// AppendTrackingResults appends items to the trackingResults array inside statistics
+// without reading or rewriting the rest of the JSON, avoiding driver errors on large payloads.
+func (r *CampaignRepositoryImpl) AppendTrackingResults(ctx context.Context, id uint, items json.RawMessage) error {
+	db := r.getDB(ctx)
+	return db.Exec(
+		`UPDATE campaigns
+		 SET statistics = jsonb_set(
+		     COALESCE(statistics, '{}'),
+		     '{trackingResults}',
+		     COALESCE(statistics->'trackingResults', '[]') || ?::jsonb,
+		     true
+		 ),
+		 updated_at = ?
+		 WHERE id = ?`,
+		string(items), utils.UTCNow(), id,
+	).Error
 }
 
 // UpdateStatus updates only the status of an campaign
@@ -308,8 +332,9 @@ func (r *CampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.Cam
 		query = query.Offset(offset)
 	}
 
-	// Preload relationships
-	query = query.Preload("Customer").
+	// Preload relationships and exclude trackingResults from statistics
+	query = query.Select(statisticsWithoutTrackingResults).
+		Preload("Customer").
 		Preload("Customer.AccountType")
 
 	err := query.Find(&campaigns).Error
