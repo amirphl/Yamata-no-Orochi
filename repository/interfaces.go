@@ -127,6 +127,7 @@ type CampaignRepository interface {
 	ByStatus(ctx context.Context, status models.CampaignStatus, limit, offset int) ([]*models.Campaign, error)
 	Update(ctx context.Context, campaign models.Campaign) error
 	UpdateStatistics(ctx context.Context, id uint, stats json.RawMessage) error
+	AppendTrackingResults(ctx context.Context, id uint, items json.RawMessage) error
 	UpdateStatus(ctx context.Context, id uint, status models.CampaignStatus) error
 	CountByCustomerID(ctx context.Context, customerID uint) (int, error)
 	CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error)
