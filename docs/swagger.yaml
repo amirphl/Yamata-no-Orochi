@@ -684,6 +684,8 @@ definitions:
     type: object
   dto.AdminPlatformSettingsItem:
     properties:
+      business_license_uuid:
+        type: string
       created_at:
         type: string
       customer_id:
@@ -706,6 +708,8 @@ definitions:
       updated_at:
         type: string
       uuid:
+        type: string
+      website:
         type: string
     type: object
   dto.AdminRejectCampaignRequest:
@@ -1085,6 +1089,31 @@ definitions:
         example: "+989123456789"
         type: string
     type: object
+  dto.BotAllocateShortLinksRequest:
+    properties:
+      campaign_id:
+        type: integer
+      items:
+        items:
+          $ref: '#/definitions/dto.PhoneWithAdLink'
+        minItems: 1
+        type: array
+      short_link_domain:
+        type: string
+    required:
+    - campaign_id
+    - items
+    - short_link_domain
+    type: object
+  dto.BotAllocateShortLinksResponse:
+    properties:
+      codes:
+        items:
+          type: string
+        type: array
+      message:
+        type: string
+    type: object
   dto.BotCampaignPlatformSettingsSpec:
     properties:
       description:
@@ -1161,34 +1190,6 @@ definitions:
       username:
         type: string
       uuid:
-        type: string
-    type: object
-  dto.BotGenerateShortLinksRequest:
-    properties:
-      ad_link:
-        maxLength: 10000
-        type: string
-      campaign_id:
-        type: integer
-      phones:
-        items:
-          type: string
-        minItems: 1
-        type: array
-      short_link_domain:
-        type: string
-    required:
-    - campaign_id
-    - phones
-    - short_link_domain
-    type: object
-  dto.BotGenerateShortLinksResponse:
-    properties:
-      codes:
-        items:
-          type: string
-        type: array
-      message:
         type: string
     type: object
   dto.BotGetCampaignResponse:
@@ -1396,7 +1397,7 @@ definitions:
         maxItems: 255
         type: array
       content:
-        maxLength: 512
+        maxLength: 4096
         minLength: 1
         type: string
       job:
@@ -1472,7 +1473,7 @@ definitions:
         maxItems: 255
         type: array
       content:
-        maxLength: 512
+        maxLength: 4096
         minLength: 1
         type: string
       job:
@@ -1549,7 +1550,7 @@ definitions:
         maxItems: 255
         type: array
       content:
-        maxLength: 512
+        maxLength: 4096
         minLength: 1
         type: string
       job:
@@ -1699,7 +1700,7 @@ definitions:
         maxItems: 255
         type: array
       content:
-        maxLength: 512
+        maxLength: 4096
         minLength: 1
         type: string
       job:
@@ -1811,6 +1812,8 @@ definitions:
     type: object
   dto.CreatePlatformSettingsRequest:
     properties:
+      business_license_uuid:
+        type: string
       description:
         type: string
       multimedia_uuid:
@@ -1832,11 +1835,15 @@ definitions:
         - active
         - inactive
         type: string
+      website:
+        type: string
     required:
     - platform
     type: object
   dto.CreatePlatformSettingsResponse:
     properties:
+      business_license_uuid:
+        type: string
       created_at:
         type: string
       description:
@@ -1852,6 +1859,8 @@ definitions:
       platform:
         type: string
       status:
+        type: string
+      website:
         type: string
     type: object
   dto.CreateResponseTicketRequest:
@@ -2016,8 +2025,12 @@ definitions:
         type: string
       platform_settings_id:
         type: integer
+      platform_settings_name:
+        type: string
       scheduleat:
         type: string
+      segment_price_factor:
+        type: number
       sex:
         type: string
       short_link_domain:
@@ -2342,6 +2355,17 @@ definitions:
       total_pages:
         type: integer
     type: object
+  dto.PhoneWithAdLink:
+    properties:
+      ad_link:
+        maxLength: 10000
+        type: string
+      phone:
+        maxLength: 20
+        type: string
+    required:
+    - phone
+    type: object
   dto.PlatformBasePriceItem:
     properties:
       platform:
@@ -2351,6 +2375,8 @@ definitions:
     type: object
   dto.PlatformSettingsItem:
     properties:
+      business_license_uuid:
+        type: string
       created_at:
         type: string
       description:
@@ -2366,6 +2392,8 @@ definitions:
       status:
         type: string
       updated_at:
+        type: string
+      website:
         type: string
     type: object
   dto.ProfileDTO:
@@ -2706,6 +2734,9 @@ definitions:
       operation:
         description: Operation name for display
         type: string
+      refund:
+        description: Refund amount (when applicable)
+        type: integer
       source:
         description: Metadata source key
         type: string
@@ -2762,7 +2793,7 @@ definitions:
         maxItems: 255
         type: array
       content:
-        maxLength: 512
+        maxLength: 4096
         minLength: 1
         type: string
       finalize:
@@ -5294,12 +5325,12 @@ paths:
       consumes:
       - application/json
       parameters:
-      - description: Generate and create short links
+      - description: Allocate per-phone short links
         in: body
         name: request
         required: true
         schema:
-          $ref: '#/definitions/dto.BotGenerateShortLinksRequest'
+          $ref: '#/definitions/dto.BotAllocateShortLinksRequest'
       produces:
       - application/json
       responses:
@@ -5310,7 +5341,7 @@ paths:
             - $ref: '#/definitions/dto.APIResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/dto.BotGenerateShortLinksResponse'
+                  $ref: '#/definitions/dto.BotAllocateShortLinksResponse'
               type: object
         "400":
           description: Bad Request
