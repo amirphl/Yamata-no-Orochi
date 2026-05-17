@@ -13,6 +13,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
 	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
+	"github.com/amirphl/Yamata-no-Orochi/app/observability"
 	_ "github.com/amirphl/Yamata-no-Orochi/docs"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/gofiber/fiber/v3"
@@ -512,6 +513,9 @@ func (r *FiberRouter) setupMiddleware() {
 		},
 	}))
 
+	// Capture every completed 4xx/5xx response, even when the handler does not return an error.
+	r.app.Use(observability.HTTPStatusCaptureMiddleware())
+
 	// Prometheus HTTP metrics (concise)
 	r.app.Use(middleware.Metrics())
 
@@ -617,6 +621,7 @@ func (r *FiberRouter) setupMiddleware() {
 				c.Method(),
 				c.IP(),
 			)
+			observability.CapturePanic(c, e)
 		},
 	}))
 }
@@ -854,14 +859,21 @@ func (r *FiberRouter) notFoundHandler(c fiber.Ctx) error {
 func errorHandler(c fiber.Ctx, err error) error {
 	// Default error code
 	code := fiber.StatusInternalServerError
+	message := "An internal server error occurred"
+	errorCode := "INTERNAL_ERROR"
 
 	// Retrieve the custom status code if it's a fiber.*Error
 	if e, ok := err.(*fiber.Error); ok {
 		code = e.Code
+		if code >= fiber.StatusBadRequest && code < fiber.StatusInternalServerError {
+			message = e.Message
+			errorCode = strings.ToUpper(strings.ReplaceAll(e.Message, " ", "_"))
+		}
 	}
 
 	// Log the error
 	log.Printf("Error %d: %v", code, err)
+	observability.CaptureError(c, code, err, "fiber_error_handler")
 
 	// Get RequestID for tracing
 	requestID := c.Locals("requestid")
@@ -869,9 +881,9 @@ func errorHandler(c fiber.Ctx, err error) error {
 	// Return JSON error response
 	return c.Status(code).JSON(dto.APIResponse{
 		Success: false,
-		Message: "An internal server error occurred",
+		Message: message,
 		Error: dto.ErrorDetail{
-			Code: "INTERNAL_ERROR",
+			Code: errorCode,
 			Details: fiber.Map{
 				"timestamp":  utils.UTCNow().Unix(),
 				"request_id": requestID,
