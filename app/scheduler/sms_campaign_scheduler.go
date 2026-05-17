@@ -132,9 +132,11 @@ func (s *SMSCampaignScheduler) Start(parent context.Context) func() {
 			case <-parent.Done():
 				return
 			case <-ticker.C:
-				ctx, cancel := context.WithTimeout(parent, s.interval*4/5)
-				s.runOnce(ctx, parent)
-				cancel()
+				func() {
+					ctx, cancel := context.WithTimeout(parent, 15*time.Minute) // TODO:
+					defer cancel()
+					s.runOnce(ctx, parent)
+				}()
 			}
 		}
 	}()
@@ -212,25 +214,79 @@ func (s *SMSCampaignScheduler) runOnce(ctx context.Context, parent context.Conte
 func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) error {
 	// Sender from campaign line number
 	if c.LineNumber == nil {
-		return fmt.Errorf("sender is nil")
+		return fmt.Errorf("resolve SMS sender for campaign id=%d: sender is nil", c.ID)
 	}
 	if c.NumAudiences == nil || *c.NumAudiences <= 0 {
-		return fmt.Errorf("campaign has no audiences")
+		return fmt.Errorf("campaign id=%d has no audiences", c.ID)
 	}
 	sender := *c.LineNumber
 
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
-		return fmt.Errorf("move to running: %w", err)
+		return fmt.Errorf("move campaign id=%d to running: %w", c.ID, err)
 	}
 	s.logger.Printf("SMS scheduler: campaign id=%d moved to running", c.ID)
 
+	// Fetch audience data OUTSIDE any DB transaction.
+	// AllocateShortLinks and DownloadTargetAudienceExcelFile are external HTTP calls that can
+	// take 60+ seconds for large audiences. Holding a Postgres transaction open during these
+	// calls triggers idle_in_transaction_session_timeout, killing the connection with
+	// "driver: bad connection" on the next SQL statement.
 	var (
 		phones       []string
 		ids          []int64
 		codes        []string
 		unmatchedUID []string
-		pc           *models.ProcessedCampaign
+		selectionID  *uint
 	)
+	if hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID) {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context expired before fetching excel UIDs for campaign id=%d: %w", c.ID, err)
+		}
+		s.logger.Printf("SMS scheduler: campaign id=%d fetching audience UIDs from excel", c.ID)
+		fileUIDs, err := fetchTargetAudienceUIDsFromExcel(ctx, s.botClient, jazzAccessToken, c.ID)
+		if err != nil {
+			return fmt.Errorf("fetch excel UIDs for campaign id=%d: %w", c.ID, err)
+		}
+		s.logger.Printf("SMS scheduler: campaign id=%d resolving %d UIDs to phones", c.ID, len(fileUIDs))
+		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
+		if err != nil {
+			return fmt.Errorf("fetch audience phones by UIDs for campaign id=%d: %w", c.ID, err)
+		}
+		phones = audienceResult.Phones
+		ids = audienceResult.IDs
+		codes = audienceResult.Codes
+		unmatchedUID = audienceResult.UnmatchedUIDs
+		selectionID = nil
+		s.logger.Printf("SMS scheduler: campaign id=%d fetched %d phones via excel (unmatched=%d)", c.ID, len(phones), len(unmatchedUID))
+	} else {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context expired before fetching audiences for campaign id=%d: %w", c.ID, err)
+		}
+		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
+		correlationID := uuid.NewString()
+		s.logger.Printf("SMS scheduler: campaign id=%d fetching audience phones (correlation_id=%s)", c.ID, correlationID)
+		audienceResult, err := s.fetchSMSAudiencePhones(ctx, c, jazzAccessToken, correlationID)
+		if err != nil {
+			return fmt.Errorf("fetch audience phones for campaign id=%d: %w", c.ID, err)
+		}
+		phones = audienceResult.Phones
+		ids = audienceResult.IDs
+		codes = audienceResult.Codes
+		selectionID = utils.ToPtr(audienceResult.SelectionID)
+		s.logger.Printf("SMS scheduler: campaign id=%d fetched %d phones (selection_id=%d)", c.ID, len(phones), audienceResult.SelectionID)
+	}
+
+	if len(ids) != len(phones) {
+		return fmt.Errorf("audience ids mismatch for campaign id=%d: phones=%d ids=%d", c.ID, len(phones), len(ids))
+	}
+	if len(codes) != len(phones) {
+		return fmt.Errorf("audience codes mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
+	}
+	s.logger.Printf("SMS scheduler: campaign id=%d audience ready: phones=%d unmatched=%d", c.ID, len(phones), len(unmatchedUID))
+
+	// Persist ProcessedCampaign and all audience data in one focused transaction.
+	// No external calls here — the transaction stays short and the connection stays active.
+	var pc *models.ProcessedCampaign
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
 			CampaignID:          c.ID,
@@ -238,99 +294,65 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			AudienceIDs:         pq.Int64Array{},
 			AudienceCodes:       []string{},
 			LastAudienceID:      nil,
-			AudienceSelectionID: nil,
+			AudienceSelectionID: selectionID,
 			Statistics:          nil,
 		}
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
-			return err
+			return fmt.Errorf("save processed campaign: %w", err)
 		}
 		s.logger.Printf("SMS scheduler: persisted processed campaign id=%d for campaign id=%d", pc.ID, c.ID)
 
-		if hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID) {
-			fileUIDs, err := fetchTargetAudienceUIDsFromExcel(txCtx, s.botClient, jazzAccessToken, c.ID)
-			if err != nil {
-				return err
-			}
-			audienceResult, err := fetchAudiencePhonesByUIDs(txCtx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
-			if err != nil {
-				return err
-			}
-			phones = audienceResult.Phones
-			ids = audienceResult.IDs
-			codes = audienceResult.Codes
-			unmatchedUID = audienceResult.UnmatchedUIDs
-			s.logger.Printf("SMS scheduler: fetched %d audience phones via excel for campaign id=%d (unmatched=%d)", len(phones), c.ID, len(unmatchedUID))
-			pc.AudienceSelectionID = nil
-		} else {
-			// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
-			var err error
-			correlationID := uuid.NewString()
-			audienceResult, err := s.fetchSMSAudiencePhones(txCtx, c, jazzAccessToken, correlationID)
-			if err != nil {
-				return err
-			}
-			phones = audienceResult.Phones
-			ids = audienceResult.IDs
-			codes = audienceResult.Codes
-			s.logger.Printf("SMS scheduler: fetched %d audience phones for campaign id=%d", len(phones), c.ID)
-			pc.AudienceSelectionID = utils.ToPtr(audienceResult.SelectionID)
-		}
 		for start := 0; start < len(ids); start += audienceAppendBatchSize {
 			end := min(start+audienceAppendBatchSize, len(ids))
 			if err := s.pcRepo.AppendAudienceData(txCtx, pc.ID, ids[start:end], codes[start:end]); err != nil {
-				return err
+				return fmt.Errorf("append audience batch [%d,%d): %w", start, end, err)
 			}
 		}
-
 		pc.UpdatedAt = utils.UTCNow()
 		if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
-			return err
+			return fmt.Errorf("update processed campaign meta: %w", err)
 		}
-		s.logger.Printf("SMS scheduler: updated processed campaign id=%d with audience ids", pc.ID)
-
+		s.logger.Printf("SMS scheduler: updated processed campaign id=%d with %d audience ids", pc.ID, len(ids))
 		return nil
 	}); err != nil {
-		return err
+		return fmt.Errorf("persist campaign data for campaign id=%d: %w", c.ID, err)
 	}
 	s.logger.Printf("SMS scheduler: persisted processed campaign id=%d num_phones=%d, num_ids=%d, num_codes=%d, num_unmatched=%d", pc.ID, len(phones), len(ids), len(codes), len(unmatchedUID))
-	if len(ids) != len(phones) {
-		return fmt.Errorf("audience ids mismatch for campaign id=%d: phones=%d ids=%d", c.ID, len(phones), len(ids))
-	}
-	if len(codes) != len(phones) {
-		return fmt.Errorf("audience codes mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
-	}
 
 	if len(unmatchedUID) > 0 {
+		s.logger.Printf("SMS scheduler: campaign id=%d creating %d unmatched sent rows for processed_campaign_id=%d", c.ID, len(unmatchedUID), pc.ID)
 		if err := s.createUnmatchedSentSMSRows(ctx, pc.ID, unmatchedUID); err != nil {
-			return err
+			return fmt.Errorf("create unmatched sent rows for campaign id=%d: %w", c.ID, err)
 		}
 	}
 
 	for start := 0; start < len(phones); start += smsSendBatchSize {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("context expired at batch start=%d for campaign id=%d: %w", start, c.ID, err)
+		}
+
 		end := min(start+smsSendBatchSize, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
 		batchCodes := codes[start:end]
 
 		items := make([]PayamSMSItem, 0, len(batchPhones))
-
 		rows := make([]*models.SentSMS, 0, len(batchPhones))
+
+		s.logger.Printf("SMS scheduler: campaign id=%d allocating tracking ids for batch [%d,%d)", c.ID, start, end)
 		trackingIDs, err := allocateTrackingIDs(ctx, s.db, len(batchPhones))
 		if err != nil {
-			return err
+			return fmt.Errorf("allocate tracking ids for batch [%d,%d) campaign id=%d: %w", start, end, c.ID, err)
 		}
 
 		for i, p := range batchPhones {
 			body := s.buildSMSBody(c, batchCodes[i])
-
 			trackingID := trackingIDs[i]
-
 			items = append(items, PayamSMSItem{
 				Recipient:  p,
 				Body:       body,
 				TrackingID: trackingID,
 			})
-
 			rows = append(rows, &models.SentSMS{
 				ProcessedCampaignID: pc.ID,
 				PhoneNumber:         p,
@@ -340,27 +362,27 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			})
 		}
 
+		lastBatchID := batchIDs[len(batchIDs)-1]
 		if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 			if len(rows) > 0 {
 				if err := s.sentRepo.SaveBatch(txCtx, rows); err != nil {
-					return err
+					return fmt.Errorf("save batch rows: %w", err)
 				}
 			}
-			lastBatchID := batchIDs[len(batchIDs)-1]
-			pc.LastAudienceID = &lastBatchID
+			pc.LastAudienceID = utils.ToPtr(lastBatchID)
 			pc.UpdatedAt = utils.UTCNow()
 			if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
-				return err
+				return fmt.Errorf("update meta: %w", err)
 			}
-
 			return nil
 		}); err != nil {
-			return err
+			return fmt.Errorf("save batch [%d,%d) for campaign id=%d: %w", start, end, c.ID, err)
 		}
+		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) saved, sending to SMS provider", c.ID, start, end)
 
 		batchResponses, batchErr := s.smsClient.SendBatch(ctx, sender, items)
 		if batchErr != nil {
-			s.logger.Printf("SMS scheduler: payamsms send batch failed for campaign id=%d: %v", c.ID, batchErr)
+			s.logger.Printf("SMS scheduler: send batch [%d,%d) failed for campaign id=%d: %v", start, end, c.ID, batchErr)
 			// TODO: How to handle this error? Retry sending? Skip to next batch?
 		}
 
@@ -374,6 +396,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			respCopy := resp
 			responseByTrackingID[trackingID] = &respCopy
 		}
+		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) SMS provider responded: sent=%d responses=%d", c.ID, start, end, len(items), len(batchResponses))
 
 		sendUpdates := make([]repository.SentSMSProviderUpdate, 0, len(items))
 		for _, item := range items {
@@ -384,38 +407,31 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			sendUpdates = append(sendUpdates, buildSMSProviderUpdate(trackingID, responseByTrackingID[trackingID], batchErr))
 		}
 		if len(sendUpdates) > 0 {
-			// TODO: Start tx here if needed?
 			if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, sendUpdates); updateErr != nil {
 				s.logger.Printf("SMS scheduler: failed to batch update sent_sms provider fields for campaign id=%d: %v", c.ID, updateErr)
 				// NOTE: Error silent here; not returning to avoid blocking further processing
 			}
 		}
 
-		// Schedule status check jobs for this batch
-		batchTrackingIDs := make([]string, 0, len(rows))
-		for _, r := range rows {
-			if r.TrackingID != "" {
-				batchTrackingIDs = append(batchTrackingIDs, r.TrackingID)
-			}
-		}
-		if err := s.scheduleStatusCheckJobs(ctx, pc.ID, batchTrackingIDs); err != nil {
+		if err := s.scheduleStatusCheckJobs(ctx, pc.ID, trackingIDs); err != nil {
 			s.logger.Printf("SMS scheduler: failed to schedule status jobs for campaign id=%d: %v", c.ID, err)
-			// TODO: How to handle this error? Retry scheduling? Skip and rely on next batch's jobs to eventually cover these?
+			// NOTE: Error silent here; not returning to avoid blocking further processing
 		}
+		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) done", c.ID, start, end)
 	}
 
 	stats, err := s.updateProcessedCampaignStats(ctx, pc.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
 	}
 	if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
-		return err
+		return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
 	}
 
 	s.logger.Printf("SMS scheduler: campaign id=%d all batches sent", c.ID)
 
 	if err := s.botClient.MoveCampaignToExecuted(ctx, jazzAccessToken, c.ID); err != nil {
-		return err
+		return fmt.Errorf("move campaign id=%d to executed: %w", c.ID, err)
 	}
 	s.logger.Printf("SMS scheduler: campaign id=%d moved to executed", c.ID)
 
@@ -616,7 +632,7 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
 		CampaignID:      c.ID,
 		Items:           items,
-		ShortLinkDomain: "jo1n.ir/",
+		ShortLinkDomain: "jo1n.ir/", // TODO:
 	})
 	if err != nil {
 		s.logger.Printf("fetchSMSAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
@@ -640,7 +656,7 @@ func (s *SMSCampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code s
 		content = *c.Content
 	}
 	if hasCampaignAdLink(c.AdLink) {
-		shortened := "jo1n.ir/" + code
+		shortened := "jo1n.ir/" + code // TODO:
 		return strings.ReplaceAll(content, "🔗", shortened) + "\n" + "لغو۱۱"
 
 	}
@@ -782,9 +798,11 @@ func (s *SMSCampaignScheduler) startStatusJobWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Minute)
-			s.processStatusJobs(ctx2)
-			cancel2()
+			func() {
+				ctx2, cancel := context.WithTimeout(ctx, 5*time.Minute) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
+				defer cancel()
+				s.processStatusJobs(ctx2)
+			}()
 		}
 	}
 }
@@ -813,7 +831,7 @@ func (s *SMSCampaignScheduler) processStatusJobs(ctx context.Context) {
 	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
 	for _, j := range jobs {
 		func(job *models.CampaignStatusJob) {
-			jobCtx, cancel := context.WithTimeout(ctx, 30*time.Second) // TODO: adjust timeout as needed
+			jobCtx, cancel := context.WithTimeout(ctx, 2*time.Minute) // TODO: Make this timeout configurable
 			defer cancel()
 			if err := s.handleStatusJob(jobCtx, job, atiehAccessToken); err != nil {
 				s.logger.Printf("SMS scheduler: handle status job id=%d failed: %v", job.ID, err)
@@ -905,8 +923,8 @@ func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.
 	return nil
 }
 
-func (s *SMSCampaignScheduler) updateProcessedCampaignStats(txCtx context.Context, processedCampaignID uint) (map[string]any, error) {
-	pc, err := s.pcRepo.ByID(txCtx, processedCampaignID)
+func (s *SMSCampaignScheduler) updateProcessedCampaignStats(ctx context.Context, processedCampaignID uint) (map[string]any, error) {
+	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
 	if err != nil {
 		return nil, err
 	}
@@ -914,14 +932,21 @@ func (s *SMSCampaignScheduler) updateProcessedCampaignStats(txCtx context.Contex
 		return nil, fmt.Errorf("processed campaign not found for processed_campaign_id=%d", processedCampaignID)
 	}
 
-	agg, err := s.resRepo.AggregateByCampaign(txCtx, processedCampaignID)
+	agg, err := s.resRepo.AggregateByCampaign(ctx, processedCampaignID)
 	if err != nil {
 		return nil, err
 	}
 
-	trackingResults, err := s.resRepo.TrackingResultsByCampaign(txCtx, processedCampaignID)
-	if err != nil {
-		return nil, err
+	// trackingResults, err := s.resRepo.TrackingResultsByCampaign(ctx, processedCampaignID)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// Fallback before any status jobs land.
+	// if agg.AggregatedTotalRecords == 0 && len(trackingResults) == 0 {
+	if agg.AggregatedTotalRecords == 0 {
+		s.logger.Printf("updateProcessedCampaignStats: no status results yet for processed_campaign_id=%d, falling back to sent rows", processedCampaignID)
+		return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
 	}
 
 	stats := map[string]any{
@@ -931,8 +956,8 @@ func (s *SMSCampaignScheduler) updateProcessedCampaignStats(txCtx context.Contex
 		"aggregatedTotalDeliveredParts":   agg.AggregatedDeliveredParts,
 		"aggregatedTotalUnDeliveredParts": agg.AggregatedUndelivered,
 		"aggregatedTotalUnKnownParts":     agg.AggregatedUnknown,
-		"trackingResults":                 trackingResults,
-		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+		// "trackingResults":                 trackingResults,
+		"updatedAt": utils.UTCNow().Format(time.RFC3339),
 	}
 	data, err := json.Marshal(stats)
 	if err != nil {
@@ -940,7 +965,50 @@ func (s *SMSCampaignScheduler) updateProcessedCampaignStats(txCtx context.Contex
 	}
 	pc.Statistics = data
 	pc.UpdatedAt = utils.UTCNow()
-	if err := s.pcRepo.UpdateMeta(txCtx, pc); err != nil {
+	if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (s *SMSCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx context.Context, pc *models.ProcessedCampaign) (map[string]any, error) {
+	s.logger.Printf("updateProcessedCampaignStatsFromSentRows: computing stats from sent rows for processed_campaign_id=%d", pc.ID)
+	type row struct {
+		Total      int64
+		Successful int64
+	}
+	var agg row
+	if err := s.db.WithContext(ctx).Table("sent_sms").
+		Select(`
+			COUNT(*) AS total,
+			COALESCE(SUM(CASE WHEN LOWER(BTRIM(status::text)) = 'successful' THEN 1 ELSE 0 END), 0) AS successful`).
+		Where("processed_campaign_id = ?", pc.ID).
+		Scan(&agg).Error; err != nil {
+		return nil, err
+	}
+
+	// trackingResults, err := s.sentRepo.TrackingResultsFromSentRows(ctx, pc.ID)
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	stats := map[string]any{
+		"aggregatedTotalRecords":          agg.Total,
+		"aggregatedTotalSent":             agg.Successful,
+		"aggregatedTotalParts":            agg.Total,
+		"aggregatedTotalDeliveredParts":   agg.Successful,
+		"aggregatedTotalUnDeliveredParts": agg.Total - agg.Successful,
+		"aggregatedTotalUnKnownParts":     int64(0),
+		// "trackingResults":                 trackingResults,
+		"updatedAt": utils.UTCNow().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return nil, err
+	}
+	pc.Statistics = data
+	pc.UpdatedAt = utils.UTCNow()
+	if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
 		return nil, err
 	}
 	return stats, nil
