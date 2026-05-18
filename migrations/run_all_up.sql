@@ -317,5 +317,11 @@
 \echo 'Running 0103_add_business_license_and_website_to_platform_settings.sql...'
 \i migrations/0103_add_business_license_and_website_to_platform_settings.sql
 
+\echo 'Running 0104_create_sent_rubika_messages.sql...'
+\i migrations/0104_create_sent_rubika_messages.sql
+
+\echo 'Running 0105_create_rubika_status_results.sql...'
+\i migrations/0105_create_rubika_status_results.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
