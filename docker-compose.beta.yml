@@ -175,7 +175,8 @@ services:
       DJANGO_SUPERUSER_PASSWORD: ${SENTRY_SUPERUSER_PASSWORD}
       DJANGO_SUPERUSER_EMAIL: ${SENTRY_SUPERUSER_EMAIL}
       EMAIL_URL: ${SENTRY_EMAIL_URL}
-    command: ["./bin/start-all-in-one.sh"]
+      SERVER_ROLE: all_in_one
+    command: ["./bin/start.sh"]
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.14
