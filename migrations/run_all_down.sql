@@ -3,6 +3,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0105_create_rubika_status_results_down.sql...'
+\i migrations/0105_create_rubika_status_results_down.sql
+
+\echo 'Running 0104_create_sent_rubika_messages_down.sql...'
+\i migrations/0104_create_sent_rubika_messages_down.sql
+
 \echo 'Running 0103_add_business_license_and_website_to_platform_settings_down.sql...'
 \i migrations/0103_add_business_license_and_website_to_platform_settings_down.sql
 
