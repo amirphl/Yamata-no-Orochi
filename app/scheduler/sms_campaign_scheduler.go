@@ -26,7 +26,7 @@ import (
 // TODO: Tx management in queries, especially around processed_campaign creation and audience fetching to ensure consistency
 
 const (
-	smsSendBatchSize     = 100 // NOTE: MUST BE LESS THAN 250
+	smsSendBatchSize     = 200 // NOTE: MUST BE LESS THAN 250
 	smsStatusJobMaxRetry = 3
 )
 
@@ -133,7 +133,7 @@ func (s *SMSCampaignScheduler) Start(parent context.Context) func() {
 				return
 			case <-ticker.C:
 				func() {
-					ctx, cancel := context.WithTimeout(parent, 15*time.Minute) // TODO:
+					ctx, cancel := context.WithTimeout(parent, 20*time.Minute) // TODO:
 					defer cancel()
 					s.runOnce(ctx, parent)
 				}()
@@ -773,7 +773,7 @@ func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, proc
 
 	corrID := uuid.NewString()
 	now := utils.UTCNow()
-	offsets := []time.Duration{5 * time.Minute, 15 * time.Minute, 1 * time.Hour, 24 * time.Hour, 48 * time.Hour}
+	offsets := []time.Duration{1 * time.Minute, 5 * time.Minute, 15 * time.Minute, 24 * time.Hour, 48 * time.Hour}
 	jobs := make([]*models.CampaignStatusJob, 0, len(offsets))
 	for _, off := range offsets {
 		jobs = append(jobs, &models.CampaignStatusJob{
