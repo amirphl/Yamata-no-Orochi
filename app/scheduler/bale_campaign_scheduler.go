@@ -26,7 +26,7 @@ import (
 // TODO: Tx management in queries, especially around processed_campaign creation and audience fetching to ensure consistency
 
 const (
-	baleSendBatchSize       = 100
+	baleSendBatchSize       = 200
 	statusJobMaxRetry       = 3
 	audienceAppendBatchSize = 1000
 )
@@ -131,7 +131,7 @@ func (s *BaleCampaignScheduler) Start(parent context.Context) func() {
 				return
 			case <-ticker.C:
 				func() {
-					ctx, cancel := context.WithTimeout(parent, 15*time.Minute) // TODO:
+					ctx, cancel := context.WithTimeout(parent, 20*time.Minute) // TODO:
 					defer cancel()
 					s.runOnce(ctx, parent)
 				}()
@@ -713,7 +713,7 @@ func (s *BaleCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, pro
 
 	corrID := uuid.NewString()
 	now := utils.UTCNow()
-	offsets := []time.Duration{5 * time.Minute, 15 * time.Minute, 1 * time.Hour, 24 * time.Hour, 48 * time.Hour}
+	offsets := []time.Duration{1 * time.Minute, 5 * time.Minute, 15 * time.Minute, 24 * time.Hour, 48 * time.Hour}
 	jobs := make([]*models.CampaignStatusJob, 0, len(offsets))
 	for _, off := range offsets {
 		jobs = append(jobs, &models.CampaignStatusJob{
@@ -729,54 +729,46 @@ func (s *BaleCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, pro
 	return s.jobRepo.SaveBatch(ctx, jobs)
 }
 
-func (s *BaleCampaignScheduler) startStatusJobWorker(ctx context.Context) {
+func (s *BaleCampaignScheduler) startStatusJobWorker(parent context.Context) {
 	ticker := time.NewTicker(statusJobWorkerInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-parent.Done():
 			return
 		case <-ticker.C:
-			func() {
-				ctx2, cancel := context.WithTimeout(ctx, 5*time.Minute) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
-				defer cancel()
-				s.processStatusJobs(ctx2)
-			}()
-		}
-	}
-}
-
-func (s *BaleCampaignScheduler) processStatusJobs(ctx context.Context) {
-	if !s.baleClient.SupportsStatusTracking() || s.jobRepo == nil || s.resRepo == nil {
-		return
-	}
-
-	now := utils.UTCNow()
-	jobs, err := s.jobRepo.ListDue(ctx, now, numJobsPerTick)
-	if err != nil {
-		s.logger.Printf("Bale scheduler: list status jobs failed: %v", err)
-		return
-	}
-	if len(jobs) == 0 {
-		return
-	}
-
-	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
-	for _, j := range jobs {
-		func(job *models.CampaignStatusJob) {
-			jobCtx, cancel := context.WithTimeout(ctx, 2*time.Minute) // TODO: Make this timeout configurable
+			// ctx2, cancel := context.WithTimeout(parent, 5*time.Minute) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
+			ctx2, cancel := context.WithTimeout(parent, 60*time.Second) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
 			defer cancel()
-			if err := s.handleStatusJob(jobCtx, job); err != nil {
-				s.logger.Printf("Bale scheduler: handle status job id=%d failed: %v", job.ID, err)
-				if job.RetryCount >= statusJobMaxRetry {
-					s.notifyAdmin(fmt.Sprintf("Bale scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
-				}
-				// Note: The job will be retried later based on the retry logic in handleStatusJob, so we don't need to do anything else here for retries.
-			} else {
-				s.logger.Printf("Bale scheduler: handle status job id=%d succeeded", job.ID)
+			if !s.baleClient.SupportsStatusTracking() || s.jobRepo == nil || s.resRepo == nil {
+				continue
 			}
-		}(j)
+
+			now := utils.UTCNow()
+			jobs, err := s.jobRepo.ListDue(ctx2, now, numJobsPerTick)
+			if err != nil {
+				s.logger.Printf("Bale scheduler: list status jobs failed: %v", err)
+				continue
+			}
+			if len(jobs) == 0 {
+				continue
+			}
+
+			for _, job := range jobs {
+				ctx3, cancel3 := context.WithTimeout(ctx2, 2*time.Minute) // TODO: Make this timeout configurable; should be long enough to process the status job but short enough to avoid blocking subsequent jobs
+				defer cancel3()
+				if err := s.handleStatusJob(ctx3, job); err != nil {
+					s.logger.Printf("Bale scheduler: handle status job id=%d failed: %v", job.ID, err)
+					if job.RetryCount >= statusJobMaxRetry {
+						s.notifyAdmin(fmt.Sprintf("Bale scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
+					}
+					// Note: The job will be retried later based on the retry logic in handleStatusJob, so we don't need to do anything else here for retries.
+				} else {
+					s.logger.Printf("Bale scheduler: handle status job id=%d succeeded", job.ID)
+				}
+			}
+		}
 	}
 }
 
