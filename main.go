@@ -385,11 +385,13 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	tagRepo := repository.NewTagRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
+	sentRubikaMessageRepo := repository.NewSentRubikaMessageRepository(db)
 	sentSplusMessageRepo := repository.NewSentSplusMessageRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
 	campaignStatusJobRepo := repository.NewCampaignStatusJobRepository(db)
 	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
 	baleStatusResultRepo := repository.NewBaleStatusResultRepository(db)
+	rubikaStatusResultRepo := repository.NewRubikaStatusResultRepository(db)
 	splusStatusResultRepo := repository.NewSplusStatusResultRepository(db)
 	ticketRepo := repository.NewTicketRepository(db)
 	multimediaRepo := repository.NewMultimediaAssetRepository(db)
@@ -739,7 +741,10 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		rubikaSched := scheduler.NewRubikaCampaignScheduler(
 			audienceProfileRepo,
 			tagRepo,
+			sentRubikaMessageRepo,
 			processedCampaignRepo,
+			campaignStatusJobRepo,
+			rubikaStatusResultRepo,
 			notificationService,
 			db,
 			log.Default(),
