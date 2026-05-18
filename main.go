@@ -154,13 +154,21 @@ func startMetricsServer(cfg config.MetricsConfig, db *gorm.DB) (func(), error) {
 }
 
 func main() {
-	log.Println("Starting Yamata no Orochi application...")
-
 	// Load production configuration
 	cfg, err := config.LoadProductionConfig()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Configure logging to persist across container restarts with rotation
+	logCloser, err := setupLogging(cfg.Logging)
+	if err != nil {
+		log.Printf("Failed to initialize file logger, falling back to default: %v", err)
+	} else if logCloser != nil {
+		defer logCloser.Close()
+	}
+
+	log.Println("Starting Yamata no Orochi application...")
 
 	// Initialize application
 	app, err := initializeApplication(cfg)
@@ -346,6 +354,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	balanceSnapshotRepo := repository.NewBalanceSnapshotRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
 	agencyDiscountRepo := repository.NewAgencyDiscountRepository(db)
+	depositReceiptRepo := repository.NewDepositReceiptRepository(db)
 	adminRepo := repository.NewAdminRepository(db)
 	lineNumberRepo := repository.NewLineNumberRepository(db)
 	botRepo := repository.NewBotRepository(db)
@@ -450,6 +459,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		balanceSnapshotRepo,
 		transactionRepo,
 		agencyDiscountRepo,
+		depositReceiptRepo,
 		db,
 		cfg.Atipay,
 		cfg.System,
@@ -463,6 +473,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		balanceSnapshotRepo,
 		transactionRepo,
 		agencyDiscountRepo,
+		depositReceiptRepo,
 		db,
 		cfg.Atipay,
 		cfg.System,
@@ -554,9 +565,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	lineNumberFlow := businessflow.NewLineNumberFlow(lineNumberRepo)
 
-	adminLineNumberFlow := businessflow.NewAdminLineNumberFlow(lineNumberRepo, db)
+	adminLineNumberFlow := businessflow.NewAdminLineNumberFlow(lineNumberRepo, db, auditRepo)
 
-	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo)
+	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo, auditRepo)
 
 	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, platformSettingsRepo, cfg.Cache, db, rc)
 	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
@@ -571,9 +582,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo, shortLinkClickRepo)
 
 	// Admin short-links flows and handler
-	adminShortLinkFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo)
-	adminShortLinkDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo)
-	adminShortLinkClicksDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo)
+	adminShortLinkFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo, auditRepo)
+	adminShortLinkDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo, auditRepo)
+	adminShortLinkClicksDownloadFlow := businessflow.NewAdminShortLinkFlow(shortLinkRepo, shortLinkClickRepo, auditRepo)
 
 	// Profile flow
 	profileFlow := businessflow.NewProfileFlow(customerRepo)
