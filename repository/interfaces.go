@@ -314,6 +314,16 @@ type SentSplusSendResultUpdate struct {
 	Description    *string
 }
 
+// SentRubikaSendResultUpdate describes send result fields update identified by tracking id.
+type SentRubikaSendResultUpdate struct {
+	TrackingID     string
+	Status         models.RubikaSendStatus
+	PartsDelivered int
+	ServerID       *string
+	ErrorCode      *string
+	Description    *string
+}
+
 // SentSMSRepository defines operations for sent SMS rows
 type SentSMSRepository interface {
 	Repository[models.SentSMS, models.SentSMSFilter]
@@ -340,6 +350,16 @@ type SentSplusMessageRepository interface {
 	ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentSplusMessage, error)
 	TrackingResultsFromSentRows(ctx context.Context, processedCampaignID uint) ([]SplusTrackingResult, error)
 	UpdateSendResultByTrackingIDs(ctx context.Context, updates []SentSplusSendResultUpdate) error
+}
+
+// SentRubikaMessageRepository defines operations for sent Rubika message rows.
+type SentRubikaMessageRepository interface {
+	Repository[models.SentRubikaMessage, models.SentRubikaMessageFilter]
+	ByID(ctx context.Context, id uint) (*models.SentRubikaMessage, error)
+	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentRubikaMessage, error)
+	ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentRubikaMessage, error)
+	TrackingResultsFromSentRows(ctx context.Context, processedCampaignID uint) ([]RubikaTrackingResult, error)
+	UpdateSendResultByTrackingIDs(ctx context.Context, updates []SentRubikaSendResultUpdate) error
 }
 
 // CampaignStatusJobRepository defines operations for cross-platform status check jobs.
@@ -373,6 +393,14 @@ type SplusStatusResultRepository interface {
 	SaveBatch(ctx context.Context, rows []*models.SplusStatusResult) error
 	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*SplusStatusAggregates, error)
 	TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SplusTrackingResult, error)
+}
+
+// RubikaStatusResultRepository defines operations for Rubika status check results.
+type RubikaStatusResultRepository interface {
+	Repository[models.RubikaStatusResult, any]
+	SaveBatch(ctx context.Context, rows []*models.RubikaStatusResult) error
+	AggregateByCampaign(ctx context.Context, processedCampaignID uint) (*RubikaStatusAggregates, error)
+	TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]RubikaTrackingResult, error)
 }
 
 // MultimediaAssetRepository defines operations for multimedia assets
