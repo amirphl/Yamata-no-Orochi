@@ -30,7 +30,7 @@ const (
 	trackingCounterHexLen = 16
 	trackingCounterBits   = 16 * 4
 
-	numJobsPerTick          = 50
+	numJobsPerTick          = 100
 	statusJobWorkerInterval = 5 * time.Minute
 )
 
