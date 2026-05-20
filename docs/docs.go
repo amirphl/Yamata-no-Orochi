@@ -4841,7 +4841,10 @@ const docTemplate = `{
         },
         "/api/v1/campaigns/{uuid}/test-send": {
             "post": {
-                "description": "Send a best-effort test message for a campaign to the authenticated customer's representative mobile",
+                "description": "Send a best-effort test message for a campaign to a target phone number",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -4856,6 +4859,15 @@ const docTemplate = `{
                         "name": "uuid",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "description": "Campaign test-send target",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.SendCampaignTestMessageRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -10731,6 +10743,17 @@ const docTemplate = `{
                 },
                 "price_factor": {
                     "type": "number"
+                }
+            }
+        },
+        "dto.SendCampaignTestMessageRequest": {
+            "type": "object",
+            "required": [
+                "target_phone_number"
+            ],
+            "properties": {
+                "target_phone_number": {
+                    "type": "string"
                 }
             }
         },
