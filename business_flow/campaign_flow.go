@@ -3147,6 +3147,7 @@ func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
 
 	// Remove the link character (🔗) before counting
 	textWithoutLinkChar := strings.ReplaceAll(text, "🔗", "")
+	textWithoutLinkChar = strings.ReplaceAll(text, "{YOUR_LINK}", "")
 
 	var count uint64
 	for _, char := range textWithoutLinkChar {
