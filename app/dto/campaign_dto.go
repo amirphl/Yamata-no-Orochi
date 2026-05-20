@@ -99,8 +99,9 @@ type CancelCampaignResponse struct {
 
 // SendCampaignTestMessageRequest represents a request to send a test message for a campaign.
 type SendCampaignTestMessageRequest struct {
-	UUID       string `json:"-"`
-	CustomerID uint   `json:"-"`
+	UUID              string `json:"-"`
+	CustomerID        uint   `json:"-"`
+	TargetPhoneNumber string `json:"target_phone_number" validate:"required,mobile_format"`
 }
 
 // SendCampaignTestMessageResponse represents the response of a test-send attempt.
