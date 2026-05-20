@@ -1,6 +1,8 @@
 -- run_all_up.sql
 -- Convenience script to apply all migrations in correct order
 
+\set ON_ERROR_STOP on
+
 \echo 'Starting database migration...'
 
 \echo 'Running 0001_create_account_types.sql...'
@@ -234,5 +236,23 @@
 \echo 'Running 0076_rename_sms_campaigns_to_campaigns.sql...'
 \i migrations/0076_rename_sms_campaigns_to_campaigns.sql
 
+\echo 'Running 0077_drop_audit_log_customer_fk.sql...'
+\i migrations/0077_drop_audit_log_customer_fk.sql
+
+\echo 'Running 0078_drop_agency_commissions.sql...'
+\i migrations/0078_drop_agency_commissions.sql
+
+\echo 'Running 0079_drop_otp_verifications.sql...'
+\i migrations/0079_drop_otp_verifications.sql
+
+\echo 'Running 0080_add_lang_to_payment_requests.sql...'
+\i migrations/0080_add_lang_to_payment_requests.sql
+
+\echo 'Running 0081_add_admin_audit_actions.sql...'
+\i migrations/0081_add_admin_audit_actions.sql
+
+\echo 'Running 0082_create_deposit_receipts.sql...'
+\i migrations/0082_create_deposit_receipts.sql
+
 \echo 'All migrations completed successfully!'
-\echo 'Database schema is now ready for the Yamata no Orochi wallet, payment, and agency commission system with comprehensive audit logging and tax collection.' 
+\echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
