@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -29,6 +30,10 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 	}
 	if req.CustomerID == 0 {
 		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_INVALID_REQUEST", "customer id is required", ErrCustomerNotFound)
+	}
+	recipient := strings.TrimSpace(req.TargetPhoneNumber)
+	if recipient == "" {
+		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_RECIPIENT_MISSING", "target phone number is missing", ErrCampaignTestRecipientMissing)
 	}
 
 	customer, err := getCustomer(ctx, s.customerRepo, req.CustomerID)
@@ -56,11 +61,6 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_CONTENT_REQUIRED", "campaign content is required", ErrCampaignContentRequired)
 	}
 
-	recipient := strings.TrimSpace(customer.RepresentativeMobile)
-	if recipient == "" {
-		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_RECIPIENT_MISSING", "representative mobile is missing", ErrCampaignTestRecipientMissing)
-	}
-
 	ok, ttl, err := s.tryAcquireCampaignTestCooldown(ctx, customer.ID, campaignTestCooldown)
 	if err != nil {
 		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_COOLDOWN_UNAVAILABLE", "failed to enforce campaign test cooldown", ErrCampaignTestCooldownUnavailable)
@@ -86,6 +86,7 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 	if hardErr != nil {
 		errMsg := fmt.Sprintf("Campaign test send failed: %v", hardErr)
 		_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignTestSend, errMsg, false, &errMsg, metadata)
+		log.Printf("Error sending campaign test message: %v", hardErr)
 		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_FAILED", "campaign test send failed", hardErr)
 	}
 
@@ -98,6 +99,7 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 		auditSuccess = false
 		e := softErr.Error()
 		auditErrMsg = &e
+		log.Printf("Warning during campaign test send: %v", softErr)
 	}
 
 	auditDesc := map[string]any{
@@ -153,8 +155,8 @@ func (s *CampaignFlowImpl) tryAcquireCampaignTestCooldown(ctx context.Context, c
 
 func buildFakeShortCode() string {
 	id := strings.ReplaceAll(uuid.NewString(), "-", "")
-	if len(id) > 12 {
-		id = id[:12]
+	if len(id) > 6 {
+		id = id[:6]
 	}
 	return "tst" + id
 }
@@ -169,9 +171,11 @@ func buildCampaignTestMessageBody(platform string, contentPtr *string, adLink *s
 		content = *contentPtr
 	}
 	if hasCampaignAdLink(adLink) {
-		content = strings.ReplaceAll(content, "🔗", "jo1n.ir/"+fakeCode)
+		content = strings.ReplaceAll(content, "🔗", "jo1n.ir/"+fakeCode) // backward compatibility
+		content = strings.ReplaceAll(content, "{YOUR_LINK}", "jo1n.ir/"+fakeCode)
 	} else {
-		content = strings.ReplaceAll(content, "🔗", "")
+		content = strings.ReplaceAll(content, "🔗", "") // backward compatibility
+		content = strings.ReplaceAll(content, "{YOUR_LINK}", "")
 	}
 	if platform == models.CampaignPlatformSMS {
 		return content + "\n" + "لغو۱۱"
@@ -202,11 +206,15 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			return nil, err
 		}
 		client := scheduler.NewPayamSMSClient(s.payamSMSConfig)
-		_, err := client.SendBatch(sendCtx, lineNumber, []scheduler.PayamSMSItem{{
+		resp, err := client.SendBatch(sendCtx, lineNumber, []scheduler.PayamSMSItem{{
 			Recipient:  recipient,
 			Body:       body,
 			TrackingID: buildProviderTestID("test-sms", campaign.CustomerID),
 		}})
+		if err == nil && len(resp) > 0 {
+			log.Printf("sendCampaignTestMessageBestEffort: PayamSMS response for campaign test send (line number: %s): %+v", lineNumber, resp)
+		}
+
 		return err, nil
 
 	case models.CampaignPlatformBale:
@@ -239,7 +247,7 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			}
 		}
 
-		_, err = baleClient.SendMessage(sendCtx, &scheduler.BaleSendMessageRequest{
+		resp, err := baleClient.SendMessage(sendCtx, &scheduler.BaleSendMessageRequest{
 			RequestID:   buildProviderTestID("test-bale", campaign.CustomerID),
 			BotID:       botID,
 			PhoneNumber: recipient,
@@ -250,6 +258,9 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 				},
 			},
 		})
+		if err == nil && resp != nil {
+			log.Printf("sendCampaignTestMessageBestEffort: Response from Bale provider: %+v", resp)
+		}
 		return err, nil
 
 	case models.CampaignPlatformRubika:
@@ -283,11 +294,15 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			}
 		}
 
-		_, err = rubikaClient.SendBulkMessages(sendCtx, serviceID, []scheduler.RubikaMessagePayload{{
+		resp, err := rubikaClient.SendBulkMessages(sendCtx, serviceID, []scheduler.RubikaMessagePayload{{
 			Phone:  recipient,
 			Text:   body,
 			FileID: fileID,
 		}})
+		if err == nil && resp != nil {
+			log.Printf("sendCampaignTestMessageBestEffort: Response from Rubika provider: %+v", resp)
+		}
+
 		return err, nil
 
 	case models.CampaignPlatformSPlus:
@@ -318,11 +333,14 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			}
 		}
 
-		_, err = splusClient.SendMessage(sendCtx, botID, &scheduler.SplusSendMessageRequest{
+		resp, err := splusClient.SendMessage(sendCtx, botID, &scheduler.SplusSendMessageRequest{
 			PhoneNumber: recipient,
 			Text:        body,
 			FileID:      fileID,
 		})
+		if err == nil && resp != nil {
+			log.Printf("sendCampaignTestMessageBestEffort: Response from SPlus provider: %+v", resp)
+		}
 		return err, nil
 
 	default:
