@@ -2493,6 +2493,13 @@ definitions:
       price_factor:
         type: number
     type: object
+  dto.SendCampaignTestMessageRequest:
+    properties:
+      target_phone_number:
+        type: string
+    required:
+    - target_phone_number
+    type: object
   dto.SendCampaignTestMessageResponse:
     properties:
       delivery:
@@ -5671,14 +5678,22 @@ paths:
       - Campaigns
   /api/v1/campaigns/{uuid}/test-send:
     post:
-      description: Send a best-effort test message for a campaign to the authenticated
-        customer's representative mobile
+      consumes:
+      - application/json
+      description: Send a best-effort test message for a campaign to a target phone
+        number
       parameters:
       - description: Campaign UUID
         in: path
         name: uuid
         required: true
         type: string
+      - description: Campaign test-send target
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SendCampaignTestMessageRequest'
       produces:
       - application/json
       responses:
