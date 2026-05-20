@@ -3,6 +3,24 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0081_add_admin_audit_actions_down.sql...'
+\i migrations/0081_add_admin_audit_actions_down.sql
+
+\echo 'Running 0082_create_deposit_receipts_down.sql...'
+\i migrations/0082_create_deposit_receipts_down.sql
+
+\echo 'Running 0080_add_lang_to_payment_requests_down.sql...'
+\i migrations/0080_add_lang_to_payment_requests_down.sql
+
+\echo 'Running 0079_drop_otp_verifications_down.sql...'
+\i migrations/0079_drop_otp_verifications_down.sql
+
+\echo 'Running 0078_drop_agency_commissions_down.sql...'
+\i migrations/0078_drop_agency_commissions_down.sql
+
+\echo 'Running 0077_drop_audit_log_customer_fk_down.sql...'
+\i migrations/0077_drop_audit_log_customer_fk_down.sql
+
 \echo 'Running 0076_rename_sms_campaigns_to_campaigns_down.sql...'
 \i migrations/0076_rename_sms_campaigns_to_campaigns_down.sql
 
@@ -173,6 +191,12 @@
 
 \echo 'Running 0020_create_tax_wallet_down.sql...'
 \i migrations/0020_create_tax_wallet_down.sql
+
+\echo 'Running 0078_drop_agency_commissions_down.sql...'
+\i migrations/0078_drop_agency_commissions_down.sql
+
+\echo 'Running 0077_drop_audit_log_customer_fk_down.sql...'
+\i migrations/0077_drop_audit_log_customer_fk_down.sql
 
 \echo 'Running 0019_add_payment_audit_actions_down.sql...'
 \i migrations/0019_add_payment_audit_actions_down.sql
