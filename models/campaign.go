@@ -159,8 +159,7 @@ type Campaign struct {
 	NumAudience *uint64 `gorm:"type:bigint" json:"num_audience,omitempty"`
 
 	// Relations
-	Customer          *Customer          `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
-	AgencyCommissions []AgencyCommission `gorm:"foreignKey:SourceCampaignID" json:"agency_commissions,omitempty"`
+	Customer *Customer `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
 }
 
 // TableName returns the table name for the model
