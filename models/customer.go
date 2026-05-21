@@ -50,7 +50,6 @@ type Customer struct {
 	LastLoginAt      *time.Time `gorm:"index:idx_customers_last_login_at" json:"last_login_at,omitempty"`
 
 	// Relations
-	OTPVerifications  []OTPVerification `gorm:"foreignKey:CustomerID" json:"-"`
 	Sessions          []CustomerSession `gorm:"foreignKey:CustomerID" json:"-"`
 	AuditLogs         []AuditLog        `gorm:"foreignKey:CustomerID" json:"-"`
 	Wallet            *Wallet           `gorm:"foreignKey:CustomerID" json:"wallet,omitempty"`
