@@ -73,6 +73,29 @@ const (
 	// Agency discount actions
 	AuditActionCreateDiscountByAgencyFailed    = "create_discount_by_agency_failed"
 	AuditActionCreateDiscountByAgencyCompleted = "create_discount_by_agency_completed"
+
+	// Admin actions
+	AuditActionAdminListCustomers                    = "admin_list_customers"
+	AuditActionAdminViewCustomer                     = "admin_view_customer"
+	AuditActionAdminViewCustomerShares               = "admin_view_customer_shares"
+	AuditActionAdminViewCustomerDiscounts            = "admin_view_customer_discounts"
+	AuditActionAdminSetCustomerStatus                = "admin_set_customer_status"
+	AuditActionAdminCreateShortLinks                 = "admin_create_short_links"
+	AuditActionAdminDownloadShortLinks               = "admin_download_short_links"
+	AuditActionAdminDownloadShortLinksWithClicks     = "admin_download_short_links_with_clicks"
+	AuditActionAdminDownloadShortLinksRange          = "admin_download_short_links_range"
+	AuditActionAdminDownloadShortLinksByScenarioName = "admin_download_short_links_by_scenario_regex"
+	AuditActionAdminCampaignApproved                 = "admin_campaign_approved"
+	AuditActionAdminCampaignRejected                 = "admin_campaign_rejected"
+	AuditActionAdminCampaignCancelled                = "admin_campaign_cancelled"
+	AuditActionAdminCampaignRescheduled              = "admin_campaign_rescheduled"
+	AuditActionAdminCampaignList                     = "admin_campaign_list"
+	AuditActionAdminCampaignGet                      = "admin_campaign_get"
+	AuditActionAdminRemoveAudienceSpec               = "admin_remove_audience_spec"
+	AuditActionAdminLineNumberCreate                 = "admin_line_number_create"
+	AuditActionAdminLineNumberList                   = "admin_line_number_list"
+	AuditActionAdminLineNumberUpdate                 = "admin_line_number_update"
+	AuditActionAdminLineNumberReport                 = "admin_line_number_report"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries
