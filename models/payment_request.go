@@ -37,6 +37,7 @@ type PaymentRequest struct {
 	Amount      uint64 `gorm:"not null" json:"amount"` // Amount in Tomans
 	Currency    string `gorm:"type:varchar(3);not null;default:'TMN'" json:"currency"`
 	Description string `gorm:"type:text" json:"description"`
+	Lang        string `gorm:"type:varchar(2);not null;default:'EN'" json:"lang"`
 
 	// Atipay request parameters
 	InvoiceNumber string `gorm:"type:varchar(255);uniqueIndex;not null" json:"invoice_number"` // Merchant-side unique ID
