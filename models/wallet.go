@@ -24,10 +24,9 @@ type Wallet struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
 	// Relationships
-	Customer          Customer           `gorm:"foreignKey:CustomerID;constraint:OnDelete:CASCADE" json:"customer,omitempty"`
-	Transactions      []Transaction      `gorm:"foreignKey:WalletID" json:"transactions,omitempty"`
-	BalanceSnapshots  []BalanceSnapshot  `gorm:"foreignKey:WalletID" json:"balance_snapshots,omitempty"`
-	AgencyCommissions []AgencyCommission `gorm:"foreignKey:WalletID" json:"agency_commissions,omitempty"`
+	Customer         Customer          `gorm:"foreignKey:CustomerID;constraint:OnDelete:CASCADE" json:"customer,omitempty"`
+	Transactions     []Transaction     `gorm:"foreignKey:WalletID" json:"transactions,omitempty"`
+	BalanceSnapshots []BalanceSnapshot `gorm:"foreignKey:WalletID" json:"balance_snapshots,omitempty"`
 }
 
 // WalletFilter represents filter criteria for wallet queries
