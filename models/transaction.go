@@ -38,6 +38,12 @@ const (
 	TransactionStatusReversed  TransactionStatus = "reversed"  // Transaction was reversed/refunded
 )
 
+const (
+	TransactionSourceIncreaseAgencyShareWithTax = "payment_callback_increase_agency_share_with_tax"
+	TransactionSourceIncreaseRealSystemShare    = "payment_callback_increase_system_locked_(real_system_share)"
+	TransactionSourceIncreaseTaxSystemShare     = "payment_callback_increase_tax_locked_(tax_system_share)"
+)
+
 // Transaction represents an immutable financial transaction in the system
 type Transaction struct {
 	ID            uint      `gorm:"primaryKey;autoIncrement" json:"id"`
@@ -74,9 +80,8 @@ type Transaction struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"deleted_at,omitempty"`
 
 	// Relationships
-	Wallet            Wallet             `gorm:"foreignKey:WalletID;constraint:OnDelete:CASCADE" json:"wallet,omitempty"`
-	Customer          Customer           `gorm:"foreignKey:CustomerID;constraint:OnDelete:CASCADE" json:"customer,omitempty"`
-	AgencyCommissions []AgencyCommission `gorm:"foreignKey:SourceTransactionID" json:"agency_commissions,omitempty"`
+	Wallet   Wallet   `gorm:"foreignKey:WalletID;constraint:OnDelete:CASCADE" json:"wallet,omitempty"`
+	Customer Customer `gorm:"foreignKey:CustomerID;constraint:OnDelete:CASCADE" json:"customer,omitempty"`
 }
 
 // BeforeCreate ensures UUID and CorrelationID are set
