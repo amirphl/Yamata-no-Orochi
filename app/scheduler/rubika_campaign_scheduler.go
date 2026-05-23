@@ -450,7 +450,7 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 			return fmt.Errorf("fetch excel UIDs for campaign id=%d: %w", c.ID, err)
 		}
 		s.logger.Printf("Rubika scheduler: campaign id=%d resolving %d UIDs to phones", c.ID, len(fileUIDs))
-		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, token, fileUIDs)
+		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, token, fileUIDs, "jo1n.ir/")
 		if err != nil {
 			return fmt.Errorf("fetch audience phones by UIDs for campaign id=%d: %w", c.ID, err)
 		}
@@ -1075,53 +1075,55 @@ func (s *RubikaCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, p
 	return s.jobRepo.SaveBatch(ctx, jobs)
 }
 
-func (s *RubikaCampaignScheduler) startStatusJobWorker(ctx context.Context) {
+func (s *RubikaCampaignScheduler) startStatusJobWorker(parent context.Context) {
 	ticker := time.NewTicker(statusJobWorkerInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-parent.Done():
 			return
 		case <-ticker.C:
-			func() {
-				ctx2, cancel := context.WithTimeout(ctx, 5*time.Minute) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
-				defer cancel()
-				s.processStatusJobs(ctx2)
-			}()
-		}
-	}
-}
-
-func (s *RubikaCampaignScheduler) processStatusJobs(ctx context.Context) {
-	if !s.rubikaClient.SupportsStatusTracking() || s.jobRepo == nil || s.resRepo == nil {
-		return
-	}
-
-	now := utils.UTCNow()
-	jobs, err := s.jobRepo.ListDue(ctx, now, numJobsPerTick)
-	if err != nil {
-		s.logger.Printf("Rubika scheduler: list status jobs failed: %v", err)
-		return
-	}
-	if len(jobs) == 0 {
-		return
-	}
-
-	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
-	for _, j := range jobs {
-		func(job *models.CampaignStatusJob) {
-			jobCtx, cancel := context.WithTimeout(ctx, 2*time.Minute) // TODO: Make this timeout configurable
-			defer cancel()
-			if err := s.handleStatusJob(jobCtx, job); err != nil {
-				s.logger.Printf("Rubika scheduler: handle status job id=%d failed: %v", job.ID, err)
-				if job.RetryCount >= rubikaStatusJobMaxRetry {
-					s.notifyAdmin(fmt.Sprintf("Rubika scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
-				}
-			} else {
-				s.logger.Printf("Rubika scheduler: handle status job id=%d succeeded", job.ID)
+			if !s.rubikaClient.SupportsStatusTracking() || s.jobRepo == nil || s.resRepo == nil {
+				continue
 			}
-		}(j)
+
+			listCtx, listCancel := context.WithTimeout(parent, 30*time.Second)
+			jobs, err := s.jobRepo.ListDue(listCtx, utils.UTCNow(), numJobsPerTick)
+			listCancel()
+			if err != nil {
+				s.logger.Printf("Rubika scheduler: list status jobs failed: %v", err)
+				continue
+			}
+			if len(jobs) == 0 {
+				continue
+			}
+
+			for i, job := range jobs {
+				if parent.Err() != nil {
+					return
+				}
+
+				jobCtx, jobCancel := context.WithTimeout(parent, 2*time.Minute)
+				err := s.handleStatusJob(jobCtx, job)
+				jobCancel()
+
+				if err != nil {
+					s.logger.Printf("Rubika scheduler: handle status job id=%d failed: %v", job.ID, err)
+					if job.RetryCount >= rubikaStatusJobMaxRetry {
+						s.notifyAdmin(fmt.Sprintf("Rubika scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
+					}
+				} else {
+					s.logger.Printf("Rubika scheduler: handle status job id=%d succeeded", job.ID)
+				}
+
+				if i < len(jobs)-1 {
+					if err := sleepWithContext(parent, time.Second); err != nil {
+						return
+					}
+				}
+			}
+		}
 	}
 }
 
