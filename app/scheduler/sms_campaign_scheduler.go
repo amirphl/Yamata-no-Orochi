@@ -234,6 +234,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 	var (
 		phones       []string
 		ids          []int64
+		uids         []string
 		codes        []string
 		unmatchedUID []string
 		selectionID  *uint
@@ -248,12 +249,17 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			return fmt.Errorf("fetch excel UIDs for campaign id=%d: %w", c.ID, err)
 		}
 		s.logger.Printf("SMS scheduler: campaign id=%d resolving %d UIDs to phones", c.ID, len(fileUIDs))
-		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
+		excelShortLinkDomain := ""
+		if c.ShortLinkDomain != nil {
+			excelShortLinkDomain = *c.ShortLinkDomain
+		}
+		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs, excelShortLinkDomain)
 		if err != nil {
 			return fmt.Errorf("fetch audience phones by UIDs for campaign id=%d: %w", c.ID, err)
 		}
 		phones = audienceResult.Phones
 		ids = audienceResult.IDs
+		uids = audienceResult.UIDs
 		codes = audienceResult.Codes
 		unmatchedUID = audienceResult.UnmatchedUIDs
 		selectionID = nil
@@ -271,6 +277,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		}
 		phones = audienceResult.Phones
 		ids = audienceResult.IDs
+		uids = audienceResult.UIDs
 		codes = audienceResult.Codes
 		selectionID = utils.ToPtr(audienceResult.SelectionID)
 		s.logger.Printf("SMS scheduler: campaign id=%d fetched %d phones (selection_id=%d)", c.ID, len(phones), audienceResult.SelectionID)
@@ -334,6 +341,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		end := min(start+smsSendBatchSize, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
+		batchUIDs := uids[start:end]
 		batchCodes := codes[start:end]
 
 		items := make([]PayamSMSItem, 0, len(batchPhones))
@@ -346,7 +354,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		}
 
 		for i, p := range batchPhones {
-			body := s.buildSMSBody(c, batchCodes[i])
+			body := s.buildSMSBody(c, batchCodes[i], batchUIDs[i])
 			trackingID := trackingIDs[i]
 			items = append(items, PayamSMSItem{
 				Recipient:  p,
@@ -614,6 +622,21 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 		return &AudiencePhonesResult{
 			Phones:      phones,
 			IDs:         ids,
+			UIDs:        uids,
+			Codes:       make([]string, len(phones)),
+			SelectionID: sel.ID,
+		}, nil
+	}
+
+	// For new campaigns without a short link domain, skip AllocateShortLinks.
+	// buildSMSBody will replace {uid} directly in the ad link.
+	if c.ShortLinkDomain == nil || strings.TrimSpace(*c.ShortLinkDomain) == "" {
+		s.logger.Printf("fetchSMSAudiencePhones skipped short links generation: campaign_id=%d short_link_domain=empty", c.ID)
+		s.logger.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d short_link_domain=empty", c.ID, len(phones), len(phones), sel.ID)
+		return &AudiencePhonesResult{
+			Phones:      phones,
+			IDs:         ids,
+			UIDs:        uids,
 			Codes:       make([]string, len(phones)),
 			SelectionID: sel.ID,
 		}, nil
@@ -632,7 +655,7 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
 		CampaignID:      c.ID,
 		Items:           items,
-		ShortLinkDomain: "jo1n.ir/", // TODO:
+		ShortLinkDomain: *c.ShortLinkDomain,
 	})
 	if err != nil {
 		s.logger.Printf("fetchSMSAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
@@ -645,22 +668,26 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 	return &AudiencePhonesResult{
 		Phones:      phones,
 		IDs:         ids,
+		UIDs:        uids,
 		Codes:       codes,
 		SelectionID: sel.ID,
 	}, nil
 }
 
-func (s *SMSCampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code string) string {
+func (s *SMSCampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code string, uid string) string {
 	content := ""
 	if c.Content != nil {
 		content = *c.Content
 	}
 	if hasCampaignAdLink(c.AdLink) {
-		shortened := "jo1n.ir/" + code // TODO:
-		return strings.ReplaceAll(content, "🔗", shortened) + "\n" + "لغو۱۱"
-
+		if c.ShortLinkDomain != nil && *c.ShortLinkDomain != "" {
+			shortened := *c.ShortLinkDomain + code
+			return strings.ReplaceAll(content, "{YOUR_LINK}", shortened) + "\n" + "لغو۱۱"
+		}
+		injected := strings.ReplaceAll(*c.AdLink, "{uid}", uid)
+		return strings.ReplaceAll(content, "{YOUR_LINK}", injected) + "\n" + "لغو۱۱"
 	}
-	return strings.ReplaceAll(content, "🔗", "") + "\n" + "لغو۱۱"
+	return strings.ReplaceAll(content, "{YOUR_LINK}", "") + "\n" + "لغو۱۱"
 }
 
 func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, processedCampaignID uint, unmatchedUIDs []string) error {
@@ -789,61 +816,63 @@ func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, proc
 	return s.jobRepo.SaveBatch(ctx, jobs)
 }
 
-func (s *SMSCampaignScheduler) startStatusJobWorker(ctx context.Context) {
+func (s *SMSCampaignScheduler) startStatusJobWorker(parent context.Context) {
 	ticker := time.NewTicker(statusJobWorkerInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-ctx.Done():
+		case <-parent.Done():
 			return
 		case <-ticker.C:
-			func() {
-				ctx2, cancel := context.WithTimeout(ctx, 5*time.Minute) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
-				defer cancel()
-				s.processStatusJobs(ctx2)
-			}()
-		}
-	}
-}
-
-func (s *SMSCampaignScheduler) processStatusJobs(ctx context.Context) {
-	if s.jobRepo == nil || s.resRepo == nil {
-		return
-	}
-
-	now := utils.UTCNow()
-	jobs, err := s.jobRepo.ListDue(ctx, now, numJobsPerTick)
-	if err != nil {
-		s.logger.Printf("SMS scheduler: list status jobs failed: %v", err)
-		return
-	}
-	if len(jobs) == 0 {
-		return
-	}
-
-	atiehAccessToken, err := s.smsClient.GetToken(ctx)
-	if err != nil {
-		s.logger.Printf("SMS scheduler: payamsms token for status jobs failed: %v", err)
-		return
-	}
-
-	// TODO: Consider processing jobs in parallel if they are independent (different campaigns) to speed up status updates, but be mindful of rate limits and database contention.
-	for _, j := range jobs {
-		func(job *models.CampaignStatusJob) {
-			jobCtx, cancel := context.WithTimeout(ctx, 2*time.Minute) // TODO: Make this timeout configurable
-			defer cancel()
-			if err := s.handleStatusJob(jobCtx, job, atiehAccessToken); err != nil {
-				s.logger.Printf("SMS scheduler: handle status job id=%d failed: %v", job.ID, err)
-				if job.RetryCount >= smsStatusJobMaxRetry {
-					s.logger.Printf("SMS scheduler: status job id=%d reached max retries, marking as failed", job.ID)
-					// Optionally, update job status to failed in DB here
-				}
-				// Note: The job will be retried in the next tick based on its ScheduledAt and RetryCount
-			} else {
-				s.logger.Printf("SMS scheduler: handle status job id=%d succeeded", job.ID)
+			if s.jobRepo == nil || s.resRepo == nil {
+				continue
 			}
-		}(j)
+
+			listCtx, listCancel := context.WithTimeout(parent, 30*time.Second)
+			jobs, err := s.jobRepo.ListDue(listCtx, utils.UTCNow(), numJobsPerTick)
+			listCancel()
+			if err != nil {
+				s.logger.Printf("SMS scheduler: list status jobs failed: %v", err)
+				continue
+			}
+			if len(jobs) == 0 {
+				continue
+			}
+
+			tokenCtx, tokenCancel := context.WithTimeout(parent, 30*time.Second)
+			atiehAccessToken, err := s.smsClient.GetToken(tokenCtx)
+			tokenCancel()
+			if err != nil {
+				s.logger.Printf("SMS scheduler: payamsms token for status jobs failed: %v", err)
+				continue
+			}
+
+			for i, job := range jobs {
+				if parent.Err() != nil {
+					return
+				}
+
+				jobCtx, jobCancel := context.WithTimeout(parent, 2*time.Minute)
+				err := s.handleStatusJob(jobCtx, job, atiehAccessToken)
+				jobCancel()
+
+				if err != nil {
+					s.logger.Printf("SMS scheduler: handle status job id=%d failed: %v", job.ID, err)
+					if job.RetryCount >= smsStatusJobMaxRetry {
+						s.notifyAdmin(fmt.Sprintf("SMS scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
+					}
+				} else {
+					s.logger.Printf("SMS scheduler: handle status job id=%d succeeded", job.ID)
+				}
+
+				if i < len(jobs)-1 {
+					if err := sleepWithContext(parent, time.Second); err != nil {
+						return
+					}
+				}
+			}
+		}
 	}
 }
 
