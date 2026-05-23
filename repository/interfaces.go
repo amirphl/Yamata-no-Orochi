@@ -80,18 +80,6 @@ type CustomerRepository interface {
 	UpdateActiveStatus(ctx context.Context, customerID uint, isActive bool) error
 }
 
-// OTPVerificationRepository defines operations for OTP verifications
-type OTPVerificationRepository interface {
-	Repository[models.OTPVerification, models.OTPVerificationFilter]
-	ByID(ctx context.Context, id uint) (*models.OTPVerification, error)
-	ByCustomerAndType(ctx context.Context, customerID uint, otpType string) ([]*models.OTPVerification, error)
-	ByTargetAndType(ctx context.Context, targetValue, otpType string) (*models.OTPVerification, error)
-	ListActiveOTPs(ctx context.Context, customerID uint) ([]*models.OTPVerification, error)
-	ExpireOldOTPs(ctx context.Context, customerID uint, otpType string) error
-	GetLatestByCorrelationID(ctx context.Context, correlationID uuid.UUID) (*models.OTPVerification, error)
-	GetHistoryByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.OTPVerification, error)
-}
-
 // CustomerSessionRepository defines operations for customer sessions
 type CustomerSessionRepository interface {
 	Repository[models.CustomerSession, models.CustomerSessionFilter]
@@ -220,6 +208,15 @@ type CryptoDepositRepository interface {
 	Update(ctx context.Context, deposit *models.CryptoDeposit) error
 }
 
+// DepositReceiptRepository defines data access for offline deposit receipts.
+type DepositReceiptRepository interface {
+	Save(ctx context.Context, receipt *models.DepositReceipt) error
+	Update(ctx context.Context, receipt *models.DepositReceipt) error
+	ByID(ctx context.Context, id uint) (*models.DepositReceipt, error)
+	ByUUID(ctx context.Context, uuid string) (*models.DepositReceipt, error)
+	List(ctx context.Context, f models.DepositReceiptFilter, limit, offset int, order string) ([]*models.DepositReceipt, error)
+}
+
 // CommissionRateRepository defines the interface for commission rate data access
 type CommissionRateRepository interface {
 	Repository[models.CommissionRate, models.CommissionRateFilter]
@@ -229,24 +226,6 @@ type CommissionRateRepository interface {
 	ByAgencyAndTransactionType(ctx context.Context, agencyID uint, transactionType string) (*models.CommissionRate, error)
 	GetActiveRates(ctx context.Context, limit, offset int) ([]*models.CommissionRate, error)
 	GetRatesByTransactionType(ctx context.Context, transactionType string, limit, offset int) ([]*models.CommissionRate, error)
-}
-
-// AgencyCommissionRepository defines the interface for agency commission data access
-type AgencyCommissionRepository interface {
-	Repository[models.AgencyCommission, models.AgencyCommissionFilter]
-	ByID(ctx context.Context, id uint) (*models.AgencyCommission, error)
-	ByUUID(ctx context.Context, uuid string) (*models.AgencyCommission, error)
-	ByCorrelationID(ctx context.Context, correlationID uuid.UUID) ([]*models.AgencyCommission, error)
-	ByAgencyID(ctx context.Context, agencyID uint, limit, offset int) ([]*models.AgencyCommission, error)
-	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.AgencyCommission, error)
-	ByWalletID(ctx context.Context, walletID uint, limit, offset int) ([]*models.AgencyCommission, error)
-	ByType(ctx context.Context, commissionType models.CommissionType, limit, offset int) ([]*models.AgencyCommission, error)
-	ByStatus(ctx context.Context, status models.CommissionStatus, limit, offset int) ([]*models.AgencyCommission, error)
-	BySourceTransaction(ctx context.Context, sourceTransactionID uint) ([]*models.AgencyCommission, error)
-	BySourceCampaign(ctx context.Context, sourceCampaignID uint) ([]*models.AgencyCommission, error)
-	GetPendingCommissions(ctx context.Context, limit, offset int) ([]*models.AgencyCommission, error)
-	GetPaidCommissions(ctx context.Context, limit, offset int) ([]*models.AgencyCommission, error)
-	GetCommissionsByDateRange(ctx context.Context, from, to time.Time, limit, offset int) ([]*models.AgencyCommission, error)
 }
 
 // AgencyDiscountRepository defines the interface for agency discount data access
