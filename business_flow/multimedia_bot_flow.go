@@ -48,6 +48,9 @@ func (f *MultimediaBotFlowImpl) DownloadMultimediaByBot(ctx context.Context, med
 
 	data, err := os.ReadFile(cleanPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return generateWhiteImagePreview()
+		}
 		return "", "", nil, err
 	}
 
