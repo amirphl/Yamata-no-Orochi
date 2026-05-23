@@ -74,13 +74,9 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 	}
 
 	fakeCode := buildFakeShortCode()
-	body := buildCampaignTestMessageBody(platform, campaign.Spec.Content, campaign.Spec.AdLink, fakeCode)
-
-	var fakeShortLink *string
-	if hasCampaignAdLink(campaign.Spec.AdLink) {
-		v := "jo1n.ir/" + fakeCode
-		fakeShortLink = &v
-	}
+	fakeUID := buildFakeAudienceUID()
+	body := buildCampaignTestMessageBody(platform, campaign.Spec.Content, campaign.Spec.AdLink, campaign.Spec.ShortLinkDomain, fakeCode, fakeUID)
+	fakeResolvedLink := buildCampaignTestResolvedLink(campaign.Spec.AdLink, campaign.Spec.ShortLinkDomain, fakeCode, fakeUID)
 
 	softErr, hardErr := s.sendCampaignTestMessageBestEffort(ctx, campaign, platform, recipient, body)
 	if hardErr != nil {
@@ -110,8 +106,8 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 		"recipient_masked": maskPhoneNumber(recipient),
 		"has_warning":      softErr != nil,
 	}
-	if fakeShortLink != nil {
-		auditDesc["fake_short_link"] = *fakeShortLink
+	if fakeResolvedLink != nil {
+		auditDesc["fake_resolved_link"] = *fakeResolvedLink
 	}
 	auditDescBytes, _ := json.Marshal(auditDesc)
 	auditDescText := string(auditDescBytes)
@@ -161,26 +157,44 @@ func buildFakeShortCode() string {
 	return "tst" + id
 }
 
+func buildFakeAudienceUID() string {
+	id := strings.ReplaceAll(uuid.NewString(), "-", "")
+	if len(id) > 8 {
+		id = id[:8]
+	}
+	return "test-" + id
+}
+
 func hasCampaignAdLink(adLink *string) bool {
 	return adLink != nil && strings.TrimSpace(*adLink) != ""
 }
 
-func buildCampaignTestMessageBody(platform string, contentPtr *string, adLink *string, fakeCode string) string {
+func buildCampaignTestMessageBody(platform string, contentPtr *string, adLink *string, shortLinkDomain *string, fakeCode string, fakeUID string) string {
 	content := ""
 	if contentPtr != nil {
 		content = *contentPtr
 	}
-	if hasCampaignAdLink(adLink) {
-		content = strings.ReplaceAll(content, "🔗", "jo1n.ir/"+fakeCode) // backward compatibility
-		content = strings.ReplaceAll(content, "{YOUR_LINK}", "jo1n.ir/"+fakeCode)
-	} else {
-		content = strings.ReplaceAll(content, "🔗", "") // backward compatibility
-		content = strings.ReplaceAll(content, "{YOUR_LINK}", "")
+	replacement := ""
+	if resolvedLink := buildCampaignTestResolvedLink(adLink, shortLinkDomain, fakeCode, fakeUID); resolvedLink != nil {
+		replacement = *resolvedLink
 	}
+	content = strings.ReplaceAll(content, "{YOUR_LINK}", replacement)
 	if platform == models.CampaignPlatformSMS {
 		return content + "\n" + "لغو۱۱"
 	}
 	return content
+}
+
+func buildCampaignTestResolvedLink(adLink *string, shortLinkDomain *string, fakeCode string, fakeUID string) *string {
+	if !hasCampaignAdLink(adLink) {
+		return nil
+	}
+	if shortLinkDomain != nil && strings.TrimSpace(*shortLinkDomain) != "" {
+		v := strings.TrimSpace(*shortLinkDomain) + fakeCode
+		return &v
+	}
+	v := strings.ReplaceAll(*adLink, "{uid}", fakeUID)
+	return &v
 }
 
 func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
