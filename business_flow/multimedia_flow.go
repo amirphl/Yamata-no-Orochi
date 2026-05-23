@@ -148,6 +148,9 @@ func (f *MultimediaFlowImpl) DownloadMultimedia(ctx context.Context, customerID 
 
 	data, err := os.ReadFile(cleanPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return generateWhiteImagePreview()
+		}
 		return "", "", nil, err
 	}
 
@@ -182,12 +185,12 @@ func (f *MultimediaFlowImpl) PreviewMultimedia(ctx context.Context, customerID u
 	}
 
 	if asset.MediaType == "video" {
-		return extractVideoThumbnail(cleanPath)
+		return previewOrWhiteImage(cleanPath, extractVideoThumbnail)
 	}
 	if asset.MediaType != "image" {
 		return "", "", nil, NewBusinessError("PREVIEW_NOT_SUPPORTED", "preview is only supported for image and video files", nil)
 	}
-	return generateImageThumbnail(cleanPath)
+	return previewOrWhiteImage(cleanPath, generateImageThumbnail)
 }
 
 func saveMultimediaToDisk(reader io.Reader, ext, mediaType string) (string, int64, string, error) {
@@ -270,6 +273,32 @@ func generateImageThumbnail(srcPath string) (string, string, []byte, error) {
 		return "", "", nil, err
 	}
 
+	return "preview.jpg", "image/jpeg", buf.Bytes(), nil
+}
+
+func previewOrWhiteImage(srcPath string, preview func(string) (string, string, []byte, error)) (string, string, []byte, error) {
+	if _, err := os.Stat(srcPath); err != nil {
+		if os.IsNotExist(err) {
+			return generateWhiteImagePreview()
+		}
+		return "", "", nil, err
+	}
+
+	filename, contentType, data, err := preview(srcPath)
+	if err != nil && os.IsNotExist(err) {
+		return generateWhiteImagePreview()
+	}
+	return filename, contentType, data, err
+}
+
+func generateWhiteImagePreview() (string, string, []byte, error) {
+	img := image.NewRGBA(image.Rect(0, 0, 512, 512))
+	imagedraw.Draw(img, img.Bounds(), &image.Uniform{C: color.White}, image.Point{}, imagedraw.Src)
+
+	buf := &bytes.Buffer{}
+	if err := jpeg.Encode(buf, img, &jpeg.Options{Quality: 75}); err != nil {
+		return "", "", nil, err
+	}
 	return "preview.jpg", "image/jpeg", buf.Bytes(), nil
 }
 
