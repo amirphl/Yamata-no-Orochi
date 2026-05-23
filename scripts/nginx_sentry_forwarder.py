@@ -20,12 +20,14 @@ class SentryStoreClient:
             raise RuntimeError("SENTRY_DSN is not configured")
 
         parsed = urllib.parse.urlparse(self.dsn)
-        if not parsed.scheme or not parsed.netloc or not parsed.username:
+        if parsed.scheme not in ("http", "https"):
+            raise RuntimeError("SENTRY_DSN scheme must be http or https")
+        if not parsed.netloc or not parsed.username:
             raise RuntimeError("SENTRY_DSN is invalid")
 
         project_id = parsed.path.strip("/")
-        if not project_id:
-            raise RuntimeError("SENTRY_DSN is missing the project ID")
+        if not project_id or not project_id.isdigit():
+            raise RuntimeError("SENTRY_DSN project ID must be numeric")
 
         self.store_url = f"{parsed.scheme}://{parsed.netloc}/api/{project_id}/store/"
         sentry_secret = parsed.password or ""
@@ -94,13 +96,24 @@ class Tailer:
     def __init__(self, path: str) -> None:
         self.path = path
         self.handle = None
+        self._inode: int | None = None
 
     def open(self) -> None:
         self.handle = open(self.path, "r", encoding="utf-8", errors="replace")
         self.handle.seek(0, os.SEEK_END)
+        self._inode = os.fstat(self.handle.fileno()).st_ino
+
+    def _rotated(self) -> bool:
+        try:
+            return os.stat(self.path).st_ino != self._inode
+        except FileNotFoundError:
+            return False
 
     def poll(self) -> list[str]:
         if self.handle is None:
+            self.open()
+        elif self._rotated():
+            self.handle.close()
             self.open()
 
         lines = []
