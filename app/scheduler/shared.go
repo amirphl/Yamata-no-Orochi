@@ -37,6 +37,7 @@ const (
 type AudiencePhonesResult struct {
 	Phones        []string
 	IDs           []int64
+	UIDs          []string
 	Codes         []string
 	SelectionID   uint
 	MatchedUIDs   []string
@@ -144,6 +145,7 @@ func fetchAudiencePhonesByUIDs(
 	c dto.BotGetCampaignResponse,
 	token string,
 	inputUIDs []string,
+	shortLinkDomain string,
 ) (*AudiencePhonesResult, error) {
 	if len(inputUIDs) == 0 {
 		return &AudiencePhonesResult{}, nil
@@ -210,10 +212,12 @@ func fetchAudiencePhonesByUIDs(
 
 	phones := make([]string, 0, len(matched))
 	ids := make([]int64, 0, len(matched))
+	uids := make([]string, 0, len(matched))
 	matchedUIDs := make([]string, 0, len(matched))
 	for _, item := range matched {
 		phones = append(phones, item.phone)
 		ids = append(ids, item.id)
+		uids = append(uids, item.uid)
 		matchedUIDs = append(matchedUIDs, item.uid)
 	}
 
@@ -222,6 +226,18 @@ func fetchAudiencePhonesByUIDs(
 		return &AudiencePhonesResult{
 			Phones:        phones,
 			IDs:           ids,
+			UIDs:          uids,
+			Codes:         make([]string, len(phones)),
+			MatchedUIDs:   matchedUIDs,
+			UnmatchedUIDs: unmatchedUIDs,
+		}, nil
+	}
+	if strings.TrimSpace(shortLinkDomain) == "" {
+		logger.Printf("fetchAudiencePhonesByUIDs skipped short links generation: campaign_id=%d short_link_domain=empty", c.ID)
+		return &AudiencePhonesResult{
+			Phones:        phones,
+			IDs:           ids,
+			UIDs:          uids,
 			Codes:         make([]string, len(phones)),
 			MatchedUIDs:   matchedUIDs,
 			UnmatchedUIDs: unmatchedUIDs,
@@ -240,7 +256,7 @@ func fetchAudiencePhonesByUIDs(
 	codes, err := botClient.AllocateShortLinks(ctx, token, &dto.BotAllocateShortLinksRequest{
 		CampaignID:      c.ID,
 		Items:           items,
-		ShortLinkDomain: "jo1n.ir/",
+		ShortLinkDomain: shortLinkDomain,
 	})
 	if err != nil {
 		logger.Printf("fetchAudiencePhonesByUIDs allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
@@ -250,6 +266,7 @@ func fetchAudiencePhonesByUIDs(
 	return &AudiencePhonesResult{
 		Phones:        phones,
 		IDs:           ids,
+		UIDs:          uids,
 		Codes:         codes,
 		MatchedUIDs:   matchedUIDs,
 		UnmatchedUIDs: unmatchedUIDs,
