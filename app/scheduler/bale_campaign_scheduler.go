@@ -231,6 +231,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 	var (
 		phones       []string
 		ids          []int64
+		uids         []string
 		codes        []string
 		unmatchedUID []string
 		selectionID  *uint
@@ -245,12 +246,17 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			return fmt.Errorf("fetch excel UIDs for campaign id=%d: %w", c.ID, err)
 		}
 		s.logger.Printf("Bale scheduler: campaign id=%d resolving %d UIDs to phones", c.ID, len(fileUIDs))
-		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs)
+		excelShortLinkDomain := ""
+		if c.ShortLinkDomain != nil {
+			excelShortLinkDomain = *c.ShortLinkDomain
+		}
+		audienceResult, err := fetchAudiencePhonesByUIDs(ctx, s.logger, s.audRepo, s.botClient, c, jazzAccessToken, fileUIDs, excelShortLinkDomain)
 		if err != nil {
 			return fmt.Errorf("fetch audience phones by UIDs for campaign id=%d: %w", c.ID, err)
 		}
 		phones = audienceResult.Phones
 		ids = audienceResult.IDs
+		uids = audienceResult.UIDs
 		codes = audienceResult.Codes
 		unmatchedUID = audienceResult.UnmatchedUIDs
 		selectionID = nil
@@ -267,6 +273,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		}
 		phones = audienceResult.Phones
 		ids = audienceResult.IDs
+		uids = audienceResult.UIDs
 		codes = audienceResult.Codes
 		selectionID = utils.ToPtr(audienceResult.SelectionID)
 		s.logger.Printf("Bale scheduler: campaign id=%d fetched %d phones (selection_id=%d)", c.ID, len(phones), audienceResult.SelectionID)
@@ -344,6 +351,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		end := min(start+baleSendBatchSize, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
+		batchUIDs := uids[start:end]
 		batchCodes := codes[start:end]
 
 		items := make([]BaleSendMessageRequest, 0, len(batchPhones))
@@ -356,7 +364,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		}
 
 		for i, p := range batchPhones {
-			body := s.buildBaleMessageBody(c, batchCodes[i])
+			body := s.buildBaleMessageBody(c, batchCodes[i], batchUIDs[i])
 			trackingID := trackingIDs[i]
 			items = append(items, BaleSendMessageRequest{
 				RequestID:   trackingID,
@@ -625,6 +633,21 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 		return &AudiencePhonesResult{
 			Phones:      phones,
 			IDs:         ids,
+			UIDs:        uids,
+			Codes:       make([]string, len(phones)),
+			SelectionID: sel.ID,
+		}, nil
+	}
+
+	// For new campaigns without a short link domain, skip AllocateShortLinks.
+	// buildBaleMessageBody will replace {uid} directly in the ad link.
+	if c.ShortLinkDomain == nil || strings.TrimSpace(*c.ShortLinkDomain) == "" {
+		s.logger.Printf("fetchBaleAudiencePhones skipped short links generation: campaign_id=%d short_link_domain=empty", c.ID)
+		s.logger.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d short_link_domain=empty", c.ID, len(phones), len(phones), sel.ID)
+		return &AudiencePhonesResult{
+			Phones:      phones,
+			IDs:         ids,
+			UIDs:        uids,
 			Codes:       make([]string, len(phones)),
 			SelectionID: sel.ID,
 		}, nil
@@ -643,7 +666,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
 		CampaignID:      c.ID,
 		Items:           items,
-		ShortLinkDomain: "jo1n.ir/", // TODO:
+		ShortLinkDomain: *c.ShortLinkDomain,
 	})
 	if err != nil {
 		s.logger.Printf("fetchBaleAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
@@ -656,21 +679,27 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	return &AudiencePhonesResult{
 		Phones:      phones,
 		IDs:         ids,
+		UIDs:        uids,
 		Codes:       codes,
 		SelectionID: sel.ID,
 	}, nil
 }
 
-func (s *BaleCampaignScheduler) buildBaleMessageBody(c dto.BotGetCampaignResponse, code string) string {
+func (s *BaleCampaignScheduler) buildBaleMessageBody(c dto.BotGetCampaignResponse, code string, uid string) string {
 	content := ""
 	if c.Content != nil {
 		content = *c.Content
 	}
 	if hasCampaignAdLink(c.AdLink) {
-		shortened := "jo1n.ir/" + code // TODO:
-		return strings.ReplaceAll(content, "🔗", shortened)
+		if c.ShortLinkDomain != nil && *c.ShortLinkDomain != "" {
+			shortened := *c.ShortLinkDomain + code
+			return strings.ReplaceAll(content, "{YOUR_LINK}", shortened)
+		} else {
+			injected := strings.ReplaceAll(*c.AdLink, "{uid}", uid)
+			return strings.ReplaceAll(content, "{YOUR_LINK}", injected)
+		}
 	}
-	return strings.ReplaceAll(content, "🔗", "")
+	return strings.ReplaceAll(content, "{YOUR_LINK}", "")
 }
 
 func (s *BaleCampaignScheduler) createUnmatchedSentBaleRows(ctx context.Context, processedCampaignID uint, unmatchedUIDs []string) error {
@@ -738,15 +767,13 @@ func (s *BaleCampaignScheduler) startStatusJobWorker(parent context.Context) {
 		case <-parent.Done():
 			return
 		case <-ticker.C:
-			// ctx2, cancel := context.WithTimeout(parent, 5*time.Minute) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
-			ctx2, cancel := context.WithTimeout(parent, 60*time.Second) // TODO: Make this timeout configurable; should be long enough to process a batch of status jobs but short enough to avoid overlap between ticks
-			defer cancel()
 			if !s.baleClient.SupportsStatusTracking() || s.jobRepo == nil || s.resRepo == nil {
 				continue
 			}
 
-			now := utils.UTCNow()
-			jobs, err := s.jobRepo.ListDue(ctx2, now, numJobsPerTick)
+			listCtx, listCancel := context.WithTimeout(parent, 30*time.Second)
+			jobs, err := s.jobRepo.ListDue(listCtx, utils.UTCNow(), numJobsPerTick)
+			listCancel()
 			if err != nil {
 				s.logger.Printf("Bale scheduler: list status jobs failed: %v", err)
 				continue
@@ -755,17 +782,28 @@ func (s *BaleCampaignScheduler) startStatusJobWorker(parent context.Context) {
 				continue
 			}
 
-			for _, job := range jobs {
-				ctx3, cancel3 := context.WithTimeout(ctx2, 2*time.Minute) // TODO: Make this timeout configurable; should be long enough to process the status job but short enough to avoid blocking subsequent jobs
-				defer cancel3()
-				if err := s.handleStatusJob(ctx3, job); err != nil {
+			for i, job := range jobs {
+				if parent.Err() != nil {
+					return
+				}
+
+				jobCtx, jobCancel := context.WithTimeout(parent, 2*time.Minute)
+				err := s.handleStatusJob(jobCtx, job)
+				jobCancel()
+
+				if err != nil {
 					s.logger.Printf("Bale scheduler: handle status job id=%d failed: %v", job.ID, err)
 					if job.RetryCount >= statusJobMaxRetry {
 						s.notifyAdmin(fmt.Sprintf("Bale scheduler: status job id=%d has failed %d times with error: %v", job.ID, job.RetryCount, err))
 					}
-					// Note: The job will be retried later based on the retry logic in handleStatusJob, so we don't need to do anything else here for retries.
 				} else {
 					s.logger.Printf("Bale scheduler: handle status job id=%d succeeded", job.ID)
+				}
+
+				if i < len(jobs)-1 {
+					if err := sleepWithContext(parent, time.Second); err != nil {
+						return
+					}
 				}
 			}
 		}
