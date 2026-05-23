@@ -72,7 +72,20 @@ def load_cert_expiry(p: Path) -> datetime:
     raise ValueError(f"No certificate found in {p}")
 
 
-def find_cert_paths(conf_path: Path, env_map: Dict[str, str]) -> List[Path]:
+def find_cert_paths(
+    conf_path: Path,
+    env_map: Dict[str, str],
+    _depth: int = 0,
+    _seen: set[Path] | None = None,
+) -> List[Path]:
+    if _depth > 10:
+        return []
+    if _seen is None:
+        _seen = set()
+    canonical = conf_path.resolve() if conf_path.exists() else conf_path
+    if canonical in _seen:
+        return []
+    _seen.add(canonical)
     paths: List[Path] = []
     if conf_path.exists():
         text = conf_path.read_text()
@@ -84,7 +97,9 @@ def find_cert_paths(conf_path: Path, env_map: Dict[str, str]) -> List[Path]:
             inc_raw = match.group(1).strip()
             inc_expanded = os.path.expandvars(_expand_env(inc_raw, env_map))
             for inc_path in glob.glob(inc_expanded):
-                paths.extend(find_cert_paths(Path(inc_path), env_map))
+                paths.extend(
+                    find_cert_paths(Path(inc_path), env_map, _depth + 1, _seen)
+                )
     return paths
 
 
