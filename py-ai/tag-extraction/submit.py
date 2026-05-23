@@ -8,8 +8,8 @@ import requests
 import sys
 import ast
 
-API_URL = "https://jazebeh.ir/api/v1/bot/campaigns/audience-spec"
-# API_URL = "http://localhost:8080/api/v1/bot/campaigns/audience-spec"
+# API_URL = "https://jazebeh.ir/api/v1/bot/campaigns/audience-spec"
+API_URL = "http://localhost:8080/api/v1/bot/campaigns/audience-spec"
 ALLOWED_PLATFORMS = {"sms", "rubika", "bale", "splus"}
 
 
