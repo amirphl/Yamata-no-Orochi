@@ -301,12 +301,6 @@ check_prerequisites() {
 		exit 1
 	fi
 	
-	# Check Docker Compose
-	if ! command_exists docker; then
-		print_error "Docker is not installed. Please install Docker first."
-		exit 1
-	fi
-	
 	# Check if docker compose is available (Docker Compose V2)
 	if ! docker compose version >/dev/null 2>&1; then
 		print_error "Docker Compose is not available. Please ensure Docker Compose V2 is installed."
