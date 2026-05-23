@@ -111,6 +111,9 @@ func (f *MultimediaAdminFlowImpl) DownloadMultimediaByAdmin(ctx context.Context,
 
 	data, err := os.ReadFile(cleanPath)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return generateWhiteImagePreview()
+		}
 		return "", "", nil, err
 	}
 
@@ -142,10 +145,10 @@ func (f *MultimediaAdminFlowImpl) PreviewMultimediaByAdmin(ctx context.Context, 
 	}
 
 	if asset.MediaType == "video" {
-		return extractVideoThumbnail(cleanPath)
+		return previewOrWhiteImage(cleanPath, extractVideoThumbnail)
 	}
 	if asset.MediaType != "image" {
 		return "", "", nil, NewBusinessError("PREVIEW_NOT_SUPPORTED", "preview is only supported for image and video files", nil)
 	}
-	return generateImageThumbnail(cleanPath)
+	return previewOrWhiteImage(cleanPath, generateImageThumbnail)
 }
