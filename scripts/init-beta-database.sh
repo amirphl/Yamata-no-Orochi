@@ -91,7 +91,7 @@ check_postgres_container() {
 
 # Function to check if database exists
 check_database_exists() {
-    if docker exec yamata-postgres-beta psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
+    if docker exec yamata-postgres-beta psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = :'check_name'" -v "check_name=$DB_NAME" | grep -q 1; then
         print_status "Database '$DB_NAME' already exists"
         return 0
     else
