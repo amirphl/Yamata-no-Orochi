@@ -73,7 +73,6 @@ type CampaignFlowImpl struct {
 }
 
 const (
-	defaultShortLinkDomain       = "jo1n.ir"
 	minCampaignBudget            = uint64(100_000)
 	maxCampaignBudget            = uint64(160_000_000)
 	defaultSegmentPriceFactor    = 1.0
@@ -83,7 +82,7 @@ const (
 
 var tehranLoc *time.Location
 
-var allowedShortLinkDomains = []string{defaultShortLinkDomain, "joinsahel.ir"}
+var allowedShortLinkDomains = []string{"jo1n.ir", "joinsahel.ir"}
 
 // NewCampaignFlow creates a new campaign flow instance
 func NewCampaignFlow(
@@ -156,7 +155,7 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 	if err != nil {
 		return nil, NewBusinessError("SHORT_LINK_DOMAIN_INVALID", "Invalid short link domain", err)
 	}
-	req.ShortLinkDomain = &shortLinkDomain
+	req.ShortLinkDomain = shortLinkDomain
 
 	category, job, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job)
 	if err != nil {
@@ -346,8 +345,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	if err != nil {
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
 	}
-	shortLinkDomain = &sanitizedShortLinkDomain
-	req.ShortLinkDomain = &sanitizedShortLinkDomain
+	shortLinkDomain = sanitizedShortLinkDomain
 
 	sanitizedCategory, sanitizedJob, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, category, job)
 	if err != nil {
@@ -1556,11 +1554,11 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		return nil, err
 	}
 
-	if s.tryAcquireFlowLock(ctx, fmt.Sprintf("list_campaigns_expire:%d", req.CustomerID), 20*time.Second) {
-		if err := s.expireCustomerCampaigns(ctx, req.CustomerID); err != nil {
-			return nil, err
-		}
-	}
+	// if s.tryAcquireFlowLock(ctx, fmt.Sprintf("list_campaigns_expire:%d", req.CustomerID), 20*time.Second) {
+	// 	if err := s.expireCustomerCampaigns(ctx, req.CustomerID); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
 	if s.tryAcquireFlowLock(ctx, fmt.Sprintf("list_campaigns_reconcile_refund:%d", req.CustomerID), 20*time.Second) {
 		if err := s.reconcileUndeliveredCampaignRefunds(ctx, req.CustomerID); err != nil {
@@ -1919,7 +1917,7 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	if req.Content != nil && *req.Content != "" {
 		spec.Content = req.Content
 	}
-	spec.ShortLinkDomain = &shortLinkDomain
+	spec.ShortLinkDomain = shortLinkDomain
 	if req.Category != nil && *req.Category != "" {
 		spec.Category = req.Category
 	}
@@ -2272,9 +2270,6 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 	if campaign.Spec.Budget == nil || *campaign.Spec.Budget <= 0 {
 		return ErrCampaignBudgetRequired
 	}
-	if campaign.Spec.ShortLinkDomain == nil {
-		return ErrInvalidShortLinkDomain
-	}
 	if _, err := sanitizeShortLinkDomain(campaign.Spec.ShortLinkDomain); err != nil {
 		return err
 	}
@@ -2354,7 +2349,7 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 		if err != nil {
 			return err
 		}
-		spec.ShortLinkDomain = &domain
+		spec.ShortLinkDomain = domain
 	}
 	if req.ScheduleAt != nil {
 		spec.ScheduleAt = req.ScheduleAt
@@ -2381,10 +2376,6 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 		spec.Budget = req.Budget
 	}
 
-	if spec.ShortLinkDomain == nil {
-		def := defaultShortLinkDomain
-		spec.ShortLinkDomain = &def
-	}
 	ensureCampaignSpecDefaults(&spec)
 
 	// Update the campaign spec
@@ -2579,6 +2570,9 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 		if hasProcessedUndeliveredRefund(c.Statistics) {
 			continue
 		}
+		if hasUndeliveredRefundError(c.Statistics) {
+			continue
+		}
 
 		err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 			campaign, err := s.campaignRepo.ByID(txCtx, c.ID)
@@ -2611,6 +2605,9 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 			}
 
 			if hasProcessedUndeliveredRefund(campaign.Statistics) {
+				return nil
+			}
+			if hasUndeliveredRefundError(campaign.Statistics) {
 				return nil
 			}
 
@@ -2784,12 +2781,43 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 				_ = s.createAuditLog(ctx, auditCustomer, models.AuditActionCampaignRefundReconcileFailed, errMsg, false, &errMsg, nil)
 			}
 			log.Printf("%s", errMsg)
+			// Mark the campaign so it is never retried again. The refund transaction
+			// was rolled back, so we persist the error flag in a separate (non-transactional) update.
+			if markErr := s.markCampaignRefundError(ctx, c.ID, err); markErr != nil {
+				log.Printf("reconcileUndeliveredCampaignRefunds: failed to mark refund error for campaign %d: %v", c.ID, markErr)
+			}
 			// Best-effort reconciliation: do not block listing/getting campaigns.
 			continue
 		}
 	}
 
 	return nil
+}
+
+// markCampaignRefundError writes an error flag into the campaign Statistics so
+// reconcileUndeliveredCampaignRefunds skips it on future invocations.
+// It runs outside any transaction because the failed refund transaction was already rolled back.
+func (s *CampaignFlowImpl) markCampaignRefundError(ctx context.Context, campaignID uint, refundErr error) error {
+	campaign, err := s.campaignRepo.ByID(ctx, campaignID)
+	if err != nil {
+		return err
+	}
+	if campaign == nil {
+		return nil
+	}
+
+	statsMap := map[string]any{}
+	if len(campaign.Statistics) > 0 {
+		_ = json.Unmarshal(campaign.Statistics, &statsMap)
+	}
+	statsMap["undeliveredRefundError"] = true
+	statsMap["undeliveredRefundErrorAt"] = utils.UTCNow().Format(time.RFC3339)
+	statsMap["undeliveredRefundErrorMsg"] = refundErr.Error()
+	statsBytes, _ := json.Marshal(statsMap)
+
+	campaign.Statistics = statsBytes
+	campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+	return s.campaignRepo.Update(ctx, *campaign)
 }
 
 func (s *CampaignFlowImpl) tryAcquireFlowLock(ctx context.Context, suffix string, ttl time.Duration) bool {
@@ -2849,6 +2877,22 @@ func hasProcessedUndeliveredRefund(stats json.RawMessage) bool {
 		return false
 	}
 	raw, ok := statsMap["undeliveredRefundProcessed"]
+	if !ok {
+		return false
+	}
+	b, ok := raw.(bool)
+	return ok && b
+}
+
+func hasUndeliveredRefundError(stats json.RawMessage) bool {
+	if len(stats) == 0 {
+		return false
+	}
+	var statsMap map[string]any
+	if err := json.Unmarshal(stats, &statsMap); err != nil {
+		return false
+	}
+	raw, ok := statsMap["undeliveredRefundError"]
 	if !ok {
 		return false
 	}
@@ -3145,9 +3189,7 @@ func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
 		return 0
 	}
 
-	// Remove the link character (🔗) before counting
-	textWithoutLinkChar := strings.ReplaceAll(text, "🔗", "")
-	textWithoutLinkChar = strings.ReplaceAll(text, "{YOUR_LINK}", "")
+	textWithoutLinkChar := strings.ReplaceAll(text, "{YOUR_LINK}", "")
 
 	var count uint64
 	for _, char := range textWithoutLinkChar {
@@ -3165,18 +3207,18 @@ func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
 	return count
 }
 
-func sanitizeShortLinkDomain(domain *string) (string, error) {
+func sanitizeShortLinkDomain(domain *string) (*string, error) {
 	if domain == nil {
-		return defaultShortLinkDomain, nil
+		return nil, nil
 	}
 	trimmed := strings.TrimSpace(*domain)
 	if trimmed == "" {
-		return "", ErrInvalidShortLinkDomain
+		return nil, ErrInvalidShortLinkDomain
 	}
 	if !slices.Contains(allowedShortLinkDomains, trimmed) {
-		return "", ErrInvalidShortLinkDomain
+		return nil, ErrInvalidShortLinkDomain
 	}
-	return trimmed, nil
+	return &trimmed, nil
 }
 
 func sanitizeCategoryAndJob(accountType string, category, job *string) (*string, *string, error) {
@@ -3222,10 +3264,6 @@ func sanitizeCampaignPlatform(platform *string) (string, error) {
 func ensureCampaignSpecDefaults(spec *models.CampaignSpec) {
 	if spec == nil {
 		return
-	}
-	if spec.ShortLinkDomain == nil || strings.TrimSpace(*spec.ShortLinkDomain) == "" {
-		def := defaultShortLinkDomain
-		spec.ShortLinkDomain = &def
 	}
 	if strings.TrimSpace(spec.Platform) == "" {
 		spec.Platform = models.CampaignPlatformSMS
