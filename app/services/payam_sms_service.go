@@ -85,7 +85,7 @@ func (s *PayamSMSSMSService) SendBulk(ctx context.Context, recipients []string, 
 	if err != nil {
 		return fmt.Errorf("failed to resolve Tehran time: %w", err)
 	}
-	sendDate = sendDate.Add(15 * time.Second) // Add a small delay to ensure the sendDate is in the future
+	sendDate = sendDate.Add(30 * time.Second) // Add a small delay to ensure the sendDate is in the future
 
 	payload := payamSMSBulkPayload{
 		Sender:   s.smsConfig.SourceNumber,
