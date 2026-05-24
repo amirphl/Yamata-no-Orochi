@@ -245,7 +245,7 @@ show_database_info() {
     echo "  Tables: $table_count"
     
     # Show record counts for main tables
-    local tables=("account_types" "customers" "otp_verifications" "customer_sessions" "audit_log")
+    local tables=("account_types" "customers" "customer_sessions" "audit_log")
     for table in "${tables[@]}"; do
         if docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table" >/dev/null 2>&1; then
             local count=$(docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table")
@@ -327,16 +327,6 @@ main() {
     
     # Show migration status before asking for confirmation
     show_migration_status
-    
-    # Ask if user wants to reset migration tracker
-    if [ -f "$PROJECT_ROOT/.migration_tracker_beta" ]; then
-        read -p "Do you want to reset the migration tracker and start fresh? [y/N]: " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            reset_migration_tracker
-            print_status "Migration tracker reset. Will apply all migrations from the beginning."
-        fi
-    fi
     
     # Apply migrations
     print_status "Ready to apply database migrations."
