@@ -97,6 +97,76 @@ check_certificate_validity() {
 	fi
 }
 
+# Validate that every certificate path referenced in yamata-beta.conf exists and is valid
+validate_nginx_certificates() {
+	local domain=$1
+
+	print_status "Validating certificates referenced in yamata-beta.conf"
+
+	# Render the template into a temporary file with the provided domain values
+	local tmp_conf
+	tmp_conf=$(mktemp)
+
+	export DOMAIN="$domain"
+	export API_DOMAIN="api.$domain"
+	export MONITORING_DOMAIN="monitoring.$domain"
+	export HSTS_MAX_AGE="31536000"
+	export GLOBAL_RATE_LIMIT="1000"
+	export AUTH_RATE_LIMIT="10"
+
+	if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$tmp_conf"; then
+		rm -f "$tmp_conf"
+		print_error "Failed to render nginx template for certificate validation"
+		exit 1
+	fi
+
+	local failed=false
+
+	# Extract certificate-related file paths (2nd field on ssl_* lines)
+	while IFS= read -r cert_path; do
+		# Trim trailing semicolon if present
+		cert_path=${cert_path%;}
+		if [ -z "$cert_path" ]; then
+			continue
+		fi
+
+		if [ ! -f "$cert_path" ]; then
+			print_error "Missing certificate file: $cert_path"
+			failed=true
+			continue
+		fi
+
+		# Skip expiry check for private keys
+		if [[ "$cert_path" == *privkey* ]]; then
+			print_success "Found key file: $cert_path"
+			continue
+		fi
+
+		expiry_date=$(openssl x509 -enddate -noout -in "$cert_path" | cut -d= -f2)
+		expiry_ts=$(date -d "$expiry_date" +%s)
+		now_ts=$(date +%s)
+		days_left=$(( (expiry_ts - now_ts) / 86400 ))
+
+		# Ensure certificate is not expired and not expiring within 7 days
+		if openssl x509 -checkend $((7*24*3600)) -noout -in "$cert_path" >/dev/null 2>&1; then
+			print_success "Certificate valid (>=7 days left): $cert_path (expires in ${days_left} days on ${expiry_date})"
+		else
+			print_error "Certificate expired or expiring within 7 days: $cert_path (expires in ${days_left} days on ${expiry_date})"
+			failed=true
+		fi
+		
+	done < <(grep -E "^\s*ssl_(certificate|certificate_key|trusted_certificate)" "$tmp_conf" | awk '{print $2}')
+
+	rm -f "$tmp_conf"
+
+	if [ "$failed" = true ]; then
+		print_error "Certificate validation failed. Fix missing/expired certificates before deploying."
+		exit 1
+	fi
+
+	print_success "All referenced certificates exist and are valid"
+}
+
 # Function to obtain Let's Encrypt certificates
 obtain_letsencrypt_certificates() {
 	local domain=$1
@@ -532,9 +602,12 @@ main() {
 	
 	# Check prerequisites
 	check_prerequisites
-	
+
 	# Obtain Let's Encrypt certificates
 	obtain_letsencrypt_certificates "$domain"
+
+	# Validate certificate files referenced by nginx config (post-issuance)
+	validate_nginx_certificates "$domain"
 	
 	# Generate nginx configuration from template
 	generate_nginx_config "$domain"
