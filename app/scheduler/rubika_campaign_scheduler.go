@@ -492,13 +492,18 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 	}
 	s.logger.Printf("Rubika scheduler: campaign id=%d audience ready: phones=%d unmatched=%d", c.ID, len(phones), len(unmatchedUID))
 
+	campaignJSON, err := json.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("marshal campaign id=%d: %w", c.ID, err)
+	}
+
 	// Persist ProcessedCampaign and all audience data in one focused transaction.
 	// No external calls here — the transaction stays short and the connection stays active.
 	var pc *models.ProcessedCampaign
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
 			CampaignID:          c.ID,
-			CampaignJSON:        func() json.RawMessage { b, _ := json.Marshal(c); return b }(),
+			CampaignJSON:        json.RawMessage(campaignJSON),
 			AudienceIDs:         pq.Int64Array{},
 			AudienceCodes:       []string{},
 			LastAudienceID:      nil,
@@ -1036,7 +1041,11 @@ func (s *RubikaCampaignScheduler) buildRubikaMessageBody(c dto.BotGetCampaignRes
 	}
 	if hasCampaignAdLink(c.AdLink) {
 		if c.ShortLinkDomain != nil && *c.ShortLinkDomain != "" {
-			shortened := *c.ShortLinkDomain + code
+			domain := *c.ShortLinkDomain
+			if !strings.HasSuffix(domain, "/") {
+				domain += "/"
+			}
+			shortened := domain + code
 			return strings.ReplaceAll(content, "{YOUR_LINK}", shortened)
 		} else {
 			injected := strings.ReplaceAll(*c.AdLink, "{uid}", uid)
