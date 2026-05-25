@@ -14,6 +14,7 @@ const (
 	TimeoutKey    ContextKey = "Timeout"
 	CancelFuncKey ContextKey = "Cancel-Func"
 	CustomerIDKey ContextKey = "Customer-ID"
+	AdminIDKey    ContextKey = "Admin-ID"
 )
 
 // Token and session time constants
