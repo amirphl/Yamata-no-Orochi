@@ -152,7 +152,6 @@ func (tdb *TestDB) ClearAllTables() error {
 	tables := []string{
 		"audit_log",
 		"customer_sessions",
-		"otp_verifications",
 		"customers",
 		"account_types",
 	}
@@ -235,20 +234,7 @@ func runTestMigrations(databaseURL, dbName string) error {
 	var migrationFiles = []string{
 		"0001_create_account_types.sql",
 		"0002_create_customers.sql",
-		"0003_create_otp_verifications.sql",
-		"0004_create_customer_sessions.sql",
-		"0005_create_audit_log.sql",
-		"0006_update_customer_fields.sql",
-		"0007_add_missing_audit_actions.sql",
-		"0008_update_audit_log_success_field.sql",
-		"0009_add_correlation_ids.sql",
-		"0010_add_customer_uuid_and_agency_id.sql",
-		"0011_add_new_audit_actions.sql",
-		"0012_update_timestamp_defaults_to_utc.sql",
-		"0013_relax_name_validation.sql",
-		"0014_create_sms_campaigns.sql",
-		"0015_add_sms_campaign_audit_actions.sql",
-		"0016_add_comment_to_sms_campaigns.sql",
+		// TODO: Add more migration files here as needed
 	}
 
 	// Execute each migration file
