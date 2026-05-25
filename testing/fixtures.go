@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"math/rand"
-	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -84,28 +83,6 @@ func (tf *TestFixtures) CreateTestCustomer(accountTypeName string) (*models.Cust
 	}
 
 	return customer, nil
-}
-
-// CreateTestOTP creates a test OTP verification record
-func (tf *TestFixtures) CreateTestOTP(customerID uint, otpType, otpCode string) (*models.OTPVerification, error) {
-	otp := &models.OTPVerification{
-		CorrelationID: uuid.New(), // Generate new UUID for correlation
-		CustomerID:    customerID,
-		OTPCode:       otpCode,
-		OTPType:       otpType,
-		TargetValue:   "+989123456789",
-		Status:        models.OTPStatusPending,
-		AttemptsCount: 0,
-		MaxAttempts:   3,
-		ExpiresAt:     utils.UTCNow().Add(utils.OTPExpiry),
-	}
-
-	err := tf.DB.DB.Create(otp).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to create test OTP: %w", err)
-	}
-
-	return otp, nil
 }
 
 func GenerateSecureToken(length int) (string, error) {
@@ -207,25 +184,4 @@ func (tf *TestFixtures) CreateMultipleTestCustomers() ([]*models.Customer, error
 	}
 
 	return customers, nil
-}
-
-// CreateExpiredOTP creates an expired OTP for testing
-func (tf *TestFixtures) CreateExpiredOTP(customerID uint) (*models.OTPVerification, error) {
-	otp := &models.OTPVerification{
-		CustomerID:    customerID,
-		OTPCode:       "123456",
-		OTPType:       models.OTPTypeMobile,
-		TargetValue:   "+989123456789",
-		Status:        models.OTPStatusPending,
-		AttemptsCount: 0,
-		MaxAttempts:   3,
-		ExpiresAt:     utils.UTCNow().Add(-1 * time.Hour), // Expired 1 hour ago
-	}
-
-	err := tf.DB.DB.Create(otp).Error
-	if err != nil {
-		return nil, fmt.Errorf("failed to create expired OTP: %w", err)
-	}
-
-	return otp, nil
 }
