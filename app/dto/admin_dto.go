@@ -1,6 +1,8 @@
 // Package dto
 package dto
 
+import "time"
+
 type AdminDTO struct {
 	ID        uint   `json:"id" example:"1"`
 	UUID      string `json:"uuid" example:"f47ac10b-58cc-4372-a567-0e02b2c3d479"`
@@ -28,6 +30,21 @@ type AdminCaptchaVerifyRequest struct {
 	Username    string  `json:"username" validate:"required,min=3,max=255"`
 	Password    string  `json:"password" validate:"required,min=8,max=100"`
 	UserAngle   float64 `json:"user_angle" validate:"required"`
+}
+
+type AdminLoginInitResponse struct {
+	Message           string    `json:"message"`
+	ChallengeID       string    `json:"challenge_id"`
+	MaskedPhone       string    `json:"masked_phone"`
+	OTPSent           bool      `json:"otp_sent"`
+	AlreadySent       bool      `json:"already_sent"`
+	OTPExpiresAt      time.Time `json:"otp_expires_at"`
+	RequiresTwoFactor bool      `json:"requires_two_factor"`
+}
+
+type AdminLoginVerifyOTPRequest struct {
+	ChallengeID string `json:"challenge_id" validate:"required"`
+	OTPCode     string `json:"otp_code" validate:"required,len=6,numeric"`
 }
 
 type AdminLoginResponse struct {
