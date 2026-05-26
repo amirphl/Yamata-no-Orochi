@@ -255,8 +255,9 @@ type AtipayConfig struct {
 }
 
 type AdminConfig struct {
-	Mobiles          []string `json:"admin_mobile"`
-	DepositReviewers []string `json:"admin_deposit_reviewer"`
+	Mobiles          []string          `json:"admin_mobile"`
+	DepositReviewers []string          `json:"admin_deposit_reviewer"`
+	TwoFAMobiles     map[string]string `json:"admin_2fa_mobiles"`
 }
 
 func (c AdminConfig) ActiveMobiles() []string {
@@ -265,6 +266,14 @@ func (c AdminConfig) ActiveMobiles() []string {
 
 func (c AdminConfig) ActiveDepositReviewers() []string {
 	return normalizeMobileList(c.DepositReviewers)
+}
+
+func (c AdminConfig) TwoFAMobile(username string) string {
+	trimmedUsername := strings.TrimSpace(username)
+	if trimmedUsername == "" || len(c.TwoFAMobiles) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(c.TwoFAMobiles[trimmedUsername])
 }
 
 func (c AdminConfig) HasMobile(mobile string) bool {
@@ -558,6 +567,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Admin: AdminConfig{
 			Mobiles:          getEnvStringSlice("ADMIN_MOBILE", []string{}),
 			DepositReviewers: getEnvStringSlice("ADMIN_DEPOSIT_REVIEWER", []string{}),
+			TwoFAMobiles:     getEnvStringMap("ADMIN_2FA_MOBILES", map[string]string{}),
 		},
 		System: SystemConfig{
 			SystemUserUUID:    getEnvString("SYSTEM_USER_UUID", ""),
@@ -735,6 +745,38 @@ func getEnvStringSlice(key string, defaultValue []string) []string {
 		}
 	}
 	return defaultValue
+}
+
+func getEnvStringMap(key string, defaultValue map[string]string) map[string]string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return defaultValue
+	}
+
+	result := make(map[string]string)
+	for _, item := range strings.Split(value, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+
+		parts := strings.SplitN(item, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+
+		mapKey := strings.TrimSpace(parts[0])
+		mapValue := strings.TrimSpace(parts[1])
+		if mapKey == "" || mapValue == "" {
+			continue
+		}
+		result[mapKey] = mapValue
+	}
+
+	if len(result) == 0 {
+		return defaultValue
+	}
+	return result
 }
 
 // ValidateProductionConfig validates the production configuration
