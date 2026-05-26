@@ -286,6 +286,8 @@ type AdminListCampaignsFilter struct {
 	Status    *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in_progress waiting_for_approval approved rejected expired"`
 	StartDate *time.Time `json:"start_date,omitempty" validate:"omitempty"`
 	EndDate   *time.Time `json:"end_date,omitempty" validate:"omitempty"`
+	Page      int        `json:"page" validate:"omitempty,min=1,max=1000000"`
+	Limit     int        `json:"limit" validate:"omitempty,min=1,max=100"`
 }
 
 // AdminGetCampaignResponse represents the campaign specification in responses
@@ -319,14 +321,18 @@ type AdminGetCampaignResponse struct {
 	Statistics            map[string]any `json:"statistics,omitempty"`
 	TotalClicks           *int64         `json:"total_clicks,omitempty"`
 	ClickRate             *float64       `json:"click_rate,omitempty"`
+	NumAudience           *uint64        `json:"num_audience,omitempty"`
+	CustomerFullName      *string        `json:"customer_full_name,omitempty"`
+	AgencyFullName        *string        `json:"agency_full_name,omitempty"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
 
 // AdminListCampaignsResponse represents a paginated list of campaigns
 type AdminListCampaignsResponse struct {
-	Message string                     `json:"message"`
-	Items   []AdminGetCampaignResponse `json:"items"`
+	Message    string                     `json:"message"`
+	Items      []AdminGetCampaignResponse `json:"items"`
+	Pagination PaginationInfo             `json:"pagination"`
 }
 
 // AdminApproveCampaignRequest represents admin approval input
