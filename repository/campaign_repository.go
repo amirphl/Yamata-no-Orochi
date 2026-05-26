@@ -37,6 +37,7 @@ func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Cam
 	err := db.Select(statisticsWithoutTrackingResults).
 		Preload("Customer").
 		Preload("Customer.AccountType").
+		Preload("Customer.ReferrerAgency").
 		Last(&campaign, id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -205,7 +206,54 @@ func (r *CampaignRepositoryImpl) GetScheduledCampaigns(ctx context.Context, from
 	return r.ByFilter(ctx, filter, "schedule_at ASC", 0, 0)
 }
 
-// ClickCounts returns a map of campaign_id -> distinct short_link_click uids
+func excludeAutomatedClickTraffic(db *gorm.DB) *gorm.DB {
+	return db.
+		Where("COALESCE(ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
+		Where(`NOT (
+			COALESCE(user_agent, '') ~ 'Chrome'
+			AND COALESCE(user_agent, '') !~ '(Edg|OPR|Opera)'
+			AND (
+				COALESCE(user_agent, '') ~* 'X11; Linux|Linux'
+				AND COALESCE(user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
+			)
+		)`)
+}
+
+// // ClickCounts returns a map of campaign_id -> distinct short_link_click uids
+// func (r *CampaignRepositoryImpl) AggregateClickCountsByCampaignIDs(ctx context.Context, campaignIDs []uint) (map[uint]int64, error) {
+// 	out := make(map[uint]int64)
+// 	if len(campaignIDs) == 0 {
+// 		return out, nil
+// 	}
+// 	type row struct {
+// 		CampaignID uint
+// 		Clicks     int64
+// 	}
+// 	var rows []row
+// 	db := r.getDB(ctx)
+// 	if err := db.Table("short_link_clicks").
+// 		Select("campaign_id, COUNT(DISTINCT uid) AS clicks").
+// 		Where("campaign_id IN ?", campaignIDs).
+// 		Where("COALESCE(ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
+// 		Where(`NOT (
+// 			COALESCE(user_agent, '') ~ 'Chrome'
+// 			AND COALESCE(user_agent, '') !~ '(Edg|OPR|Opera)'
+// 			AND (
+// 				COALESCE(user_agent, '') ~* 'X11; Linux|Linux'
+// 				AND COALESCE(user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
+// 			)
+// 		)`).
+// 		Group("campaign_id").
+// 		Scan(&rows).Error; err != nil {
+// 		return nil, err
+// 	}
+// 	for _, r := range rows {
+// 		out[r.CampaignID] = r.Clicks
+// 	}
+// 	return out, nil
+// }
+
+// AggregateClickCountsByCampaignIDs returns a map of campaign_id -> distinct clicking audience count.
 func (r *CampaignRepositoryImpl) AggregateClickCountsByCampaignIDs(ctx context.Context, campaignIDs []uint) (map[uint]int64, error) {
 	out := make(map[uint]int64)
 	if len(campaignIDs) == 0 {
@@ -216,19 +264,10 @@ func (r *CampaignRepositoryImpl) AggregateClickCountsByCampaignIDs(ctx context.C
 		Clicks     int64
 	}
 	var rows []row
-	db := r.getDB(ctx)
+	db := excludeAutomatedClickTraffic(r.getDB(ctx))
 	if err := db.Table("short_link_clicks").
 		Select("campaign_id, COUNT(DISTINCT uid) AS clicks").
 		Where("campaign_id IN ?", campaignIDs).
-		Where("COALESCE(ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
-		Where(`NOT (
-			COALESCE(user_agent, '') ~ 'Chrome'
-			AND COALESCE(user_agent, '') !~ '(Edg|OPR|Opera)'
-			AND (
-				COALESCE(user_agent, '') ~* 'X11; Linux|Linux'
-				AND COALESCE(user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
-			)
-		)`).
 		Group("campaign_id").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -239,7 +278,43 @@ func (r *CampaignRepositoryImpl) AggregateClickCountsByCampaignIDs(ctx context.C
 	return out, nil
 }
 
-// AggregateClickCountsByCustomerIDs returns a map of customer_id -> distinct short_link_click uids.
+// // AggregateClickCountsByCustomerIDs returns a map of customer_id -> distinct short_link_click uids.
+// func (r *CampaignRepositoryImpl) AggregateClickCountsByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]int64, error) {
+// 	out := make(map[uint]int64)
+// 	if len(customerIDs) == 0 {
+// 		return out, nil
+// 	}
+
+// 	type row struct {
+// 		CustomerID uint
+// 		Clicks     int64
+// 	}
+// 	var rows []row
+// 	db := r.getDB(ctx)
+// 	if err := db.Table("short_link_clicks sc").
+// 		Select("c.customer_id, COUNT(DISTINCT sc.uid) AS clicks").
+// 		Joins("JOIN campaigns c ON c.id = sc.campaign_id").
+// 		Where("c.customer_id IN ?", customerIDs).
+// 		Where("COALESCE(sc.ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
+// 		Where(`NOT (
+// 			COALESCE(sc.user_agent, '') ~ 'Chrome'
+// 			AND COALESCE(sc.user_agent, '') !~ '(Edg|OPR|Opera)'
+// 			AND (
+// 				COALESCE(sc.user_agent, '') ~* 'X11; Linux|Linux'
+// 				AND COALESCE(sc.user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
+// 			)
+// 		)`).
+// 		Group("c.customer_id").
+// 		Scan(&rows).Error; err != nil {
+// 		return nil, err
+// 	}
+// 	for _, r := range rows {
+// 		out[r.CustomerID] = r.Clicks
+// 	}
+// 	return out, nil
+// }
+
+// AggregateClickCountsByCustomerIDs returns a map of customer_id -> sum of per-campaign distinct clicking audience counts.
 func (r *CampaignRepositoryImpl) AggregateClickCountsByCustomerIDs(ctx context.Context, customerIDs []uint) (map[uint]int64, error) {
 	out := make(map[uint]int64)
 	if len(customerIDs) == 0 {
@@ -252,19 +327,24 @@ func (r *CampaignRepositoryImpl) AggregateClickCountsByCustomerIDs(ctx context.C
 	}
 	var rows []row
 	db := r.getDB(ctx)
-	if err := db.Table("short_link_clicks sc").
-		Select("c.customer_id, COUNT(DISTINCT sc.uid) AS clicks").
-		Joins("JOIN campaigns c ON c.id = sc.campaign_id").
+	if err := db.Table("campaigns c").
+		Select("c.customer_id, COALESCE(SUM(campaign_clicks.clicks), 0) AS clicks").
+		Joins(`JOIN (
+			SELECT campaign_id, COUNT(DISTINCT uid) AS clicks
+			FROM short_link_clicks
+			WHERE campaign_id IS NOT NULL
+			  AND COALESCE(ip, '') !~ '^(66\\.249\\.|74\\.125\\.)'
+			  AND NOT (
+				COALESCE(user_agent, '') ~ 'Chrome'
+				AND COALESCE(user_agent, '') !~ '(Edg|OPR|Opera)'
+				AND (
+					COALESCE(user_agent, '') ~* 'X11; Linux|Linux'
+					AND COALESCE(user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
+				)
+			  )
+			GROUP BY campaign_id
+		) AS campaign_clicks ON campaign_clicks.campaign_id = c.id`).
 		Where("c.customer_id IN ?", customerIDs).
-		Where("COALESCE(sc.ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
-		Where(`NOT (
-			COALESCE(sc.user_agent, '') ~ 'Chrome'
-			AND COALESCE(sc.user_agent, '') !~ '(Edg|OPR|Opera)'
-			AND (
-				COALESCE(sc.user_agent, '') ~* 'X11; Linux|Linux'
-				AND COALESCE(sc.user_agent, '') !~* 'Android|Windows NT|Mac OS X|Macintosh|iPhone|iPad|iPod'
-			)
-		)`).
 		Group("c.customer_id").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -335,7 +415,8 @@ func (r *CampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.Cam
 	// Preload relationships and exclude trackingResults from statistics
 	query = query.Select(statisticsWithoutTrackingResults).
 		Preload("Customer").
-		Preload("Customer.AccountType")
+		Preload("Customer.AccountType").
+		Preload("Customer.ReferrerAgency")
 
 	err := query.Find(&campaigns).Error
 	if err != nil {
