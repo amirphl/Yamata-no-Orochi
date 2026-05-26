@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -26,6 +27,7 @@ type CampaignHandlerInterface interface {
 	ListAudienceSpec(c fiber.Ctx) error
 	GetApprovedRunningSummary(c fiber.Ctx) error
 	CancelCampaign(c fiber.Ctx) error
+	CloneCampaign(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -233,6 +235,54 @@ func (h *CampaignHandler) CancelCampaign(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign cancelled successfully", result)
+}
+
+// CloneCampaign clones an existing campaign for the authenticated customer.
+// @Summary Clone Campaign
+// @Description Clone an existing campaign belonging to the current customer.
+// @Tags Campaigns
+// @Produce json
+// @Param uuid path string true "Campaign UUID to clone"
+// @Success 201 {object} dto.APIResponse{data=dto.CloneCampaignResponse} "Campaign cloned successfully"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 403 {object} dto.APIResponse "Forbidden - access denied"
+// @Failure 404 {object} dto.APIResponse "Campaign not found"
+// @Failure 409 {object} dto.APIResponse "Clone not allowed"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/{uuid}/clone [post]
+func (h *CampaignHandler) CloneCampaign(c fiber.Ctx) error {
+	campaignUUID := c.Params("uuid")
+	if strings.TrimSpace(campaignUUID) == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is required", "MISSING_CAMPAIGN_UUID", nil)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok || customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	req := dto.CloneCampaignRequest{
+		UUID:       campaignUUID,
+		CustomerID: customerID,
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	res, err := h.campaignFlow.CloneCampaign(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID+"/clone"), &req, metadata)
+	if err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		if businessflow.IsCampaignAccessDenied(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Access denied", "CAMPAIGN_ACCESS_DENIED", nil)
+		}
+		if businessflow.IsCampaignUpdateNotAllowed(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Clone not allowed", "CLONE_NOT_ALLOWED", nil)
+		}
+		log.Println("Clone campaign failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to clone campaign", "CAMPAIGN_CLONE_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusCreated, "Campaign cloned successfully", res)
 }
 
 // CalculateCampaignCapacity handles the campaign capacity calculation process
