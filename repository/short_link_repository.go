@@ -144,6 +144,17 @@ func (r *ShortLinkRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Sh
 	return &row, nil
 }
 
+// DeleteTestLinksOlderThan removes short links whose UID starts with the "tst"
+// prefix (created by campaign test-sends) and are older than age. Called
+// best-effort before each test-send to prevent unbounded table growth.
+func (r *ShortLinkRepositoryImpl) DeleteTestLinksOlderThan(ctx context.Context, age time.Duration) error {
+	cutoff := time.Now().UTC().Add(-age)
+	return r.getDB(ctx).
+		Where("uid LIKE ?", "tst%").
+		Where("created_at < ?", cutoff).
+		Delete(&models.ShortLink{}).Error
+}
+
 func (r *ShortLinkRepositoryImpl) ByUID(ctx context.Context, uid string) (*models.ShortLink, error) {
 	filter := models.ShortLinkFilter{UID: &uid}
 	rows, err := r.ByFilter(ctx, filter, "id DESC", 1, 0)
