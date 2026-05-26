@@ -19,7 +19,7 @@ import (
 
 // PaymentAdminHandlerInterface defines the contract for admin payment handlers.
 type PaymentAdminHandlerInterface interface {
-	ChargeWalletByAdmin(c fiber.Ctx) error
+	ChargeWallet(c fiber.Ctx) error
 	ListDepositReceipts(c fiber.Ctx) error
 	GetDepositReceiptFile(c fiber.Ctx) error
 	UpdateDepositReceiptStatus(c fiber.Ctx) error
@@ -62,21 +62,21 @@ func (h *PaymentAdminHandler) createRequestContext(c fiber.Ctx, endpoint string)
 	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
 }
 
-// ChargeWalletByAdmin directly charges a customer's wallet without payment gateway redirect.
+// ChargeWallet directly charges a customer's wallet without payment gateway redirect.
 // @Summary Charge Wallet By Admin
 // @Description Admin endpoint to directly charge a customer wallet (manual card-to-card/offline payment settlement)
 // @Tags Payments Admin
 // @Accept json
 // @Produce json
-// @Param request body dto.ChargeWalletByAdminRequest true "Admin wallet charge payload"
-// @Success 200 {object} dto.APIResponse{data=dto.ChargeWalletByAdminResponse} "Wallet charged successfully by admin"
+// @Param request body dto.AdminChargeWalletRequest true "Admin wallet charge payload"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminChargeWalletResponse} "Wallet charged successfully by admin"
 // @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
 // @Failure 401 {object} dto.APIResponse "Unauthorized admin"
 // @Failure 404 {object} dto.APIResponse "Customer or wallet not found"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/admin/payments/charge-wallet [post]
-func (h *PaymentAdminHandler) ChargeWalletByAdmin(c fiber.Ctx) error {
-	var req dto.ChargeWalletByAdminRequest
+func (h *PaymentAdminHandler) ChargeWallet(c fiber.Ctx) error {
+	var req dto.AdminChargeWalletRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
@@ -101,7 +101,7 @@ func (h *PaymentAdminHandler) ChargeWalletByAdmin(c fiber.Ctx) error {
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
-	result, err := h.paymentAdminFlow.ChargeWalletByAdmin(
+	result, err := h.paymentAdminFlow.AdminChargeWallet(
 		h.createRequestContext(c, "/api/v1/admin/payments/charge-wallet"),
 		&req,
 		metadata,
@@ -153,6 +153,21 @@ func (h *PaymentAdminHandler) ChargeWalletByAdmin(c fiber.Ctx) error {
 }
 
 // ListDepositReceipts lists receipts with filters.
+// @Summary Admin list deposit receipts
+// @Description Lists deposit receipts with optional filters and previews.
+// @Tags Payments Admin
+// @Produce json
+// @Param status query string false "Receipt status (pending|approved|rejected)"
+// @Param lang query string false "Language filter (FA or EN)"
+// @Param customer_id query int false "Filter by customer ID"
+// @Param limit query int false "Limit (default 50)"
+// @Param offset query int false "Offset"
+// @Param order query string false "Order by clause (default id DESC)"
+// @Success 200 {object} dto.APIResponse{data=dto.ListDepositReceiptsResponse} "Receipts retrieved"
+// @Failure 400 {object} dto.APIResponse "Invalid language"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/payments/deposit-receipts [get]
 func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 	status := c.Query("status")
 	lang := c.Query("lang")
@@ -186,6 +201,16 @@ func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 }
 
 // GetDepositReceiptFile downloads the uploaded file.
+// @Summary Admin download deposit receipt file
+// @Description Downloads the receipt file by UUID (no ownership check).
+// @Tags Payments Admin
+// @Produce octet-stream
+// @Param uuid path string true "Deposit receipt UUID"
+// @Success 200 {file} binary "Receipt file"
+// @Failure 404 {object} dto.APIResponse "Receipt not found"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/payments/deposit-receipts/{uuid}/file [get]
 func (h *PaymentAdminHandler) GetDepositReceiptFile(c fiber.Ctx) error {
 	uuid := c.Params("uuid")
 	data, filename, contentType, err := h.paymentAdminFlow.AdminGetDepositReceiptFile(h.createRequestContext(c, "/api/v1/admin/payments/deposit-receipts/"+uuid+"/file"), uuid)
@@ -196,12 +221,56 @@ func (h *PaymentAdminHandler) GetDepositReceiptFile(c fiber.Ctx) error {
 		log.Println("Admin get receipt file failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to download receipt file", "ADMIN_DOWNLOAD_RECEIPT_FAILED", nil)
 	}
+	// ext := ""
+	// if dot := strings.LastIndex(filename, "."); dot == -1 {
+	// 	if guessed := mimeFromContentType(contentType); guessed != "" {
+	// 		ext = guessed
+	// 	}
+	// }
+	// finalName := filename
+	// if ext != "" && !strings.HasSuffix(strings.ToLower(filename), ext) {
+	// 	finalName = filename + ext
+	// }
+	// // Ensure browser gets a filename with extension
+	// c.Attachment(finalName)
+	// if contentType != "" {
+	// 	c.Type(contentType, "")
+	// }
+	// return c.Status(fiber.StatusOK).Send(data)
 	c.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	c.Type(contentType, "")
 	return c.Status(fiber.StatusOK).Send(data)
 }
 
+// mimeFromContentType returns a dot extension for a content type (limited set).
+func mimeFromContentType(ct string) string {
+	ct = strings.ToLower(strings.TrimSpace(ct))
+	switch ct {
+	case "application/pdf":
+		return ".pdf"
+	case "image/png":
+		return ".png"
+	case "image/jpeg", "image/jpg":
+		return ".jpg"
+	default:
+		return ""
+	}
+}
+
 // UpdateDepositReceiptStatus approves/rejects a receipt.
+// @Summary Admin update deposit receipt status
+// @Description Approve or reject a deposit receipt; on approval credits wallet using receipt metadata.
+// @Tags Payments Admin
+// @Accept json
+// @Produce json
+// @Param request body dto.AdminUpdateDepositReceiptStatusRequest true "Status update payload"
+// @Success 200 {object} dto.APIResponse{data=dto.SubmitDepositReceiptResponse} "Status updated"
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 404 {object} dto.APIResponse "Receipt not found"
+// @Failure 409 {object} dto.APIResponse "Receipt already finalized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/payments/deposit-receipts/status [post]
 func (h *PaymentAdminHandler) UpdateDepositReceiptStatus(c fiber.Ctx) error {
 	var req dto.AdminUpdateDepositReceiptStatusRequest
 	if err := c.Bind().JSON(&req); err != nil {
