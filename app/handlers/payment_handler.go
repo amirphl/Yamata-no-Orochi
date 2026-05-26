@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -23,7 +24,9 @@ type PaymentHandlerInterface interface {
 	SubmitDepositReceipt(c fiber.Ctx) error
 	ListDepositReceipts(c fiber.Ctx) error
 	PreviewProformaInvoice(c fiber.Ctx) error
-	DownloadProformaInvoice(c fiber.Ctx) error
+	DownloadDepositReceiptFile(c fiber.Ctx) error
+	UpdateDepositReceiptFile(c fiber.Ctx) error
+	DeleteDepositReceiptFile(c fiber.Ctx) error
 }
 
 // PaymentHandler handles payment-related HTTP requests
@@ -501,7 +504,18 @@ func (h *PaymentHandler) setupCustomValidations() {
 	// Example: h.validator.RegisterValidation("custom_rule", customValidationFunc)
 }
 
-// SubmitDepositReceipt allows customer to upload deposit receipt (base64 payload).
+// SubmitDepositReceipt uploads a deposit receipt for manual review (no immediate credit).
+// @Summary Submit deposit receipt
+// @Description Upload a bank deposit receipt file (base64) for finance review; balance is credited only after approval.
+// @Tags Payments
+// @Accept json
+// @Produce json
+// @Param request body dto.SubmitDepositReceiptRequest true "Deposit receipt payload"
+// @Success 201 {object} dto.APIResponse{data=dto.SubmitDepositReceiptResponse} "Receipt submitted"
+// @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized - customer not found or inactive"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/deposit-receipts [post]
 func (h *PaymentHandler) SubmitDepositReceipt(c fiber.Ctx) error {
 	var req dto.SubmitDepositReceiptRequest
 	if err := c.Bind().JSON(&req); err != nil {
@@ -539,6 +553,16 @@ func (h *PaymentHandler) SubmitDepositReceipt(c fiber.Ctx) error {
 }
 
 // ListDepositReceipts returns current user's receipts.
+// @Summary List deposit receipts
+// @Description Returns the user's submitted deposit receipts with status and metadata.
+// @Tags Payments
+// @Produce json
+// @Param lang query string false "Language filter (FA or EN)"
+// @Success 200 {object} dto.APIResponse{data=dto.ListDepositReceiptsResponse} "Receipts retrieved"
+// @Failure 400 {object} dto.APIResponse "Invalid language"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/deposit-receipts [get]
 func (h *PaymentHandler) ListDepositReceipts(c fiber.Ctx) error {
 	customerID, _ := c.Locals("customer_id").(uint)
 	if customerID == 0 {
@@ -557,21 +581,34 @@ func (h *PaymentHandler) ListDepositReceipts(c fiber.Ctx) error {
 }
 
 // PreviewProformaInvoice returns JSON data.
+// @Summary Preview proforma invoice
+// @Description Returns JSON containing seller/buyer info, amounts, and tax for the requested deposit receipt and language.
+// @Tags Payments
+// @Produce json
+// @Param receipt_uuid query string true "Deposit receipt UUID"
+// @Param lang query string false "Language (FA or EN)"
+// @Success 200 {object} dto.APIResponse{data=dto.ProformaPreviewResponse} "Preview generated"
+// @Failure 400 {object} dto.APIResponse "Invalid receipt or language"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/proforma/preview [get]
 func (h *PaymentHandler) PreviewProformaInvoice(c fiber.Ctx) error {
 	customerID, _ := c.Locals("customer_id").(uint)
 	if customerID == 0 {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
-	amountStr := c.Query("amount")
+	receiptUUID := c.Query("receipt_uuid")
 	lang := c.Query("lang")
-	amount, err := strconv.ParseUint(amountStr, 10, 64)
-	if err != nil || amount == 0 {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
+	if strings.TrimSpace(receiptUUID) == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid receipt_uuid", "INVALID_RECEIPT", nil)
 	}
-	resp, err := h.paymentFlow.PreviewProformaInvoice(h.createRequestContext(c, "/api/v1/payments/proforma/preview"), customerID, amount, lang)
+	resp, err := h.paymentFlow.PreviewProformaInvoice(h.createRequestContext(c, "/api/v1/payments/proforma/preview"), customerID, receiptUUID, lang)
 	if err != nil {
 		if businessflow.IsInvalidLanguage(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
+		}
+		if businessflow.IsDepositReceiptNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt not found", "RECEIPT_NOT_FOUND", nil)
 		}
 		log.Println("Preview proforma failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to preview proforma invoice", "PROFORMA_PREVIEW_FAILED", nil)
@@ -579,27 +616,128 @@ func (h *PaymentHandler) PreviewProformaInvoice(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Proforma preview generated", resp)
 }
 
-// DownloadProformaInvoice returns HTML (caller can treat as PDF content after conversion).
-func (h *PaymentHandler) DownloadProformaInvoice(c fiber.Ctx) error {
+// DownloadDepositReceiptFile returns the uploaded receipt file for the authenticated customer.
+// @Summary Download deposit receipt file
+// @Description Downloads the original receipt file uploaded by the customer.
+// @Tags Payments
+// @Produce octet-stream
+// @Param receipt_uuid path string true "Deposit receipt UUID"
+// @Success 200 {file} binary "Receipt file"
+// @Failure 400 {object} dto.APIResponse "Invalid receipt"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/deposit-receipts/{receipt_uuid}/file [get]
+func (h *PaymentHandler) DownloadDepositReceiptFile(c fiber.Ctx) error {
 	customerID, _ := c.Locals("customer_id").(uint)
 	if customerID == 0 {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
-	amountStr := c.Query("amount")
-	lang := c.Query("lang")
-	amount, err := strconv.ParseUint(amountStr, 10, 64)
-	if err != nil || amount == 0 {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
+	receiptUUID := c.Params("receipt_uuid")
+	if strings.TrimSpace(receiptUUID) == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid receipt_uuid", "INVALID_RECEIPT", nil)
 	}
-	data, filename, err := h.paymentFlow.DownloadProformaInvoicePDF(h.createRequestContext(c, "/api/v1/payments/proforma/download"), customerID, amount, lang)
+	data, filename, contentType, err := h.paymentFlow.DownloadDepositReceiptFile(h.createRequestContext(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file"), customerID, receiptUUID)
 	if err != nil {
-		if businessflow.IsInvalidLanguage(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
+		if businessflow.IsDepositReceiptNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt not found", "RECEIPT_NOT_FOUND", nil)
 		}
-		log.Println("Download proforma failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to generate proforma invoice", "PROFORMA_DOWNLOAD_FAILED", nil)
+		if businessflow.IsDepositReceiptFileEmpty(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt file not available", "RECEIPT_FILE_EMPTY", nil)
+		}
+		log.Println("Download receipt failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to download receipt", "RECEIPT_DOWNLOAD_FAILED", nil)
 	}
 	c.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
-	c.Type("html", "utf-8")
+	c.Type(contentType, "")
 	return c.Status(fiber.StatusOK).Send(data)
+}
+
+// UpdateDepositReceiptFile replaces the receipt file while status is pending.
+// @Summary Update deposit receipt file
+// @Description Replaces the uploaded receipt file if the receipt is still pending.
+// @Tags Payments
+// @Accept json
+// @Produce json
+// @Param receipt_uuid path string true "Deposit receipt UUID"
+// @Param request body dto.UpdateDepositReceiptFileRequest true "New receipt file payload"
+// @Success 200 {object} dto.APIResponse "File updated"
+// @Failure 400 {object} dto.APIResponse "Invalid request or receipt"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 409 {object} dto.APIResponse "Receipt already finalized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/deposit-receipts/{receipt_uuid}/file [put]
+func (h *PaymentHandler) UpdateDepositReceiptFile(c fiber.Ctx) error {
+	customerID, _ := c.Locals("customer_id").(uint)
+	if customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	receiptUUID := c.Params("receipt_uuid")
+	if strings.TrimSpace(receiptUUID) == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid receipt_uuid", "INVALID_RECEIPT", nil)
+	}
+	var req dto.UpdateDepositReceiptFileRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	err := h.paymentFlow.UpdateDepositReceiptFile(h.createRequestContext(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file"), customerID, receiptUUID, &req)
+	if err != nil {
+		switch {
+		case businessflow.IsDepositReceiptNotFound(err):
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt not found", "RECEIPT_NOT_FOUND", nil)
+		case businessflow.IsDepositReceiptAlreadyFinalized(err):
+			return h.ErrorResponse(c, fiber.StatusConflict, "Receipt already finalized", "RECEIPT_FINALIZED", nil)
+		case businessflow.IsDepositReceiptFileTooLarge(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "File too large (max 5MB)", "FILE_TOO_LARGE", nil)
+		case businessflow.IsDepositReceiptFileInvalidType(err):
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Unsupported file type", "INVALID_FILE_TYPE", nil)
+		default:
+			log.Println("Update receipt file failed", err)
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update receipt file", "RECEIPT_FILE_UPDATE_FAILED", nil)
+		}
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Receipt file updated", fiber.Map{"ok": true})
+}
+
+// DeleteDepositReceiptFile clears the stored file while status is pending.
+// @Summary Delete deposit receipt file
+// @Description Removes the uploaded receipt file content (keeps receipt record) if pending.
+// @Tags Payments
+// @Produce json
+// @Param receipt_uuid path string true "Deposit receipt UUID"
+// @Success 200 {object} dto.APIResponse "File removed"
+// @Failure 400 {object} dto.APIResponse "Invalid receipt"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 409 {object} dto.APIResponse "Receipt already finalized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/deposit-receipts/{receipt_uuid}/file [delete]
+func (h *PaymentHandler) DeleteDepositReceiptFile(c fiber.Ctx) error {
+	customerID, _ := c.Locals("customer_id").(uint)
+	if customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	receiptUUID := c.Params("receipt_uuid")
+	if strings.TrimSpace(receiptUUID) == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid receipt_uuid", "INVALID_RECEIPT", nil)
+	}
+	err := h.paymentFlow.DeleteDepositReceiptFile(h.createRequestContext(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file"), customerID, receiptUUID)
+	if err != nil {
+		switch {
+		case businessflow.IsDepositReceiptNotFound(err):
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt not found", "RECEIPT_NOT_FOUND", nil)
+		case businessflow.IsDepositReceiptAlreadyFinalized(err):
+			return h.ErrorResponse(c, fiber.StatusConflict, "Receipt already finalized", "RECEIPT_FINALIZED", nil)
+		default:
+			log.Println("Delete receipt file failed", err)
+			return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to delete receipt file", "RECEIPT_FILE_DELETE_FAILED", nil)
+		}
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Receipt file removed", fiber.Map{"ok": true})
 }
