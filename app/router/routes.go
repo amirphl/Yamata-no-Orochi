@@ -249,6 +249,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Post("/", r.campaignHandler.CreateCampaign)
 	campaigns.Put("/:uuid", r.campaignHandler.UpdateCampaign)
 	campaigns.Get("/", r.campaignHandler.ListCampaigns)
+	campaigns.Post("/:uuid/clone", r.campaignHandler.CloneCampaign)
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
 	campaigns.Post("/calculate-cost", r.campaignHandler.CalculateCampaignCost)
 	campaigns.Post("/calculate-cost-v2", r.campaignHandler.CalculateCampaignCostV2)
@@ -372,15 +373,19 @@ func (r *FiberRouter) SetupRoutes() {
 	// Deposit receipt submission & listing
 	payments.Post("/deposit-receipts", r.authMiddleware.Authenticate(), r.paymentHandler.SubmitDepositReceipt)
 	payments.Get("/deposit-receipts", r.authMiddleware.Authenticate(), r.paymentHandler.ListDepositReceipts)
-	// Proforma invoice preview/download
+	// Proforma invoice preview
 	payments.Get("/proforma/preview", r.authMiddleware.Authenticate(), r.paymentHandler.PreviewProformaInvoice)
-	payments.Get("/proforma/download", r.authMiddleware.Authenticate(), r.paymentHandler.DownloadProformaInvoice)
+	// Receipt file download
+	payments.Get("/deposit-receipts/:receipt_uuid/file", r.authMiddleware.Authenticate(), r.paymentHandler.DownloadDepositReceiptFile)
+	// Receipt file update/delete
+	payments.Put("/deposit-receipts/:receipt_uuid/file", r.authMiddleware.Authenticate(), r.paymentHandler.UpdateDepositReceiptFile)
+	payments.Delete("/deposit-receipts/:receipt_uuid/file", r.authMiddleware.Authenticate(), r.paymentHandler.DeleteDepositReceiptFile)
 
 	// Admin payment routes (protected)
 	adminPayments := api.Group("/admin/payments")
 	adminPayments.Use(r.authMiddleware.AdminAuthenticate())
 	adminPayments.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
-	adminPayments.Post("/charge-wallet", r.paymentAdminHandler.ChargeWalletByAdmin)
+	adminPayments.Post("/charge-wallet", r.paymentAdminHandler.ChargeWallet)
 	adminPayments.Get("/deposit-receipts", r.paymentAdminHandler.ListDepositReceipts)
 	adminPayments.Get("/deposit-receipts/:uuid/file", r.paymentAdminHandler.GetDepositReceiptFile)
 	adminPayments.Post("/deposit-receipts/status", r.paymentAdminHandler.UpdateDepositReceiptStatus)
