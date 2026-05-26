@@ -456,3 +456,38 @@ func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	}
 	return os.Rename(tmp, path)
 }
+
+// computeClickRate safely calculates a click-through rate as clicks/totalSent.
+// Returns nil when totalSent is <= 0 to distinguish "no data" from "0% CTR".
+// A nil return should be serialised as absent/null by callers, not as zero.
+func computeClickRate(clicks int64, totalSent float64) *float64 {
+	if totalSent <= 0 {
+		return nil
+	}
+	rate := float64(clicks) / totalSent
+	return &rate
+}
+
+// parseAggregatedTotalSentFromMap extracts the "aggregatedTotalSent" field from a
+// campaign statistics map (already parsed from JSON). Returns 0 when the key is
+// absent, nil, or has an unrecognised type.
+func parseAggregatedTotalSentFromMap(statsMap map[string]any) float64 {
+	if statsMap == nil {
+		return 0
+	}
+	v, ok := statsMap["aggregatedTotalSent"]
+	if !ok {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int64:
+		return float64(n)
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f
+		}
+	}
+	return 0
+}

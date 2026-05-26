@@ -17,6 +17,7 @@ import (
 type AuthAdminHandlerInterface interface {
 	InitCaptcha(cCtx fiber.Ctx) error
 	VerifyLogin(cCtx fiber.Ctx) error
+	VerifyLoginOTP(cCtx fiber.Ctx) error
 }
 
 // AuthAdminHandler implements AuthAdminHandlerInterface
@@ -71,14 +72,14 @@ func (h *AuthAdminHandler) InitCaptcha(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Captcha initialized", resp)
 }
 
-// VerifyLogin completes admin login by verifying captcha and credentials
+// VerifyLogin validates captcha and credentials, then starts the OTP step.
 // @Summary Admin login
-// @Description Verify captcha and authenticate admin with username/password
+// @Description Verify captcha and admin credentials, then send/reuse an OTP for two-factor login
 // @Tags Admin Authentication
 // @Accept json
 // @Produce json
 // @Param request body dto.AdminCaptchaVerifyRequest true "Admin login data"
-// @Success 200 {object} dto.APIResponse{data=object{access_token=string,refresh_token=string,token_type=string,expires_in=int,admin=dto.AdminDTO}} "Login successful"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminLoginInitResponse} "OTP challenge created"
 // @Failure 400 {object} dto.APIResponse "Invalid request or captcha"
 // @Failure 401 {object} dto.APIResponse "Incorrect credentials or admin not found"
 // @Failure 403 {object} dto.APIResponse "Admin inactive"
@@ -101,19 +102,65 @@ func (h *AuthAdminHandler) VerifyLogin(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	result, err := h.flow.Verify(h.createRequestContext(c, "/api/v1/admin/auth/login"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many login attempts", "RATE_LIMITED", nil)
+		}
 		if businessflow.IsInvalidCaptcha(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid captcha", "INVALID_CAPTCHA", nil)
 		}
-		if businessflow.IsAdminNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Admin not found", "ADMIN_NOT_FOUND", nil)
+		if businessflow.IsAdminTwoFactorNotConfigured(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Admin two-factor authentication is not configured", "ADMIN_2FA_NOT_CONFIGURED", nil)
+		}
+		if businessflow.IsAuthenticationFailed(err) || businessflow.IsAdminNotFound(err) || businessflow.IsAdminInactive(err) || businessflow.IsIncorrectPassword(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Login failed", "LOGIN_FAILED", nil)
+		}
+		log.Println("Admin login failed", err)
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Login failed", "LOGIN_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "OTP sent", result)
+}
+
+// VerifyLoginOTP completes the second factor step for admin login.
+// @Summary Admin login OTP verification
+// @Description Verify admin OTP and issue access/refresh tokens
+// @Tags Admin Authentication
+// @Accept json
+// @Produce json
+// @Param request body dto.AdminLoginVerifyOTPRequest true "Admin login OTP verification data"
+// @Success 200 {object} dto.APIResponse{data=object{access_token=string,refresh_token=string,token_type=string,expires_in=int,admin=dto.AdminDTO}} "Login successful"
+// @Failure 400 {object} dto.APIResponse "Invalid request body"
+// @Failure 401 {object} dto.APIResponse "Invalid or expired OTP"
+// @Failure 403 {object} dto.APIResponse "Admin inactive"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/auth/login/verify-otp [post]
+func (h *AuthAdminHandler) VerifyLoginOTP(c fiber.Ctx) error {
+	var req dto.AdminLoginVerifyOTPRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	result, err := h.flow.VerifyOTP(h.createRequestContext(c, "/api/v1/admin/auth/login/verify-otp"), &req, metadata)
+	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
+		}
+		if businessflow.IsAdminNotFound(err) || businessflow.IsIncorrectPassword(err) || businessflow.IsNoValidOTPFound(err) || businessflow.IsInvalidOTPCode(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid or expired OTP", "INVALID_OTP", nil)
 		}
 		if businessflow.IsAdminInactive(err) {
 			return h.ErrorResponse(c, fiber.StatusForbidden, "Admin inactive", "ADMIN_INACTIVE", nil)
 		}
-		if businessflow.IsIncorrectPassword(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Incorrect password", "INCORRECT_PASSWORD", nil)
-		}
-		log.Println("Admin login failed", err)
+		log.Println("Admin OTP verification failed", err)
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Login failed", "LOGIN_FAILED", nil)
 	}
 

@@ -75,8 +75,11 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 
 	fakeCode := buildFakeShortCode()
 	fakeUID := buildFakeAudienceUID()
-	body := buildCampaignTestMessageBody(platform, campaign.Spec.Content, campaign.Spec.AdLink, campaign.Spec.ShortLinkDomain, fakeCode, fakeUID)
-	fakeResolvedLink := buildCampaignTestResolvedLink(campaign.Spec.AdLink, campaign.Spec.ShortLinkDomain, fakeCode, fakeUID)
+	fakeResolvedLink, err := s.resolveCampaignTestLink(ctx, campaign, recipient, fakeCode, fakeUID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_SHORT_LINK_FAILED", "failed to create campaign test short link", err)
+	}
+	body := buildCampaignTestMessageBody(platform, campaign.Spec.Content, fakeResolvedLink)
 
 	softErr, hardErr := s.sendCampaignTestMessageBestEffort(ctx, campaign, platform, recipient, body)
 	if hardErr != nil {
@@ -169,13 +172,13 @@ func hasCampaignAdLink(adLink *string) bool {
 	return adLink != nil && strings.TrimSpace(*adLink) != ""
 }
 
-func buildCampaignTestMessageBody(platform string, contentPtr *string, adLink *string, shortLinkDomain *string, fakeCode string, fakeUID string) string {
+func buildCampaignTestMessageBody(platform string, contentPtr *string, resolvedLink *string) string {
 	content := ""
 	if contentPtr != nil {
 		content = *contentPtr
 	}
 	replacement := ""
-	if resolvedLink := buildCampaignTestResolvedLink(adLink, shortLinkDomain, fakeCode, fakeUID); resolvedLink != nil {
+	if resolvedLink != nil {
 		replacement = *resolvedLink
 	}
 	content = strings.ReplaceAll(content, "{YOUR_LINK}", replacement)
@@ -190,11 +193,48 @@ func buildCampaignTestResolvedLink(adLink *string, shortLinkDomain *string, fake
 		return nil
 	}
 	if shortLinkDomain != nil && strings.TrimSpace(*shortLinkDomain) != "" {
-		v := strings.TrimSpace(*shortLinkDomain) + fakeCode
+		v := buildCampaignShortLink(*shortLinkDomain, fakeCode)
 		return &v
 	}
 	v := strings.ReplaceAll(*adLink, "{uid}", fakeUID)
 	return &v
+}
+
+func buildCampaignShortLink(shortLinkDomain string, code string) string {
+	domain := strings.TrimSpace(shortLinkDomain)
+	domain = strings.TrimRight(domain, "/")
+	return domain + "/" + code
+}
+
+func (s *CampaignFlowImpl) resolveCampaignTestLink(
+	ctx context.Context,
+	campaign models.Campaign,
+	recipient string,
+	fakeCode string,
+	fakeUID string,
+) (*string, error) {
+	if !hasCampaignAdLink(campaign.Spec.AdLink) {
+		return nil, nil
+	}
+
+	longLink := strings.ReplaceAll(*campaign.Spec.AdLink, "{uid}", fakeUID)
+	if campaign.Spec.ShortLinkDomain == nil || strings.TrimSpace(*campaign.Spec.ShortLinkDomain) == "" {
+		return &longLink, nil
+	}
+
+	shortLink := buildCampaignShortLink(*campaign.Spec.ShortLinkDomain, fakeCode)
+	shortLinkRow := &models.ShortLink{
+		UID:         fakeCode,
+		CampaignID:  &campaign.ID,
+		PhoneNumber: utils.ToPtr(recipient),
+		LongLink:    longLink,
+		ShortLink:   shortLink,
+	}
+	if err := s.shortLinkRepo.Save(ctx, shortLinkRow); err != nil {
+		return nil, err
+	}
+
+	return &shortLink, nil
 }
 
 func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(

@@ -34,11 +34,13 @@ var (
 	ErrReferrerAgencyShebaNumberRequired = errors.New("referrer agency sheba number is required")
 
 	// OTP-related errors
-	ErrNoValidOTPFound   = errors.New("no valid OTP found")
-	ErrInvalidOTPCode    = errors.New("invalid OTP code")
-	ErrInvalidOTPType    = errors.New("invalid OTP type")
-	ErrOTPExpired        = errors.New("OTP has expired")
-	ErrCacheNotAvailable = errors.New("cache not available")
+	ErrNoValidOTPFound      = errors.New("no valid OTP found")
+	ErrInvalidOTPCode       = errors.New("invalid OTP code")
+	ErrInvalidOTPType       = errors.New("invalid OTP type")
+	ErrOTPExpired           = errors.New("OTP has expired")
+	ErrCacheNotAvailable    = errors.New("cache not available")
+	ErrAuthenticationFailed = errors.New("authentication failed")
+	ErrRateLimitExceeded    = errors.New("rate limit exceeded")
 
 	ErrAlreadyVerified = errors.New("already verified")
 
@@ -62,6 +64,7 @@ var (
 	ErrScheduleTimeNotPresent                   = errors.New("schedule time is not present")
 	ErrScheduleTimeTooSoon                      = errors.New("schedule time is too soon")
 	ErrScheduleTimeTooCloseToCurrent            = errors.New("current schedule time is too close to allow reschedule")
+	ErrScheduleTimeTooCloseToCancel             = errors.New("current schedule time is too close to allow cancel")
 	ErrScheduleTimeMustBeUTC                    = errors.New("schedule time must be UTC")
 	ErrCampaignCityRequired                     = errors.New("campaign city is required")
 	ErrCampaignTagsRequired                     = errors.New("campaign tags is required")
@@ -144,9 +147,10 @@ var (
 	ErrAgencyCannotListDiscountsForItself  = errors.New("agency cannot list discounts for itself")
 
 	// Admin and captcha related errors
-	ErrAdminNotFound  = errors.New("admin not found")
-	ErrAdminInactive  = errors.New("admin account is inactive")
-	ErrInvalidCaptcha = errors.New("invalid captcha")
+	ErrAdminNotFound               = errors.New("admin not found")
+	ErrAdminInactive               = errors.New("admin account is inactive")
+	ErrInvalidCaptcha              = errors.New("invalid captcha")
+	ErrAdminTwoFactorNotConfigured = errors.New("admin two-factor mobile is not configured")
 
 	// Bot related errors
 	ErrBotNotFound = errors.New("bot not found")
@@ -383,6 +387,10 @@ func IsScheduleTimeTooCloseToCurrent(err error) bool {
 	return errors.Is(err, ErrScheduleTimeTooCloseToCurrent)
 }
 
+func IsScheduleTimeTooCloseToCancel(err error) bool {
+	return errors.Is(err, ErrScheduleTimeTooCloseToCancel)
+}
+
 func IsScheduleTimeMustBeUTC(err error) bool {
 	return errors.Is(err, ErrScheduleTimeMustBeUTC)
 }
@@ -517,6 +525,18 @@ func IsInvalidOTPType(err error) bool {
 
 func IsOTPExpired(err error) bool {
 	return errors.Is(err, ErrOTPExpired)
+}
+
+func IsAuthenticationFailed(err error) bool {
+	return errors.Is(err, ErrAuthenticationFailed)
+}
+
+func IsRateLimitExceeded(err error) bool {
+	return errors.Is(err, ErrRateLimitExceeded)
+}
+
+func IsAdminTwoFactorNotConfigured(err error) bool {
+	return errors.Is(err, ErrAdminTwoFactorNotConfigured)
 }
 
 func IsCacheNotAvailable(err error) bool {

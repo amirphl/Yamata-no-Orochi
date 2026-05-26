@@ -311,39 +311,58 @@ main() {
     echo "🗄️  Yamata no Orochi - Beta Database Initialization"
     echo "=================================================="
     echo ""
-    
+
+    # Parse arguments
+    AUTO_YES=false
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --yes|-y)
+                AUTO_YES=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
     # Get database configuration
     get_db_config
-    
+
     # Check if PostgreSQL container is running
     check_postgres_container
-    
+
     # Check if database exists
     if check_database_exists; then
         print_status "Database '$DB_NAME' already exists; skipping drop and creation"
     else
         create_database || true
     fi
-    
+
     # Show migration status before asking for confirmation
     show_migration_status
-    
+
     # Apply migrations
     print_status "Ready to apply database migrations."
-    read -p "Do you want to proceed with applying migrations? [y/N]: " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$AUTO_YES" = true ]; then
+        print_status "Auto-yes enabled – applying migrations without prompt."
         apply_migrations
     else
-        print_status "Migration step skipped."
+        read -p "Do you want to proceed with applying migrations? [y/N]: " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            apply_migrations
+        else
+            print_status "Migration step skipped."
+        fi
     fi
-    
+
     # Verify database setup
     verify_database_setup
-    
+
     # Show database information
     show_database_info
-    
+
     print_success "🎉 Beta database initialization completed successfully!"
     echo ""
     echo "📋 Next Steps:"
@@ -354,4 +373,4 @@ main() {
 }
 
 # Run main function
-main "$@" 
+main "$@"

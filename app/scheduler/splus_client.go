@@ -61,6 +61,47 @@ type SplusStatusResponse struct {
 	StatusText string // human-readable status description
 }
 
+const (
+	splusUploadRetryBaseDelay = 1 * time.Second
+	splusUploadRetryMaxDelay  = 30 * time.Second
+	splusUploadMaxRetries     = 3 // 0 means unlimited retries until success or context cancellation.
+)
+
+// splusUploadRetryBackoffDelay returns the exponential back-off duration for the
+// given attempt index (0-based), capped at splusUploadRetryMaxDelay.
+func splusUploadRetryBackoffDelay(attempt int) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	backoff := splusUploadRetryBaseDelay
+	for i := 0; i < attempt; i++ {
+		backoff *= 2
+		if backoff >= splusUploadRetryMaxDelay {
+			return splusUploadRetryMaxDelay
+		}
+	}
+	return backoff
+}
+
+// isRetryableSplusUploadError reports whether an upload error is transient and
+// worth retrying (network failures and HTTP 429/5xx responses).
+func isRetryableSplusUploadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "429") ||
+		strings.Contains(msg, "http status: 500") ||
+		strings.Contains(msg, "http status: 502") ||
+		strings.Contains(msg, "http status: 503") ||
+		strings.Contains(msg, "http status: 504") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "timed out") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "eof")
+}
+
 // httpSplusClient is the production HTTP implementation of SplusClient.
 type httpSplusClient struct {
 	cfg    config.SplusConfig
@@ -131,14 +172,17 @@ func (c *httpSplusClient) SendMessage(ctx context.Context, botID string, reqBody
 	return &out, nil
 }
 
+// UploadFile uploads a media file to Splus with exponential backoff retries on
+// transient errors (network failures and HTTP 429/5xx). Each retry re-opens the
+// file from disk so the multipart body is always fresh.
 func (c *httpSplusClient) UploadFile(ctx context.Context, botID string, path string) (*SplusUploadResponse, error) {
+	// Validate inputs once — these errors are permanent, no point retrying.
 	if strings.TrimSpace(botID) == "" {
 		return nil, fmt.Errorf("splus bot id is not configured")
 	}
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("upload path is empty")
 	}
-
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -147,6 +191,25 @@ func (c *httpSplusClient) UploadFile(ctx context.Context, botID string, path str
 		return nil, fmt.Errorf("file size exceeds splus upload limit (8MB)")
 	}
 
+	var resp *SplusUploadResponse
+	for attempt := 0; ; attempt++ {
+		resp, err = c.uploadFileOnce(ctx, botID, path)
+		if !isRetryableSplusUploadError(err) {
+			return resp, err
+		}
+		if splusUploadMaxRetries > 0 && attempt+1 >= splusUploadMaxRetries {
+			break
+		}
+		if sleepErr := sleepWithContext(ctx, splusUploadRetryBackoffDelay(attempt)); sleepErr != nil {
+			return resp, ctx.Err()
+		}
+	}
+	return resp, err
+}
+
+// uploadFileOnce performs a single (non-retried) file upload attempt. It opens
+// the file on every call so the multipart body is always fresh.
+func (c *httpSplusClient) uploadFileOnce(ctx context.Context, botID string, path string) (*SplusUploadResponse, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err

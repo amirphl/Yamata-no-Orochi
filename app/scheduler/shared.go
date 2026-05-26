@@ -32,6 +32,16 @@ const (
 
 	numJobsPerTick          = 100
 	statusJobWorkerInterval = 5 * time.Minute
+
+	// statusJobMaxRetry is the maximum number of times a status-check job is
+	// retried before it is permanently marked as executed. Used by all platform
+	// schedulers (Bale, Splus, SMS, …).
+	statusJobMaxRetry = 3
+
+	// audienceAppendBatchSize controls how many audience IDs are flushed to the
+	// database per AppendAudienceData call inside the persistence transaction.
+	// Used by all platform schedulers.
+	audienceAppendBatchSize = 1000
 )
 
 type AudiencePhonesResult struct {

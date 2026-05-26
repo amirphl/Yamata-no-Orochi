@@ -138,9 +138,14 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomersShares(ctx context.Context
 	for _, r := range rows {
 		totalSent := totalSentByCustomer[r.CustomerID]
 		clicks := clickCountsByCustomer[r.CustomerID]
-		clickRate := .0
-		if totalSent > 0 {
-			clickRate = float64(clicks) / float64(totalSent)
+		// NOTE: totalSent and clicks aggregate ALL campaigns for this customer
+		// regardless of the startDate/endDate filter applied to the shares data.
+		// ClickRate therefore represents lifetime performance, not period performance.
+		// DTO uses float64 (not *float64), so fall back to 0.0 when no messages sent.
+		cr := computeClickRate(clicks, float64(totalSent))
+		clickRate := 0.0
+		if cr != nil {
+			clickRate = *cr
 		}
 		items = append(items, dto.AdminCustomersSharesItem{
 			CustomerID:         r.CustomerID,
@@ -213,24 +218,14 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 		if len(c.Statistics) > 0 {
 			_ = json.Unmarshal(c.Statistics, &stats)
 		}
-		totalSent := uint64(0)
+		// aggregatedTotalSent: number of recipients for whom delivery completed.
+		// Use parseAggregatedTotalSentFromMap so the click-rate denominator is the
+		// same float64 value that computeClickRate works with (avoids uint64 truncation
+		// for very large campaigns and keeps logic consistent across all flows).
+		totalSentFloat := parseAggregatedTotalSentFromMap(stats)
+		totalSent := uint64(totalSentFloat) // uint64 is only used for TotalSent response field
+
 		totalDelivered := uint64(0)
-		if v, ok := stats["aggregatedTotalSent"]; ok {
-			switch n := v.(type) {
-			case float64:
-				if n > 0 {
-					totalSent = uint64(n)
-				}
-			case int64:
-				if n > 0 {
-					totalSent = uint64(n)
-				}
-			case json.Number:
-				if f, e := n.Float64(); e == nil && f > 0 {
-					totalSent = uint64(f)
-				}
-			}
-		}
 		if v, ok := stats["aggregatedTotalDeliveredParts"]; ok {
 			switch n := v.(type) {
 			case float64:
@@ -248,9 +243,12 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 			}
 		}
 		clicks := clickCounts[c.ID]
+		// DTO uses float64 (not *float64), so fall back to 0.0 when there is no
+		// delivery data yet rather than leaving the field absent.
+		cr := computeClickRate(clicks, totalSentFloat)
 		clickRate := 0.0
-		if totalSent > 0 {
-			clickRate = float64(clicks) / float64(totalSent)
+		if cr != nil {
+			clickRate = *cr
 		}
 		resp.Campaigns = append(resp.Campaigns, dto.AdminCustomerCampaignItem{
 			CampaignID:     c.ID,

@@ -250,6 +250,7 @@ func (r *FiberRouter) SetupRoutes() {
 	}))
 	adminAuth.Get("/captcha/init", r.authAdminHandler.InitCaptcha)
 	adminAuth.Post("/login", r.authAdminHandler.VerifyLogin)
+	adminAuth.Post("/login/verify-otp", r.authAdminHandler.VerifyLoginOTP)
 
 	// Bot auth
 	botAuth := api.Group("/bot/auth")

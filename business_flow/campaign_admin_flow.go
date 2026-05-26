@@ -55,7 +55,10 @@ type AdminCampaignFlowImpl struct {
 	db                   *gorm.DB
 }
 
-const adminRescheduleMinLeadTime = 5 * time.Minute
+const (
+	adminRescheduleMinLeadTime = 2 * time.Minute
+	adminCancelMinLeadTime     = 2 * time.Minute
+)
 
 var adminTehranLoc *time.Location = time.FixedZone("Asia/Tehran", 3*3600+1800)
 
@@ -100,6 +103,16 @@ func NewAdminCampaignFlow(
 
 // ListCampaigns retrieves campaigns for admin using optional filters: title (name), status, start/end dates
 func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.AdminListCampaignsFilter) (*dto.AdminListCampaignsResponse, error) {
+	page := max(1, filter.Page)
+	limit := filter.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+
 	cf := models.CampaignFilter{}
 	if filter.Title != nil && *filter.Title != "" {
 		cf.Title = filter.Title
@@ -123,7 +136,15 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		}
 	}
 
-	rows, err := s.campaignRepo.ByFilter(ctx, cf, "updated_at DESC", 0, 0)
+	total64, err := s.campaignRepo.Count(ctx, cf)
+	if err != nil {
+		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", false, nil, map[string]any{
+			"status": filter.Status,
+		}, err)
+		return nil, NewBusinessError("ADMIN_LIST_CAMPAIGNS_FAILED", "Failed to count campaigns", err)
+	}
+
+	rows, err := s.campaignRepo.ByFilter(ctx, cf, "updated_at DESC", limit, offset)
 	if err != nil {
 		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", false, nil, map[string]any{
 			"status": filter.Status,
@@ -135,7 +156,13 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 	for _, c := range rows {
 		campaignIDs = append(campaignIDs, c.ID)
 	}
-	clickCounts, _ := s.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, campaignIDs)
+	clickCounts, err := s.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, campaignIDs)
+	if err != nil {
+		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", false, nil, map[string]any{
+			"status": filter.Status,
+		}, err)
+		return nil, NewBusinessError("ADMIN_LIST_CAMPAIGNS_FAILED", "Failed to aggregate click counts", err)
+	}
 
 	items := make([]dto.AdminGetCampaignResponse, 0, len(rows))
 	for _, c := range rows {
@@ -144,25 +171,8 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			_ = json.Unmarshal(c.Statistics, &stats)
 		}
 		clicks := clickCounts[c.ID]
-		var clickRate *float64
-		totalSent := float64(0)
-		if v, ok := stats["aggregatedTotalSent"]; ok {
-			switch n := v.(type) {
-			case float64:
-				totalSent = n
-			case int64:
-				totalSent = float64(n)
-			case json.Number:
-				if f, e := n.Float64(); e == nil {
-					totalSent = f
-				}
-			}
-		}
-		if totalSent > 0 {
-			val := float64(clicks) / totalSent
-			clickRate = &val
-		}
 		totalClicks := clicks
+		clickRate := computeClickRate(clicks, parseAggregatedTotalSentFromMap(stats))
 
 		items = append(items, dto.AdminGetCampaignResponse{
 			ID:                 c.ID,
@@ -192,17 +202,57 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			Statistics:         stats,
 			TotalClicks:        &totalClicks,
 			ClickRate:          clickRate,
+			NumAudience:        c.NumAudience,
+			CustomerFullName:   formatCampaignPartyFullName(c.Customer),
+			AgencyFullName:     formatCampaignAgencyFullName(c.Customer),
 
 			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 		})
 	}
+	nowUTC := utils.UTCNow()
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i].ScheduleAt
+		right := items[j].ScheduleAt
+
+		if left == nil || left.IsZero() {
+			return false
+		}
+		if right == nil || right.IsZero() {
+			return true
+		}
+
+		leftUTC := left.UTC()
+		rightUTC := right.UTC()
+		leftIsUpcoming := !leftUTC.Before(nowUTC)
+		rightIsUpcoming := !rightUTC.Before(nowUTC)
+
+		if leftIsUpcoming != rightIsUpcoming {
+			return leftIsUpcoming
+		}
+		if leftIsUpcoming {
+			return leftUTC.Before(rightUTC)
+		}
+		return leftUTC.After(rightUTC)
+	})
+
+	totalPages := int((total64 + int64(limit) - 1) / int64(limit))
 
 	resp := &dto.AdminListCampaignsResponse{
 		Message: "Campaigns retrieved successfully",
 		Items:   items,
+		Pagination: dto.PaginationInfo{
+			Total:      total64,
+			Page:       page,
+			Limit:      limit,
+			TotalPages: totalPages,
+		},
 	}
 	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", true, nil, map[string]any{
-		"items": len(items),
+		"items":       len(items),
+		"total":       total64,
+		"page":        page,
+		"limit":       limit,
+		"total_pages": totalPages,
 	}, nil)
 	return resp, nil
 }
@@ -221,27 +271,13 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	if len(c.Statistics) > 0 {
 		_ = json.Unmarshal(c.Statistics, &stats)
 	}
-	clickCounts, _ := s.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, []uint{id})
+	clickCounts, err := s.campaignRepo.AggregateClickCountsByCampaignIDs(ctx, []uint{id})
+	if err != nil {
+		return nil, NewBusinessError("ADMIN_GET_CAMPAIGN_FAILED", "Failed to aggregate click counts", err)
+	}
 	clicks := clickCounts[id]
-	var clickRate *float64
-	totalSent := float64(0)
-	if v, ok := stats["aggregatedTotalSent"]; ok {
-		switch n := v.(type) {
-		case float64:
-			totalSent = n
-		case int64:
-			totalSent = float64(n)
-		case json.Number:
-			if f, e := n.Float64(); e == nil {
-				totalSent = f
-			}
-		}
-	}
-	if totalSent > 0 {
-		val := float64(clicks) / totalSent
-		clickRate = &val
-	}
 	totalClicks := clicks
+	clickRate := computeClickRate(clicks, parseAggregatedTotalSentFromMap(stats))
 	metaSegment, metaLine, err := s.readCampaignPriceFactorsFromMetadata(ctx, c.ID)
 	if err != nil {
 		return nil, err
@@ -309,6 +345,9 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		Statistics:            stats,
 		TotalClicks:           &totalClicks,
 		ClickRate:             clickRate,
+		NumAudience:           c.NumAudience,
+		CustomerFullName:      formatCampaignPartyFullName(c.Customer),
+		AgencyFullName:        formatCampaignAgencyFullName(c.Customer),
 
 		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 	}
@@ -316,6 +355,37 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		"campaign_id": c.ID,
 	}, nil)
 	return resp, nil
+}
+
+func formatCampaignPartyFullName(customer *models.Customer) *string {
+	if customer == nil {
+		return nil
+	}
+
+	fullName := strings.TrimSpace(customer.RepresentativeFirstName + " " + customer.RepresentativeLastName)
+	companyName := ""
+	if customer.CompanyName != nil {
+		companyName = strings.TrimSpace(*customer.CompanyName)
+	}
+
+	switch {
+	case fullName != "" && companyName != "":
+		value := fullName + " - " + companyName
+		return &value
+	case fullName != "":
+		return &fullName
+	case companyName != "":
+		return &companyName
+	default:
+		return nil
+	}
+}
+
+func formatCampaignAgencyFullName(customer *models.Customer) *string {
+	if customer == nil {
+		return nil
+	}
+	return formatCampaignPartyFullName(customer.ReferrerAgency)
 }
 
 func (s *AdminCampaignFlowImpl) readCampaignPriceFactorsFromMetadata(ctx context.Context, campaignID uint) (*float64, *float64, error) {
@@ -727,6 +797,13 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		}
 		metaBytes, _ := json.Marshal(meta)
 
+		// TODO: Is this correct?
+		// // Restore free/credit split exactly as it was taken during the freeze.
+		// newFrozen := latestBalance.FrozenBalance - amount
+		// freeRefund, creditRefund := computeFreezeRefundSplit(freezeTx, amount)
+		// newFree := latestBalance.FreeBalance + freeRefund
+		// newCredit := latestBalance.CreditBalance + creditRefund
+
 		// Move from frozen back to free
 		newFrozen := latestBalance.FrozenBalance - amount
 		newCredit := latestBalance.CreditBalance + amount
@@ -736,12 +813,14 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 			CorrelationID:      freezeTx.CorrelationID,
 			WalletID:           wallet.ID,
 			CustomerID:         customer.ID,
+			// FreeBalance:        newFree,
 			FreeBalance:        latestBalance.FreeBalance,
 			FrozenBalance:      newFrozen,
 			LockedBalance:      latestBalance.LockedBalance,
 			CreditBalance:      newCredit,
 			SpentOnCampaign:    latestBalance.SpentOnCampaign,
 			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+			// TotalBalance:       newFree + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
 			TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
 			Reason:             "campaign_rejected_budget_refund",
 			Description:        fmt.Sprintf("Refund reserved budget for rejected campaign %d", campaign.ID),
@@ -853,12 +932,14 @@ func (s *AdminCampaignFlowImpl) RescheduleCampaign(ctx context.Context, req *dto
 	scheduleUTC := req.ScheduleAt.UTC()
 	nowUTC := utils.UTCNow()
 	minAllowedUTC := nowUTC.Add(adminRescheduleMinLeadTime)
+	isMissedPendingApproval := isAdminMissedPendingApprovalCampaign(campaign, nowUTC)
 
 	if campaign.Spec.ScheduleAt != nil && campaign.Spec.ScheduleAt.IsZero() {
 		return nil, NewBusinessError("SCHEDULE_TIME_NOT_PRESENT", "current campaign schedule is missing", ErrScheduleTimeNotPresent)
 	}
-	// Don't allow rescheduling when execution window is too close to current schedule time.
-	if campaign.Spec.ScheduleAt != nil && campaign.Spec.ScheduleAt.UTC().Sub(nowUTC) < adminRescheduleMinLeadTime {
+	// Preserve the lead-time guard for active schedules, but allow recovery of
+	// missed waiting-for-approval campaigns whose schedule has already passed.
+	if campaign.Spec.ScheduleAt != nil && !isMissedPendingApproval && campaign.Spec.ScheduleAt.UTC().Sub(nowUTC) < adminRescheduleMinLeadTime {
 		return nil, NewBusinessError("SCHEDULE_TIME_TOO_CLOSE_TO_CURRENT", "current schedule is too close to reschedule", ErrScheduleTimeTooCloseToCurrent)
 	}
 	if scheduleUTC.Before(minAllowedUTC) {
@@ -889,7 +970,7 @@ func (s *AdminCampaignFlowImpl) RescheduleCampaign(ctx context.Context, req *dto
 	}, nil
 }
 
-// CancelCampaign cancels an approved campaign: change status to cancelled-by-admin and refund spent budget to customer credit balance.
+// CancelCampaign cancels an approved campaign or a missed waiting-for-approval campaign.
 func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.AdminCancelCampaignRequest) (*dto.AdminCancelCampaignResponse, error) {
 	if req == nil || req.CampaignID == 0 || strings.TrimSpace(req.Comment) == "" {
 		return nil, NewBusinessError("ADMIN_CANCEL_CAMPAIGN_FAILED", "campaign_id and comment are required", nil)
@@ -907,34 +988,22 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 		if campaign == nil {
 			return ErrCampaignNotFound
 		}
-		if campaign.Status != models.CampaignStatusApproved {
+		nowUTC := utils.UTCNow()
+		isMissedPendingApproval := isAdminMissedPendingApprovalCampaign(campaign, nowUTC)
+		if campaign.Status != models.CampaignStatusApproved && !isMissedPendingApproval {
 			return ErrCampaignNotApproved
+		}
+		if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() {
+			return ErrScheduleTimeNotPresent
+		}
+		if campaign.Status == models.CampaignStatusApproved && campaign.Spec.ScheduleAt.UTC().Sub(nowUTC) < adminCancelMinLeadTime {
+			return NewBusinessError("SCHEDULE_TIME_TOO_CLOSE_TO_CANCEL", "current schedule is too close to cancel", ErrScheduleTimeTooCloseToCancel)
 		}
 
 		customer, err = getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
 		if err != nil {
 			return err
 		}
-
-		// Find the debit (fee) transaction created when campaign was approved.
-		debitTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
-			CustomerID: &campaign.CustomerID,
-			CampaignID: &campaign.ID,
-			Source:     utils.ToPtr("admin_campaign_approve"),
-			Operation:  utils.ToPtr("approve_campaign_budget_consume"),
-			Type:       utils.ToPtr(models.TransactionTypeFee),
-			Status:     utils.ToPtr(models.TransactionStatusCompleted),
-		}, "id DESC", 0, 0)
-		if err != nil {
-			return err
-		}
-		if len(debitTxs) == 0 {
-			return ErrCampaignDebitTransactionNotFound
-		}
-		if len(debitTxs) > 1 {
-			return ErrMultipleCampaignDebitTransactionsFound
-		}
-		debitTx := debitTxs[0]
 
 		wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
 		if err != nil {
@@ -945,68 +1014,195 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 			return err
 		}
 
-		amount := debitTx.Amount
-		if latestBalance.SpentOnCampaign < amount {
-			return ErrInsufficientFunds
-		}
+		if isMissedPendingApproval {
+			freezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CustomerID: &campaign.CustomerID,
+				CampaignID: &campaign.ID,
+				Source:     utils.ToPtr("campaign_update"),
+				Operation:  utils.ToPtr("reserve_budget"),
+				Type:       utils.ToPtr(models.TransactionTypeFreeze),
+				Status:     utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id DESC", 0, 0)
+			if err != nil {
+				return err
+			}
+			if len(freezeTxs) == 0 {
+				return ErrFreezeTransactionNotFound
+			}
+			if len(freezeTxs) > 1 {
+				return ErrMultipleFreezeTransactionsFound
+			}
+			freezeTx := freezeTxs[0]
 
-		meta := map[string]any{
-			"source":      "admin_campaign_cancel",
-			"operation":   "cancel_campaign_refund_spent",
-			"campaign_id": campaign.ID,
-			"comment":     req.Comment,
-		}
-		metaBytes, _ := json.Marshal(meta)
+			amount := freezeTx.Amount
+			if latestBalance.FrozenBalance < amount {
+				return ErrInsufficientFunds
+			}
 
-		// Move spent amount back to customer credit.
-		newCredit := latestBalance.CreditBalance + amount
-		newSpentOnCampaign := latestBalance.SpentOnCampaign - amount
+			meta := map[string]any{
+				"source":      "admin_campaign_cancel",
+				"operation":   "cancel_campaign_refund_frozen_missed_approval_deadline",
+				"campaign_id": campaign.ID,
+				"comment":     req.Comment,
+			}
+			metaBytes, _ := json.Marshal(meta)
 
-		newSnap := &models.BalanceSnapshot{
-			UUID:               uuid.New(),
-			CorrelationID:      debitTx.CorrelationID,
-			WalletID:           wallet.ID,
-			CustomerID:         customer.ID,
-			FreeBalance:        latestBalance.FreeBalance,
-			FrozenBalance:      latestBalance.FrozenBalance,
-			LockedBalance:      latestBalance.LockedBalance,
-			CreditBalance:      newCredit,
-			SpentOnCampaign:    newSpentOnCampaign,
-			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
-			TotalBalance:       latestBalance.FreeBalance + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
-			Reason:             "campaign_cancelled_by_admin_budget_refund",
-			Description:        fmt.Sprintf("Refund spent budget for admin-cancelled campaign %d", campaign.ID),
-			Metadata:           metaBytes,
-		}
-		if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
-			return err
-		}
+			freeRefund, creditRefund := computeFreezeRefundSplit(freezeTx, amount)
+			newFrozen := latestBalance.FrozenBalance - amount
+			newFree := latestBalance.FreeBalance + freeRefund
+			newCredit := latestBalance.CreditBalance + creditRefund
 
-		beforeMap, err := latestBalance.GetBalanceMap()
-		if err != nil {
-			return err
-		}
-		afterMap, err := newSnap.GetBalanceMap()
-		if err != nil {
-			return err
-		}
+			newSnap := &models.BalanceSnapshot{
+				UUID:               uuid.New(),
+				CorrelationID:      freezeTx.CorrelationID,
+				WalletID:           wallet.ID,
+				CustomerID:         customer.ID,
+				FreeBalance:        newFree,
+				FrozenBalance:      newFrozen,
+				LockedBalance:      latestBalance.LockedBalance,
+				CreditBalance:      newCredit,
+				SpentOnCampaign:    latestBalance.SpentOnCampaign,
+				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+				TotalBalance:       newFree + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+				Reason:             "campaign_cancelled_by_admin_budget_refund_before_approval",
+				Description:        fmt.Sprintf("Refund reserved budget for admin-cancelled campaign %d before approval", campaign.ID),
+				Metadata:           metaBytes,
+			}
+			if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+				return err
+			}
 
-		refundTx := &models.Transaction{
-			UUID:          uuid.New(),
-			CorrelationID: debitTx.CorrelationID,
-			Type:          models.TransactionTypeRefund,
-			Status:        models.TransactionStatusCompleted,
-			Amount:        amount,
-			Currency:      utils.TomanCurrency,
-			WalletID:      wallet.ID,
-			CustomerID:    customer.ID,
-			BalanceBefore: beforeMap,
-			BalanceAfter:  afterMap,
-			Description:   fmt.Sprintf("Refund spent budget for admin-cancelled campaign %d", campaign.ID),
-			Metadata:      metaBytes,
-		}
-		if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
-			return err
+			beforeMap, err := latestBalance.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+			afterMap, err := newSnap.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+
+			refundTx := &models.Transaction{
+				UUID:          uuid.New(),
+				CorrelationID: freezeTx.CorrelationID,
+				Type:          models.TransactionTypeRefund,
+				Status:        models.TransactionStatusCompleted,
+				Amount:        amount,
+				Currency:      utils.TomanCurrency,
+				WalletID:      wallet.ID,
+				CustomerID:    customer.ID,
+				BalanceBefore: beforeMap,
+				BalanceAfter:  afterMap,
+				Description:   fmt.Sprintf("Refund reserved budget for admin-cancelled campaign %d before approval", campaign.ID),
+				Metadata:      metaBytes,
+			}
+			if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+				return err
+			}
+		} else {
+			// Find the debit (fee) transaction created when campaign was approved.
+			debitTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CustomerID: &campaign.CustomerID,
+				CampaignID: &campaign.ID,
+				Source:     utils.ToPtr("admin_campaign_approve"),
+				Operation:  utils.ToPtr("approve_campaign_budget_consume"),
+				Type:       utils.ToPtr(models.TransactionTypeFee),
+				Status:     utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id DESC", 0, 0)
+			if err != nil {
+				return err
+			}
+			if len(debitTxs) == 0 {
+				return ErrCampaignDebitTransactionNotFound
+			}
+			if len(debitTxs) > 1 {
+				return ErrMultipleCampaignDebitTransactionsFound
+			}
+			debitTx := debitTxs[0]
+
+			amount := debitTx.Amount
+			if latestBalance.SpentOnCampaign < amount {
+				return ErrInsufficientFunds
+			}
+
+			// Recover the original FreeBalance/CreditBalance split by looking up the
+			// freeze transaction that shares the same CorrelationID as the debit tx.
+			debitCorrID := debitTx.CorrelationID
+			origFreezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CorrelationID: &debitCorrID,
+				CustomerID:    &campaign.CustomerID,
+				Type:          utils.ToPtr(models.TransactionTypeFreeze),
+				Status:        utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id ASC", 1, 0)
+			if err != nil {
+				return err
+			}
+			var freeRefund, creditRefund uint64
+			if len(origFreezeTxs) > 0 {
+				freeRefund, creditRefund = computeFreezeRefundSplit(origFreezeTxs[0], amount)
+			} else {
+				// No freeze tx found; conservatively return all to free balance.
+				freeRefund = amount
+			}
+
+			meta := map[string]any{
+				"source":      "admin_campaign_cancel",
+				"operation":   "cancel_campaign_refund_spent",
+				"campaign_id": campaign.ID,
+				"comment":     req.Comment,
+			}
+			metaBytes, _ := json.Marshal(meta)
+
+			// Restore the free/credit split that was used at freeze time.
+			newFree := latestBalance.FreeBalance + freeRefund
+			newCredit := latestBalance.CreditBalance + creditRefund
+			newSpentOnCampaign := latestBalance.SpentOnCampaign - amount
+
+			newSnap := &models.BalanceSnapshot{
+				UUID:               uuid.New(),
+				CorrelationID:      debitTx.CorrelationID,
+				WalletID:           wallet.ID,
+				CustomerID:         customer.ID,
+				FreeBalance:        newFree,
+				FrozenBalance:      latestBalance.FrozenBalance,
+				LockedBalance:      latestBalance.LockedBalance,
+				CreditBalance:      newCredit,
+				SpentOnCampaign:    newSpentOnCampaign,
+				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+				TotalBalance:       newFree + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
+				Reason:             "campaign_cancelled_by_admin_budget_refund",
+				Description:        fmt.Sprintf("Refund spent budget for admin-cancelled campaign %d", campaign.ID),
+				Metadata:           metaBytes,
+			}
+			if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+				return err
+			}
+
+			beforeMap, err := latestBalance.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+			afterMap, err := newSnap.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+
+			refundTx := &models.Transaction{
+				UUID:          uuid.New(),
+				CorrelationID: debitTx.CorrelationID,
+				Type:          models.TransactionTypeRefund,
+				Status:        models.TransactionStatusCompleted,
+				Amount:        amount,
+				Currency:      utils.TomanCurrency,
+				WalletID:      wallet.ID,
+				CustomerID:    customer.ID,
+				BalanceBefore: beforeMap,
+				BalanceAfter:  afterMap,
+				Description:   fmt.Sprintf("Refund spent budget for admin-cancelled campaign %d", campaign.ID),
+				Metadata:      metaBytes,
+			}
+			if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+				return err
+			}
 		}
 
 		campaign.Status = models.CampaignStatusCancelledByAdmin
@@ -1182,6 +1378,16 @@ func isAdminReschedulable(status models.CampaignStatus) bool {
 	default:
 		return false
 	}
+}
+
+func isAdminMissedPendingApprovalCampaign(campaign *models.Campaign, nowUTC time.Time) bool {
+	if campaign == nil || campaign.Status != models.CampaignStatusWaitingForApproval {
+		return false
+	}
+	if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() {
+		return false
+	}
+	return !campaign.Spec.ScheduleAt.UTC().After(nowUTC)
 }
 
 func isUTCInstant(t time.Time) bool {

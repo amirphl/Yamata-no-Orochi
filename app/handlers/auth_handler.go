@@ -179,6 +179,9 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 	// Call business logic with proper context
 	result, err := h.signupFlow.VerifyOTP(h.createRequestContext(c, "/api/v1/auth/verify"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -246,6 +249,9 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 	// Call business logic with proper context
 	result, err := h.signupFlow.ResendOTP(h.createRequestContext(c, "/api/v1/auth/resend-otp"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Please wait before requesting another OTP", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -307,6 +313,9 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 	// Call business logic with proper context
 	result, err := h.loginFlow.Login(h.createRequestContext(c, "/api/v1/auth/login"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many login attempts", "RATE_LIMITED", nil)
+		}
 		if businessflow.IsAccountTypeNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
 		}
@@ -363,6 +372,9 @@ func (h *AuthHandler) RequestLoginOTP(c fiber.Ctx) error {
 
 	res, err := h.loginFlow.RequestLoginOTP(h.createRequestContext(c, "/api/v1/auth/login/otp"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Please wait before requesting another OTP", "RATE_LIMITED", nil)
+		}
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "User not found", "CUSTOMER_NOT_FOUND", nil)
 		}
@@ -408,6 +420,9 @@ func (h *AuthHandler) VerifyLoginOTP(c fiber.Ctx) error {
 
 	res, err := h.loginFlow.VerifyLoginOTP(h.createRequestContext(c, "/api/v1/auth/login/otp/verify"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
+		}
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "User not found", "CUSTOMER_NOT_FOUND", nil)
 		}
@@ -467,6 +482,9 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 	// Call business logic with proper context
 	result, err := h.loginFlow.ForgotPassword(h.createRequestContext(c, "/api/v1/auth/forgot-password"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Please wait before requesting another OTP", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -524,6 +542,9 @@ func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 	// Call business logic with proper context
 	result, err := h.loginFlow.ResetPassword(h.createRequestContext(c, "/api/v1/auth/reset"), &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)

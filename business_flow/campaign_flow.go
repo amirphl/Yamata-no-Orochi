@@ -47,6 +47,7 @@ type CampaignFlow interface {
 // CampaignFlowImpl implements the campaign business flow
 type CampaignFlowImpl struct {
 	campaignRepo          repository.CampaignRepository
+	shortLinkRepo         repository.ShortLinkRepository
 	customerRepo          repository.CustomerRepository
 	multimediaRepo        repository.MultimediaAssetRepository
 	platformSettingsRepo  repository.PlatformSettingsRepository
@@ -87,6 +88,7 @@ var allowedShortLinkDomains = []string{"jo1n.ir", "joinsahel.ir"}
 // NewCampaignFlow creates a new campaign flow instance
 func NewCampaignFlow(
 	campaignRepo repository.CampaignRepository,
+	shortLinkRepo repository.ShortLinkRepository,
 	customerRepo repository.CustomerRepository,
 	multimediaRepo repository.MultimediaAssetRepository,
 	platformSettingsRepo repository.PlatformSettingsRepository,
@@ -113,6 +115,7 @@ func NewCampaignFlow(
 ) CampaignFlow {
 	return &CampaignFlowImpl{
 		campaignRepo:          campaignRepo,
+		shortLinkRepo:         shortLinkRepo,
 		customerRepo:          customerRepo,
 		multimediaRepo:        multimediaRepo,
 		platformSettingsRepo:  platformSettingsRepo,
@@ -773,20 +776,23 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 			metaBytes, _ := json.Marshal(meta)
 
 			newFrozen := latestBalance.FrozenBalance - amount
-			newCredit := latestBalance.CreditBalance + amount
+			// Restore free/credit split exactly as it was taken during the freeze.
+			freeRefund, creditRefund := computeFreezeRefundSplit(freezeTx, amount)
+			newFree := latestBalance.FreeBalance + freeRefund
+			newCredit := latestBalance.CreditBalance + creditRefund
 
 			newSnap := &models.BalanceSnapshot{
 				UUID:               uuid.New(),
 				CorrelationID:      freezeTx.CorrelationID,
 				WalletID:           wallet.ID,
 				CustomerID:         customer.ID,
-				FreeBalance:        latestBalance.FreeBalance,
+				FreeBalance:        newFree,
 				FrozenBalance:      newFrozen,
 				LockedBalance:      latestBalance.LockedBalance,
 				CreditBalance:      newCredit,
 				SpentOnCampaign:    latestBalance.SpentOnCampaign,
 				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
-				TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+				TotalBalance:       newFree + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
 				Reason:             "campaign_cancelled_budget_refund",
 				Description:        fmt.Sprintf("Refund reserved budget for cancelled campaign %d", campaign.ID),
 				Metadata:           metaBytes,
@@ -855,6 +861,26 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 				return ErrInsufficientFunds
 			}
 
+			// Recover the original FreeBalance/CreditBalance split by looking up the
+			// freeze transaction that shares the same CorrelationID as the debit tx.
+			debitCorrID := debitTx.CorrelationID
+			origFreezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CorrelationID: &debitCorrID,
+				CustomerID:    &campaign.CustomerID,
+				Type:          utils.ToPtr(models.TransactionTypeFreeze),
+				Status:        utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id ASC", 1, 0)
+			if err != nil {
+				return err
+			}
+			var freeRefund, creditRefund uint64
+			if len(origFreezeTxs) > 0 {
+				freeRefund, creditRefund = computeFreezeRefundSplit(origFreezeTxs[0], amount)
+			} else {
+				// No freeze tx found; conservatively return all to free balance.
+				freeRefund = amount
+			}
+
 			meta := map[string]any{
 				"source":      "campaign_cancel",
 				"operation":   "cancel_campaign_refund_spent_after_approval",
@@ -863,7 +889,8 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 			}
 			metaBytes, _ := json.Marshal(meta)
 
-			newCredit := latestBalance.CreditBalance + amount
+			newFree := latestBalance.FreeBalance + freeRefund
+			newCredit := latestBalance.CreditBalance + creditRefund
 			newSpentOnCampaign := latestBalance.SpentOnCampaign - amount
 
 			newSnap := &models.BalanceSnapshot{
@@ -871,13 +898,13 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 				CorrelationID:      debitTx.CorrelationID,
 				WalletID:           wallet.ID,
 				CustomerID:         customer.ID,
-				FreeBalance:        latestBalance.FreeBalance,
+				FreeBalance:        newFree,
 				FrozenBalance:      latestBalance.FrozenBalance,
 				LockedBalance:      latestBalance.LockedBalance,
 				CreditBalance:      newCredit,
 				SpentOnCampaign:    newSpentOnCampaign,
 				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
-				TotalBalance:       latestBalance.FreeBalance + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
+				TotalBalance:       newFree + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
 				Reason:             "campaign_cancelled_budget_refund_after_approval",
 				Description:        fmt.Sprintf("Refund spent budget for cancelled campaign %d after approval", campaign.ID),
 				Metadata:           metaBytes,
@@ -1629,26 +1656,15 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		if len(c.Statistics) > 0 {
 			_ = json.Unmarshal(c.Statistics, &statsMap)
 		}
-		aggregatedTotalSent := float64(0)
-		if v, ok := statsMap["aggregatedTotalSent"]; ok {
-			switch n := v.(type) {
-			case float64:
-				aggregatedTotalSent = n
-			case int64:
-				aggregatedTotalSent = float64(n)
-			case json.Number:
-				if f, e := n.Float64(); e == nil {
-					aggregatedTotalSent = f
-				}
-			}
-		}
 		clicks := clickCounts[c.ID]
-		var clickRate *float64
-		if aggregatedTotalSent > 0 {
-			val := float64(clicks) / aggregatedTotalSent
-			clickRate = &val
-		}
 		totalClicks := clicks
+		// computeClickRate returns nil when aggregatedTotalSent is 0 so callers can
+		// distinguish "campaign not yet executed" from "0% click-through rate".
+		// Note: reconcileUndeliveredCampaignRefunds (called above) only appends
+		// "undeliveredRefund*" keys to Statistics; it never overwrites
+		// aggregatedTotalSent, so the value read here is always the authoritative
+		// delivery count set by the campaign scheduler.
+		clickRate := computeClickRate(clicks, parseAggregatedTotalSentFromMap(statsMap))
 
 		enrichments, err := s.fetchCampaignDisplayEnrichments(ctx, c)
 		if err != nil {
@@ -2478,20 +2494,23 @@ func (s *CampaignFlowImpl) expireCustomerCampaigns(ctx context.Context, customer
 			metaBytes, _ := json.Marshal(meta)
 
 			newFrozen := latestBalance.FrozenBalance - amount
-			newCredit := latestBalance.CreditBalance + amount
+			// Restore free/credit split exactly as it was taken during the freeze.
+			freeRefund, creditRefund := computeFreezeRefundSplit(freezeTx, amount)
+			newFree := latestBalance.FreeBalance + freeRefund
+			newCredit := latestBalance.CreditBalance + creditRefund
 
 			newSnap := &models.BalanceSnapshot{
 				UUID:               uuid.New(),
 				CorrelationID:      freezeTx.CorrelationID,
 				WalletID:           wallet.ID,
 				CustomerID:         customer.ID,
-				FreeBalance:        latestBalance.FreeBalance,
+				FreeBalance:        newFree,
 				FrozenBalance:      newFrozen,
 				LockedBalance:      latestBalance.LockedBalance,
 				CreditBalance:      newCredit,
 				SpentOnCampaign:    latestBalance.SpentOnCampaign,
 				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
-				TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+				TotalBalance:       newFree + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
 				Reason:             "campaign_expired_budget_refund",
 				Description:        fmt.Sprintf("Refund reserved budget for expired campaign %d", campaign.ID),
 				Metadata:           metaBytes,
@@ -2692,6 +2711,26 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 				return ErrInsufficientFunds
 			}
 
+			// Recover the original FreeBalance/CreditBalance split by looking up the
+			// freeze transaction that shares the same CorrelationID as the debit tx.
+			debitCorrID := debitTx.CorrelationID
+			origFreezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CorrelationID: &debitCorrID,
+				CustomerID:    &campaign.CustomerID,
+				Type:          utils.ToPtr(models.TransactionTypeFreeze),
+				Status:        utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id ASC", 1, 0)
+			if err != nil {
+				return err
+			}
+			var freeRefund, creditRefund uint64
+			if len(origFreezeTxs) > 0 {
+				freeRefund, creditRefund = computeFreezeRefundSplit(origFreezeTxs[0], refundAmount)
+			} else {
+				// No freeze tx found; conservatively return all to free balance.
+				freeRefund = refundAmount
+			}
+
 			meta := map[string]any{
 				"source":                "campaign_partial_refund",
 				"operation":             "partial_undelivered_messages_refund",
@@ -2705,7 +2744,8 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 			}
 			metaBytes, _ := json.Marshal(meta)
 
-			newCredit := latestBalance.CreditBalance + refundAmount
+			newFree := latestBalance.FreeBalance + freeRefund
+			newCredit := latestBalance.CreditBalance + creditRefund
 			newSpentOnCampaign := latestBalance.SpentOnCampaign - refundAmount
 
 			newSnap := &models.BalanceSnapshot{
@@ -2713,13 +2753,13 @@ func (s *CampaignFlowImpl) reconcileUndeliveredCampaignRefunds(ctx context.Conte
 				CorrelationID:      debitTx.CorrelationID,
 				WalletID:           wallet.ID,
 				CustomerID:         customer.ID,
-				FreeBalance:        latestBalance.FreeBalance,
+				FreeBalance:        newFree,
 				FrozenBalance:      latestBalance.FrozenBalance,
 				LockedBalance:      latestBalance.LockedBalance,
 				CreditBalance:      newCredit,
 				SpentOnCampaign:    newSpentOnCampaign,
 				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
-				TotalBalance:       latestBalance.FreeBalance + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
+				TotalBalance:       newFree + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
 				Reason:             "campaign_partial_refund_for_undelivered_messages",
 				Description:        fmt.Sprintf("Refund undelivered messages for campaign %d", campaign.ID),
 				Metadata:           metaBytes,
@@ -2987,6 +3027,51 @@ func parseMetadataUint64(value any) (uint64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// computeFreezeRefundSplit determines how much of refundAmount should be restored
+// to FreeBalance vs CreditBalance by reading the balance change recorded in the
+// original freeze transaction.
+//
+// When a campaign budget is frozen, FreeBalance is drained first and any remainder
+// is taken from CreditBalance. A refund must reverse that exact split so that a
+// customer's real money (FreeBalance) is returned to FreeBalance and not silently
+// converted to CreditBalance.
+//
+// The function applies "free-first" semantics: up to the amount originally taken
+// from FreeBalance is restored there; any remaining refund goes to CreditBalance.
+// If the balance snapshots cannot be parsed, the entire refundAmount is returned as
+// freeRefund so no real money is lost.
+func computeFreezeRefundSplit(freezeTx *models.Transaction, refundAmount uint64) (freeRefund, creditRefund uint64) {
+	if refundAmount == 0 {
+		return 0, 0
+	}
+	if len(freezeTx.BalanceBefore) == 0 || len(freezeTx.BalanceAfter) == 0 {
+		// Cannot determine origin; conservatively return all to free balance.
+		return refundAmount, 0
+	}
+
+	var balBefore, balAfter map[string]any
+	if err := json.Unmarshal(freezeTx.BalanceBefore, &balBefore); err != nil {
+		return refundAmount, 0
+	}
+	if err := json.Unmarshal(freezeTx.BalanceAfter, &balAfter); err != nil {
+		return refundAmount, 0
+	}
+
+	freeBefore, _ := parseMetadataUint64(balBefore["free"])
+	freeAfter, _ := parseMetadataUint64(balAfter["free"])
+
+	// How much of the freeze came from FreeBalance.
+	var freeReduced uint64
+	if freeBefore > freeAfter {
+		freeReduced = freeBefore - freeAfter
+	}
+	if freeReduced > refundAmount {
+		freeReduced = refundAmount
+	}
+
+	return freeReduced, refundAmount - freeReduced
 }
 
 func (s *CampaignFlowImpl) GetPagePrices(ctx context.Context) (*dto.GetPagePricesResponse, error) {
