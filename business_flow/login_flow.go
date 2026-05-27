@@ -4,6 +4,7 @@ package businessflow
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"strings"
@@ -80,6 +81,11 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 	if err := lf.validateLoginRequest(req); err != nil {
 		return nil, NewBusinessError("LOGIN_VALIDATION_FAILED", "Login validation failed", err)
 	}
+	req.Identifier = normalizeLoginIdentifier(req.Identifier)
+
+	if err := lf.enforceLoginRateLimit(ctx, req.Identifier, metadata); err != nil {
+		return nil, NewBusinessError("LOGIN_RATE_LIMITED", "Login failed", err)
+	}
 
 	var customer *models.Customer
 	var resp *dto.LoginResponse
@@ -92,15 +98,15 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 			return err
 		}
 		if customer == nil {
-			return ErrCustomerNotFound
+			return ErrAuthenticationFailed
 		}
 		if !utils.IsTrue(customer.IsActive) {
-			return ErrAccountInactive
+			return ErrAuthenticationFailed
 		}
 
 		// Verify password
 		if err := bcrypt.CompareHashAndPassword([]byte(customer.PasswordHash), []byte(req.Password)); err != nil {
-			return ErrIncorrectPassword
+			return ErrAuthenticationFailed
 		}
 
 		// Get account type information
@@ -114,7 +120,7 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 
 		// Check mobile number is verified
 		if !utils.IsTrue(customer.IsMobileVerified) {
-			return ErrMobileNumberNotVerified
+			return ErrAuthenticationFailed
 		}
 
 		// Create new session
@@ -132,11 +138,15 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 	})
 
 	if err != nil {
+		if IsAuthenticationFailed(err) {
+			_ = lf.recordFailedLoginAttempt(ctx, req.Identifier, metadata)
+		}
 		errMsg := fmt.Sprintf("Login failed for identifier %s: %s", req.Identifier, err.Error())
 		_ = lf.createAuditLog(ctx, customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
 
 		return nil, NewBusinessError("LOGIN_FAILED", "Login failed", err)
 	}
+	_ = lf.clearFailedLoginAttempts(ctx, req.Identifier, metadata)
 
 	msg := fmt.Sprintf("User logged in successfully for identifier %s", req.Identifier)
 	_ = lf.createAuditLog(ctx, customer, models.AuditActionLoginSuccess, msg, true, nil, metadata)
@@ -152,6 +162,7 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 	if lf.rc == nil {
 		return nil, NewBusinessError("LOGIN_OTP_CACHE_UNAVAILABLE", "Cache not available", ErrCacheNotAvailable)
 	}
+	req.Identifier = normalizeLoginIdentifier(req.Identifier)
 
 	customer, err := lf.findCustomerByIdentifier(ctx, req.Identifier)
 	if err != nil {
@@ -164,22 +175,17 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 		return nil, ErrAccountInactive
 	}
 
-	key := fmt.Sprintf("login:otp:%d", customer.ID)
-	if val, err := lf.rc.Get(ctx, key).Result(); err == nil && val != "" {
-		ttl := lf.rc.TTL(ctx, key).Val()
-		expiresAt := utils.UTCNowAdd(utils.OTPExpiry)
-		if ttl > 0 {
-			expiresAt = utils.UTCNowAdd(ttl)
-		}
+	key := lf.loginOTPKey(customer.ID)
+	if _, ttl, err := lf.getOTPState(ctx, key); err == nil {
 		return &dto.LoginOTPResponse{
 			Message:     "OTP already generated and sent",
 			CustomerID:  customer.ID,
 			MaskedPhone: dto.MaskPhoneNumber(customer.RepresentativeMobile),
 			OTPSent:     true,
 			AlreadySent: true,
-			OTPExpiry:   expiresAt,
+			OTPExpiry:   utils.UTCNowAdd(ttl),
 		}, nil
-	} else if err != nil && err != redis.Nil {
+	} else if err != nil && err != ErrNoValidOTPFound {
 		return nil, err
 	}
 
@@ -189,7 +195,7 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 	}
 
 	expiresAt := utils.UTCNowAdd(utils.OTPExpiry)
-	if err := lf.rc.Set(ctx, key, otpCode, utils.OTPExpiry).Err(); err != nil {
+	if err := lf.saveOTPState(ctx, key, otpCode, utils.OTPExpiry); err != nil {
 		return nil, err
 	}
 
@@ -197,14 +203,16 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 	customerID := int64(customer.ID)
 	recipient, err := normalizeOTPMobile(customer.RepresentativeMobile)
 	if err != nil {
-		_ = lf.rc.Del(ctx, key).Err()
+		_ = lf.deleteOTPState(ctx, key)
 		return nil, err
 	}
-	// TODO: Async
-	if err := lf.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID); err != nil {
-		_ = lf.rc.Del(ctx, key).Err()
-		return nil, err
-	}
+	runAsyncOTPTask(ctx, "RequestLoginOTP send OTP", func(asyncCtx context.Context) error {
+		if err := lf.otpSMSSvc.SendOTP(asyncCtx, recipient, message, &customerID); err != nil {
+			_ = lf.deleteOTPState(asyncCtx, key)
+			return err
+		}
+		return nil
+	})
 
 	return &dto.LoginOTPResponse{
 		Message:     "OTP sent successfully",
@@ -296,9 +304,14 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 	if err := lf.validateForgotPasswordRequest(req); err != nil {
 		return nil, NewBusinessError("FORGOT_PASSWORD_VALIDATION_FAILED", "Forgot password validation failed", err)
 	}
+	req.Identifier = normalizeLoginIdentifier(req.Identifier)
 
 	var customer *models.Customer
 	var resp *dto.ForgetPasswordResponse
+	var otpRecipient string
+	var otpMessage string
+	var otpCustomerID int64
+	var otpKey string
 
 	err := repository.WithTransaction(ctx, lf.db, func(txCtx context.Context) error {
 		var err error
@@ -313,33 +326,20 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 			return ErrAccountInactive
 		}
 
-		// Expire any existing password reset OTPs
-		if err := lf.expireOldPasswordResetOTPs(txCtx, customer.ID); err != nil {
-			return err
-		}
-
 		// Generate new OTP (Redis)
 		otpCode, expiresAt, err := lf.generateAndSavePasswordResetOTP(txCtx, customer)
 		if err != nil {
 			return err
 		}
 
-		// Send OTP via SMS
-		smsMessage := fmt.Sprintf(lf.messageConfig.PasswordResetVerificationCodeTemplate, otpCode)
-		customerID := int64(customer.ID)
-		recipient, err := normalizeOTPMobile(customer.RepresentativeMobile)
+		otpMessage = fmt.Sprintf(lf.messageConfig.PasswordResetVerificationCodeTemplate, otpCode)
+		otpCustomerID = int64(customer.ID)
+		otpRecipient, err = normalizeOTPMobile(customer.RepresentativeMobile)
 		if err != nil {
-			// TODO: Delete OTP
+			_ = lf.deleteOTPState(txCtx, lf.passwordResetOTPKey(customer.ID))
 			return err
 		}
-		// TODO: Outside of TX
-		if err := lf.otpSMSSvc.SendOTP(txCtx, recipient, smsMessage, &customerID); err != nil {
-			// Log SMS failure but don't fail the entire process
-			errMsg := fmt.Sprintf("OTP generated but SMS failed: %v", err)
-			_ = lf.createAuditLog(txCtx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
-			// TODO: Retry sending OTP
-			// TODO: Delete OTP
-		}
+		otpKey = lf.passwordResetOTPKey(customer.ID)
 
 		resp = &dto.ForgetPasswordResponse{
 			CustomerID:  customer.ID,
@@ -356,6 +356,18 @@ func (lf *LoginFlowImpl) ForgotPassword(ctx context.Context, req *dto.ForgotPass
 
 		return nil, NewBusinessError("FORGOT_PASSWORD_FAILED", "Forgot password failed", err)
 	}
+
+	runAsyncOTPTask(ctx, "ForgotPassword send OTP", func(asyncCtx context.Context) error {
+		if err := lf.otpSMSSvc.SendOTP(asyncCtx, otpRecipient, otpMessage, &otpCustomerID); err != nil {
+			if lf.rc != nil {
+				_ = lf.rc.Del(asyncCtx, otpKey).Err()
+			}
+			errMsg := fmt.Sprintf("OTP generated but SMS failed: %v", err)
+			_ = lf.createAuditLog(asyncCtx, customer, models.AuditActionPasswordResetFailed, errMsg, false, &errMsg, metadata)
+			return err
+		}
+		return nil
+	})
 
 	msg := fmt.Sprintf("Password reset OTP sent successfully for identifier %s", req.Identifier)
 	_ = lf.createAuditLog(ctx, customer, models.AuditActionPasswordResetRequested, msg, true, nil, metadata)
@@ -434,7 +446,7 @@ func (lf *LoginFlowImpl) ResetPassword(ctx context.Context, req *dto.ResetPasswo
 // Private helper methods
 
 func (lf *LoginFlowImpl) findCustomerByIdentifier(ctx context.Context, identifier string) (*models.Customer, error) {
-	identifier = strings.TrimSpace(identifier)
+	identifier = normalizeLoginIdentifier(identifier)
 
 	// Try to find by email first
 	if strings.Contains(identifier, "@") {
@@ -506,22 +518,25 @@ func (lf *LoginFlowImpl) createSession(ctx context.Context, customerID uint, met
 }
 
 func generateOTP() (string, error) {
-	// Generate a secure 6-digit number using crypto/rand and math/big (consistent with signup_flow.go)
-	max := big.NewInt(999999)
-	min := big.NewInt(100000)
-
-	n, err := rand.Int(rand.Reader, new(big.Int).Sub(max, min))
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
 	if err != nil {
 		return "", err
 	}
-
-	return fmt.Sprintf("%06d", new(big.Int).Add(n, min).Int64()), nil
+	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
 // generateAndSavePasswordResetOTP creates a new OTP and stores it in Redis with expiry
 func (lf *LoginFlowImpl) generateAndSavePasswordResetOTP(ctx context.Context, customer *models.Customer) (string, time.Time, error) {
 	if lf.rc == nil {
 		return "", time.Time{}, ErrCacheNotAvailable
+	}
+	key := lf.passwordResetOTPKey(customer.ID)
+	if existing, ttl, err := lf.getOTPState(ctx, key); err == nil {
+		if ttl > 0 && utils.UTCNow().Sub(existing.LastSentAt) < authOTPResendCooldown {
+			return "", time.Time{}, ErrRateLimitExceeded
+		}
+	} else if err != ErrNoValidOTPFound {
+		return "", time.Time{}, err
 	}
 
 	otpCode, err := generateOTP()
@@ -530,8 +545,7 @@ func (lf *LoginFlowImpl) generateAndSavePasswordResetOTP(ctx context.Context, cu
 	}
 
 	expiresAt := utils.UTCNowAdd(utils.OTPExpiry)
-	key := fmt.Sprintf("password_reset:otp:%d", customer.ID)
-	if err := lf.rc.Set(ctx, key, otpCode, utils.OTPExpiry).Err(); err != nil {
+	if err := lf.saveOTPState(ctx, key, otpCode, utils.OTPExpiry); err != nil {
 		return "", time.Time{}, err
 	}
 
@@ -542,19 +556,8 @@ func (lf *LoginFlowImpl) verifyLoginOTP(ctx context.Context, customerID uint, ot
 	if lf.rc == nil {
 		return ErrCacheNotAvailable
 	}
-	key := fmt.Sprintf("login:otp:%d", customerID)
-	val, err := lf.rc.Get(ctx, key).Result()
-	if err == redis.Nil {
-		return ErrNoValidOTPFound
-	}
-	if err != nil {
-		return err
-	}
-	if val != otpCode {
-		return ErrInvalidOTPCode
-	}
-	// Do not delete OTP; let it expire naturally.
-	return nil
+	key := lf.loginOTPKey(customerID)
+	return lf.verifyOTPState(ctx, key, otpCode, true)
 }
 
 // verifyPasswordResetOTP checks the OTP from Redis and consumes it on success
@@ -562,31 +565,8 @@ func (lf *LoginFlowImpl) verifyPasswordResetOTP(ctx context.Context, customerID 
 	if lf.rc == nil {
 		return ErrCacheNotAvailable
 	}
-	key := fmt.Sprintf("password_reset:otp:%d", customerID)
-	val, err := lf.rc.Get(ctx, key).Result()
-	if err == redis.Nil {
-		return ErrNoValidOTPFound
-	}
-	if err != nil {
-		return err
-	}
-	if val != otpCode {
-		return ErrInvalidOTPCode
-	}
-	_ = lf.rc.Del(ctx, key).Err()
-	return nil
-}
-
-func (lf *LoginFlowImpl) expireOldPasswordResetOTPs(ctx context.Context, customerID uint) error {
-	if lf.rc != nil {
-		key := fmt.Sprintf("password_reset:otp:%d", customerID)
-		if err := lf.rc.Del(ctx, key).Err(); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	return nil
+	key := lf.passwordResetOTPKey(customerID)
+	return lf.verifyOTPState(ctx, key, otpCode, true)
 }
 
 func (lf *LoginFlowImpl) invalidateAllSessions(ctx context.Context, customerID uint) error {
@@ -654,20 +634,20 @@ func (lf *LoginFlowImpl) createAuditLog(ctx context.Context, customer *models.Cu
 
 func (lf *LoginFlowImpl) validateLoginRequest(request *dto.LoginRequest) error {
 	// Validate identifier is not empty
-	if request.Identifier == "" {
-		return ErrCustomerNotFound
+	if strings.TrimSpace(request.Identifier) == "" {
+		return ErrAuthenticationFailed
 	}
 
 	// Validate password is not empty
 	if request.Password == "" {
-		return ErrIncorrectPassword
+		return ErrAuthenticationFailed
 	}
 
 	return nil
 }
 
 func (lf *LoginFlowImpl) validateLoginOTPRequest(request *dto.LoginOTPRequest) error {
-	if request.Identifier == "" {
+	if strings.TrimSpace(request.Identifier) == "" {
 		return ErrCustomerNotFound
 	}
 	return nil
@@ -677,7 +657,7 @@ func (lf *LoginFlowImpl) validateVerifyLoginOTPRequest(request *dto.LoginOTPVeri
 	if request.CustomerID == 0 {
 		return ErrCustomerNotFound
 	}
-	if len(request.OTPCode) != 6 {
+	if !isSixDigitCode(request.OTPCode) {
 		return ErrInvalidOTPCode
 	}
 	return nil
@@ -685,7 +665,7 @@ func (lf *LoginFlowImpl) validateVerifyLoginOTPRequest(request *dto.LoginOTPVeri
 
 func (lf *LoginFlowImpl) validateForgotPasswordRequest(request *dto.ForgotPasswordRequest) error {
 	// Validate identifier is not empty
-	if request.Identifier == "" {
+	if strings.TrimSpace(request.Identifier) == "" {
 		return ErrCustomerNotFound
 	}
 
@@ -711,7 +691,7 @@ func (lf *LoginFlowImpl) completeSignupAfterLogin(ctx context.Context, customer 
 
 func (lf *LoginFlowImpl) validateResetPasswordRequest(request *dto.ResetPasswordRequest) error {
 	// Validate OTP code format (6 digits)
-	if len(request.OTPCode) != 6 {
+	if !isSixDigitCode(request.OTPCode) {
 		return ErrInvalidOTPCode
 	}
 
@@ -726,4 +706,136 @@ func (lf *LoginFlowImpl) validateResetPasswordRequest(request *dto.ResetPassword
 	}
 
 	return nil
+}
+
+func (lf *LoginFlowImpl) loginOTPKey(customerID uint) string {
+	return fmt.Sprintf("login:otp:%d", customerID)
+}
+
+func (lf *LoginFlowImpl) passwordResetOTPKey(customerID uint) string {
+	return fmt.Sprintf("password_reset:otp:%d", customerID)
+}
+
+func (lf *LoginFlowImpl) saveOTPState(ctx context.Context, key, code string, ttl time.Duration) error {
+	state := otpChallengeState{
+		OTPHash:    hashOTPCode(code),
+		Attempts:   0,
+		CreatedAt:  utils.UTCNow(),
+		LastSentAt: utils.UTCNow(),
+	}
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return lf.rc.Set(ctx, key, payload, ttl).Err()
+}
+
+func (lf *LoginFlowImpl) getOTPState(ctx context.Context, key string) (*otpChallengeState, time.Duration, error) {
+	raw, err := lf.rc.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, 0, ErrNoValidOTPFound
+		}
+		return nil, 0, err
+	}
+	var state otpChallengeState
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		if isSixDigitCode(raw) {
+			state = otpChallengeState{
+				OTPHash:   hashOTPCode(raw),
+				Attempts:  0,
+				CreatedAt: utils.UTCNow(),
+			}
+		} else {
+			return nil, 0, err
+		}
+	}
+	ttl := lf.rc.TTL(ctx, key).Val()
+	if ttl <= 0 {
+		return nil, 0, ErrNoValidOTPFound
+	}
+	return &state, ttl, nil
+}
+
+func (lf *LoginFlowImpl) updateOTPState(ctx context.Context, key string, state *otpChallengeState, ttl time.Duration) error {
+	payload, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	return lf.rc.Set(ctx, key, payload, ttl).Err()
+}
+
+func (lf *LoginFlowImpl) deleteOTPState(ctx context.Context, key string) error {
+	return lf.rc.Del(ctx, key).Err()
+}
+
+func (lf *LoginFlowImpl) verifyOTPState(ctx context.Context, key, otpCode string, consumeOnSuccess bool) error {
+	state, ttl, err := lf.getOTPState(ctx, key)
+	if err != nil {
+		return err
+	}
+	if state.Attempts >= authOTPMaxAttempts {
+		_ = lf.deleteOTPState(ctx, key)
+		return ErrRateLimitExceeded
+	}
+	if !verifyOTPCodeHash(otpCode, state.OTPHash) {
+		state.Attempts++
+		if state.Attempts >= authOTPMaxAttempts {
+			_ = lf.deleteOTPState(ctx, key)
+			return ErrRateLimitExceeded
+		}
+		if err := lf.updateOTPState(ctx, key, state, ttl); err != nil {
+			return err
+		}
+		return ErrInvalidOTPCode
+	}
+	if consumeOnSuccess {
+		return lf.deleteOTPState(ctx, key)
+	}
+	return nil
+}
+
+func (lf *LoginFlowImpl) enforceLoginRateLimit(ctx context.Context, identifier string, metadata *ClientMetadata) error {
+	if lf.rc == nil {
+		return nil
+	}
+	key := loginFailureKey(identifier, clientIPAddress(metadata))
+	attempts, err := lf.rc.Get(ctx, key).Int()
+	if err == redis.Nil {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if attempts >= authLoginMaxFailures {
+		return ErrRateLimitExceeded
+	}
+	return nil
+}
+
+func (lf *LoginFlowImpl) recordFailedLoginAttempt(ctx context.Context, identifier string, metadata *ClientMetadata) error {
+	if lf.rc == nil {
+		return nil
+	}
+	key := loginFailureKey(identifier, clientIPAddress(metadata))
+	pipe := lf.rc.TxPipeline()
+	pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, authLoginFailureWindow)
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+func (lf *LoginFlowImpl) clearFailedLoginAttempts(ctx context.Context, identifier string, metadata *ClientMetadata) error {
+	if lf.rc == nil {
+		return nil
+	}
+	key := loginFailureKey(identifier, clientIPAddress(metadata))
+	return lf.rc.Del(ctx, key).Err()
+}
+
+func clientIPAddress(metadata *ClientMetadata) string {
+	if metadata == nil || strings.TrimSpace(metadata.IPAddress) == "" {
+		return "unknown"
+	}
+	return strings.TrimSpace(metadata.IPAddress)
 }
