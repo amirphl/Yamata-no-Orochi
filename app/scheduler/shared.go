@@ -32,6 +32,16 @@ const (
 
 	numJobsPerTick          = 100
 	statusJobWorkerInterval = 5 * time.Minute
+
+	// statusJobMaxRetry is the maximum number of times a status-check job is
+	// retried before it is permanently marked as executed. Used by all platform
+	// schedulers (Bale, Splus, SMS, …).
+	statusJobMaxRetry = 3
+
+	// audienceAppendBatchSize controls how many audience IDs are flushed to the
+	// database per AppendAudienceData call inside the persistence transaction.
+	// Used by all platform schedulers.
+	audienceAppendBatchSize = 1000
 )
 
 type AudiencePhonesResult struct {
@@ -339,6 +349,22 @@ func allocateTrackingIDs(ctx context.Context, db *gorm.DB, count int) ([]string,
 	}
 
 	return ids, nil
+}
+
+// retryBackoffDelay returns an exponential back-off duration for the given
+// attempt index (0-based), starting at base and capped at max.
+func retryBackoffDelay(attempt int, base, max time.Duration) time.Duration {
+	if attempt < 0 {
+		attempt = 0
+	}
+	d := base
+	for i := 0; i < attempt; i++ {
+		d *= 2
+		if d >= max {
+			return max
+		}
+	}
+	return d
 }
 
 func hashTags(tags []string) string {
