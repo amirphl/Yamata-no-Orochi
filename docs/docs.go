@@ -283,6 +283,128 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/campaigns/audience-spec": {
+            "delete": {
+                "description": "Remove audience spec for a platform from storage and cache (default platform is sms)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Campaigns"
+                ],
+                "summary": "Remove Audience Spec",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Platform (default: sms)",
+                        "name": "platform",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminRemoveAudienceSpecResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/campaigns/cancel": {
+            "post": {
+                "description": "Cancel an approved campaign by admin and refund consumed budget to customer",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Campaigns"
+                ],
+                "summary": "Cancel Campaign",
+                "parameters": [
+                    {
+                        "description": "Cancellation payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminCancelCampaignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminCancelCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Invalid state",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/campaigns/reject": {
             "post": {
                 "description": "Reject a campaign waiting for approval; refunds reserved funds to free balance",
@@ -320,6 +442,76 @@ const docTemplate = `{
                                     "properties": {
                                         "data": {
                                             "$ref": "#/definitions/dto.AdminRejectCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Invalid state",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/campaigns/reschedule": {
+            "post": {
+                "description": "Admin reschedules an eligible campaign; schedule_at should be provided in Tehran time.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Campaigns"
+                ],
+                "summary": "Reschedule Campaign",
+                "parameters": [
+                    {
+                        "description": "Reschedule payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminRescheduleCampaignRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminRescheduleCampaignResponse"
                                         }
                                     }
                                 }
@@ -405,6 +597,43 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/customer-management": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Customer Management"
+                ],
+                "summary": "Admin List Customers",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminListCustomersResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/customer-management/active-status": {
             "post": {
                 "consumes": [
@@ -453,14 +682,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/dto.APIResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
                     },
-                    "409": {
-                        "description": "Conflict",
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -852,6 +1081,581 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/media/{uuid}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Download an image or video by uuid (admin access)",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Admin Multimedia"
+                ],
+                "summary": "Admin download multimedia",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Multimedia UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Binary file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/media/{uuid}/preview": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return a thumbnail image for multimedia (video -\u003e frame image, image -\u003e resized)",
+                "produces": [
+                    "image/jpeg"
+                ],
+                "tags": [
+                    "Admin Multimedia"
+                ],
+                "summary": "Admin preview multimedia",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Multimedia UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thumbnail image",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payments/charge-wallet": {
+            "post": {
+                "description": "Admin endpoint to directly charge a customer wallet (manual card-to-card/offline payment settlement)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments Admin"
+                ],
+                "summary": "Charge Wallet By Admin",
+                "parameters": [
+                    {
+                        "description": "Admin wallet charge payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminChargeWalletRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Wallet charged successfully by admin",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminChargeWalletResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized admin",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Customer or wallet not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payments/deposit-receipts": {
+            "get": {
+                "description": "Lists deposit receipts with optional filters and previews.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments Admin"
+                ],
+                "summary": "Admin list deposit receipts",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Receipt status (pending|approved|rejected)",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Language filter (FA or EN)",
+                        "name": "lang",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Filter by customer ID",
+                        "name": "customer_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Limit (default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Offset",
+                        "name": "offset",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Order by clause (default id DESC)",
+                        "name": "order",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Receipts retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListDepositReceiptsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid language",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payments/deposit-receipts/status": {
+            "post": {
+                "description": "Approve or reject a deposit receipt; on approval credits wallet using receipt metadata.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments Admin"
+                ],
+                "summary": "Admin update deposit receipt status",
+                "parameters": [
+                    {
+                        "description": "Status update payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminUpdateDepositReceiptStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Status updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SubmitDepositReceiptResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Receipt not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Receipt already finalized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/payments/deposit-receipts/{uuid}/file": {
+            "get": {
+                "description": "Downloads the receipt file by UUID (no ownership check).",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Payments Admin"
+                ],
+                "summary": "Admin download deposit receipt file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Deposit receipt UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Receipt file",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Receipt not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/platform-settings": {
+            "get": {
+                "description": "List platform settings (admin)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Platform Settings"
+                ],
+                "summary": "Admin list platform settings",
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminListPlatformSettingsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/platform-settings/metadata": {
+            "put": {
+                "description": "Add a key/value pair into platform settings metadata (merge, does not overwrite whole object)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Platform Settings"
+                ],
+                "summary": "Admin add platform settings metadata",
+                "parameters": [
+                    {
+                        "description": "Metadata append payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminAddPlatformSettingsMetadataRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminAddPlatformSettingsMetadataResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Platform settings not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/platform-settings/status": {
+            "put": {
+                "description": "Move status to in-progress, active, or inactive (initialized is forbidden)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Platform Settings"
+                ],
+                "summary": "Admin change platform settings status",
+                "parameters": [
+                    {
+                        "description": "Status change payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminChangePlatformSettingsStatusRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminChangePlatformSettingsStatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Platform settings not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/segment-price-factors": {
             "get": {
                 "description": "List the latest price factor per level3",
@@ -862,6 +1666,14 @@ const docTemplate = `{
                     "Admin Segment Price Factors"
                 ],
                 "summary": "List Segment Price Factors (Admin)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Platform (sms|rubika|bale|splus), default sms",
+                        "name": "platform",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -1572,6 +2384,163 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/auth/login/otp": {
+            "post": {
+                "description": "Generate and send a one-time password for login via SMS",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Request Login OTP",
+                "parameters": [
+                    {
+                        "description": "Login OTP request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.LoginOTPRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OTP sent",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.LoginOTPResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Cache not available",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/login/otp/verify": {
+            "post": {
+                "description": "Verify a one-time password for login and issue tokens",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Verify Login OTP",
+                "parameters": [
+                    {
+                        "description": "Login OTP verification request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.LoginOTPVerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Login successful",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "properties": {
+                                                "access_token": {
+                                                    "type": "string"
+                                                },
+                                                "customer": {
+                                                    "$ref": "#/definitions/dto.AuthCustomerDTO"
+                                                },
+                                                "expires_in": {
+                                                    "type": "integer"
+                                                },
+                                                "refresh_token": {
+                                                    "type": "string"
+                                                },
+                                                "token_type": {
+                                                    "type": "string"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid OTP or request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "User not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Cache not available",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/auth/resend-otp": {
             "post": {
                 "description": "Resend OTP code to user's mobile number",
@@ -1730,7 +2699,7 @@ const docTemplate = `{
         },
         "/api/v1/auth/signup": {
             "post": {
-                "description": "Register a new user account with email verification",
+                "description": "Register a new user account with mobile verification. National ID is required for individual, independent_company, and marketing_agency account types.",
                 "consumes": [
                     "application/json"
                 ],
@@ -2041,6 +3010,14 @@ const docTemplate = `{
                     "Bot Campaigns"
                 ],
                 "summary": "Bot List Ready Campaigns",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by platform (sms|rubika|bale|splus)",
+                        "name": "platform",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2170,6 +3147,64 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bot/media/{uuid}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Download an image or video by uuid (bot access)",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Bot Multimedia"
+                ],
+                "summary": "Bot download multimedia",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Multimedia UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Binary file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -2391,7 +3426,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed)",
+                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|cancelled|cancelled-by-admin)",
                         "name": "status",
                         "in": "query"
                     }
@@ -2507,6 +3542,14 @@ const docTemplate = `{
                     "Campaigns"
                 ],
                 "summary": "List Audience Spec",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Platform (default: sms)",
+                        "name": "platform",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -2645,6 +3688,114 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/calculate-cost-v2": {
+            "post": {
+                "description": "Calculate required credit based on desired num_messages, capped by audience capacity",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Calculate Campaign Cost V2",
+                "parameters": [
+                    {
+                        "description": "Campaign parameters for reverse cost calculation",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CalculateCampaignCostV2Request"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Cost calculated successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CalculateCampaignCostResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/initiated/last": {
+            "get": {
+                "description": "Retrieve the most recent campaign with status initiated for the authenticated user",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get Last Initiated Campaign",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.GetLastInitiatedCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -2851,6 +4002,77 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Campaign not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/clone": {
+            "post": {
+                "description": "Clone an existing campaign belonging to the current customer.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Clone Campaign",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Campaign UUID to clone",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Campaign cloned successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CloneCampaignResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden - access denied",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Clone not allowed",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -3146,6 +4368,186 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/media/upload": {
+            "post": {
+                "description": "Upload an image or video (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv, \u003c=100MB)",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Multimedia"
+                ],
+                "summary": "Upload multimedia",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Multimedia file (\u003c=100MB)",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Upload successful",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.UploadMultimediaResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or file",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/media/{uuid}": {
+            "get": {
+                "description": "Download an image or video by uuid (owner only)",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Multimedia"
+                ],
+                "summary": "Download multimedia",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Multimedia UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Binary file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/media/{uuid}/preview": {
+            "get": {
+                "description": "Return a thumbnail image for multimedia (video -\u003e frame image, image -\u003e resized)",
+                "produces": [
+                    "image/jpeg"
+                ],
+                "tags": [
+                    "Multimedia"
+                ],
+                "summary": "Preview multimedia",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Multimedia UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Thumbnail image",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/payments/callback/{invoice_number}": {
             "post": {
                 "description": "Handles the callback from the payment gateway (Atipay)",
@@ -3275,6 +4677,287 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/payments/deposit-receipts": {
+            "get": {
+                "description": "Returns the user's submitted deposit receipts with status and metadata.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "List deposit receipts",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Language filter (FA or EN)",
+                        "name": "lang",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Receipts retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListDepositReceiptsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid language",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Upload a bank deposit receipt file (base64) for finance review; balance is credited only after approval.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Submit deposit receipt",
+                "parameters": [
+                    {
+                        "description": "Deposit receipt payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.SubmitDepositReceiptRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Receipt submitted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SubmitDepositReceiptResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/payments/deposit-receipts/{receipt_uuid}/file": {
+            "get": {
+                "description": "Downloads the original receipt file uploaded by the customer.",
+                "produces": [
+                    "application/octet-stream"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Download deposit receipt file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Deposit receipt UUID",
+                        "name": "receipt_uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Receipt file",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid receipt",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Replaces the uploaded receipt file if the receipt is still pending.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Update deposit receipt file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Deposit receipt UUID",
+                        "name": "receipt_uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "New receipt file payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UpdateDepositReceiptFileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File updated",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or receipt",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Receipt already finalized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "Removes the uploaded receipt file content (keeps receipt record) if pending.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Delete deposit receipt file",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Deposit receipt UUID",
+                        "name": "receipt_uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File removed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid receipt",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Receipt already finalized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/payments/history": {
             "get": {
                 "description": "Retrieve paginated transaction history for the authenticated customer",
@@ -3356,6 +5039,177 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized - customer not found or inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/payments/proforma/preview": {
+            "get": {
+                "description": "Returns JSON containing seller/buyer info, amounts, and tax for the requested deposit receipt and language.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Preview proforma invoice",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Deposit receipt UUID",
+                        "name": "receipt_uuid",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Language (FA or EN)",
+                        "name": "lang",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Preview generated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ProformaPreviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid receipt or language",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/platform-settings": {
+            "get": {
+                "description": "List platform settings (authenticated)",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Platform Settings"
+                ],
+                "summary": "List platform settings",
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListPlatformSettingsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create platform settings (authenticated)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Platform Settings"
+                ],
+                "summary": "Create platform settings",
+                "parameters": [
+                    {
+                        "description": "Platform settings payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreatePlatformSettingsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CreatePlatformSettingsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -3700,6 +5554,52 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/segment-price-factors": {
+            "get": {
+                "description": "List the latest price factor per level3",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Segment Price Factors"
+                ],
+                "summary": "List Segment Price Factors",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Platform (sms|rubika|bale|splus), default sms",
+                        "name": "platform",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListLatestSegmentPriceFactorsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "List failed",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -4143,6 +6043,42 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminAddPlatformSettingsMetadataRequest": {
+            "type": "object",
+            "required": [
+                "id",
+                "key",
+                "value"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "key": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "minLength": 1
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminAddPlatformSettingsMetadataResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
         "dto.AdminApproveCampaignRequest": {
             "type": "object",
             "required": [
@@ -4159,6 +6095,30 @@ const docTemplate = `{
             }
         },
         "dto.AdminApproveCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminCancelCampaignRequest": {
+            "type": "object",
+            "required": [
+                "campaign_id",
+                "comment"
+            ],
+            "properties": {
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "comment": {
+                    "type": "string",
+                    "maxLength": 1000
+                }
+            }
+        },
+        "dto.AdminCancelCampaignResponse": {
             "type": "object",
             "properties": {
                 "message": {
@@ -4204,6 +6164,92 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 255,
                     "minLength": 3
+                }
+            }
+        },
+        "dto.AdminChangePlatformSettingsStatusRequest": {
+            "type": "object",
+            "required": [
+                "id",
+                "status"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "in-progress",
+                        "active",
+                        "inactive"
+                    ]
+                }
+            }
+        },
+        "dto.AdminChangePlatformSettingsStatusResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminChargeWalletRequest": {
+            "type": "object",
+            "required": [
+                "amount_with_tax",
+                "customer_id"
+            ],
+            "properties": {
+                "amount_with_tax": {
+                    "type": "integer",
+                    "maximum": 1000000000,
+                    "minimum": 1000
+                },
+                "customer_id": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "maxLength": 128,
+                    "minLength": 8
+                }
+            }
+        },
+        "dto.AdminChargeWalletResponse": {
+            "type": "object",
+            "properties": {
+                "admin_id": {
+                    "type": "integer"
+                },
+                "amount_with_tax": {
+                    "type": "integer"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "invoice_number": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "payment_request_id": {
+                    "type": "integer"
+                },
+                "reference_number": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
                 }
             }
         },
@@ -4278,11 +6324,21 @@ const docTemplate = `{
             "type": "object",
             "required": [
                 "level3",
+                "platform",
                 "price_factor"
             ],
             "properties": {
                 "level3": {
                     "type": "string"
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
                 },
                 "price_factor": {
                     "type": "number"
@@ -4328,6 +6384,18 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "level3s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "line_number": {
+                    "type": "string"
+                },
+                "num_audience": {
+                    "type": "integer"
                 },
                 "schedule_at": {
                     "type": "string"
@@ -4663,6 +6731,15 @@ const docTemplate = `{
                 "line_number_price_factor": {
                     "type": "number"
                 },
+                "media_uuid": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "platform_settings_id": {
+                    "type": "integer"
+                },
                 "scheduleat": {
                     "type": "string"
                 },
@@ -4760,6 +6837,23 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminListCustomersResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminCustomerDetailDTO"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.AdminListLevel3OptionsResponse": {
             "type": "object",
             "properties": {
@@ -4767,6 +6861,20 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "type": "string"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminListPlatformSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminPlatformSettingsItem"
                     }
                 },
                 "message": {
@@ -4802,6 +6910,45 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminPlatformSettingsItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "multimedia_uuid": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminRejectCampaignRequest": {
             "type": "object",
             "required": [
@@ -4826,6 +6973,40 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminRemoveAudienceSpecResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminRescheduleCampaignRequest": {
+            "type": "object",
+            "required": [
+                "campaign_id",
+                "schedule_at"
+            ],
+            "properties": {
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "schedule_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminRescheduleCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminSegmentPriceFactorItem": {
             "type": "object",
             "properties": {
@@ -4833,6 +7014,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "level3": {
+                    "type": "string"
+                },
+                "platform": {
                     "type": "string"
                 },
                 "price_factor": {
@@ -4862,6 +7046,30 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminUpdateDepositReceiptStatusRequest": {
+            "type": "object",
+            "required": [
+                "action",
+                "receipt_uuid"
+            ],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "approve",
+                        "reject"
+                    ]
+                },
+                "reason": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "minLength": 3
+                },
+                "receipt_uuid": {
                     "type": "string"
                 }
             }
@@ -5120,6 +7328,33 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.BotCampaignPlatformSettingsSpec": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "multimedia_id": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.BotCreateShortLinkRequest": {
             "type": "object",
             "required": [
@@ -5305,7 +7540,19 @@ const docTemplate = `{
                 "line_number": {
                     "type": "string"
                 },
+                "media_uuid": {
+                    "type": "string"
+                },
                 "num_audiences": {
+                    "type": "integer"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "platform_settings": {
+                    "$ref": "#/definitions/dto.BotCampaignPlatformSettingsSpec"
+                },
+                "platform_settings_id": {
                     "type": "integer"
                 },
                 "scheduleat": {
@@ -5383,7 +7630,8 @@ const docTemplate = `{
             "required": [
                 "level1",
                 "level2",
-                "level3"
+                "level3",
+                "platform"
             ],
             "properties": {
                 "level1": {
@@ -5397,6 +7645,15 @@ const docTemplate = `{
                 "level3": {
                     "type": "string",
                     "maxLength": 255
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
                 }
             }
         },
@@ -5435,6 +7692,7 @@ const docTemplate = `{
                 "level1",
                 "level2",
                 "level3",
+                "platform",
                 "tags"
             ],
             "properties": {
@@ -5457,6 +7715,15 @@ const docTemplate = `{
                 "metadata": {
                     "type": "object",
                     "additionalProperties": {}
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
                 },
                 "tags": {
                     "type": "array",
@@ -5547,6 +7814,22 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 255
                 },
+                "media_uuid": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "platform_settings_id": {
+                    "type": "integer",
+                    "minimum": 1
+                },
                 "scheduleat": {
                     "type": "string"
                 },
@@ -5634,6 +7917,22 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 255
                 },
+                "media_uuid": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "platform_settings_id": {
+                    "type": "integer",
+                    "minimum": 1
+                },
                 "scheduleat": {
                     "type": "string"
                 },
@@ -5674,6 +7973,100 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.CalculateCampaignCostV2Request": {
+            "type": "object",
+            "required": [
+                "num_messages"
+            ],
+            "properties": {
+                "adlink": {
+                    "type": "string",
+                    "maxLength": 10000
+                },
+                "city": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string",
+                    "maxLength": 512,
+                    "minLength": 1
+                },
+                "job": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job_category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level1": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "level2s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "level3s": {
+                    "type": "array",
+                    "maxItems": 255,
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "line_number": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "media_uuid": {
+                    "type": "string"
+                },
+                "num_messages": {
+                    "type": "integer"
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "platform_settings_id": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "short_link_domain": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                }
+            }
+        },
         "dto.CancelCampaignRequest": {
             "type": "object",
             "required": [
@@ -5708,6 +8101,13 @@ const docTemplate = `{
                     "type": "integer",
                     "maximum": 1000000000,
                     "minimum": 1000
+                },
+                "lang": {
+                    "type": "string",
+                    "enum": [
+                        "FA",
+                        "EN"
+                    ]
                 }
             }
         },
@@ -5721,6 +8121,26 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "token": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CloneCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "uuid": {
                     "type": "string"
                 }
             }
@@ -5812,7 +8232,23 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 255
                 },
-                "schedule_at": {
+                "media_uuid": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "platform_settings_id": {
+                    "type": "integer",
+                    "minimum": 1
+                },
+                "scheduleat": {
                     "type": "string"
                 },
                 "sex": {
@@ -5911,6 +8347,71 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "request_uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CreatePlatformSettingsRequest": {
+            "type": "object",
+            "required": [
+                "platform"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "multimedia_uuid": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "initialized",
+                        "in-progress",
+                        "active",
+                        "inactive"
+                    ]
+                }
+            }
+        },
+        "dto.CreatePlatformSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "multimedia_uuid": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "status": {
                     "type": "string"
                 }
             }
@@ -6030,6 +8531,53 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.DepositReceiptItem": {
+            "type": "object",
+            "properties": {
+                "amount": {
+                    "type": "integer"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "currency": {
+                    "type": "string"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "file_size": {
+                    "type": "integer"
+                },
+                "lang": {
+                    "type": "string"
+                },
+                "preview_base64": {
+                    "type": "string"
+                },
+                "preview_type": {
+                    "type": "string"
+                },
+                "rejection_note": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "status_reason": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.ForgotPasswordRequest": {
             "type": "object",
             "required": [
@@ -6101,7 +8649,16 @@ const docTemplate = `{
                 "line_price_factor": {
                     "type": "number"
                 },
+                "media_uuid": {
+                    "type": "string"
+                },
                 "num_audience": {
+                    "type": "integer"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "platform_settings_id": {
                     "type": "integer"
                 },
                 "scheduleat": {
@@ -6177,6 +8734,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status_reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.GetLastInitiatedCampaignResponse": {
+            "type": "object",
+            "properties": {
+                "item": {
+                    "$ref": "#/definitions/dto.GetCampaignResponse"
+                },
+                "message": {
                     "type": "string"
                 }
             }
@@ -6303,6 +8871,45 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.ListDepositReceiptsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.DepositReceiptItem"
+                    }
+                }
+            }
+        },
+        "dto.ListLatestSegmentPriceFactorsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.SegmentPriceFactorItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.ListPlatformSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.PlatformSettingsItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.ListTicketsResponse": {
             "type": "object",
             "properties": {
@@ -6314,6 +8921,60 @@ const docTemplate = `{
                 },
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.LoginOTPRequest": {
+            "type": "object",
+            "required": [
+                "identifier"
+            ],
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 3,
+                    "example": "user@example.com or +989123456789"
+                }
+            }
+        },
+        "dto.LoginOTPResponse": {
+            "type": "object",
+            "properties": {
+                "already_sent": {
+                    "type": "boolean"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "masked_phone": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "otp_expiry": {
+                    "type": "string"
+                },
+                "otp_sent": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.LoginOTPVerifyRequest": {
+            "type": "object",
+            "required": [
+                "customer_id",
+                "otp_code"
+            ],
+            "properties": {
+                "customer_id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "otp_code": {
+                    "type": "string",
+                    "example": "123456"
                 }
             }
         },
@@ -6426,6 +9087,35 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.PlatformSettingsItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "multimedia_uuid": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.ProfileDTO": {
             "type": "object",
             "properties": {
@@ -6510,6 +9200,18 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.ProformaPreviewResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "success": {
+                    "type": "boolean"
+                }
+            }
+        },
         "dto.ResetPasswordRequest": {
             "type": "object",
             "required": [
@@ -6536,6 +9238,23 @@ const docTemplate = `{
                 "otp_code": {
                     "type": "string",
                     "example": "123456"
+                }
+            }
+        },
+        "dto.SegmentPriceFactorItem": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "level3": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "price_factor": {
+                    "type": "number"
                 }
             }
         },
@@ -6668,6 +9387,67 @@ const docTemplate = `{
                 "otp_target": {
                     "description": "Mobile number (masked for security)",
                     "type": "string"
+                }
+            }
+        },
+        "dto.SubmitDepositReceiptRequest": {
+            "type": "object",
+            "required": [
+                "amount",
+                "content_type",
+                "file_base64",
+                "file_name",
+                "file_size"
+            ],
+            "properties": {
+                "amount": {
+                    "type": "integer",
+                    "maximum": 1000000000,
+                    "minimum": 1000
+                },
+                "content_type": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 3
+                },
+                "file_base64": {
+                    "description": "frontend will send; backend decodes to []byte",
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 3
+                },
+                "file_size": {
+                    "description": "cap 5MB",
+                    "type": "integer",
+                    "maximum": 5242880,
+                    "minimum": 1
+                },
+                "lang": {
+                    "type": "string",
+                    "enum": [
+                        "FA",
+                        "EN"
+                    ]
+                }
+            }
+        },
+        "dto.SubmitDepositReceiptResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "receipt_uuid": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
                 }
             }
         },
@@ -6896,6 +9676,22 @@ const docTemplate = `{
                     "type": "string",
                     "maxLength": 255
                 },
+                "media_uuid": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "platform_settings_id": {
+                    "type": "integer",
+                    "minimum": 1
+                },
                 "scheduleat": {
                     "type": "string"
                 },
@@ -6924,6 +9720,61 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.UpdateDepositReceiptFileRequest": {
+            "type": "object",
+            "required": [
+                "content_type",
+                "file_base64",
+                "file_name",
+                "file_size"
+            ],
+            "properties": {
+                "content_type": {
+                    "type": "string",
+                    "maxLength": 120,
+                    "minLength": 3
+                },
+                "file_base64": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string",
+                    "maxLength": 255,
+                    "minLength": 3
+                },
+                "file_size": {
+                    "type": "integer",
+                    "maximum": 5242880,
+                    "minimum": 1
+                }
+            }
+        },
+        "dto.UploadMultimediaResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "media_type": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "mime_type": {
+                    "type": "string"
+                },
+                "original_filename": {
+                    "type": "string"
+                },
+                "size_bytes": {
+                    "type": "integer"
+                },
+                "uuid": {
                     "type": "string"
                 }
             }
