@@ -15,6 +15,36 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 )
 
+const (
+	payamRetryBaseDelay   = 1 * time.Second
+	payamRetryMaxDelay    = 2 * time.Minute
+	payamRetryMaxAttempts = 5 // 0 means unlimited retries until success or context cancellation.
+)
+
+func payamRetryBackoffDelay(attempt int) time.Duration {
+	return retryBackoffDelay(attempt, payamRetryBaseDelay, payamRetryMaxDelay)
+}
+
+func isPayamRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "429") ||
+		strings.Contains(msg, "too many requests") ||
+		strings.Contains(msg, "http status: 500") ||
+		strings.Contains(msg, "http status: 502") ||
+		strings.Contains(msg, "http status: 503") ||
+		strings.Contains(msg, "http status: 504") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "timed out") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "temporary failure") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "eof")
+}
+
 type PayamSMSItem struct {
 	Recipient  string
 	Body       string
@@ -59,15 +89,34 @@ func newHTTPPayamSMSClient(cfg config.PayamSMSConfig) *httpPayamSMSClient {
 	}
 }
 
-// SendBatch sends a batch of SMS messages.
+// SendBatch sends a batch of SMS messages with exponential backoff retries.
 func (c *httpPayamSMSClient) SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error) {
 	if len(items) == 0 {
 		return nil, nil
 	}
+	// GetToken already retries internally; no need to re-fetch on each send retry.
 	token, err := c.GetToken(ctx)
 	if err != nil {
 		return nil, err
 	}
+
+	var out []PayamSMSResponseItem
+	for attempt := 0; ; attempt++ {
+		out, err = c.sendBatchOnce(ctx, sender, items, token)
+		if !isPayamRetryableError(err) {
+			return out, err
+		}
+		if payamRetryMaxAttempts > 0 && attempt+1 >= payamRetryMaxAttempts {
+			break
+		}
+		if sleepErr := sleepWithContext(ctx, payamRetryBackoffDelay(attempt)); sleepErr != nil {
+			return out, ctx.Err()
+		}
+	}
+	return out, err
+}
+
+func (c *httpPayamSMSClient) sendBatchOnce(ctx context.Context, sender string, items []PayamSMSItem, token string) ([]PayamSMSResponseItem, error) {
 	payload := struct {
 		Sender   string `json:"sender"`
 		SMSItems []any  `json:"smsItems"`
@@ -119,7 +168,28 @@ func (c *httpPayamSMSClient) SendBatch(ctx context.Context, sender string, items
 	return out, nil
 }
 
+// GetToken fetches a fresh OAuth2 bearer token from PayamSMS with exponential backoff retries.
 func (c *httpPayamSMSClient) GetToken(ctx context.Context) (string, error) {
+	var (
+		token string
+		err   error
+	)
+	for attempt := 0; ; attempt++ {
+		token, err = c.getTokenOnce(ctx)
+		if !isPayamRetryableError(err) {
+			return token, err
+		}
+		if payamRetryMaxAttempts > 0 && attempt+1 >= payamRetryMaxAttempts {
+			break
+		}
+		if sleepErr := sleepWithContext(ctx, payamRetryBackoffDelay(attempt)); sleepErr != nil {
+			return "", ctx.Err()
+		}
+	}
+	return token, err
+}
+
+func (c *httpPayamSMSClient) getTokenOnce(ctx context.Context) (string, error) {
 	tokenURL := c.cfg.TokenURL
 	if tokenURL == "" {
 		tokenURL = "https://www.payamsms.com/auth/oauth/token"
@@ -173,7 +243,28 @@ func (c *httpPayamSMSClient) GetToken(ctx context.Context) (string, error) {
 	return out.AccessToken, nil
 }
 
+// FetchStatus retrieves delivery statuses for the given tracking IDs with exponential backoff retries.
 func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trackingIDs []string) ([]PayamStatusResponse, error) {
+	var (
+		out []PayamStatusResponse
+		err error
+	)
+	for attempt := 0; ; attempt++ {
+		out, err = c.fetchStatusOnce(ctx, token, trackingIDs)
+		if !isPayamRetryableError(err) {
+			return out, err
+		}
+		if payamRetryMaxAttempts > 0 && attempt+1 >= payamRetryMaxAttempts {
+			break
+		}
+		if sleepErr := sleepWithContext(ctx, payamRetryBackoffDelay(attempt)); sleepErr != nil {
+			return out, ctx.Err()
+		}
+	}
+	return out, err
+}
+
+func (c *httpPayamSMSClient) fetchStatusOnce(ctx context.Context, token string, trackingIDs []string) ([]PayamStatusResponse, error) {
 	if len(trackingIDs) == 0 {
 		return nil, fmt.Errorf("no tracking ids provided")
 	}
