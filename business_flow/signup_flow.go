@@ -20,7 +20,6 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
-	"github.com/gofiber/fiber/v3/log"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
@@ -96,6 +95,8 @@ func NewSignupFlow(
 
 // Signup handles the complete signup process
 func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, metadata *ClientMetadata) (*dto.SignupResponse, error) {
+	s.sanitizeSignupRequest(req)
+
 	// Validate business rules
 	if err := s.validateSignupRequest(ctx, req); err != nil {
 		return nil, NewBusinessError("SIGNUP_VALIDATION_FAILED", "Signup validation failed", err)
@@ -127,22 +128,25 @@ func (s *SignupFlowImpl) Signup(ctx context.Context, req *dto.SignupRequest, met
 		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", err)
 	}
 
-	// Send OTP via SMS (outside transaction to avoid rollback on SMS failure)
-	go func() {
-		customerID := int64(pendingID)
-		message := fmt.Sprintf(s.messageConfig.SignupVerificationCodeTemplate, otpCode)
-		recipient, err := normalizeOTPMobile(req.RepresentativeMobile)
-		if err != nil {
-			log.Errorf("Signup: Error occurred while normalizing OTP mobile number: %v", err)
-			// TODO: deletePendingSignup
-			return
+	customerID := int64(pendingID)
+	message := fmt.Sprintf(s.messageConfig.SignupVerificationCodeTemplate, otpCode)
+	recipient, err := normalizeOTPMobile(req.RepresentativeMobile)
+	if err != nil {
+		_ = s.deletePendingSignup(ctx, pendingID)
+		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", err)
+	}
+	if s.otpSMSSvc == nil {
+		_ = s.deletePendingSignup(ctx, pendingID)
+		return nil, NewBusinessError("SIGNUP_FAILED", "Signup failed", fmt.Errorf("sms service not configured"))
+	}
+
+	runAsyncOTPTask(ctx, "Signup send OTP", func(asyncCtx context.Context) error {
+		if err := s.otpSMSSvc.SendOTP(asyncCtx, recipient, message, &customerID); err != nil {
+			_ = s.deletePendingSignup(asyncCtx, pendingID)
+			return err
 		}
-		err2 := s.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID)
-		if err2 != nil {
-			log.Errorf("Signup: Error occurred while sending OTP: %v", err2)
-		}
-		// TODO: deletePendingSignup
-	}()
+		return nil
+	})
 
 	return &dto.SignupResponse{
 		Message:    "Signup initiated successfully. OTP sent to your mobile number.",
@@ -271,27 +275,46 @@ func (s *SignupFlowImpl) ResendOTP(ctx context.Context, req *dto.OTPResendReques
 		customerID := int64(req.CustomerID)
 		recipient, mobileErr := normalizeOTPMobile(target)
 		if mobileErr != nil {
-			err = mobileErr
-		} else {
-			err = s.otpSMSSvc.SendOTP(ctx, recipient, message, &customerID)
+			return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", mobileErr)
 		}
+		if s.otpSMSSvc == nil {
+			_ = s.deleteSignupOTPState(ctx, req.CustomerID, req.OTPType)
+			return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", fmt.Errorf("sms service not configured"))
+		}
+		runAsyncOTPTask(ctx, "ResendOTP send mobile OTP", func(asyncCtx context.Context) error {
+			if err := s.otpSMSSvc.SendOTP(asyncCtx, recipient, message, &customerID); err != nil {
+				_ = s.deleteSignupOTPState(asyncCtx, req.CustomerID, req.OTPType)
+				return err
+			}
+			return nil
+		})
 	} else {
-		err = s.notificationSvc.SendEmail(target, "Verification Code", message)
-	}
-	if err != nil {
-		log.Errorf("ResendOTP: Error occurred while resending OTP: %v", err)
-		// TODO: Delete OTP
-		return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", err)
+		if s.notificationSvc == nil {
+			_ = s.deleteSignupOTPState(ctx, req.CustomerID, req.OTPType)
+			return nil, NewBusinessError("RESEND_OTP_FAILED", "Resend OTP failed", fmt.Errorf("notification service not configured"))
+		}
+		runAsyncOTPTask(ctx, "ResendOTP send email OTP", func(asyncCtx context.Context) error {
+			_ = asyncCtx
+			if err := s.notificationSvc.SendEmail(target, "Verification Code", message); err != nil {
+				_ = s.deleteSignupOTPState(asyncCtx, req.CustomerID, req.OTPType)
+				return err
+			}
+			return nil
+		})
 	}
 
 	return &dto.OTPResendResponse{
 		Message:         "OTP resent successfully",
 		OTPSent:         true,
-		MaskedOTPTarget: s.maskMobileNumber(target),
+		MaskedOTPTarget: maskOTPTarget(target),
 	}, nil
 }
 
 func (s *SignupFlowImpl) validateSignupRequest(ctx context.Context, req *dto.SignupRequest) error {
+	if req == nil {
+		return ErrCustomerNotFound
+	}
+
 	// Check if email already exists
 	existingCustomer, err := s.customerRepo.ByEmail(ctx, req.Email)
 	if err != nil {
@@ -408,6 +431,7 @@ func (s *SignupFlowImpl) createCustomer(ctx context.Context, req *dto.SignupRequ
 		UUID:                    uuid.New(),
 		AgencyRefererCode:       utils.GenerateRandomAgencyRefererCode(),
 		AccountTypeID:           accountType.ID,
+		AccountType:             *accountType,
 		CompanyName:             req.CompanyName,
 		NationalID:              req.NationalID,
 		CompanyPhone:            req.CompanyPhone,
@@ -443,8 +467,26 @@ func (s *SignupFlowImpl) generateAndSaveOTP(ctx context.Context, customerID uint
 	}
 
 	if s.rc != nil {
-		key := fmt.Sprintf("signup:otp:%s:%d", otpType, customerID)
-		if err := s.rc.Set(ctx, key, otpCode, utils.OTPExpiry).Err(); err != nil {
+		key := s.signupOTPKey(customerID, otpType)
+		if existing, ttl, err := s.getSignupOTPState(ctx, customerID, otpType); err == nil {
+			if ttl > 0 && utils.UTCNow().Sub(existing.LastSentAt) < authOTPResendCooldown {
+				return "", ErrRateLimitExceeded
+			}
+		} else if err != ErrNoValidOTPFound {
+			return "", err
+		}
+
+		state := otpChallengeState{
+			OTPHash:    hashOTPCode(otpCode),
+			Attempts:   0,
+			CreatedAt:  utils.UTCNow(),
+			LastSentAt: utils.UTCNow(),
+		}
+		payload, err := json.Marshal(state)
+		if err != nil {
+			return "", err
+		}
+		if err := s.rc.Set(ctx, key, payload, utils.OTPExpiry).Err(); err != nil {
 			return "", err
 		}
 		return otpCode, nil
@@ -455,19 +497,30 @@ func (s *SignupFlowImpl) generateAndSaveOTP(ctx context.Context, customerID uint
 
 func (s *SignupFlowImpl) verifyOTPCode(ctx context.Context, customerID uint, code, otpType string) error {
 	if s.rc != nil {
-		key := fmt.Sprintf("signup:otp:%s:%d", otpType, customerID)
-		val, err := s.rc.Get(ctx, key).Result()
-		if err == redis.Nil {
-			return ErrNoValidOTPFound
-		}
+		state, ttl, err := s.getSignupOTPState(ctx, customerID, otpType)
 		if err != nil {
 			return err
 		}
-		if val != code {
+		key := s.signupOTPKey(customerID, otpType)
+		if state.Attempts >= authOTPMaxAttempts {
+			_ = s.rc.Del(ctx, key).Err()
+			return ErrRateLimitExceeded
+		}
+		if !verifyOTPCodeHash(code, state.OTPHash) {
+			state.Attempts++
+			if state.Attempts >= authOTPMaxAttempts {
+				_ = s.rc.Del(ctx, key).Err()
+				return ErrRateLimitExceeded
+			}
+			payload, marshalErr := json.Marshal(state)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if err := s.rc.Set(ctx, key, payload, ttl).Err(); err != nil {
+				return err
+			}
 			return ErrInvalidOTPCode
 		}
-		// consume OTP
-		_ = s.rc.Del(ctx, key).Err()
 		return nil
 	}
 
@@ -522,6 +575,10 @@ func (s *SignupFlowImpl) createSession(ctx context.Context, customerID uint, acc
 }
 
 func (s *SignupFlowImpl) createDefaultDiscount(ctx context.Context, customer *models.Customer) error {
+	if customer.ReferrerAgencyID == nil {
+		return nil
+	}
+
 	rate := 0.0
 	if customer.AccountType.TypeName == models.AccountTypeMarketingAgency {
 		rate = 0.5
@@ -590,13 +647,16 @@ func (s *SignupFlowImpl) maskMobileNumber(mobile string) string {
 }
 
 func (s *SignupFlowImpl) validateOTPVerificationRequest(ctx context.Context, req *dto.OTPVerificationRequest) error {
+	if req == nil {
+		return ErrInvalidOTPCode
+	}
 	// Validate OTP type
 	if req.OTPType != OTPTypeMobile && req.OTPType != OTPTypeEmail {
 		return ErrInvalidOTPType
 	}
 
 	// Validate OTP code format (6 digits)
-	if len(req.OTPCode) != 6 {
+	if !isSixDigitCode(req.OTPCode) {
 		return ErrInvalidOTPCode
 	}
 
@@ -608,6 +668,9 @@ func (s *SignupFlowImpl) validateOTPVerificationRequest(ctx context.Context, req
 }
 
 func (s *SignupFlowImpl) validateOTPResendRequest(ctx context.Context, req *dto.OTPResendRequest) error {
+	if req == nil {
+		return ErrInvalidOTPType
+	}
 	// Validate OTP type
 	if req.OTPType != OTPTypeMobile && req.OTPType != OTPTypeEmail {
 		return ErrInvalidOTPType
@@ -678,7 +741,12 @@ func (s *SignupFlowImpl) deletePendingSignup(ctx context.Context, pendingID uint
 	if s.rc == nil {
 		return ErrCacheNotAvailable
 	}
-	return s.rc.Del(ctx, s.pendingSignupKey(pendingID)).Err()
+	return s.rc.Del(
+		ctx,
+		s.pendingSignupKey(pendingID),
+		s.signupOTPKey(pendingID, OTPTypeMobile),
+		s.signupOTPKey(pendingID, OTPTypeEmail),
+	).Err()
 }
 
 func generatePendingSignupID() (uint, error) {
@@ -692,4 +760,75 @@ func generatePendingSignupID() (uint, error) {
 		return 1, nil
 	}
 	return id, nil
+}
+
+func (s *SignupFlowImpl) sanitizeSignupRequest(req *dto.SignupRequest) {
+	if req == nil {
+		return
+	}
+
+	req.Email = normalizeEmailIdentifier(req.Email)
+	req.RepresentativeFirstName = strings.TrimSpace(req.RepresentativeFirstName)
+	req.RepresentativeLastName = strings.TrimSpace(req.RepresentativeLastName)
+	req.RepresentativeMobile = strings.TrimSpace(req.RepresentativeMobile)
+	req.AccountType = strings.TrimSpace(req.AccountType)
+	req.ReferrerAgencyCode = trimOptionalString(req.ReferrerAgencyCode)
+	req.CompanyName = trimOptionalString(req.CompanyName)
+	req.NationalID = trimOptionalString(req.NationalID)
+	req.CompanyPhone = trimOptionalString(req.CompanyPhone)
+	req.CompanyAddress = trimOptionalString(req.CompanyAddress)
+	req.PostalCode = trimOptionalString(req.PostalCode)
+	req.ShebaNumber = trimOptionalString(req.ShebaNumber)
+	req.Job = trimOptionalString(req.Job)
+	req.Category = trimOptionalString(req.Category)
+}
+
+func (s *SignupFlowImpl) signupOTPKey(customerID uint, otpType string) string {
+	return fmt.Sprintf("signup:otp:%s:%d", otpType, customerID)
+}
+
+func (s *SignupFlowImpl) deleteSignupOTPState(ctx context.Context, customerID uint, otpType string) error {
+	if s.rc == nil {
+		return ErrCacheNotAvailable
+	}
+	return s.rc.Del(ctx, s.signupOTPKey(customerID, otpType)).Err()
+}
+
+func (s *SignupFlowImpl) getSignupOTPState(ctx context.Context, customerID uint, otpType string) (*otpChallengeState, time.Duration, error) {
+	key := s.signupOTPKey(customerID, otpType)
+	raw, err := s.rc.Get(ctx, key).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return nil, 0, ErrNoValidOTPFound
+		}
+		return nil, 0, err
+	}
+	var state otpChallengeState
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		if isSixDigitCode(raw) {
+			state = otpChallengeState{
+				OTPHash:   hashOTPCode(raw),
+				Attempts:  0,
+				CreatedAt: utils.UTCNow(),
+			}
+		} else {
+			return nil, 0, err
+		}
+	}
+	ttl := s.rc.TTL(ctx, key).Val()
+	if ttl <= 0 {
+		return nil, 0, ErrNoValidOTPFound
+	}
+	return &state, ttl, nil
+}
+
+func trimOptionalString(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
 }
