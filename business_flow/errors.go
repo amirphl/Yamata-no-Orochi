@@ -668,6 +668,9 @@ func IsDepositReceiptAlreadyApproved(err error) bool {
 func IsDepositReceiptAlreadyRejected(err error) bool {
 	return errors.Is(err, ErrDepositReceiptAlreadyRejected)
 }
+func IsDepositReceiptAlreadyFinalized(err error) bool {
+	return errors.Is(err, ErrDepositReceiptAlreadyFinalized)
+}
 func IsDepositReceiptFileTooLarge(err error) bool {
 	return errors.Is(err, ErrDepositReceiptFileTooLarge)
 }
