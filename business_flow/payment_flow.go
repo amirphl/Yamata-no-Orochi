@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"net/http"
 	"os"
 	"strings"
@@ -18,6 +21,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"golang.org/x/image/draw"
 	"gorm.io/gorm"
 )
 
@@ -29,8 +33,10 @@ type PaymentFlow interface {
 	GetWalletBalance(ctx context.Context, req *dto.GetWalletBalanceRequest, metadata *ClientMetadata) (*dto.GetWalletBalanceResponse, error)
 	SubmitDepositReceipt(ctx context.Context, req *dto.SubmitDepositReceiptRequest, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error)
 	ListDepositReceipts(ctx context.Context, customerID uint, lang string) (*dto.ListDepositReceiptsResponse, error)
-	PreviewProformaInvoice(ctx context.Context, customerID uint, amountWithTax uint64, lang string) (*dto.ProformaPreviewResponse, error)
-	DownloadProformaInvoicePDF(ctx context.Context, customerID uint, amountWithTax uint64, lang string) ([]byte, string, error)
+	PreviewProformaInvoice(ctx context.Context, customerID uint, receiptUUID string, lang string) (*dto.ProformaPreviewResponse, error)
+	DownloadDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) ([]byte, string, string, error)
+	UpdateDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string, req *dto.UpdateDepositReceiptFileRequest) error
+	DeleteDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) error
 }
 
 // PaymentFlowImpl implements the payment business flow
@@ -243,181 +249,6 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 	}
 
 	return paymentRequest, nil
-}
-
-// SubmitDepositReceipt lets customer upload a deposit receipt for manual review.
-func (p *PaymentFlowImpl) SubmitDepositReceipt(ctx context.Context, req *dto.SubmitDepositReceiptRequest, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error) {
-	if req == nil {
-		return nil, NewBusinessError("DEPOSIT_RECEIPT_INVALID_REQUEST", "Submit deposit receipt failed", fmt.Errorf("request is nil"))
-	}
-	lang := strings.ToUpper(strings.TrimSpace(req.Lang))
-	if lang == "" {
-		lang = "EN"
-	}
-	if lang != "EN" && lang != "FA" {
-		return nil, ErrInvalidLanguage
-	}
-	if req.FileSize <= 0 {
-		return nil, ErrDepositReceiptFileEmpty
-	}
-	if req.FileSize > 5*1024*1024 {
-		return nil, ErrDepositReceiptFileTooLarge
-	}
-	ct := strings.ToLower(strings.TrimSpace(req.ContentType))
-	allowed := map[string]bool{
-		"image/jpeg":               true,
-		"image/png":                true,
-		"application/pdf":          true,
-		"image/jpg":                true,
-		"application/octet-stream": true, // fallback when browsers mislabel
-	}
-	if !allowed[ct] {
-		return nil, ErrDepositReceiptFileInvalidType
-	}
-	data, err := base64.StdEncoding.DecodeString(req.FileBase64)
-	if err != nil {
-		return nil, NewBusinessError("DEPOSIT_RECEIPT_DECODE_FAILED", "Failed to decode file", err)
-	}
-	if int64(len(data)) != req.FileSize {
-		// trust actual length
-		req.FileSize = int64(len(data))
-	}
-
-	var receiptUUID string
-	err = repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
-		customer, err := getCustomer(txCtx, p.customerRepo, req.CustomerID)
-		if err != nil {
-			return err
-		}
-		rec := &models.DepositReceipt{
-			CustomerID:   customer.ID,
-			Amount:       req.Amount,
-			Currency:     utils.TomanCurrency,
-			Status:       models.DepositReceiptStatusPending,
-			FileName:     req.FileName,
-			ContentType:  ct,
-			FileSize:     req.FileSize,
-			FileData:     data,
-			Lang:         lang,
-			StatusReason: "submitted by customer",
-		}
-		if err := p.depositReceiptRepo.Save(txCtx, rec); err != nil {
-			return err
-		}
-		receiptUUID = rec.UUID.String()
-
-		desc := fmt.Sprintf("Deposit receipt submitted amount %d by customer %d", req.Amount, req.CustomerID)
-		_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionPaymentCallbackProcessed, desc, true, nil, metadata)
-		return nil
-	})
-	if err != nil {
-		return nil, NewBusinessError("DEPOSIT_RECEIPT_SUBMIT_FAILED", "Failed to submit deposit receipt", err)
-	}
-
-	return &dto.SubmitDepositReceiptResponse{
-		Success:     true,
-		Message:     "Deposit receipt submitted for review",
-		ReceiptUUID: receiptUUID,
-		Status:      string(models.DepositReceiptStatusPending),
-	}, nil
-}
-
-// ListDepositReceipts lists receipts for a customer.
-func (p *PaymentFlowImpl) ListDepositReceipts(ctx context.Context, customerID uint, lang string) (*dto.ListDepositReceiptsResponse, error) {
-	lang = strings.ToUpper(strings.TrimSpace(lang))
-	if lang != "" && lang != "EN" && lang != "FA" {
-		return nil, ErrInvalidLanguage
-	}
-	f := models.DepositReceiptFilter{CustomerID: &customerID}
-	if lang != "" {
-		f.Lang = &lang
-	}
-	items, err := p.depositReceiptRepo.List(ctx, f, 50, 0, "id DESC")
-	if err != nil {
-		return nil, NewBusinessError("DEPOSIT_RECEIPT_LIST_FAILED", "Failed to list deposit receipts", err)
-	}
-	resp := &dto.ListDepositReceiptsResponse{Items: make([]dto.DepositReceiptItem, 0, len(items))}
-	for _, r := range items {
-		resp.Items = append(resp.Items, dto.DepositReceiptItem{
-			UUID:         r.UUID.String(),
-			CustomerID:   r.CustomerID,
-			Amount:       r.Amount,
-			Currency:     r.Currency,
-			Status:       string(r.Status),
-			StatusReason: r.StatusReason,
-			Lang:         r.Lang,
-			FileName:     r.FileName,
-			ContentType:  r.ContentType,
-			FileSize:     r.FileSize,
-			CreatedAt:    r.CreatedAt,
-		})
-	}
-	return resp, nil
-}
-
-// PreviewProformaInvoice builds data for a proforma invoice JSON preview.
-func (p *PaymentFlowImpl) PreviewProformaInvoice(ctx context.Context, customerID uint, amountWithTax uint64, lang string) (*dto.ProformaPreviewResponse, error) {
-	lang = strings.ToUpper(strings.TrimSpace(lang))
-	if lang == "" {
-		lang = "EN"
-	}
-	if lang != "EN" && lang != "FA" {
-		return nil, ErrInvalidLanguage
-	}
-	customer, err := getCustomer(ctx, p.customerRepo, customerID)
-	if err != nil {
-		return nil, err
-	}
-	now := utils.UTCNow()
-	invoiceNumber := fmt.Sprintf("PRF-%s", uuid.New().String())
-	real := uint64(float64(amountWithTax) * 10 / 11)
-	tax := amountWithTax - real
-	data := map[string]any{
-		"invoice_number":  invoiceNumber,
-		"date":            now.Format("2006-01-02"),
-		"amount_with_tax": amountWithTax,
-		"amount":          real,
-		"tax":             tax,
-		"service": map[string]any{
-			"description": "Jazebeh wallet top-up",
-		},
-		"buyer": map[string]any{
-			"customer_id":   customer.ID,
-			"customer_uuid": customer.UUID.String(),
-			"name":          strings.TrimSpace(customer.RepresentativeFirstName + " " + customer.RepresentativeLastName),
-			"company_name":  customer.CompanyName,
-			"mobile":        customer.RepresentativeMobile,
-			"company_phone": customer.CompanyPhone,
-			"address":       customer.CompanyAddress,
-			"national_id":   customer.NationalID,
-			"postal_code":   customer.PostalCode,
-			"email":         customer.Email,
-		},
-		"seller": map[string]any{
-			"name":           "Jazebeh Platform",
-			"economic_code":  "N/A",
-			"national_id":    p.sysCfg.SystemUserUUID,
-			"sheba":          p.sysCfg.SystemShebaNumber,
-			"bank_name":      "N/A",
-			"account_number": "N/A",
-			"card_number":    "N/A",
-			"iban":           p.sysCfg.SystemShebaNumber,
-		},
-		"notes": "This is a proforma invoice. Final invoice will be issued after payment confirmation.",
-		"lang":  lang,
-	}
-	return &dto.ProformaPreviewResponse{Success: true, Data: data}, nil
-}
-
-// DownloadProformaInvoicePDF returns a rendered HTML (caller can set content-type PDF after conversion).
-func (p *PaymentFlowImpl) DownloadProformaInvoicePDF(ctx context.Context, customerID uint, amountWithTax uint64, lang string) ([]byte, string, error) {
-	preview, err := p.PreviewProformaInvoice(ctx, customerID, amountWithTax, lang)
-	if err != nil {
-		return nil, "", err
-	}
-	html := renderProformaHTML(preview.Data, preview.Data["lang"].(string))
-	filename := fmt.Sprintf("proforma-%s.html", preview.Data["invoice_number"])
-	return []byte(html), filename, nil
 }
 
 type ScatteredSettlementItem struct {
@@ -1569,78 +1400,340 @@ func (p *PaymentFlowImpl) GetWalletBalance(ctx context.Context, req *dto.GetWall
 	return resp, nil
 }
 
-// renderProformaHTML builds a minimal HTML representation. Caller may convert to PDF externally.
-func renderProformaHTML(data map[string]any, lang string) string {
-	rtl := lang == "FA"
-	dir := "ltr"
-	align := "left"
-	if rtl {
-		dir = "rtl"
-		align = "right"
+// buildReceiptPreview creates a medium-size preview as base64 JPEG for images; empty for PDFs/others.
+func buildReceiptPreview(data []byte, contentType string) (string, string) {
+	if len(data) == 0 {
+		return "", ""
 	}
-	invoiceNumber, _ := data["invoice_number"].(string)
-	date, _ := data["date"].(string)
-	amountWithTax := data["amount_with_tax"]
-	amount := data["amount"]
-	tax := data["tax"]
-	notes, _ := data["notes"].(string)
-	buyer := data["buyer"].(map[string]any)
-	seller := data["seller"].(map[string]any)
+	ct := strings.ToLower(strings.TrimSpace(contentType))
+	if strings.HasPrefix(ct, "application/pdf") {
+		return "", ""
+	}
+	var img image.Image
+	var err error
+	reader := bytes.NewReader(data)
+	switch {
+	case strings.HasPrefix(ct, "image/png"):
+		img, err = png.Decode(reader)
+	case strings.HasPrefix(ct, "image/jpeg"), strings.HasPrefix(ct, "image/jpg"):
+		img, err = jpeg.Decode(reader)
+	default:
+		return "", ""
+	}
+	if err != nil || img == nil {
+		return "", ""
+	}
 
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="%s" dir="%s">
-<head>
-<meta charset="UTF-8">
-<title>Proforma %s</title>
-<style>
-body { font-family: sans-serif; direction:%s; text-align:%s; }
-.card { border:1px solid #ccc; padding:16px; margin:12px auto; max-width:720px; }
-.row { display:flex; justify-content:space-between; }
-.section { margin-top:12px; }
-table { width:100%%; border-collapse: collapse; }
-td, th { border:1px solid #ddd; padding:8px; }
-</style>
-</head>
-<body>
-<div class="card">
-  <h2>Proforma Invoice</h2>
-  <div class="row"><div><strong>No:</strong> %s</div><div><strong>Date:</strong> %s</div></div>
-  <div class="section">
-    <h3>Seller</h3>
-    <div>%v</div>
-    <div>Economic Code: %v</div>
-    <div>National ID: %v</div>
-    <div>IBAN: %v</div>
-  </div>
-  <div class="section">
-    <h3>Buyer</h3>
-    <div>%v</div>
-    <div>Mobile: %v</div>
-    <div>Company: %v</div>
-    <div>Address: %v</div>
-    <div>Postal Code: %v</div>
-  </div>
-  <div class="section">
-    <h3>Service</h3>
-    <table>
-      <tr><th>Description</th><th>Amount</th><th>Tax</th><th>Total</th></tr>
-      <tr><td>Jazebeh wallet top-up</td><td>%v</td><td>%v</td><td>%v</td></tr>
-    </table>
-  </div>
-  <div class="section">
-    <h3>Bank Account</h3>
-    <div>IBAN: %v</div>
-  </div>
-  <div class="section"><em>%s</em></div>
-</div>
-</body></html>`,
-		lang, dir, invoiceNumber, dir, align,
-		invoiceNumber, date,
-		seller["name"], seller["economic_code"], seller["national_id"], seller["iban"],
-		buyer["name"], buyer["mobile"], buyer["company_name"], buyer["address"], buyer["postal_code"],
-		amount, tax, amountWithTax,
-		seller["iban"],
-		notes,
-	)
-	return html
+	// Resize to max width 480px preserving aspect ratio
+	maxW := 480
+	b := img.Bounds()
+	w := b.Dx()
+	h := b.Dy()
+	if w == 0 || h == 0 {
+		return "", ""
+	}
+	if w > maxW {
+		newW := maxW
+		newH := int(float64(h) * (float64(newW) / float64(w)))
+		dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+		draw.CatmullRom.Scale(dst, dst.Bounds(), img, b, draw.Over, nil)
+		img = dst
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 60}); err != nil {
+		return "", ""
+	}
+
+	encoded := base64.StdEncoding.EncodeToString(buf.Bytes())
+	return encoded, "image/jpeg"
+}
+
+// SubmitDepositReceipt lets customer upload a deposit receipt for manual review.
+func (p *PaymentFlowImpl) SubmitDepositReceipt(ctx context.Context, req *dto.SubmitDepositReceiptRequest, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error) {
+	if req == nil {
+		return nil, NewBusinessError("DEPOSIT_RECEIPT_INVALID_REQUEST", "Submit deposit receipt failed", fmt.Errorf("request is nil"))
+	}
+	lang := strings.ToUpper(strings.TrimSpace(req.Lang))
+	if lang == "" {
+		lang = "EN"
+	}
+	if lang != "EN" && lang != "FA" {
+		return nil, ErrInvalidLanguage
+	}
+	// default to empty slice to satisfy NOT NULL
+	data := []byte{}
+	if req.FileSize < 0 {
+		return nil, ErrDepositReceiptFileEmpty
+	}
+	if req.FileSize > 0 {
+		if req.FileSize > 5*1024*1024 {
+			return nil, ErrDepositReceiptFileTooLarge
+		}
+		ct := strings.ToLower(strings.TrimSpace(req.ContentType))
+		allowed := map[string]bool{
+			"image/jpeg":               true,
+			"image/png":                true,
+			"application/pdf":          true,
+			"image/jpg":                true,
+			"application/octet-stream": true, // fallback when browsers mislabel
+		}
+		if !allowed[ct] {
+			return nil, ErrDepositReceiptFileInvalidType
+		}
+		var err error
+		data, err = base64.StdEncoding.DecodeString(req.FileBase64)
+		if err != nil {
+			return nil, NewBusinessError("DEPOSIT_RECEIPT_DECODE_FAILED", "Failed to decode file", err)
+		}
+		if int64(len(data)) != req.FileSize {
+			req.FileSize = int64(len(data))
+			if req.FileSize > 5*1024*1024 {
+				return nil, ErrDepositReceiptFileTooLarge
+			}
+		}
+	}
+	ct := ""
+	if req.FileSize > 0 {
+		ct = strings.ToLower(strings.TrimSpace(req.ContentType))
+	}
+
+	var receiptUUID string
+	err := repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		customer, err := getCustomer(txCtx, p.customerRepo, req.CustomerID)
+		if err != nil {
+			return err
+		}
+		invoiceNumber := fmt.Sprintf("PRF-%s", uuid.New().String())
+		rec := &models.DepositReceipt{
+			CustomerID:    customer.ID,
+			Amount:        req.Amount,
+			Currency:      utils.TomanCurrency,
+			Status:        models.DepositReceiptStatusPending,
+			FileName:      req.FileName,
+			ContentType:   ct,
+			FileSize:      req.FileSize,
+			FileData:      data,
+			Lang:          lang,
+			InvoiceNumber: invoiceNumber,
+			StatusReason:  "Submitted by customer",
+		}
+		if err := p.depositReceiptRepo.Save(txCtx, rec); err != nil {
+			return err
+		}
+		receiptUUID = rec.UUID.String()
+
+		desc := fmt.Sprintf("Deposit receipt submitted amount %d by customer %d", req.Amount, req.CustomerID)
+		_ = createAuditLog(txCtx, p.auditRepo, &customer, models.AuditActionDepositReceiptSubmitted, desc, true, nil, metadata)
+		return nil
+	})
+	if err != nil {
+		return nil, NewBusinessError("DEPOSIT_RECEIPT_SUBMIT_FAILED", "Failed to submit deposit receipt", err)
+	}
+
+	return &dto.SubmitDepositReceiptResponse{
+		Success:     true,
+		Message:     "Deposit receipt submitted for review",
+		ReceiptUUID: receiptUUID,
+		Status:      string(models.DepositReceiptStatusPending),
+	}, nil
+}
+
+// ListDepositReceipts lists receipts for a customer.
+func (p *PaymentFlowImpl) ListDepositReceipts(ctx context.Context, customerID uint, lang string) (*dto.ListDepositReceiptsResponse, error) {
+	lang = strings.ToUpper(strings.TrimSpace(lang))
+	if lang != "" && lang != "EN" && lang != "FA" {
+		return nil, ErrInvalidLanguage
+	}
+	f := models.DepositReceiptFilter{CustomerID: &customerID}
+	if lang != "" {
+		f.Lang = &lang
+	}
+	items, err := p.depositReceiptRepo.List(ctx, f, 50, 0, "id DESC")
+	if err != nil {
+		return nil, NewBusinessError("DEPOSIT_RECEIPT_LIST_FAILED", "Failed to list deposit receipts", err)
+	}
+	resp := &dto.ListDepositReceiptsResponse{Items: make([]dto.DepositReceiptItem, 0, len(items))}
+	for _, r := range items {
+		preview, previewType := buildReceiptPreview(r.FileData, r.ContentType)
+		resp.Items = append(resp.Items, dto.DepositReceiptItem{
+			UUID:          r.UUID.String(),
+			CustomerID:    r.CustomerID,
+			Amount:        r.Amount,
+			Currency:      r.Currency,
+			Status:        string(r.Status),
+			StatusReason:  r.StatusReason,
+			RejectionNote: r.RejectionNote,
+			Lang:          r.Lang,
+			FileName:      r.FileName,
+			ContentType:   r.ContentType,
+			FileSize:      r.FileSize,
+			PreviewBase64: preview,
+			PreviewType:   previewType,
+			CreatedAt:     r.CreatedAt,
+		})
+	}
+	return resp, nil
+}
+
+// PreviewProformaInvoice builds data for a proforma invoice JSON preview.
+func (p *PaymentFlowImpl) PreviewProformaInvoice(ctx context.Context, customerID uint, receiptUUID string, lang string) (*dto.ProformaPreviewResponse, error) {
+	lang = strings.ToUpper(strings.TrimSpace(lang))
+	if lang == "" {
+		lang = "EN"
+	}
+	if lang != "EN" && lang != "FA" {
+		return nil, ErrInvalidLanguage
+	}
+	receipt, err := p.depositReceiptRepo.ByUUID(ctx, receiptUUID)
+	if err != nil {
+		return nil, err
+	}
+	if receipt == nil || receipt.CustomerID != customerID {
+		return nil, ErrDepositReceiptNotFound
+	}
+	amountWithTax := receipt.Amount
+	customer, err := getCustomer(ctx, p.customerRepo, customerID)
+	if err != nil {
+		return nil, err
+	}
+	now := utils.UTCNow()
+	invoiceNumber := receipt.InvoiceNumber
+	real := uint64(float64(amountWithTax) * 10 / 11)
+	tax := amountWithTax - real
+	serviceDesc := "Jazebeh wallet top-up"
+	notes := "This is a proforma invoice. Final invoice will be issued after payment confirmation."
+	sellerName := "Jazebeh Platform"
+	if lang == "FA" {
+		serviceDesc = "شارژ کیف پول جاذبه"
+		notes = "این پیش‌فاکتور است؛ فاکتور نهایی پس از پرداخت و تأیید صادر می‌شود."
+		sellerName = "پلتفرم جاذبه"
+	}
+	buyerName := strings.TrimSpace(customer.RepresentativeFirstName + " " + customer.RepresentativeLastName)
+	if buyerName == "" && customer.CompanyName != nil {
+		buyerName = *customer.CompanyName
+	}
+	data := map[string]any{
+		"invoice_number":  invoiceNumber,
+		"date":            now.Format("2006-01-02"),
+		"amount_with_tax": amountWithTax,
+		"amount":          real,
+		"tax":             tax,
+		"service": map[string]any{
+			"description": serviceDesc,
+		},
+		"buyer": map[string]any{
+			"customer_uuid": customer.UUID.String(),
+			"name":          buyerName,
+			"company_name":  customer.CompanyName,
+			"mobile":        customer.RepresentativeMobile,
+			"company_phone": customer.CompanyPhone,
+			"address":       customer.CompanyAddress,
+			"national_id":   customer.NationalID,
+			"postal_code":   customer.PostalCode,
+			"email":         customer.Email,
+		},
+		"seller": map[string]any{
+			"name":           sellerName,
+			"economic_code":  "N/A",
+			"national_id":    "N/A",
+			"sheba":          "N/A",
+			"bank_name":      "N/A",
+			"account_number": "N/A",
+			"card_number":    "N/A",
+			"iban":           "N/A",
+		},
+		"notes": notes,
+		"lang":  lang,
+	}
+	return &dto.ProformaPreviewResponse{Success: true, Data: data}, nil
+}
+
+// DownloadDepositReceiptFile returns raw receipt file bytes with metadata.
+func (p *PaymentFlowImpl) DownloadDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) ([]byte, string, string, error) {
+	rec, err := p.depositReceiptRepo.ByUUID(ctx, receiptUUID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if rec == nil || rec.CustomerID != customerID {
+		return nil, "", "", ErrDepositReceiptNotFound
+	}
+	if len(rec.FileData) == 0 {
+		return nil, "", "", ErrDepositReceiptFileEmpty
+	}
+	return rec.FileData, rec.FileName, rec.ContentType, nil
+}
+
+// UpdateDepositReceiptFile replaces the file if receipt is still pending.
+func (p *PaymentFlowImpl) UpdateDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string, req *dto.UpdateDepositReceiptFileRequest) error {
+	if req == nil {
+		return NewBusinessError("DEPOSIT_RECEIPT_INVALID_REQUEST", "Invalid request", fmt.Errorf("nil request"))
+	}
+	if req.FileSize <= 0 || req.FileSize > 5*1024*1024 {
+		return ErrDepositReceiptFileTooLarge
+	}
+	ct := strings.ToLower(strings.TrimSpace(req.ContentType))
+	allowed := map[string]bool{
+		"image/jpeg":               true,
+		"image/png":                true,
+		"application/pdf":          true,
+		"image/jpg":                true,
+		"application/octet-stream": true,
+	}
+	if !allowed[ct] {
+		return ErrDepositReceiptFileInvalidType
+	}
+	data, err := base64.StdEncoding.DecodeString(req.FileBase64)
+	if err != nil {
+		return NewBusinessError("DEPOSIT_RECEIPT_DECODE_FAILED", "Failed to decode file", err)
+	}
+	if int64(len(data)) != req.FileSize {
+		req.FileSize = int64(len(data))
+		if req.FileSize > 5*1024*1024 {
+			return ErrDepositReceiptFileTooLarge
+		}
+	}
+
+	return repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		rec, err := p.depositReceiptRepo.ByUUID(txCtx, receiptUUID)
+		if err != nil {
+			return err
+		}
+		if rec == nil || rec.CustomerID != customerID {
+			return ErrDepositReceiptNotFound
+		}
+		if rec.Status != models.DepositReceiptStatusPending {
+			return ErrDepositReceiptAlreadyFinalized
+		}
+		rec.FileName = req.FileName
+		rec.ContentType = ct
+		rec.FileSize = req.FileSize
+		rec.FileData = data
+		rec.StatusReason = "file updated"
+		rec.UpdatedAt = utils.UTCNow()
+		return p.depositReceiptRepo.Update(txCtx, rec)
+	})
+}
+
+// DeleteDepositReceiptFile removes stored file bytes (metadata-only receipt kept) if pending.
+func (p *PaymentFlowImpl) DeleteDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) error {
+	return repository.WithTransaction(ctx, p.db, func(txCtx context.Context) error {
+		rec, err := p.depositReceiptRepo.ByUUID(txCtx, receiptUUID)
+		if err != nil {
+			return err
+		}
+		if rec == nil || rec.CustomerID != customerID {
+			return ErrDepositReceiptNotFound
+		}
+		if rec.Status != models.DepositReceiptStatusPending {
+			return ErrDepositReceiptAlreadyFinalized
+		}
+		rec.FileData = []byte{}
+		rec.FileSize = 0
+		rec.ContentType = ""
+		rec.FileName = ""
+		rec.StatusReason = "file removed"
+		rec.UpdatedAt = utils.UTCNow()
+		return p.depositReceiptRepo.Update(txCtx, rec)
+	})
 }
