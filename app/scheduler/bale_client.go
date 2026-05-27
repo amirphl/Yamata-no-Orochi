@@ -1481,20 +1481,7 @@ func errString(err error) string {
 }
 
 func baleRetryBackoffDelay(attempt int) time.Duration {
-	if attempt < 0 {
-		attempt = 0
-	}
-	backoff := baleRetryBaseDelay
-	for i := 0; i < attempt; i++ {
-		if backoff >= baleRetryMaxDelay {
-			return baleRetryMaxDelay
-		}
-		backoff *= 2
-		if backoff >= baleRetryMaxDelay {
-			return baleRetryMaxDelay
-		}
-	}
-	return backoff
+	return retryBackoffDelay(attempt, baleRetryBaseDelay, baleRetryMaxDelay)
 }
 
 func isBaleRetryable(err error, resp *BaleSendMessageResponse) bool {
