@@ -223,7 +223,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if scheduleTime != nil && !scheduleTime.IsZero() {
 		if scheduleTime.Before(utils.UTCNow().Add(10 * time.Minute)) {
-			return nil, NewBusinessError("INVALID_SCHEDULE_TIME", "Schedule time must be at least 10 minutes in the future", ErrScheduleTimeTooSoon)
+			// TODO:
+			// return nil, NewBusinessError("INVALID_SCHEDULE_TIME", "Schedule time must be at least 10 minutes in the future", ErrScheduleTimeTooSoon)
 		}
 	}
 
@@ -1623,6 +1624,21 @@ func (s *CampaignFlowImpl) ensureUpdateCampaignRefs(
 		if platform != models.CampaignPlatformSMS && (platformSettingsID == nil || *platformSettingsID == 0) {
 			return ErrCampaignPlatformSettingRequired
 		}
+
+		if platform != models.CampaignPlatformSMS && platformSettingsID != nil && *platformSettingsID != 0 {
+			settingsRows, err := s.platformSettingsRepo.ByFilter(ctx, models.PlatformSettingsFilter{
+				ID:         platformSettingsID,
+				CustomerID: &customerID,
+				Platform:   &platform,
+				Status:     utils.ToPtr(models.PlatformSettingsStatusActive),
+			}, "", 1, 0)
+			if err != nil {
+				return err
+			}
+			if len(settingsRows) == 0 {
+				return ErrCampaignPlatformSettingNotFound
+			}
+		}
 	}
 
 	if lineNumber != nil {
@@ -1649,22 +1665,6 @@ func (s *CampaignFlowImpl) ensureUpdateCampaignRefs(
 		}
 		if len(mediaRows) == 0 {
 			return ErrCampaignMediaNotFound
-		}
-	}
-
-	if platformSettingsID != nil && *platformSettingsID != 0 {
-		platformFilter := platform
-		settingsRows, err := s.platformSettingsRepo.ByFilter(ctx, models.PlatformSettingsFilter{
-			ID:         platformSettingsID,
-			CustomerID: &customerID,
-			Platform:   &platformFilter,
-			Status:     utils.ToPtr(models.PlatformSettingsStatusActive),
-		}, "", 1, 0)
-		if err != nil {
-			return err
-		}
-		if len(settingsRows) == 0 {
-			return ErrCampaignPlatformSettingNotFound
 		}
 	}
 
