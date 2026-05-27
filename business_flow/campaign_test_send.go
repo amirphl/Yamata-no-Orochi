@@ -73,10 +73,12 @@ func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto
 		return nil, NewBusinessErrorf("CAMPAIGN_TEST_SEND_RATE_LIMITED", "Please wait %d seconds before sending another test message", ErrCampaignTestRateLimited, secs)
 	}
 
-	fakeCode := buildFakeShortCode()
 	fakeUID := buildFakeAudienceUID()
-	body := buildCampaignTestMessageBody(platform, campaign.Spec.Content, campaign.Spec.AdLink, campaign.Spec.ShortLinkDomain, fakeCode, fakeUID)
-	fakeResolvedLink := buildCampaignTestResolvedLink(campaign.Spec.AdLink, campaign.Spec.ShortLinkDomain, fakeCode, fakeUID)
+	fakeResolvedLink, err := s.resolveCampaignTestLink(ctx, campaign, recipient, fakeUID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_TEST_SEND_SHORT_LINK_FAILED", "failed to create campaign test short link", err)
+	}
+	body := buildCampaignTestMessageBody(platform, campaign.Spec.Content, fakeResolvedLink)
 
 	softErr, hardErr := s.sendCampaignTestMessageBestEffort(ctx, campaign, platform, recipient, body)
 	if hardErr != nil {
@@ -149,14 +151,6 @@ func (s *CampaignFlowImpl) tryAcquireCampaignTestCooldown(ctx context.Context, c
 	return false, remaining, nil
 }
 
-func buildFakeShortCode() string {
-	id := strings.ReplaceAll(uuid.NewString(), "-", "")
-	if len(id) > 6 {
-		id = id[:6]
-	}
-	return "tst" + id
-}
-
 func buildFakeAudienceUID() string {
 	id := strings.ReplaceAll(uuid.NewString(), "-", "")
 	if len(id) > 8 {
@@ -169,13 +163,13 @@ func hasCampaignAdLink(adLink *string) bool {
 	return adLink != nil && strings.TrimSpace(*adLink) != ""
 }
 
-func buildCampaignTestMessageBody(platform string, contentPtr *string, adLink *string, shortLinkDomain *string, fakeCode string, fakeUID string) string {
+func buildCampaignTestMessageBody(platform string, contentPtr *string, resolvedLink *string) string {
 	content := ""
 	if contentPtr != nil {
 		content = *contentPtr
 	}
 	replacement := ""
-	if resolvedLink := buildCampaignTestResolvedLink(adLink, shortLinkDomain, fakeCode, fakeUID); resolvedLink != nil {
+	if resolvedLink != nil {
 		replacement = *resolvedLink
 	}
 	content = strings.ReplaceAll(content, "{YOUR_LINK}", replacement)
@@ -185,16 +179,70 @@ func buildCampaignTestMessageBody(platform string, contentPtr *string, adLink *s
 	return content
 }
 
-func buildCampaignTestResolvedLink(adLink *string, shortLinkDomain *string, fakeCode string, fakeUID string) *string {
-	if !hasCampaignAdLink(adLink) {
-		return nil
+func buildCampaignShortLink(shortLinkDomain string, code string) string {
+	domain := strings.TrimSpace(shortLinkDomain)
+	domain = strings.TrimRight(domain, "/")
+	return domain + "/" + code
+}
+
+func (s *CampaignFlowImpl) resolveCampaignTestLink(
+	ctx context.Context,
+	campaign models.Campaign,
+	recipient string,
+	fakeUID string,
+) (*string, error) {
+	if !hasCampaignAdLink(campaign.Spec.AdLink) {
+		return nil, nil
 	}
-	if shortLinkDomain != nil && strings.TrimSpace(*shortLinkDomain) != "" {
-		v := strings.TrimSpace(*shortLinkDomain) + fakeCode
-		return &v
+
+	longLink := strings.ReplaceAll(*campaign.Spec.AdLink, "{uid}", fakeUID)
+	if campaign.Spec.ShortLinkDomain == nil || strings.TrimSpace(*campaign.Spec.ShortLinkDomain) == "" {
+		return &longLink, nil
 	}
-	v := strings.ReplaceAll(*adLink, "{uid}", fakeUID)
-	return &v
+
+	lockShortLinkGen()
+	defer unlockShortLinkGen()
+
+	fakeCode, err := s.allocateNextCampaignTestShortCode(ctx)
+	if err != nil {
+		return nil, err
+	}
+	normalizedRecipient, err := normalizeOTPMobile(recipient)
+	if err != nil {
+		return nil, err
+	}
+	shortLink := buildCampaignShortLink(*campaign.Spec.ShortLinkDomain, fakeCode)
+	shortLinkRow := &models.ShortLink{
+		UID:         fakeCode,
+		CampaignID:  &campaign.ID,
+		PhoneNumber: utils.ToPtr(normalizedRecipient),
+		LongLink:    longLink,
+		ShortLink:   shortLink,
+	}
+	if err := s.shortLinkRepo.Save(ctx, shortLinkRow); err != nil {
+		return nil, err
+	}
+
+	return &shortLink, nil
+}
+
+func (s *CampaignFlowImpl) allocateNextCampaignTestShortCode(ctx context.Context) (string, error) {
+	cutoff := time.Date(2025, 11, 10, 15, 45, 11, 401492000, time.UTC)
+	lastUID, err := s.shortLinkRepo.GetMaxUIDSince(ctx, cutoff)
+	if err != nil {
+		return "", err
+	}
+
+	var seq uint64
+	if lastUID != "" {
+		seq, err = decodeBase36Compat(lastUID)
+		if err != nil {
+			return "", err
+		}
+		seq++
+	}
+
+	return formatSequentialUIDCompat(seq)
 }
 
 func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
