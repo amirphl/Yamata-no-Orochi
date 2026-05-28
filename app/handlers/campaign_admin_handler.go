@@ -72,17 +72,34 @@ func (h *CampaignAdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, mess
 // @Param status query string false "Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected|expired)"
 // @Param start_date query string false "Filter created_at >= start_date (RFC3339)"
 // @Param end_date query string false "Filter created_at <= end_date (RFC3339)"
-// @Success 200 {object} dto.APIResponse{data=[]dto.GetCampaignResponse}
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Page size" default(10) maximum(100)
+// @Success 200 {object} dto.APIResponse{data=dto.AdminListCampaignsResponse}
 // @Failure 400 {object} dto.APIResponse "Validation error"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/admin/campaigns [get]
 func (h *CampaignAdminHandler) ListCampaigns(c fiber.Ctx) error {
+	pageStr := c.Query("page", "1")
+	limitStr := c.Query("limit", "10")
 	title := c.Query("title")
 	status := c.Query("status")
 	startStr := c.Query("start_date")
 	endStr := c.Query("end_date")
 
-	var filter dto.AdminListCampaignsFilter
+	page, err := strconv.Atoi(pageStr)
+	if err != nil || page <= 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page format", "INVALID_PAGE", nil)
+	}
+
+	limit, err := strconv.Atoi(limitStr)
+	if err != nil || limit <= 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid limit format", "INVALID_LIMIT", nil)
+	}
+
+	filter := dto.AdminListCampaignsFilter{
+		Page:  page,
+		Limit: limit,
+	}
 	if title != "" {
 		filter.Title = &title
 	}
@@ -104,7 +121,13 @@ func (h *CampaignAdminHandler) ListCampaigns(c fiber.Ctx) error {
 		}
 	}
 
-	resp, err := h.campaignFlow.ListCampaigns(h.createRequestContext(c, "/api/v1/admin/campaigns"), filter)
+	if err := h.validator.Struct(filter); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
+	}
+
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns", 30*time.Second)
+	defer cancel()
+	resp, err := h.campaignFlow.ListCampaigns(ctx, filter)
 	if err != nil {
 		if businessflow.IsStartDateAfterEndDate(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "End date must be after start date", "INVALID_DATE_RANGE", nil)
@@ -113,7 +136,11 @@ func (h *CampaignAdminHandler) ListCampaigns(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to list campaigns", "ADMIN_LIST_CAMPAIGNS_FAILED", nil)
 	}
 
-	return h.SuccessResponse(c, fiber.StatusOK, "Campaigns retrieved successfully", resp)
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaigns retrieved successfully", fiber.Map{
+		"message":    resp.Message,
+		"items":      resp.Items,
+		"pagination": resp.Pagination,
+	})
 }
 
 // GetCampaign returns a single campaign by ID
@@ -131,7 +158,9 @@ func (h *CampaignAdminHandler) GetCampaign(c fiber.Ctx) error {
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign ID", "INVALID_CAMPAIGN_ID", nil)
 	}
-	resp, err := h.campaignFlow.GetCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/"+id), uint(idUint))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/"+id, 30*time.Second)
+	defer cancel()
+	resp, err := h.campaignFlow.GetCampaign(ctx, uint(idUint))
 	if err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
@@ -164,7 +193,9 @@ func (h *CampaignAdminHandler) ApproveCampaign(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
 	}
 
-	res, err := h.campaignFlow.ApproveCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/approve"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/approve", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.ApproveCampaign(ctx, &req)
 	if err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
@@ -227,7 +258,9 @@ func (h *CampaignAdminHandler) RejectCampaign(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
 	}
 
-	res, err := h.campaignFlow.RejectCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/reject"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/reject", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.RejectCampaign(ctx, &req)
 	if err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
@@ -267,7 +300,7 @@ func (h *CampaignAdminHandler) RejectCampaign(c fiber.Ctx) error {
 
 // RescheduleCampaign updates the scheduled time for a campaign (admin-only).
 // @Summary Reschedule Campaign
-// @Description Admin reschedules an eligible campaign; schedule_at must be UTC and its Tehran-local time must be between 08:00 and 21:00.
+// @Description Admin reschedules an eligible campaign; schedule_at must be UTC and its Tehran-local time must be between 08:00 and 21:00. A waiting-for-approval campaign whose deadline was missed may still be rescheduled.
 // @Tags Admin Campaigns
 // @Accept json
 // @Produce json
@@ -287,7 +320,9 @@ func (h *CampaignAdminHandler) RescheduleCampaign(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
 	}
 
-	res, err := h.campaignFlow.RescheduleCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/reschedule"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/reschedule", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.RescheduleCampaign(ctx, &req)
 	if err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
@@ -321,9 +356,9 @@ func (h *CampaignAdminHandler) RescheduleCampaign(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign rescheduled successfully", res)
 }
 
-// CancelCampaign cancels an approved campaign and refunds consumed budget.
+// CancelCampaign cancels an approved campaign or a waiting-for-approval campaign that missed its deadline.
 // @Summary Cancel Campaign
-// @Description Cancel an approved campaign by admin and refund consumed budget to customer
+// @Description Cancel an approved campaign by admin and refund consumed budget to customer. Approved campaigns still require at least 2 minutes before schedule_at; a waiting-for-approval campaign that already missed schedule_at may also be cancelled.
 // @Tags Admin Campaigns
 // @Accept json
 // @Produce json
@@ -343,13 +378,18 @@ func (h *CampaignAdminHandler) CancelCampaign(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
 	}
 
-	res, err := h.campaignFlow.CancelCampaign(h.createRequestContext(c, "/api/v1/admin/campaigns/cancel"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/cancel", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.CancelCampaign(ctx, &req)
 	if err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
 		}
 		if businessflow.IsCampaignNotApproved(err) {
 			return h.ErrorResponse(c, fiber.StatusConflict, "Invalid campaign state for cancel", "INVALID_STATE", nil)
+		}
+		if businessflow.IsScheduleTimeTooCloseToCancel(err) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "Current schedule is too close; cancel must happen at least 2 minutes before scheduled time", "SCHEDULE_TIME_TOO_CLOSE_TO_CANCEL", nil)
 		}
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -395,7 +435,9 @@ func (h *CampaignAdminHandler) RemoveAudienceSpec(c fiber.Ctx) error {
 		platform = &platformRaw
 	}
 
-	res, err := h.campaignFlow.RemoveAudienceSpec(h.createRequestContext(c, "/api/v1/admin/campaigns/audience-spec"), platform)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/audience-spec", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.RemoveAudienceSpec(ctx, platform)
 	if err != nil {
 		if businessflow.IsAudienceSpecPlatformInvalid(err) || businessflow.IsAudienceSpecPlatformRequired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
@@ -436,7 +478,9 @@ func (h *CampaignAdminHandler) UpdatePagePrice(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
 	}
 
-	res, err := h.campaignFlow.UpdatePagePrice(h.createRequestContext(c, "/api/v1/admin/campaigns/page-prices"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/page-prices", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.UpdatePagePrice(ctx, &req)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -460,7 +504,9 @@ func (h *CampaignAdminHandler) UpdatePagePrice(c fiber.Ctx) error {
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/admin/campaigns/page-prices [get]
 func (h *CampaignAdminHandler) GetPagePrices(c fiber.Ctx) error {
-	res, err := h.campaignFlow.GetPagePrices(h.createRequestContext(c, "/api/v1/admin/campaigns/page-prices"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/page-prices", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.GetPagePrices(ctx)
 	if err != nil {
 		log.Println("Admin get page prices failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get page prices", "PAGE_PRICE_LIST_FAILED", nil)
@@ -468,13 +514,8 @@ func (h *CampaignAdminHandler) GetPagePrices(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Page prices retrieved successfully", res)
 }
 
-// createRequestContext creates a context with request-scoped values for observability and timeout
-func (h *CampaignAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
 // createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
-func (h *CampaignAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *CampaignAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	// Create context with custom timeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
@@ -489,7 +530,7 @@ func (h *CampaignAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endp
 		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
 	}
 
-	return ctx
+	return ctx, cancel
 }
 
 // setupCustomValidations sets up custom validation rules
