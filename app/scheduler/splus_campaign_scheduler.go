@@ -735,9 +735,10 @@ func (s *SplusCampaignScheduler) buildSplusMessageBody(c dto.BotGetCampaignRespo
 			}
 			shortened := domain + code
 			return strings.ReplaceAll(content, "{YOUR_LINK}", shortened)
+		} else {
+			injected := strings.ReplaceAll(*c.AdLink, "{uid}", uid)
+			return strings.ReplaceAll(content, "{YOUR_LINK}", injected)
 		}
-		injected := strings.ReplaceAll(*c.AdLink, "{uid}", uid)
-		return strings.ReplaceAll(content, "{YOUR_LINK}", injected)
 	}
 	return strings.ReplaceAll(content, "{YOUR_LINK}", "")
 }
