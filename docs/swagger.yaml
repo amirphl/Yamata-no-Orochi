@@ -15,6 +15,31 @@ definitions:
       price_factor:
         type: number
     type: object
+  dto.AdminAddPlatformSettingsMetadataRequest:
+    properties:
+      id:
+        type: integer
+      key:
+        maxLength: 100
+        minLength: 1
+        type: string
+      value:
+        type: string
+    required:
+    - id
+    - key
+    - value
+    type: object
+  dto.AdminAddPlatformSettingsMetadataResponse:
+    properties:
+      id:
+        type: integer
+      message:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+    type: object
   dto.AdminApproveCampaignRequest:
     properties:
       campaign_id:
@@ -26,6 +51,22 @@ definitions:
     - campaign_id
     type: object
   dto.AdminApproveCampaignResponse:
+    properties:
+      message:
+        type: string
+    type: object
+  dto.AdminCancelCampaignRequest:
+    properties:
+      campaign_id:
+        type: integer
+      comment:
+        maxLength: 1000
+        type: string
+    required:
+    - campaign_id
+    - comment
+    type: object
+  dto.AdminCancelCampaignResponse:
     properties:
       message:
         type: string
@@ -58,6 +99,65 @@ definitions:
     - password
     - user_angle
     - username
+    type: object
+  dto.AdminChangePlatformSettingsStatusRequest:
+    properties:
+      id:
+        type: integer
+      status:
+        enum:
+        - in-progress
+        - active
+        - inactive
+        type: string
+    required:
+    - id
+    - status
+    type: object
+  dto.AdminChangePlatformSettingsStatusResponse:
+    properties:
+      id:
+        type: integer
+      message:
+        type: string
+      status:
+        type: string
+    type: object
+  dto.AdminChargeWalletRequest:
+    properties:
+      amount_with_tax:
+        maximum: 1000000000
+        minimum: 1000
+        type: integer
+      customer_id:
+        minimum: 1
+        type: integer
+      idempotency_key:
+        maxLength: 128
+        minLength: 8
+        type: string
+    required:
+    - amount_with_tax
+    - customer_id
+    type: object
+  dto.AdminChargeWalletResponse:
+    properties:
+      admin_id:
+        type: integer
+      amount_with_tax:
+        type: integer
+      customer_id:
+        type: integer
+      invoice_number:
+        type: string
+      message:
+        type: string
+      payment_request_id:
+        type: integer
+      reference_number:
+        type: string
+      success:
+        type: boolean
     type: object
   dto.AdminCreateLineNumberRequest:
     properties:
@@ -108,10 +208,18 @@ definitions:
     properties:
       level3:
         type: string
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
       price_factor:
         type: number
     required:
     - level3
+    - platform
     - price_factor
     type: object
   dto.AdminCreateSegmentPriceFactorResponse:
@@ -140,6 +248,14 @@ definitions:
         type: number
       created_at:
         type: string
+      level3s:
+        items:
+          type: string
+        type: array
+      line_number:
+        type: string
+      num_audience:
+        type: integer
       schedule_at:
         type: string
       status:
@@ -361,6 +477,12 @@ definitions:
         type: string
       line_number_price_factor:
         type: number
+      media_uuid:
+        type: string
+      platform:
+        type: string
+      platform_settings_id:
+        type: integer
       scheduleat:
         type: string
       segment_price_factor:
@@ -425,11 +547,31 @@ definitions:
       total_sent:
         type: integer
     type: object
+  dto.AdminListCustomersResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminCustomerDetailDTO'
+        type: array
+      message:
+        type: string
+      total:
+        type: integer
+    type: object
   dto.AdminListLevel3OptionsResponse:
     properties:
       items:
         items:
           type: string
+        type: array
+      message:
+        type: string
+    type: object
+  dto.AdminListPlatformSettingsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminPlatformSettingsItem'
         type: array
       message:
         type: string
@@ -452,6 +594,32 @@ definitions:
       message:
         type: string
     type: object
+  dto.AdminPlatformSettingsItem:
+    properties:
+      created_at:
+        type: string
+      customer_id:
+        type: integer
+      description:
+        type: string
+      id:
+        type: integer
+      metadata:
+        additionalProperties: {}
+        type: object
+      multimedia_uuid:
+        type: string
+      name:
+        type: string
+      platform:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      uuid:
+        type: string
+    type: object
   dto.AdminRejectCampaignRequest:
     properties:
       campaign_id:
@@ -468,11 +636,35 @@ definitions:
       message:
         type: string
     type: object
+  dto.AdminRemoveAudienceSpecResponse:
+    properties:
+      message:
+        type: string
+      platform:
+        type: string
+    type: object
+  dto.AdminRescheduleCampaignRequest:
+    properties:
+      campaign_id:
+        type: integer
+      schedule_at:
+        type: string
+    required:
+    - campaign_id
+    - schedule_at
+    type: object
+  dto.AdminRescheduleCampaignResponse:
+    properties:
+      message:
+        type: string
+    type: object
   dto.AdminSegmentPriceFactorItem:
     properties:
       created_at:
         type: string
       level3:
+        type: string
+      platform:
         type: string
       price_factor:
         type: number
@@ -493,6 +685,23 @@ definitions:
         type: boolean
       message:
         type: string
+    type: object
+  dto.AdminUpdateDepositReceiptStatusRequest:
+    properties:
+      action:
+        enum:
+        - approve
+        - reject
+        type: string
+      reason:
+        maxLength: 500
+        minLength: 3
+        type: string
+      receipt_uuid:
+        type: string
+    required:
+    - action
+    - receipt_uuid
     type: object
   dto.AdminUpdateLineNumberItem:
     properties:
@@ -667,6 +876,24 @@ definitions:
         example: "+989123456789"
         type: string
     type: object
+  dto.BotCampaignPlatformSettingsSpec:
+    properties:
+      description:
+        type: string
+      id:
+        type: integer
+      metadata:
+        additionalProperties: {}
+        type: object
+      multimedia_id:
+        type: integer
+      name:
+        type: string
+      platform:
+        type: string
+      status:
+        type: string
+    type: object
   dto.BotCreateShortLinkRequest:
     properties:
       campaign_id:
@@ -791,7 +1018,15 @@ definitions:
         type: array
       line_number:
         type: string
+      media_uuid:
+        type: string
       num_audiences:
+        type: integer
+      platform:
+        type: string
+      platform_settings:
+        $ref: '#/definitions/dto.BotCampaignPlatformSettingsSpec'
+      platform_settings_id:
         type: integer
       scheduleat:
         type: string
@@ -851,10 +1086,18 @@ definitions:
       level3:
         maxLength: 255
         type: string
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
     required:
     - level1
     - level2
     - level3
+    - platform
     type: object
   dto.BotResetAudienceSpecResponse:
     properties:
@@ -891,6 +1134,13 @@ definitions:
       metadata:
         additionalProperties: {}
         type: object
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
       tags:
         items:
           type: string
@@ -901,6 +1151,7 @@ definitions:
     - level1
     - level2
     - level3
+    - platform
     - tags
     type: object
   dto.BotUpdateAudienceSpecResponse:
@@ -959,6 +1210,18 @@ definitions:
       line_number:
         maxLength: 255
         type: string
+      media_uuid:
+        type: string
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      platform_settings_id:
+        minimum: 1
+        type: integer
       scheduleat:
         type: string
       sex:
@@ -1021,6 +1284,18 @@ definitions:
       line_number:
         maxLength: 255
         type: string
+      media_uuid:
+        type: string
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      platform_settings_id:
+        minimum: 1
+        type: integer
       scheduleat:
         type: string
       sex:
@@ -1048,6 +1323,74 @@ definitions:
       total_cost:
         type: integer
     type: object
+  dto.CalculateCampaignCostV2Request:
+    properties:
+      adlink:
+        maxLength: 10000
+        type: string
+      city:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      content:
+        maxLength: 512
+        minLength: 1
+        type: string
+      job:
+        maxLength: 255
+        type: string
+      job_category:
+        maxLength: 255
+        type: string
+      level1:
+        maxLength: 255
+        type: string
+      level2s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      level3s:
+        items:
+          type: string
+        maxItems: 255
+        type: array
+      line_number:
+        maxLength: 255
+        type: string
+      media_uuid:
+        type: string
+      num_messages:
+        type: integer
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      platform_settings_id:
+        minimum: 1
+        type: integer
+      scheduleat:
+        type: string
+      sex:
+        maxLength: 255
+        type: string
+      short_link_domain:
+        maxLength: 255
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        maxLength: 255
+        type: string
+    required:
+    - num_messages
+    type: object
   dto.CancelCampaignRequest:
     properties:
       campaign_id:
@@ -1070,6 +1413,11 @@ definitions:
         maximum: 1000000000
         minimum: 1000
         type: integer
+      lang:
+        enum:
+        - FA
+        - EN
+        type: string
     required:
     - amount
     type: object
@@ -1080,6 +1428,19 @@ definitions:
       success:
         type: boolean
       token:
+        type: string
+    type: object
+  dto.CloneCampaignResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      status:
+        type: string
+      uuid:
         type: string
     type: object
   dto.CreateAgencyDiscountRequest:
@@ -1145,7 +1506,19 @@ definitions:
       line_number:
         maxLength: 255
         type: string
-      schedule_at:
+      media_uuid:
+        type: string
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      platform_settings_id:
+        minimum: 1
+        type: integer
+      scheduleat:
         type: string
       sex:
         maxLength: 255
@@ -1214,6 +1587,51 @@ definitions:
       rate_source:
         type: string
       request_uuid:
+        type: string
+    type: object
+  dto.CreatePlatformSettingsRequest:
+    properties:
+      description:
+        type: string
+      multimedia_uuid:
+        type: string
+      name:
+        maxLength: 255
+        type: string
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      status:
+        enum:
+        - initialized
+        - in-progress
+        - active
+        - inactive
+        type: string
+    required:
+    - platform
+    type: object
+  dto.CreatePlatformSettingsResponse:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+      multimedia_uuid:
+        type: string
+      name:
+        type: string
+      platform:
+        type: string
+      status:
         type: string
     type: object
   dto.CreateResponseTicketRequest:
@@ -1291,6 +1709,37 @@ definitions:
       tx_hash:
         type: string
     type: object
+  dto.DepositReceiptItem:
+    properties:
+      amount:
+        type: integer
+      content_type:
+        type: string
+      created_at:
+        type: string
+      currency:
+        type: string
+      customer_id:
+        type: integer
+      file_name:
+        type: string
+      file_size:
+        type: integer
+      lang:
+        type: string
+      preview_base64:
+        type: string
+      preview_type:
+        type: string
+      rejection_note:
+        type: string
+      status:
+        type: string
+      status_reason:
+        type: string
+      uuid:
+        type: string
+    type: object
   dto.ForgotPasswordRequest:
     properties:
       identifier:
@@ -1339,7 +1788,13 @@ definitions:
         type: string
       line_price_factor:
         type: number
+      media_uuid:
+        type: string
       num_audience:
+        type: integer
+      platform:
+        type: string
+      platform_settings_id:
         type: integer
       scheduleat:
         type: string
@@ -1390,6 +1845,13 @@ definitions:
       status:
         type: string
       status_reason:
+        type: string
+    type: object
+  dto.GetLastInitiatedCampaignResponse:
+    properties:
+      item:
+        $ref: '#/definitions/dto.GetCampaignResponse'
+      message:
         type: string
     type: object
   dto.GetProfileResponse:
@@ -1471,6 +1933,31 @@ definitions:
       pagination:
         $ref: '#/definitions/dto.PaginationInfo'
     type: object
+  dto.ListDepositReceiptsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.DepositReceiptItem'
+        type: array
+    type: object
+  dto.ListLatestSegmentPriceFactorsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.SegmentPriceFactorItem'
+        type: array
+      message:
+        type: string
+    type: object
+  dto.ListPlatformSettingsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.PlatformSettingsItem'
+        type: array
+      message:
+        type: string
+    type: object
   dto.ListTicketsResponse:
     properties:
       groups:
@@ -1479,6 +1966,43 @@ definitions:
         type: array
       message:
         type: string
+    type: object
+  dto.LoginOTPRequest:
+    properties:
+      identifier:
+        example: user@example.com or +989123456789
+        maxLength: 255
+        minLength: 3
+        type: string
+    required:
+    - identifier
+    type: object
+  dto.LoginOTPResponse:
+    properties:
+      already_sent:
+        type: boolean
+      customer_id:
+        type: integer
+      masked_phone:
+        type: string
+      message:
+        type: string
+      otp_expiry:
+        type: string
+      otp_sent:
+        type: boolean
+    type: object
+  dto.LoginOTPVerifyRequest:
+    properties:
+      customer_id:
+        example: 1
+        type: integer
+      otp_code:
+        example: "123456"
+        type: string
+    required:
+    - customer_id
+    - otp_code
     type: object
   dto.LoginRequest:
     properties:
@@ -1555,6 +2079,25 @@ definitions:
       total_pages:
         type: integer
     type: object
+  dto.PlatformSettingsItem:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: integer
+      multimedia_uuid:
+        type: string
+      name:
+        type: string
+      platform:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
   dto.ProfileDTO:
     properties:
       account_type:
@@ -1611,6 +2154,14 @@ definitions:
       uuid:
         type: string
     type: object
+  dto.ProformaPreviewResponse:
+    properties:
+      data:
+        additionalProperties: {}
+        type: object
+      success:
+        type: boolean
+    type: object
   dto.ResetPasswordRequest:
     properties:
       confirm_password:
@@ -1632,6 +2183,17 @@ definitions:
     - customer_id
     - new_password
     - otp_code
+    type: object
+  dto.SegmentPriceFactorItem:
+    properties:
+      created_at:
+        type: string
+      level3:
+        type: string
+      platform:
+        type: string
+      price_factor:
+        type: number
     type: object
   dto.ShortLinkDTO:
     properties:
@@ -1730,6 +2292,51 @@ definitions:
       otp_target:
         description: Mobile number (masked for security)
         type: string
+    type: object
+  dto.SubmitDepositReceiptRequest:
+    properties:
+      amount:
+        maximum: 1000000000
+        minimum: 1000
+        type: integer
+      content_type:
+        maxLength: 120
+        minLength: 3
+        type: string
+      file_base64:
+        description: frontend will send; backend decodes to []byte
+        type: string
+      file_name:
+        maxLength: 255
+        minLength: 3
+        type: string
+      file_size:
+        description: cap 5MB
+        maximum: 5242880
+        minimum: 1
+        type: integer
+      lang:
+        enum:
+        - FA
+        - EN
+        type: string
+    required:
+    - amount
+    - content_type
+    - file_base64
+    - file_name
+    - file_size
+    type: object
+  dto.SubmitDepositReceiptResponse:
+    properties:
+      message:
+        type: string
+      receipt_uuid:
+        type: string
+      status:
+        type: string
+      success:
+        type: boolean
     type: object
   dto.TicketAttachment:
     properties:
@@ -1888,6 +2495,18 @@ definitions:
       line_number:
         maxLength: 255
         type: string
+      media_uuid:
+        type: string
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      platform_settings_id:
+        minimum: 1
+        type: integer
       scheduleat:
         type: string
       sex:
@@ -1908,6 +2527,45 @@ definitions:
   dto.UpdateCampaignResponse:
     properties:
       message:
+        type: string
+    type: object
+  dto.UpdateDepositReceiptFileRequest:
+    properties:
+      content_type:
+        maxLength: 120
+        minLength: 3
+        type: string
+      file_base64:
+        type: string
+      file_name:
+        maxLength: 255
+        minLength: 3
+        type: string
+      file_size:
+        maximum: 5242880
+        minimum: 1
+        type: integer
+    required:
+    - content_type
+    - file_base64
+    - file_name
+    - file_size
+    type: object
+  dto.UploadMultimediaResponse:
+    properties:
+      created_at:
+        type: string
+      media_type:
+        type: string
+      message:
+        type: string
+      mime_type:
+        type: string
+      original_filename:
+        type: string
+      size_bytes:
+        type: integer
+      uuid:
         type: string
     type: object
 info:
@@ -2110,6 +2768,82 @@ paths:
       summary: Approve Campaign
       tags:
       - Admin Campaigns
+  /api/v1/admin/campaigns/audience-spec:
+    delete:
+      description: Remove audience spec for a platform from storage and cache (default
+        platform is sms)
+      parameters:
+      - description: 'Platform (default: sms)'
+        in: query
+        name: platform
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminRemoveAudienceSpecResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Remove Audience Spec
+      tags:
+      - Admin Campaigns
+  /api/v1/admin/campaigns/cancel:
+    post:
+      consumes:
+      - application/json
+      description: Cancel an approved campaign by admin and refund consumed budget
+        to customer
+      parameters:
+      - description: Cancellation payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminCancelCampaignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminCancelCampaignResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Invalid state
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Cancel Campaign
+      tags:
+      - Admin Campaigns
   /api/v1/admin/campaigns/reject:
     post:
       consumes:
@@ -2154,6 +2888,71 @@ paths:
       summary: Reject Campaign
       tags:
       - Admin Campaigns
+  /api/v1/admin/campaigns/reschedule:
+    post:
+      consumes:
+      - application/json
+      description: Admin reschedules an eligible campaign; schedule_at should be provided
+        in Tehran time.
+      parameters:
+      - description: Reschedule payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminRescheduleCampaignRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminRescheduleCampaignResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Invalid state
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Reschedule Campaign
+      tags:
+      - Admin Campaigns
+  /api/v1/admin/customer-management:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListCustomersResponse'
+              type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin List Customers
+      tags:
+      - Admin Customer Management
   /api/v1/admin/customer-management/{customer_id}:
     get:
       parameters:
@@ -2251,12 +3050,12 @@ paths:
           description: Bad Request
           schema:
             $ref: '#/definitions/dto.APIResponse'
-        "404":
-          description: Not Found
+        "403":
+          description: Forbidden
           schema:
             $ref: '#/definitions/dto.APIResponse'
-        "409":
-          description: Conflict
+        "404":
+          description: Not Found
           schema:
             $ref: '#/definitions/dto.APIResponse'
         "500":
@@ -2424,9 +3223,377 @@ paths:
       summary: Line Numbers Report (Admin)
       tags:
       - Admin Line Numbers
+  /api/v1/admin/media/{uuid}:
+    get:
+      description: Download an image or video by uuid (admin access)
+      parameters:
+      - description: Multimedia UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Binary file
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Admin download multimedia
+      tags:
+      - Admin Multimedia
+  /api/v1/admin/media/{uuid}/preview:
+    get:
+      description: Return a thumbnail image for multimedia (video -> frame image,
+        image -> resized)
+      parameters:
+      - description: Multimedia UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - image/jpeg
+      responses:
+        "200":
+          description: Thumbnail image
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Admin preview multimedia
+      tags:
+      - Admin Multimedia
+  /api/v1/admin/payments/charge-wallet:
+    post:
+      consumes:
+      - application/json
+      description: Admin endpoint to directly charge a customer wallet (manual card-to-card/offline
+        payment settlement)
+      parameters:
+      - description: Admin wallet charge payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminChargeWalletRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Wallet charged successfully by admin
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminChargeWalletResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized admin
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Customer or wallet not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Charge Wallet By Admin
+      tags:
+      - Payments Admin
+  /api/v1/admin/payments/deposit-receipts:
+    get:
+      description: Lists deposit receipts with optional filters and previews.
+      parameters:
+      - description: Receipt status (pending|approved|rejected)
+        in: query
+        name: status
+        type: string
+      - description: Language filter (FA or EN)
+        in: query
+        name: lang
+        type: string
+      - description: Filter by customer ID
+        in: query
+        name: customer_id
+        type: integer
+      - description: Limit (default 50)
+        in: query
+        name: limit
+        type: integer
+      - description: Offset
+        in: query
+        name: offset
+        type: integer
+      - description: Order by clause (default id DESC)
+        in: query
+        name: order
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Receipts retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListDepositReceiptsResponse'
+              type: object
+        "400":
+          description: Invalid language
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin list deposit receipts
+      tags:
+      - Payments Admin
+  /api/v1/admin/payments/deposit-receipts/{uuid}/file:
+    get:
+      description: Downloads the receipt file by UUID (no ownership check).
+      parameters:
+      - description: Deposit receipt UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Receipt file
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Receipt not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin download deposit receipt file
+      tags:
+      - Payments Admin
+  /api/v1/admin/payments/deposit-receipts/status:
+    post:
+      consumes:
+      - application/json
+      description: Approve or reject a deposit receipt; on approval credits wallet
+        using receipt metadata.
+      parameters:
+      - description: Status update payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminUpdateDepositReceiptStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Status updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SubmitDepositReceiptResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Receipt not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Receipt already finalized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin update deposit receipt status
+      tags:
+      - Payments Admin
+  /api/v1/admin/platform-settings:
+    get:
+      description: List platform settings (admin)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListPlatformSettingsResponse'
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin list platform settings
+      tags:
+      - Admin Platform Settings
+  /api/v1/admin/platform-settings/metadata:
+    put:
+      consumes:
+      - application/json
+      description: Add a key/value pair into platform settings metadata (merge, does
+        not overwrite whole object)
+      parameters:
+      - description: Metadata append payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminAddPlatformSettingsMetadataRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminAddPlatformSettingsMetadataResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Platform settings not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin add platform settings metadata
+      tags:
+      - Admin Platform Settings
+  /api/v1/admin/platform-settings/status:
+    put:
+      consumes:
+      - application/json
+      description: Move status to in-progress, active, or inactive (initialized is
+        forbidden)
+      parameters:
+      - description: Status change payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminChangePlatformSettingsStatusRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminChangePlatformSettingsStatusResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Platform settings not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin change platform settings status
+      tags:
+      - Admin Platform Settings
   /api/v1/admin/segment-price-factors:
     get:
       description: List the latest price factor per level3
+      parameters:
+      - description: Platform (sms|rubika|bale|splus), default sms
+        in: query
+        name: platform
+        type: string
       produces:
       - application/json
       responses:
@@ -2874,6 +4041,103 @@ paths:
       summary: User Login
       tags:
       - Authentication
+  /api/v1/auth/login/otp:
+    post:
+      consumes:
+      - application/json
+      description: Generate and send a one-time password for login via SMS
+      parameters:
+      - description: Login OTP request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginOTPRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OTP sent
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.LoginOTPResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "503":
+          description: Cache not available
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Request Login OTP
+      tags:
+      - Authentication
+  /api/v1/auth/login/otp/verify:
+    post:
+      consumes:
+      - application/json
+      description: Verify a one-time password for login and issue tokens
+      parameters:
+      - description: Login OTP verification request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.LoginOTPVerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Login successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  properties:
+                    access_token:
+                      type: string
+                    customer:
+                      $ref: '#/definitions/dto.AuthCustomerDTO'
+                    expires_in:
+                      type: integer
+                    refresh_token:
+                      type: string
+                    token_type:
+                      type: string
+                  type: object
+              type: object
+        "400":
+          description: Invalid OTP or request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: User not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "503":
+          description: Cache not available
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Verify Login OTP
+      tags:
+      - Authentication
   /api/v1/auth/resend-otp:
     post:
       consumes:
@@ -2974,7 +4238,9 @@ paths:
     post:
       consumes:
       - application/json
-      description: Register a new user account with email verification
+      description: Register a new user account with mobile verification. National
+        ID is required for individual, independent_company, and marketing_agency account
+        types.
       parameters:
       - description: User registration data
         in: body
@@ -3226,6 +4492,11 @@ paths:
       - Bot Campaigns
   /api/v1/bot/campaigns/ready:
     get:
+      parameters:
+      - description: Filter by platform (sms|rubika|bale|splus)
+        in: query
+        name: platform
+        type: string
       produces:
       - application/json
       responses:
@@ -3241,6 +4512,43 @@ paths:
       summary: Bot List Ready Campaigns
       tags:
       - Bot Campaigns
+  /api/v1/bot/media/{uuid}:
+    get:
+      description: Download an image or video by uuid (bot access)
+      parameters:
+      - description: Multimedia UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Binary file
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Bot download multimedia
+      tags:
+      - Bot Multimedia
   /api/v1/bot/short-links:
     post:
       consumes:
@@ -3369,7 +4677,7 @@ paths:
         in: query
         name: title
         type: string
-      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed)
+      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|cancelled|cancelled-by-admin)
         in: query
         name: status
         type: string
@@ -3540,8 +4848,57 @@ paths:
       summary: Update Campaign
       tags:
       - Campaigns
+  /api/v1/campaigns/{uuid}/clone:
+    post:
+      description: Clone an existing campaign belonging to the current customer.
+      parameters:
+      - description: Campaign UUID to clone
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Campaign cloned successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CloneCampaignResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden - access denied
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Clone not allowed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Clone Campaign
+      tags:
+      - Campaigns
   /api/v1/campaigns/audience-spec:
     get:
+      parameters:
+      - description: 'Platform (default: sms)'
+        in: query
+        name: platform
+        type: string
       produces:
       - application/json
       responses:
@@ -3636,6 +4993,73 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Calculate Campaign Cost
+      tags:
+      - Campaigns
+  /api/v1/campaigns/calculate-cost-v2:
+    post:
+      consumes:
+      - application/json
+      description: Calculate required credit based on desired num_messages, capped
+        by audience capacity
+      parameters:
+      - description: Campaign parameters for reverse cost calculation
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CalculateCampaignCostV2Request'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Cost calculated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CalculateCampaignCostResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Calculate Campaign Cost V2
+      tags:
+      - Campaigns
+  /api/v1/campaigns/initiated/last:
+    get:
+      description: Retrieve the most recent campaign with status initiated for the
+        authenticated user
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.GetLastInitiatedCampaignResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get Last Initiated Campaign
       tags:
       - Campaigns
   /api/v1/campaigns/summary:
@@ -3840,6 +5264,124 @@ paths:
       summary: List Active Line Numbers
       tags:
       - Line Numbers
+  /api/v1/media/{uuid}:
+    get:
+      description: Download an image or video by uuid (owner only)
+      parameters:
+      - description: Multimedia UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Binary file
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Download multimedia
+      tags:
+      - Multimedia
+  /api/v1/media/{uuid}/preview:
+    get:
+      description: Return a thumbnail image for multimedia (video -> frame image,
+        image -> resized)
+      parameters:
+      - description: Multimedia UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - image/jpeg
+      responses:
+        "200":
+          description: Thumbnail image
+          schema:
+            type: string
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Preview multimedia
+      tags:
+      - Multimedia
+  /api/v1/media/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Upload an image or video (jpg/jpeg/png/gif/webp/mp4/mov/webm/mkv,
+        <=100MB)
+      parameters:
+      - description: Multimedia file (<=100MB)
+        in: formData
+        name: file
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Upload successful
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UploadMultimediaResponse'
+              type: object
+        "400":
+          description: Invalid request or file
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Upload multimedia
+      tags:
+      - Multimedia
   /api/v1/payments/callback/{invoice_number}:
     post:
       consumes:
@@ -3923,6 +5465,188 @@ paths:
       summary: Charge Wallet
       tags:
       - Payments
+  /api/v1/payments/deposit-receipts:
+    get:
+      description: Returns the user's submitted deposit receipts with status and metadata.
+      parameters:
+      - description: Language filter (FA or EN)
+        in: query
+        name: lang
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Receipts retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListDepositReceiptsResponse'
+              type: object
+        "400":
+          description: Invalid language
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List deposit receipts
+      tags:
+      - Payments
+    post:
+      consumes:
+      - application/json
+      description: Upload a bank deposit receipt file (base64) for finance review;
+        balance is credited only after approval.
+      parameters:
+      - description: Deposit receipt payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.SubmitDepositReceiptRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Receipt submitted
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SubmitDepositReceiptResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized - customer not found or inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Submit deposit receipt
+      tags:
+      - Payments
+  /api/v1/payments/deposit-receipts/{receipt_uuid}/file:
+    delete:
+      description: Removes the uploaded receipt file content (keeps receipt record)
+        if pending.
+      parameters:
+      - description: Deposit receipt UUID
+        in: path
+        name: receipt_uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: File removed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "400":
+          description: Invalid receipt
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Receipt already finalized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Delete deposit receipt file
+      tags:
+      - Payments
+    get:
+      description: Downloads the original receipt file uploaded by the customer.
+      parameters:
+      - description: Deposit receipt UUID
+        in: path
+        name: receipt_uuid
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: Receipt file
+          schema:
+            type: file
+        "400":
+          description: Invalid receipt
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Download deposit receipt file
+      tags:
+      - Payments
+    put:
+      consumes:
+      - application/json
+      description: Replaces the uploaded receipt file if the receipt is still pending.
+      parameters:
+      - description: Deposit receipt UUID
+        in: path
+        name: receipt_uuid
+        required: true
+        type: string
+      - description: New receipt file payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateDepositReceiptFileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: File updated
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "400":
+          description: Invalid request or receipt
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Receipt already finalized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Update deposit receipt file
+      tags:
+      - Payments
   /api/v1/payments/history:
     get:
       consumes:
@@ -3983,6 +5707,111 @@ paths:
       summary: Get Transaction History
       tags:
       - Payments
+  /api/v1/payments/proforma/preview:
+    get:
+      description: Returns JSON containing seller/buyer info, amounts, and tax for
+        the requested deposit receipt and language.
+      parameters:
+      - description: Deposit receipt UUID
+        in: query
+        name: receipt_uuid
+        required: true
+        type: string
+      - description: Language (FA or EN)
+        in: query
+        name: lang
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Preview generated
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ProformaPreviewResponse'
+              type: object
+        "400":
+          description: Invalid receipt or language
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Preview proforma invoice
+      tags:
+      - Payments
+  /api/v1/platform-settings:
+    get:
+      description: List platform settings (authenticated)
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListPlatformSettingsResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List platform settings
+      tags:
+      - Platform Settings
+    post:
+      consumes:
+      - application/json
+      description: Create platform settings (authenticated)
+      parameters:
+      - description: Platform settings payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreatePlatformSettingsRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreatePlatformSettingsResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Create platform settings
+      tags:
+      - Platform Settings
   /api/v1/profile:
     get:
       description: Retrieve the authenticated customer's profile and parent agency
@@ -4188,6 +6017,33 @@ paths:
       summary: List Active Discounts of Agency
       tags:
       - Reports
+  /api/v1/segment-price-factors:
+    get:
+      description: List the latest price factor per level3
+      parameters:
+      - description: Platform (sms|rubika|bale|splus), default sms
+        in: query
+        name: platform
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListLatestSegmentPriceFactorsResponse'
+              type: object
+        "500":
+          description: List failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List Segment Price Factors
+      tags:
+      - Segment Price Factors
   /api/v1/tickets:
     get:
       consumes:
