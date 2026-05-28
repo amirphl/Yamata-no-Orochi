@@ -48,7 +48,8 @@ func (h *AdminCustomerManagementHandler) SuccessResponse(c fiber.Ctx, statusCode
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/admin/customer-management [get]
 func (h *AdminCustomerManagementHandler) ListCustomers(c fiber.Ctx) error {
-	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/customer-management", 30*time.Second)
+	defer cancel()
 	res, err := h.flow.ListCustomers(ctx)
 	if err != nil {
 		log.Println("Admin list customers failed", err)
@@ -83,7 +84,8 @@ func (h *AdminCustomerManagementHandler) GetCustomersShares(c fiber.Ctx) error {
 		}
 	}
 
-	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management/shares")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/customer-management/shares", 30*time.Second)
+	defer cancel()
 	res, err := h.flow.GetCustomersShares(ctx, &req)
 	if err != nil {
 		log.Println("Admin get customers shares failed", err)
@@ -108,7 +110,8 @@ func (h *AdminCustomerManagementHandler) GetCustomerWithCampaigns(c fiber.Ctx) e
 	if err != nil || cid == 0 {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid customer_id", "VALIDATION_ERROR", nil)
 	}
-	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management/"+cidStr)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/customer-management/"+cidStr, 30*time.Second)
+	defer cancel()
 	res, err := h.flow.GetCustomerWithCampaigns(ctx, uint(cid))
 	if err != nil {
 		log.Println("Admin get customer with campaigns failed", err)
@@ -137,7 +140,8 @@ func (h *AdminCustomerManagementHandler) SetCustomerActiveStatus(c fiber.Ctx) er
 	if err := h.validator.Struct(req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation error", "VALIDATION_ERROR", err.Error())
 	}
-	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management/active-status")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/customer-management/active-status", 30*time.Second)
+	defer cancel()
 	res, err := h.flow.SetCustomerActiveStatus(ctx, &req)
 	if err != nil {
 		log.Println("Admin set customer active status failed", err)
@@ -162,7 +166,8 @@ func (h *AdminCustomerManagementHandler) GetCustomerDiscountsHistory(c fiber.Ctx
 	if err != nil || cid == 0 {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid customer_id", "VALIDATION_ERROR", nil)
 	}
-	ctx := h.createRequestContext(c, "/api/v1/admin/customer-management/"+cidStr+"/discounts")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/customer-management/"+cidStr+"/discounts", 30*time.Second)
+	defer cancel()
 	res, err := h.flow.GetCustomerDiscountsHistory(ctx, uint(cid))
 	if err != nil {
 		log.Println("Admin list customer discounts history failed", err)
@@ -206,11 +211,7 @@ func (h *AdminCustomerManagementHandler) respondAdminCustomerManagementError(
 	return h.ErrorResponse(c, fiber.StatusInternalServerError, defaultMessage, defaultCode, nil)
 }
 
-func (h *AdminCustomerManagementHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *AdminCustomerManagementHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *AdminCustomerManagementHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -221,5 +222,5 @@ func (h *AdminCustomerManagementHandler) createRequestContextWithTimeout(c fiber
 	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
 		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
 	}
-	return ctx
+	return ctx, cancel
 }
