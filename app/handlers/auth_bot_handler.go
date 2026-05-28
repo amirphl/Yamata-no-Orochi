@@ -52,7 +52,9 @@ func (h *AuthBotHandler) Login(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.Verify(h.createRequestContext(c, "/api/v1/bot/auth/login"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/auth/login", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.Verify(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Bot login failed", err)
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Login failed", "BOT_LOGIN_FAILED", nil)
@@ -60,11 +62,7 @@ func (h *AuthBotHandler) Login(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Login successful", res)
 }
 
-func (h *AuthBotHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *AuthBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *AuthBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -72,5 +70,5 @@ func (h *AuthBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint s
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
