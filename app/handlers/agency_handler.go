@@ -72,7 +72,9 @@ func (h *AgencyHandler) CreateAgencyDiscount(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.CreateAgencyDiscount(h.createRequestContext(c, "/api/v1/reports/agency/discounts"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/reports/agency/discounts", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.CreateAgencyDiscount(ctx, &req, metadata)
 	if err != nil {
 		if businessflow.IsAgencyNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency not found", "AGENCY_NOT_FOUND", nil)
@@ -152,7 +154,9 @@ func (h *AgencyHandler) GetAgencyCustomerReport(c fiber.Ctx) error {
 	}
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.GetAgencyCustomerReport(h.createRequestContext(c, "/api/v1/reports/agency/customers"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/reports/agency/customers", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.GetAgencyCustomerReport(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsAgencyNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency not found", "AGENCY_NOT_FOUND", nil)
@@ -192,7 +196,9 @@ func (h *AgencyHandler) ListAgencyActiveDiscounts(c fiber.Ctx) error {
 		},
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.ListAgencyActiveDiscounts(h.createRequestContext(c, "/api/v1/reports/agency/discounts/active"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/reports/agency/discounts/active", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListAgencyActiveDiscounts(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsAgencyNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency not found", "AGENCY_NOT_FOUND", nil)
@@ -231,7 +237,9 @@ func (h *AgencyHandler) ListAgencyCustomerDiscounts(c fiber.Ctx) error {
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
-	res, err := h.flow.ListAgencyCustomerDiscounts(h.createRequestContext(c, "/api/v1/reports/agency/customers/"+cidStr+"/discounts"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/reports/agency/customers/"+cidStr+"/discounts", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListAgencyCustomerDiscounts(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsAgencyNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency not found", "AGENCY_NOT_FOUND", nil)
@@ -276,7 +284,9 @@ func (h *AgencyHandler) ListAgencyCustomers(c fiber.Ctx) error {
 	req := &dto.ListAgencyCustomersRequest{AgencyID: agencyID}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
-	res, err := h.flow.ListAgencyCustomers(h.createRequestContext(c, "/api/v1/reports/agency/customers/list"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/reports/agency/customers/list", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListAgencyCustomers(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsAgencyNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency not found", "AGENCY_NOT_FOUND", nil)
@@ -292,11 +302,7 @@ func (h *AgencyHandler) ListAgencyCustomers(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Agency customers retrieved successfully", res)
 }
 
-func (h *AgencyHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *AgencyHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *AgencyHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -304,5 +310,5 @@ func (h *AgencyHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint st
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
