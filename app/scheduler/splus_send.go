@@ -10,6 +10,15 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 )
 
+const (
+	splusSendRetryBaseDelay = 1 * time.Second
+	splusSendRetryMaxDelay  = 30 * time.Second
+)
+
+func splusSendRetryBackoffDelay(attempt int) time.Duration {
+	return retryBackoffDelay(attempt, splusSendRetryBaseDelay, splusSendRetryMaxDelay)
+}
+
 func (s *SplusCampaignScheduler) sendWithRetry(ctx context.Context, botID string, req *SplusSendMessageRequest) (*SplusResponse, error) {
 	var (
 		resp *SplusResponse
@@ -23,13 +32,8 @@ func (s *SplusCampaignScheduler) sendWithRetry(ctx context.Context, botID string
 		if attempt == splusSendMaxRetries {
 			break
 		}
-		backoff := time.Duration(1<<attempt) * time.Second
-		timer := time.NewTimer(backoff)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if sleepErr := sleepWithContext(ctx, splusSendRetryBackoffDelay(attempt)); sleepErr != nil {
 			return resp, ctx.Err()
-		case <-timer.C:
 		}
 	}
 	return resp, err
