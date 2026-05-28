@@ -26,9 +26,7 @@ import (
 // TODO: Tx management in queries, especially around processed_campaign creation and audience fetching to ensure consistency
 
 const (
-	baleSendBatchSize       = 200
-	statusJobMaxRetry       = 3
-	audienceAppendBatchSize = 1000
+	baleSendBatchSize = 200
 )
 
 type BaleCampaignScheduler struct {
@@ -875,10 +873,12 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		for _, item := range statusItems {
 			serverID := strings.TrimSpace(item.MessageID)
 			if serverID == "" {
+				s.logger.Printf("handleStatusJob: skipping status item with empty server_id for job_id=%d processed_campaign_id=%d", job.ID, job.ProcessedCampaignID)
 				continue
 			}
 			row := rowByServerID[serverID]
 			if row == nil {
+				s.logger.Printf("handleStatusJob: no sent row found for server_id=%s job_id=%d processed_campaign_id=%d", serverID, job.ID, job.ProcessedCampaignID)
 				continue
 			}
 
