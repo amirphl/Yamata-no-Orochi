@@ -94,9 +94,11 @@ func (h *AuthHandler) Signup(c fiber.Ctx) error {
 
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/signup", 30*time.Second)
+	defer cancel()
 
 	// Call business logic with proper context
-	result, err := h.signupFlow.Signup(h.createRequestContext(c, "/api/v1/auth/signup"), &req, metadata)
+	result, err := h.signupFlow.Signup(ctx, &req, metadata)
 	if err != nil {
 		// Handle specific business errors
 		if businessflow.IsEmailAlreadyExists(err) {
@@ -175,10 +177,15 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/verify", 30*time.Second)
+	defer cancel()
 
 	// Call business logic with proper context
-	result, err := h.signupFlow.VerifyOTP(h.createRequestContext(c, "/api/v1/auth/verify"), &req, metadata)
+	result, err := h.signupFlow.VerifyOTP(ctx, &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -242,10 +249,15 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/resend-otp", 30*time.Second)
+	defer cancel()
 
 	// Call business logic with proper context
-	result, err := h.signupFlow.ResendOTP(h.createRequestContext(c, "/api/v1/auth/resend-otp"), &req, metadata)
+	result, err := h.signupFlow.ResendOTP(ctx, &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Please wait before requesting another OTP", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -303,18 +315,20 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/login", 30*time.Second)
+	defer cancel()
 
 	// Call business logic with proper context
-	result, err := h.loginFlow.Login(h.createRequestContext(c, "/api/v1/auth/login"), &req, metadata)
+	result, err := h.loginFlow.Login(ctx, &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many login attempts", "RATE_LIMITED", nil)
+		}
+		if businessflow.IsAuthenticationFailed(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid credentials", "AUTHENTICATION_FAILED", nil)
+		}
 		if businessflow.IsAccountTypeNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
-		}
-		if businessflow.IsIncorrectPassword(err) {
-			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Incorrect password", "INCORRECT_PASSWORD", nil)
-		}
-		if businessflow.IsMobileNumberNotVerified(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Mobile number not verified", "MOBILE_NUMBER_NOT_VERIFIED", nil)
 		}
 
 		log.Println("Login failed", err)
@@ -360,9 +374,14 @@ func (h *AuthHandler) RequestLoginOTP(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/login/otp", 30*time.Second)
+	defer cancel()
 
-	res, err := h.loginFlow.RequestLoginOTP(h.createRequestContext(c, "/api/v1/auth/login/otp"), &req, metadata)
+	res, err := h.loginFlow.RequestLoginOTP(ctx, &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Please wait before requesting another OTP", "RATE_LIMITED", nil)
+		}
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "User not found", "CUSTOMER_NOT_FOUND", nil)
 		}
@@ -405,9 +424,14 @@ func (h *AuthHandler) VerifyLoginOTP(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/login/otp/verify", 30*time.Second)
+	defer cancel()
 
-	res, err := h.loginFlow.VerifyLoginOTP(h.createRequestContext(c, "/api/v1/auth/login/otp/verify"), &req, metadata)
+	res, err := h.loginFlow.VerifyLoginOTP(ctx, &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
+		}
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "User not found", "CUSTOMER_NOT_FOUND", nil)
 		}
@@ -463,10 +487,15 @@ func (h *AuthHandler) ForgotPassword(c fiber.Ctx) error {
 
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/forgot-password", 30*time.Second)
+	defer cancel()
 
 	// Call business logic with proper context
-	result, err := h.loginFlow.ForgotPassword(h.createRequestContext(c, "/api/v1/auth/forgot-password"), &req, metadata)
+	result, err := h.loginFlow.ForgotPassword(ctx, &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Please wait before requesting another OTP", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -520,10 +549,15 @@ func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/reset", 30*time.Second)
+	defer cancel()
 
 	// Call business logic with proper context
-	result, err := h.loginFlow.ResetPassword(h.createRequestContext(c, "/api/v1/auth/reset"), &req, metadata)
+	result, err := h.loginFlow.ResetPassword(ctx, &req, metadata)
 	if err != nil {
+		if businessflow.IsRateLimitExceeded(err) {
+			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
+		}
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -579,13 +613,8 @@ func (h *AuthHandler) Health(c fiber.Ctx) error {
 	})
 }
 
-// createRequestContext creates a context with request-scoped values for observability and timeout
-func (h *AuthHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
 // createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
-func (h *AuthHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *AuthHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	// Create context with custom timeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
@@ -597,7 +626,7 @@ func (h *AuthHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint stri
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel) // Store cancel function for cleanup
 
-	return ctx
+	return ctx, cancel
 }
 
 // Custom validation setup
