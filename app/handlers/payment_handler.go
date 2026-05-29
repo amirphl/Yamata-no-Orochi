@@ -112,7 +112,9 @@ func (h *PaymentHandler) ChargeWallet(c fiber.Ctx) error {
 	req.CustomerID = customerID
 
 	// Call business logic with proper context
-	result, err := h.paymentFlow.ChargeWallet(h.createRequestContext(c, "/api/v1/payments/charge-wallet"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/charge-wallet", 30*time.Second)
+	defer cancel()
+	result, err := h.paymentFlow.ChargeWallet(ctx, &req, metadata)
 	if err != nil {
 		// Handle specific business errors
 		if businessflow.IsCustomerNotFound(err) {
@@ -246,7 +248,9 @@ func (h *PaymentHandler) PaymentCallback(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Process callback
-	resultHTML, err := h.paymentFlow.PaymentCallback(h.createRequestContext(c, "/api/v1/payments/callback/"+invoiceNumber), &callbackReq, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/callback/"+invoiceNumber, 30*time.Second)
+	defer cancel()
+	resultHTML, err := h.paymentFlow.PaymentCallback(ctx, &callbackReq, metadata)
 	if err != nil {
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -403,7 +407,9 @@ func (h *PaymentHandler) GetTransactionHistory(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(ipAddress, userAgent)
 
 	// Call business logic
-	result, err := h.paymentFlow.GetTransactionHistory(h.createRequestContext(c, "/api/v1/payments/history"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/history", 30*time.Second)
+	defer cancel()
+	result, err := h.paymentFlow.GetTransactionHistory(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsInvalidPage(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page", "INVALID_PAGE", nil)
@@ -458,7 +464,9 @@ func (h *PaymentHandler) GetWalletBalance(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Business call
-	result, err := h.paymentFlow.GetWalletBalance(h.createRequestContext(c, "/api/v1/wallet/balance"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/wallet/balance", 30*time.Second)
+	defer cancel()
+	result, err := h.paymentFlow.GetWalletBalance(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -480,13 +488,8 @@ func (h *PaymentHandler) GetWalletBalance(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Wallet balance retrieved successfully", result)
 }
 
-// createRequestContext creates a context with request-scoped values for observability and timeout
-func (h *PaymentHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
 // createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
-func (h *PaymentHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *PaymentHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	// Create context with custom timeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
@@ -498,7 +501,7 @@ func (h *PaymentHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint s
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel) // Store cancel function for cleanup
 
-	return ctx
+	return ctx, cancel
 }
 
 // setupCustomValidations sets up custom validation rules
@@ -536,7 +539,9 @@ func (h *PaymentHandler) SubmitDepositReceipt(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.paymentFlow.SubmitDepositReceipt(h.createRequestContext(c, "/api/v1/payments/deposit-receipts"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/deposit-receipts", 30*time.Second)
+	defer cancel()
+	res, err := h.paymentFlow.SubmitDepositReceipt(ctx, &req, metadata)
 	if err != nil {
 		switch {
 		case businessflow.IsInvalidLanguage(err):
@@ -572,7 +577,9 @@ func (h *PaymentHandler) ListDepositReceipts(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 	lang := c.Query("lang")
-	resp, err := h.paymentFlow.ListDepositReceipts(h.createRequestContext(c, "/api/v1/payments/deposit-receipts"), customerID, lang)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/deposit-receipts", 30*time.Second)
+	defer cancel()
+	resp, err := h.paymentFlow.ListDepositReceipts(ctx, customerID, lang)
 	if err != nil {
 		if businessflow.IsInvalidLanguage(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
@@ -605,7 +612,9 @@ func (h *PaymentHandler) PreviewProformaInvoice(c fiber.Ctx) error {
 	if strings.TrimSpace(receiptUUID) == "" {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "receipt_uuid is required", "INVALID_RECEIPT", nil)
 	}
-	resp, err := h.paymentFlow.PreviewProformaInvoice(h.createRequestContext(c, "/api/v1/payments/proforma/preview"), customerID, receiptUUID, lang)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/proforma/preview", 30*time.Second)
+	defer cancel()
+	resp, err := h.paymentFlow.PreviewProformaInvoice(ctx, customerID, receiptUUID, lang)
 	if err != nil {
 		if businessflow.IsInvalidLanguage(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
@@ -648,7 +657,9 @@ func (h *PaymentHandler) PreviewProformaInvoiceByAmount(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
 	}
 	lang := c.Query("lang")
-	resp, err := h.paymentFlow.PreviewProformaInvoiceByAmount(h.createRequestContext(c, "/api/v1/payments/proforma/preview-by-amount"), customerID, amount, lang)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/proforma/preview-by-amount", 30*time.Second)
+	defer cancel()
+	resp, err := h.paymentFlow.PreviewProformaInvoiceByAmount(ctx, customerID, amount, lang)
 	if err != nil {
 		if businessflow.IsInvalidLanguage(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
@@ -682,7 +693,9 @@ func (h *PaymentHandler) DownloadDepositReceiptFile(c fiber.Ctx) error {
 	if strings.TrimSpace(receiptUUID) == "" {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid receipt_uuid", "INVALID_RECEIPT", nil)
 	}
-	data, filename, contentType, err := h.paymentFlow.DownloadDepositReceiptFile(h.createRequestContext(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file"), customerID, receiptUUID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file", 30*time.Second)
+	defer cancel()
+	data, filename, contentType, err := h.paymentFlow.DownloadDepositReceiptFile(ctx, customerID, receiptUUID)
 	if err != nil {
 		if businessflow.IsDepositReceiptNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt not found", "RECEIPT_NOT_FOUND", nil)
@@ -733,7 +746,9 @@ func (h *PaymentHandler) UpdateDepositReceiptFile(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 
-	err := h.paymentFlow.UpdateDepositReceiptFile(h.createRequestContext(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file"), customerID, receiptUUID, &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file", 30*time.Second)
+	defer cancel()
+	err := h.paymentFlow.UpdateDepositReceiptFile(ctx, customerID, receiptUUID, &req)
 	if err != nil {
 		switch {
 		case businessflow.IsDepositReceiptNotFound(err):
@@ -773,7 +788,9 @@ func (h *PaymentHandler) DeleteDepositReceiptFile(c fiber.Ctx) error {
 	if strings.TrimSpace(receiptUUID) == "" {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid receipt_uuid", "INVALID_RECEIPT", nil)
 	}
-	err := h.paymentFlow.DeleteDepositReceiptFile(h.createRequestContext(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file"), customerID, receiptUUID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/deposit-receipts/"+receiptUUID+"/file", 30*time.Second)
+	defer cancel()
+	err := h.paymentFlow.DeleteDepositReceiptFile(ctx, customerID, receiptUUID)
 	if err != nil {
 		switch {
 		case businessflow.IsDepositReceiptNotFound(err):
@@ -822,8 +839,10 @@ func (h *PaymentHandler) NotifyInvoiceIssueRequest(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/payments/transactions/invoice-issue-request", 30*time.Second)
+	defer cancel()
 	resp, err := h.paymentFlow.NotifyInvoiceIssueRequest(
-		h.createRequestContext(c, "/api/v1/payments/transactions/invoice-issue-request"),
+		ctx,
 		&req,
 		customerID,
 		metadata,
