@@ -81,7 +81,9 @@ func (h *CampaignBotHandler) UpdateAudienceSpec(c fiber.Ctx) error {
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	_ = metadata
-	res, err := h.campaignFlow.UpdateAudienceSpec(h.createRequestContext(c, "/api/v1/bot/campaigns/audience-spec"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/audience-spec", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.UpdateAudienceSpec(ctx, &req)
 	if err != nil {
 		if businessflow.IsAudienceSpecPlatformRequired(err) || businessflow.IsAudienceSpecPlatformInvalid(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
@@ -123,7 +125,9 @@ func (h *CampaignBotHandler) ResetAudienceSpec(c fiber.Ctx) error {
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	_ = metadata
-	res, err := h.campaignFlow.ResetAudienceSpec(h.createRequestContext(c, "/api/v1/bot/campaigns/audience-spec/reset"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/audience-spec/reset", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.ResetAudienceSpec(ctx, &req)
 	if err != nil {
 		if businessflow.IsAudienceSpecPlatformRequired(err) || businessflow.IsAudienceSpecPlatformInvalid(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
@@ -154,7 +158,9 @@ func (h *CampaignBotHandler) ListReadyCampaigns(c fiber.Ctx) error {
 	if p := strings.TrimSpace(c.Query("platform")); p != "" {
 		platformPtr = &p
 	}
-	res, err := h.campaignFlow.ListReadyCampaigns(h.createRequestContext(c, "/api/v1/bot/campaigns/ready"), platformPtr)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/ready", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.ListReadyCampaigns(ctx, platformPtr)
 	if err != nil {
 		if businessflow.IsCampaignPlatformInvalid(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
@@ -180,7 +186,9 @@ func (h *CampaignBotHandler) MoveCampaignToExecuted(c fiber.Ctx) error {
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	_ = metadata
-	if err := h.campaignFlow.MoveCampaignToExecuted(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/executed"), uint(id)); err != nil {
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/"+idStr+"/executed", 30*time.Second)
+	defer cancel()
+	if err := h.campaignFlow.MoveCampaignToExecuted(ctx, uint(id)); err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
 		}
@@ -208,7 +216,9 @@ func (h *CampaignBotHandler) MoveCampaignToRunning(c fiber.Ctx) error {
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	_ = metadata
-	if err := h.campaignFlow.MoveCampaignToRunning(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/running"), uint(id)); err != nil {
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/"+idStr+"/running", 30*time.Second)
+	defer cancel()
+	if err := h.campaignFlow.MoveCampaignToRunning(ctx, uint(id)); err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
 		}
@@ -240,8 +250,10 @@ func (h *CampaignBotHandler) DownloadTargetAudienceExcelFile(c fiber.Ctx) error 
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign id", "INVALID_CAMPAIGN_ID", nil)
 	}
 
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/"+idStr+"/target-audience-excel-file", 30*time.Second)
+	defer cancel()
 	filename, contentType, data, err := h.campaignFlow.DownloadTargetAudienceExcelFile(
-		h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/target-audience-excel-file"),
+		ctx,
 		uint(id),
 	)
 	if err != nil {
@@ -294,7 +306,9 @@ func (h *CampaignBotHandler) UpdateCampaignStatistics(c fiber.Ctx) error {
 		}
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
-	res, err := h.campaignFlow.UpdateCampaignStatistics(h.createRequestContext(c, "/api/v1/bot/campaigns/"+idStr+"/statistics"), uint(id), req.Statistics)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/"+idStr+"/statistics", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.UpdateCampaignStatistics(ctx, uint(id), req.Statistics)
 	if err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
@@ -313,11 +327,7 @@ func (h *CampaignBotHandler) UpdateCampaignStatistics(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign statistics updated", res)
 }
 
-func (h *CampaignBotHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *CampaignBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *CampaignBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -325,5 +335,5 @@ func (h *CampaignBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoi
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
