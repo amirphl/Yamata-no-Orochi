@@ -57,7 +57,9 @@ func (h *PlatformBasePriceAdminHandler) SuccessResponse(c fiber.Ctx, statusCode 
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/admin/platform-base-prices [get]
 func (h *PlatformBasePriceAdminHandler) List(c fiber.Ctx) error {
-	res, err := h.flow.AdminListPlatformBasePrices(h.createRequestContext(c, "/api/v1/admin/platform-base-prices"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/platform-base-prices", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.AdminListPlatformBasePrices(ctx)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			if be.Code == "PLATFORM_BASE_PRICE_LIST_FAILED" {
@@ -94,7 +96,9 @@ func (h *PlatformBasePriceAdminHandler) Update(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 
-	res, err := h.flow.AdminUpdatePlatformBasePrice(h.createRequestContext(c, "/api/v1/admin/platform-base-prices"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/platform-base-prices", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.AdminUpdatePlatformBasePrice(ctx, &req)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -112,11 +116,7 @@ func (h *PlatformBasePriceAdminHandler) Update(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Platform base price updated successfully", res)
 }
 
-func (h *PlatformBasePriceAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *PlatformBasePriceAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *PlatformBasePriceAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -127,5 +127,5 @@ func (h *PlatformBasePriceAdminHandler) createRequestContextWithTimeout(c fiber.
 	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
 		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
 	}
-	return ctx
+	return ctx, cancel
 }
