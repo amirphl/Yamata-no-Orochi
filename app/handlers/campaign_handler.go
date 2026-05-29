@@ -113,7 +113,9 @@ func (h *CampaignHandler) CreateCampaign(c fiber.Ctx) error {
 	req.CustomerID = customerID
 
 	// Call business logic with proper context
-	result, err := h.campaignFlow.CreateCampaign(h.createRequestContext(c, "/api/v1/campaigns"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.CreateCampaign(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Campaign creation failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Campaign creation failed", "CAMPAIGN_CREATION_FAILED")
@@ -179,7 +181,9 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Call business logic with proper context
-	result, err := h.campaignFlow.UpdateCampaign(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+campaignUUID, 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.UpdateCampaign(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Campaign update failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Campaign update failed", "CAMPAIGN_UPDATE_FAILED")
@@ -233,7 +237,9 @@ func (h *CampaignHandler) CancelCampaign(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.campaignFlow.CancelCampaign(h.createRequestContext(c, "/api/v1/campaigns/"+idStr+"/cancel"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+idStr+"/cancel", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.CancelCampaign(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Cancel campaign failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Cancel campaign failed", "CANCEL_CAMPAIGN_FAILED")
@@ -272,7 +278,9 @@ func (h *CampaignHandler) CloneCampaign(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.campaignFlow.CloneCampaign(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID+"/clone"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+campaignUUID+"/clone", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.CloneCampaign(ctx, &req, metadata)
 	if err != nil {
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
@@ -314,7 +322,9 @@ func (h *CampaignHandler) ExportCampaignReport(c fiber.Ctx) error {
 	}
 	campaignUUID = parsedCampaignUUID.String()
 
-	data, err := h.campaignFlow.ExportCampaignReport(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID+"/export"), campaignUUID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+campaignUUID+"/export", 30*time.Second)
+	defer cancel()
+	data, err := h.campaignFlow.ExportCampaignReport(ctx, campaignUUID)
 	if err != nil {
 		log.Println("Export campaign report failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to export campaign report", "CAMPAIGN_REPORT_EXPORT_FAILED")
@@ -356,7 +366,9 @@ func (h *CampaignHandler) CalculateCampaignCapacity(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Call business logic with proper context
-	result, err := h.campaignFlow.CalculateCampaignCapacity(h.createRequestContext(c, "/api/v1/campaigns/calculate-capacity"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/calculate-capacity", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.CalculateCampaignCapacity(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Campaign capacity calculation failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Campaign capacity calculation failed", "CAPACITY_CALCULATION_FAILED")
@@ -407,7 +419,9 @@ func (h *CampaignHandler) CalculateCampaignCost(c fiber.Ctx) error {
 	req.CustomerID = customerID
 
 	// Call business logic with proper context
-	result, err := h.campaignFlow.CalculateCampaignCost(h.createRequestContext(c, "/api/v1/campaigns/calculate-cost"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/calculate-cost", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.CalculateCampaignCost(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Campaign cost calculation failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Campaign cost calculation failed", "COST_CALCULATION_FAILED")
@@ -456,7 +470,9 @@ func (h *CampaignHandler) CalculateCampaignCostV2(c fiber.Ctx) error {
 	}
 	req.CustomerID = customerID
 
-	result, err := h.campaignFlow.CalculateCampaignCostV2(h.createRequestContext(c, "/api/v1/campaigns/calculate-cost-v2"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/calculate-cost-v2", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.CalculateCampaignCostV2(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Campaign cost calculation v2 failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Campaign cost calculation failed", "COST_CALCULATION_FAILED")
@@ -534,7 +550,9 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Call business logic
-	result, err := h.campaignFlow.ListCampaigns(h.createRequestContext(c, "/api/v1/campaigns"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.ListCampaigns(ctx, req, metadata)
 	if err != nil {
 		log.Println("List campaigns failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to list campaigns", "LIST_CAMPAIGNS_FAILED")
@@ -563,7 +581,9 @@ func (h *CampaignHandler) GetLastInitiatedCampaign(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.campaignFlow.GetLastInitiatedCampaign(h.createRequestContext(c, "/api/v1/campaigns/initiated/last"), customerID, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/initiated/last", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.GetLastInitiatedCampaign(ctx, customerID, metadata)
 	if err != nil {
 		log.Println("Get last initiated campaign failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to get last initiated campaign", "GET_LAST_INITIATED_CAMPAIGN_FAILED")
@@ -581,7 +601,9 @@ func (h *CampaignHandler) GetLastInitiatedCampaign(c fiber.Ctx) error {
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/campaigns/page-prices [get]
 func (h *CampaignHandler) GetPagePrices(c fiber.Ctx) error {
-	res, err := h.campaignFlow.GetPagePrices(h.createRequestContext(c, "/api/v1/campaigns/page-prices"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/page-prices", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.GetPagePrices(ctx)
 	if err != nil {
 		log.Println("Get page prices failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to get page prices", "PAGE_PRICE_LIST_FAILED")
@@ -605,7 +627,9 @@ func (h *CampaignHandler) ListAudienceSpec(c fiber.Ctx) error {
 	if platformRaw != "" {
 		platform = &platformRaw
 	}
-	res, err := h.campaignFlow.ListAudienceSpec(h.createRequestContext(c, "/api/v1/campaigns/audience-spec"), platform)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/audience-spec", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.ListAudienceSpec(ctx, platform)
 	if err != nil {
 		if businessflow.IsAudienceSpecPlatformInvalid(err) || businessflow.IsAudienceSpecPlatformRequired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
@@ -633,7 +657,9 @@ func (h *CampaignHandler) GetApprovedRunningSummary(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 
-	res, err := h.campaignFlow.GetApprovedRunningSummary(h.createRequestContext(c, "/api/v1/campaigns/summary"), customerID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/summary", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.GetApprovedRunningSummary(ctx, customerID)
 	if err != nil {
 		log.Println("Get campaigns summary failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to get campaigns summary", "GET_CAMPAIGNS_SUMMARY_FAILED")
@@ -695,7 +721,9 @@ func (h *CampaignHandler) SendCampaignTestMessage(c fiber.Ctx) error {
 	req.CustomerID = customerID
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
-	res, err := h.campaignFlow.SendCampaignTestMessage(h.createRequestContext(c, "/api/v1/campaigns/"+campaignUUID+"/test-send"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+campaignUUID+"/test-send", 30*time.Second)
+	defer cancel()
+	res, err := h.campaignFlow.SendCampaignTestMessage(ctx, &req, metadata)
 	if err != nil {
 		log.Println("Campaign test send failed", err)
 		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Campaign test send failed", "CAMPAIGN_TEST_SEND_FAILED")
@@ -704,13 +732,8 @@ func (h *CampaignHandler) SendCampaignTestMessage(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign test message attempted", res)
 }
 
-// createRequestContext creates a context with request-scoped values for observability and timeout
-func (h *CampaignHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
 // createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
-func (h *CampaignHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *CampaignHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	// Create context with custom timeout
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 
@@ -725,7 +748,7 @@ func (h *CampaignHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint 
 		ctx = context.WithValue(ctx, utils.CustomerIDKey, customerID)
 	}
 
-	return ctx
+	return ctx, cancel
 }
 
 // setupCustomValidations sets up custom validation rules
