@@ -85,7 +85,9 @@ func (h *MultimediaHandler) Upload(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.flow.UploadMultimedia(h.createRequestContext(c, "/api/v1/media/upload"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/media/upload", 30*time.Second)
+	defer cancel()
+	result, err := h.flow.UploadMultimedia(ctx, &req, metadata)
 	if err != nil {
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -135,7 +137,9 @@ func (h *MultimediaHandler) Download(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 
-	filename, contentType, data, err := h.flow.DownloadMultimedia(h.createRequestContext(c, "/api/v1/media/{uuid}"), customerID, mediaUUID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/media/{uuid}", 30*time.Second)
+	defer cancel()
+	filename, contentType, data, err := h.flow.DownloadMultimedia(ctx, customerID, mediaUUID)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -183,7 +187,9 @@ func (h *MultimediaHandler) Preview(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 
-	filename, contentType, data, err := h.flow.PreviewMultimedia(h.createRequestContext(c, "/api/v1/media/{uuid}/preview"), customerID, mediaUUID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/media/{uuid}/preview", 30*time.Second)
+	defer cancel()
+	filename, contentType, data, err := h.flow.PreviewMultimedia(ctx, customerID, mediaUUID)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -213,11 +219,7 @@ func (h *MultimediaHandler) Preview(c fiber.Ctx) error {
 	return c.Send(data)
 }
 
-func (h *MultimediaHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *MultimediaHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *MultimediaHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -228,5 +230,5 @@ func (h *MultimediaHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoin
 	if customerID, ok := c.Locals("customer_id").(uint); ok && customerID != 0 {
 		ctx = context.WithValue(ctx, utils.CustomerIDKey, customerID)
 	}
-	return ctx
+	return ctx, cancel
 }
