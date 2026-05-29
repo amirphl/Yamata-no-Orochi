@@ -42,7 +42,8 @@ func (h *LineNumberHandler) SuccessResponse(c fiber.Ctx, statusCode int, message
 // @Success 200 {object} dto.APIResponse{data=dto.ListActiveLineNumbersResponse}
 // @Router /api/v1/line-numbers/active [get]
 func (h *LineNumberHandler) ListActive(c fiber.Ctx) error {
-	ctx := h.createRequestContext(c, "/api/v1/line-numbers/active")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/line-numbers/active", 30*time.Second)
+	defer cancel()
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	res, err := h.flow.ListActiveLineNumbers(ctx, metadata)
 	if err != nil {
@@ -52,11 +53,7 @@ func (h *LineNumberHandler) ListActive(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Active line numbers retrieved", res)
 }
 
-func (h *LineNumberHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *LineNumberHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *LineNumberHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -64,5 +61,5 @@ func (h *LineNumberHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoin
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
