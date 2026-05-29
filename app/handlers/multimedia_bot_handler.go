@@ -55,7 +55,9 @@ func (h *MultimediaBotHandler) Download(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid uuid", "INVALID_UUID", nil)
 	}
 
-	filename, contentType, data, err := h.flow.DownloadMultimediaByBot(h.createRequestContext(c, "/api/v1/bot/media/{uuid}"), mediaUUID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/media/{uuid}", 30*time.Second)
+	defer cancel()
+	filename, contentType, data, err := h.flow.DownloadMultimediaByBot(ctx, mediaUUID)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -77,11 +79,7 @@ func (h *MultimediaBotHandler) Download(c fiber.Ctx) error {
 	return c.Send(data)
 }
 
-func (h *MultimediaBotHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *MultimediaBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *MultimediaBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -89,5 +87,5 @@ func (h *MultimediaBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endp
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
