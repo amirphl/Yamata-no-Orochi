@@ -67,7 +67,9 @@ func (h *LineNumberAdminHandler) CreateLineNumber(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.Create(h.createRequestContext(c, "/api/v1/admin/line-numbers/"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/line-numbers/", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.Create(ctx, &req, metadata)
 	if err != nil {
 		if businessflow.IsLineNumberValueRequired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number is required", "LINE_NUMBER_VALUE_REQUIRED", nil)
@@ -94,7 +96,9 @@ func (h *LineNumberAdminHandler) CreateLineNumber(c fiber.Ctx) error {
 // @Router /api/v1/admin/line-numbers/ [get]
 func (h *LineNumberAdminHandler) ListLineNumbers(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.ListAll(h.createRequestContext(c, "/api/v1/admin/line-numbers/"), metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/line-numbers/", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListAll(ctx, metadata)
 	if err != nil {
 		log.Println("List line numbers failed:", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "List line numbers failed", "LINE_NUMBER_LIST_FAILED", nil)
@@ -126,7 +130,9 @@ func (h *LineNumberAdminHandler) UpdateLineNumbersBatch(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	if err := h.flow.UpdateBatch(h.createRequestContext(c, "/api/v1/admin/line-numbers/"), &req, metadata); err != nil {
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/line-numbers/", 30*time.Second)
+	defer cancel()
+	if err := h.flow.UpdateBatch(ctx, &req, metadata); err != nil {
 		if businessflow.IsLineNumberValueRequired(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number is required", "LINE_NUMBER_VALUE_REQUIRED", nil)
 		}
@@ -152,7 +158,9 @@ func (h *LineNumberAdminHandler) UpdateLineNumbersBatch(c fiber.Ctx) error {
 // @Router /api/v1/admin/line-numbers/report [get]
 func (h *LineNumberAdminHandler) GetLineNumbersReport(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	items, err := h.flow.GetReport(h.createRequestContext(c, "/api/v1/admin/line-numbers/report"), metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/line-numbers/report", 30*time.Second)
+	defer cancel()
+	items, err := h.flow.GetReport(ctx, metadata)
 	if err != nil {
 		log.Println("Line numbers report failed:", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Report generation failed", "LINE_NUMBER_REPORT_FAILED", nil)
@@ -160,12 +168,7 @@ func (h *LineNumberAdminHandler) GetLineNumbersReport(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Line numbers report", items)
 }
 
-// createRequestContext mirrors other handlers for request-scoped values
-func (h *LineNumberAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *LineNumberAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *LineNumberAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -176,5 +179,5 @@ func (h *LineNumberAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, en
 	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
 		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
 	}
-	return ctx
+	return ctx, cancel
 }
