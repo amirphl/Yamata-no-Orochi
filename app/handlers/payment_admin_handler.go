@@ -60,10 +60,6 @@ func (h *PaymentAdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, messa
 	})
 }
 
-func (h *PaymentAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
 // ChargeWallet directly charges a customer's wallet without payment gateway redirect.
 // @Summary Charge Wallet By Admin
 // @Description Admin endpoint to directly charge a customer wallet (manual card-to-card/offline payment settlement)
@@ -103,8 +99,10 @@ func (h *PaymentAdminHandler) ChargeWallet(c fiber.Ctx) error {
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/charge-wallet", 30*time.Second)
+	defer cancel()
 	result, err := h.paymentAdminFlow.AdminChargeWallet(
-		h.createRequestContext(c, "/api/v1/admin/payments/charge-wallet"),
+		ctx,
 		&req,
 		metadata,
 		adminID,
@@ -204,7 +202,9 @@ func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 		cu := uint(cid)
 		f.CustomerID = &cu
 	}
-	resp, err := h.paymentAdminFlow.AdminListDepositReceipts(h.createRequestContext(c, "/api/v1/admin/payments/deposit-receipts"), f, limit, offset, order)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/deposit-receipts", 30*time.Second)
+	defer cancel()
+	resp, err := h.paymentAdminFlow.AdminListDepositReceipts(ctx, f, limit, offset, order)
 	if err != nil {
 		if businessflow.IsInvalidLanguage(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
@@ -285,8 +285,10 @@ func (h *PaymentAdminHandler) ListTransactions(c fiber.Ctx) error {
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/transactions", 30*time.Second)
+	defer cancel()
 	res, err := h.paymentAdminFlow.AdminListTransactions(
-		h.createRequestContext(c, "/api/v1/admin/payments/transactions"),
+		ctx,
 		req,
 		metadata,
 	)
@@ -319,7 +321,9 @@ func (h *PaymentAdminHandler) ListTransactions(c fiber.Ctx) error {
 // @Router /api/v1/admin/payments/deposit-receipts/{uuid}/file [get]
 func (h *PaymentAdminHandler) GetDepositReceiptFile(c fiber.Ctx) error {
 	uuid := c.Params("uuid")
-	data, filename, contentType, err := h.paymentAdminFlow.AdminGetDepositReceiptFile(h.createRequestContext(c, "/api/v1/admin/payments/deposit-receipts/"+uuid+"/file"), uuid)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/deposit-receipts/"+uuid+"/file", 30*time.Second)
+	defer cancel()
+	data, filename, contentType, err := h.paymentAdminFlow.AdminGetDepositReceiptFile(ctx, uuid)
 	if err != nil {
 		if businessflow.IsDepositReceiptNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt not found", "RECEIPT_NOT_FOUND", nil)
@@ -381,8 +385,10 @@ func (h *PaymentAdminHandler) UpdateDepositReceiptStatus(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
 
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/deposit-receipts/status", 30*time.Second)
+	defer cancel()
 	res, err := h.paymentAdminFlow.AdminUpdateDepositReceiptStatus(
-		h.createRequestContext(c, "/api/v1/admin/payments/deposit-receipts/status"),
+		ctx,
 		&req,
 		adminID,
 		metadata,
@@ -446,8 +452,10 @@ func (h *PaymentAdminHandler) AddInvoiceToTransaction(c fiber.Ctx) error {
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/transactions/invoice", 30*time.Second)
+	defer cancel()
 	res, err := h.paymentAdminFlow.AddInvoiceToTransaction(
-		h.createRequestContext(c, "/api/v1/admin/payments/transactions/invoice"),
+		ctx,
 		&req,
 		adminID,
 		metadata,
@@ -474,7 +482,7 @@ func (h *PaymentAdminHandler) AddInvoiceToTransaction(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Invoice linked to transaction", res)
 }
 
-func (h *PaymentAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *PaymentAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -485,5 +493,5 @@ func (h *PaymentAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpo
 	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
 		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
 	}
-	return ctx
+	return ctx, cancel
 }
