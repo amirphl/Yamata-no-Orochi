@@ -254,5 +254,14 @@
 \echo 'Running 0082_create_deposit_receipts.sql...'
 \i migrations/0082_create_deposit_receipts.sql
 
+\echo 'Running 0083_add_deposit_receipt_audit_action.sql...'
+\i migrations/0083_add_deposit_receipt_audit_action.sql
+
+\echo 'Running 0084_add_invoice_number_to_deposit_receipts.sql...'
+\i migrations/0084_add_invoice_number_to_deposit_receipts.sql
+
+\echo 'Running 0085_add_admin_deposit_receipt_review_action.sql...'
+\i migrations/0085_add_admin_deposit_receipt_review_action.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
