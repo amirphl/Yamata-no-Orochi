@@ -53,7 +53,9 @@ func (h *PlatformBasePriceHandler) SuccessResponse(c fiber.Ctx, statusCode int, 
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/platform-base-prices [get]
 func (h *PlatformBasePriceHandler) List(c fiber.Ctx) error {
-	res, err := h.flow.ListPlatformBasePrices(h.createRequestContext(c, "/api/v1/platform-base-prices"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/platform-base-prices", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListPlatformBasePrices(ctx)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			if be.Code == "PLATFORM_BASE_PRICE_LIST_FAILED" {
@@ -65,11 +67,7 @@ func (h *PlatformBasePriceHandler) List(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Platform base prices retrieved successfully", res)
 }
 
-func (h *PlatformBasePriceHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *PlatformBasePriceHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *PlatformBasePriceHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -80,5 +78,5 @@ func (h *PlatformBasePriceHandler) createRequestContextWithTimeout(c fiber.Ctx, 
 	if customerID, ok := c.Locals("customer_id").(uint); ok && customerID != 0 {
 		ctx = context.WithValue(ctx, utils.CustomerIDKey, customerID)
 	}
-	return ctx
+	return ctx, cancel
 }
