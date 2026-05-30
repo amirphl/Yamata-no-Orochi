@@ -78,7 +78,9 @@ func (h *PlatformSettingsHandler) Create(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.CreatePlatformSettings(h.createRequestContext(c, "/api/v1/platform-settings"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/platform-settings", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.CreatePlatformSettings(ctx, &req, metadata)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -117,7 +119,9 @@ func (h *PlatformSettingsHandler) List(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 
-	res, err := h.flow.ListPlatformSettings(h.createRequestContext(c, "/api/v1/platform-settings"), customerID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/platform-settings", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListPlatformSettings(ctx, customerID)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			if be.Code == "MISSING_CUSTOMER_ID" {
@@ -129,11 +133,7 @@ func (h *PlatformSettingsHandler) List(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Platform settings retrieved", res)
 }
 
-func (h *PlatformSettingsHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *PlatformSettingsHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *PlatformSettingsHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -144,5 +144,5 @@ func (h *PlatformSettingsHandler) createRequestContextWithTimeout(c fiber.Ctx, e
 	if customerID, ok := c.Locals("customer_id").(uint); ok && customerID != 0 {
 		ctx = context.WithValue(ctx, utils.CustomerIDKey, customerID)
 	}
-	return ctx
+	return ctx, cancel
 }
