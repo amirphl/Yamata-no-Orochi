@@ -121,7 +121,9 @@ func (h *TicketHandler) Create(c fiber.Ctx) error {
 	req.SavedFilePath = savedPath
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.flow.CreateTicket(h.createRequestContext(c, "/api/v1/tickets"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/tickets", 30*time.Second)
+	defer cancel()
+	result, err := h.flow.CreateTicket(ctx, &req, metadata)
 	if err != nil {
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -208,7 +210,9 @@ func (h *TicketHandler) CreateResponse(c fiber.Ctx) error {
 	req.SavedFilePath = savedPath
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.flow.CreateResponseTicket(h.createRequestContext(c, "/api/v1/tickets/reply"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/tickets/reply", 30*time.Second)
+	defer cancel()
+	result, err := h.flow.CreateResponseTicket(ctx, &req, metadata)
 	if err != nil {
 		if businessflow.IsCustomerNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
@@ -303,7 +307,9 @@ func (h *TicketHandler) List(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.flow.ListTickets(h.createRequestContext(c, "/api/v1/tickets"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/tickets", 30*time.Second)
+	defer cancel()
+	result, err := h.flow.ListTickets(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsStartDateAfterEndDate(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Start date must be before end date", "START_DATE_AFTER_END_DATE", nil)
@@ -354,8 +360,10 @@ func (h *TicketHandler) DownloadAttachment(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/tickets/{ticket_id}/attachments/{file_index}", 30*time.Second)
+	defer cancel()
 	filename, contentType, data, err := h.flow.DownloadTicketAttachment(
-		h.createRequestContext(c, "/api/v1/tickets/{ticket_id}/attachments/{file_index}"),
+		ctx,
 		customerID,
 		uint(ticketID),
 		fileIndex,
@@ -436,7 +444,9 @@ func (h *TicketHandler) AdminCreateResponse(c fiber.Ctx) error {
 
 	req.SavedFilePath = savedPath
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.flow.AdminCreateResponseTicket(h.createRequestContext(c, "/api/v1/admin/tickets/reply"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/tickets/reply", 30*time.Second)
+	defer cancel()
+	result, err := h.flow.AdminCreateResponseTicket(ctx, &req, metadata)
 	if err != nil {
 		if businessflow.IsTicketNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Ticket not found", "TICKET_NOT_FOUND", nil)
@@ -535,7 +545,9 @@ func (h *TicketHandler) AdminList(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	result, err := h.flow.AdminListTickets(h.createRequestContext(c, "/api/v1/admin/tickets"), req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/tickets", 30*time.Second)
+	defer cancel()
+	result, err := h.flow.AdminListTickets(ctx, req, metadata)
 	if err != nil {
 		if businessflow.IsStartDateAfterEndDate(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Start date must be before end date", "START_DATE_AFTER_END_DATE", nil)
@@ -546,11 +558,7 @@ func (h *TicketHandler) AdminList(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Admin tickets retrieved successfully", result)
 }
 
-func (h *TicketHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *TicketHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *TicketHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -558,7 +566,7 @@ func (h *TicketHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint st
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
 
 // saveUploadedFile writes multipart upload to disk under data/uploads/tickets/YYYY-MM-DD/
