@@ -47,7 +47,9 @@ func (h *SegmentPriceFactorHandler) ListLatest(c fiber.Ctx) error {
 		platform = &platformRaw
 	}
 
-	res, err := h.flow.ListLatestSegmentPriceFactors(h.createRequestContext(c, "/api/v1/segment-price-factors"), platform)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/segment-price-factors", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListLatestSegmentPriceFactors(ctx, platform)
 	if err != nil {
 		if businessflow.IsSegmentPriceFactorPlatformInvalid(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
@@ -58,11 +60,7 @@ func (h *SegmentPriceFactorHandler) ListLatest(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Segment price factors retrieved", res)
 }
 
-func (h *SegmentPriceFactorHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *SegmentPriceFactorHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *SegmentPriceFactorHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -70,5 +68,5 @@ func (h *SegmentPriceFactorHandler) createRequestContextWithTimeout(c fiber.Ctx,
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
