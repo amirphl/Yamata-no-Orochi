@@ -40,7 +40,9 @@ func (h *ShortLinkHandler) Visit(c fiber.Ctx) error {
 	ua := c.Get("User-Agent")
 	ip := c.IP()
 
-	link, err := h.flow.Visit(h.createRequestContext(c, "/s/"+uid), uid, &ua, &ip)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/s/"+uid, 10*time.Second)
+	defer cancel()
+	link, err := h.flow.Visit(ctx, uid, &ua, &ip)
 	if err != nil {
 		if businessflow.IsShortLinkNotFound(err) {
 			return c.Status(fiber.StatusNotFound).SendString("not found")
@@ -52,11 +54,7 @@ func (h *ShortLinkHandler) Visit(c fiber.Ctx) error {
 	return nil
 }
 
-func (h *ShortLinkHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 10*time.Second)
-}
-
-func (h *ShortLinkHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *ShortLinkHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -64,5 +62,5 @@ func (h *ShortLinkHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
