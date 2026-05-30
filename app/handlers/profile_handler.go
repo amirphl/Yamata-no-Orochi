@@ -56,7 +56,9 @@ func (h *ProfileHandler) GetProfile(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
 
-	res, err := h.flow.GetProfile(h.createRequestContext(c, "/api/v1/profile"), customerID)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/profile", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.GetProfile(ctx, customerID)
 	if err != nil {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to get profile", "GET_PROFILE_FAILED", nil)
 	}
@@ -67,11 +69,7 @@ func (h *ProfileHandler) GetProfile(c fiber.Ctx) error {
 	})
 }
 
-func (h *ProfileHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *ProfileHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *ProfileHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -79,5 +77,5 @@ func (h *ProfileHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint s
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
