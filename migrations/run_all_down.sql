@@ -3,11 +3,20 @@
 
 \echo 'Starting database rollback...'
 
-\echo 'Running 0081_add_admin_audit_actions_down.sql...'
-\i migrations/0081_add_admin_audit_actions_down.sql
+\echo 'Running 0085_add_admin_deposit_receipt_review_action_down.sql...'
+\i migrations/0085_add_admin_deposit_receipt_review_action_down.sql
+
+\echo 'Running 0084_add_invoice_number_to_deposit_receipts_down.sql...'
+\i migrations/0084_add_invoice_number_to_deposit_receipts_down.sql
+
+\echo 'Running 0083_add_deposit_receipt_audit_action_down.sql...'
+\i migrations/0083_add_deposit_receipt_audit_action_down.sql
 
 \echo 'Running 0082_create_deposit_receipts_down.sql...'
 \i migrations/0082_create_deposit_receipts_down.sql
+
+\echo 'Running 0081_add_admin_audit_actions_down.sql...'
+\i migrations/0081_add_admin_audit_actions_down.sql
 
 \echo 'Running 0080_add_lang_to_payment_requests_down.sql...'
 \i migrations/0080_add_lang_to_payment_requests_down.sql
