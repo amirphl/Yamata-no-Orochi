@@ -58,7 +58,9 @@ func (h *PlatformSettingsAdminHandler) SuccessResponse(c fiber.Ctx, statusCode i
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/admin/platform-settings [get]
 func (h *PlatformSettingsAdminHandler) List(c fiber.Ctx) error {
-	res, err := h.flow.ListPlatformSettingsByAdmin(h.createRequestContext(c, "/api/v1/admin/platform-settings"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/platform-settings", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ListPlatformSettingsByAdmin(ctx)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -97,7 +99,9 @@ func (h *PlatformSettingsAdminHandler) ChangeStatus(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.ChangePlatformSettingsStatusByAdmin(h.createRequestContext(c, "/api/v1/admin/platform-settings/status"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/platform-settings/status", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.ChangePlatformSettingsStatusByAdmin(ctx, &req, metadata)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -141,7 +145,9 @@ func (h *PlatformSettingsAdminHandler) AddMetadata(c fiber.Ctx) error {
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	res, err := h.flow.AddMetadataByAdmin(h.createRequestContext(c, "/api/v1/admin/platform-settings/metadata"), &req, metadata)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/platform-settings/metadata", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.AddMetadataByAdmin(ctx, &req, metadata)
 	if err != nil {
 		if be, ok := err.(*businessflow.BusinessError); ok {
 			switch be.Code {
@@ -159,11 +165,7 @@ func (h *PlatformSettingsAdminHandler) AddMetadata(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Platform settings metadata updated successfully", res)
 }
 
-func (h *PlatformSettingsAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *PlatformSettingsAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *PlatformSettingsAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -174,5 +176,5 @@ func (h *PlatformSettingsAdminHandler) createRequestContextWithTimeout(c fiber.C
 	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
 		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
 	}
-	return ctx
+	return ctx, cancel
 }
