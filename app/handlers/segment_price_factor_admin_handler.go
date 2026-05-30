@@ -67,7 +67,9 @@ func (h *SegmentPriceFactorAdminHandler) CreateSegmentPriceFactor(c fiber.Ctx) e
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
 	}
 
-	res, err := h.flow.AdminCreateSegmentPriceFactor(h.createRequestContext(c, "/api/v1/admin/segment-price-factors"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/segment-price-factors", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.AdminCreateSegmentPriceFactor(ctx, &req)
 	if err != nil {
 		if businessflow.IsLevel3Required(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Level3 is required", "LEVEL3_REQUIRED", nil)
@@ -101,7 +103,9 @@ func (h *SegmentPriceFactorAdminHandler) ListSegmentPriceFactors(c fiber.Ctx) er
 		platform = &platformRaw
 	}
 
-	res, err := h.flow.AdminListSegmentPriceFactors(h.createRequestContext(c, "/api/v1/admin/segment-price-factors"), platform)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/segment-price-factors", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.AdminListSegmentPriceFactors(ctx, platform)
 	if err != nil {
 		if businessflow.IsSegmentPriceFactorPlatformInvalid(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
@@ -121,7 +125,9 @@ func (h *SegmentPriceFactorAdminHandler) ListSegmentPriceFactors(c fiber.Ctx) er
 // @Failure 500 {object} dto.APIResponse "List failed"
 // @Router /api/v1/admin/segment-price-factors/level3-options [get]
 func (h *SegmentPriceFactorAdminHandler) ListLevel3Options(c fiber.Ctx) error {
-	res, err := h.flow.AdminListLevel3Options(h.createRequestContext(c, "/api/v1/admin/segment-price-factors/level3-options"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/segment-price-factors/level3-options", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.AdminListLevel3Options(ctx)
 	if err != nil {
 		log.Println("List level3 options failed:", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "List level3 options failed", "SEGMENT_PRICE_FACTOR_LEVEL3_LIST_FAILED", nil)
@@ -129,12 +135,7 @@ func (h *SegmentPriceFactorAdminHandler) ListLevel3Options(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Level3 options retrieved", res)
 }
 
-// createRequestContext mirrors other handlers for request-scoped values
-func (h *SegmentPriceFactorAdminHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *SegmentPriceFactorAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *SegmentPriceFactorAdminHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -145,5 +146,5 @@ func (h *SegmentPriceFactorAdminHandler) createRequestContextWithTimeout(c fiber
 	if adminID, ok := middleware.GetAdminIDFromContext(c); ok {
 		ctx = context.WithValue(ctx, utils.AdminIDKey, adminID)
 	}
-	return ctx
+	return ctx, cancel
 }
