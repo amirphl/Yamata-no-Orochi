@@ -69,6 +69,8 @@ const (
 	AuditActionPaymentCancelled            = "payment_cancelled"
 	AuditActionPaymentExpired              = "payment_expired"
 	AuditActionTransactionHistoryRetrieved = "transaction_history_retrieved"
+	AuditActionDepositReceiptSubmitted     = "deposit_receipt_submitted"
+	AuditActionAdminDepositReceiptReviewed = "admin_deposit_receipt_reviewed"
 
 	// Agency discount actions
 	AuditActionCreateDiscountByAgencyFailed    = "create_discount_by_agency_failed"
