@@ -55,7 +55,9 @@ func (h *ShortLinkBotHandler) CreateShortLink(c fiber.Ctx) error {
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	res, err := h.flow.CreateShortLink(h.createRequestContext(c, "/api/v1/bot/short-links/one"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links/one", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.CreateShortLink(ctx, &req)
 	if err != nil {
 		log.Println("Bot create short link failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to create short link", "CREATE_SHORT_LINK_FAILED", nil)
@@ -81,7 +83,9 @@ func (h *ShortLinkBotHandler) CreateShortLinks(c fiber.Ctx) error {
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	res, err := h.flow.CreateShortLinks(h.createRequestContext(c, "/api/v1/bot/short-links"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links", 30*time.Second)
+	defer cancel()
+	res, err := h.flow.CreateShortLinks(ctx, &req)
 	if err != nil {
 		log.Println("Bot create short links failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to create short links", "CREATE_SHORT_LINKS_FAILED", nil)
@@ -107,7 +111,9 @@ func (h *ShortLinkBotHandler) AllocateShortLinks(c fiber.Ctx) error {
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	codes, err := h.flow.GenerateAndCreateShortLinks(h.createRequestContext(c, "/api/v1/bot/short-links/allocate"), &req)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links/allocate", 30*time.Second)
+	defer cancel()
+	codes, err := h.flow.GenerateAndCreateShortLinks(ctx, &req)
 	if err != nil {
 		log.Println("Bot allocate short links failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to allocate short links", "ALLOCATE_SHORT_LINKS_FAILED", nil)
@@ -115,11 +121,7 @@ func (h *ShortLinkBotHandler) AllocateShortLinks(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Short links allocated", dto.BotAllocateShortLinksResponse{Message: "Short links allocated", Codes: codes})
 }
 
-func (h *ShortLinkBotHandler) createRequestContext(c fiber.Ctx, endpoint string) context.Context {
-	return h.createRequestContextWithTimeout(c, endpoint, 30*time.Second)
-}
-
-func (h *ShortLinkBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) context.Context {
+func (h *ShortLinkBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	ctx = context.WithValue(ctx, utils.RequestIDKey, c.Get("X-Request-ID"))
 	ctx = context.WithValue(ctx, utils.UserAgentKey, c.Get("User-Agent"))
@@ -127,5 +129,5 @@ func (h *ShortLinkBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpo
 	ctx = context.WithValue(ctx, utils.EndpointKey, endpoint)
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
-	return ctx
+	return ctx, cancel
 }
