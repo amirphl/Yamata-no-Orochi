@@ -467,6 +467,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	campaignFlow := businessflow.NewCampaignFlow(
 		campaignRepo,
+		shortLinkRepo,
 		customerRepo,
 		multimediaRepo,
 		platformSettingsRepo,
@@ -568,6 +569,10 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		adminRepo,
 		tokenService,
 		captchaSvc,
+		otpSMSService,
+		cfg.Admin,
+		cfg.Message,
+		rc,
 	)
 
 	botAuthFlow := businessflow.NewBotAuthFlow(
