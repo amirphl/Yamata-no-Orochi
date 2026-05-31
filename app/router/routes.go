@@ -250,6 +250,7 @@ func (r *FiberRouter) SetupRoutes() {
 	}))
 	adminAuth.Get("/captcha/init", r.authAdminHandler.InitCaptcha)
 	adminAuth.Post("/login", r.authAdminHandler.VerifyLogin)
+	adminAuth.Post("/login/verify-otp", r.authAdminHandler.VerifyLoginOTP)
 
 	// Bot auth
 	botAuth := api.Group("/bot/auth")
@@ -496,6 +497,11 @@ func (r *FiberRouter) SetupRoutes() {
 	// Public short-link redirect (no auth)
 	r.app.Get("/s/:uid", r.shortLinkHandler.Visit)
 	r.app.Get("/:uid", r.shortLinkHandler.Visit)
+
+	// Public tst short-link redirect (no auth)
+	// Handles /s/tst7df343 and /tst7df343
+	r.app.Get("/s/tst:uid", r.shortLinkHandler.Visit)
+	r.app.Get("/tst:uid", r.shortLinkHandler.Visit)
 
 	// Not found handler
 	r.app.Use(r.notFoundHandler)
