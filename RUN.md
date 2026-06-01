@@ -31,6 +31,10 @@ python3 add_segment_price_factor.py --dbname somedb --user mac --password postgr
 
 Add credit to your user in http://localhost:8081/satrap/sardis/payments
 
+Add superadmin role to created admin.
+
+Fill base price table.
+
 kernel sysctl
 
 ssh keybased authentication, disable password based auth
