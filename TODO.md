@@ -71,4 +71,20 @@ refactor front end
 
 https://app.oxapay.com/merchant-service
 https://docs.oxapay.com/webhook
-
+- Admin permission hardening (open items)
+  - Add MFA to admin login flow (TOTP/SMS/Email OTP) after captcha/password; store per-admin MFA secret/status; enforce on login.
+  - Add step-up MFA for high-risk actions (payment:*, platform-base-price:create, acl:approve, audit exports) requiring fresh MFA within N minutes.
+  - Shorten admin access-token TTL; rotate refresh-token secrets regularly and revoke on ACL change or password change.
+  - Require dual approval for superadmin grants or restrict acl:approve for superadmin role changes to designated approvers.
+  - Provide UI/CRUD to assign roles/overrides plus read-only audit trail of ACL changes (API exists; UI missing).
+  - Implement step-up guard details: define HighRiskPermissions set (payment:*, platform-base-price:create, acl:approve, audit export); extend AdminAuthorize to enforce recent-MFA flag (else 403 MFA_REQUIRED); persist last_admin_mfa_at with short TTL (10–15 min); ensure login MFA flow sets the flag and re-prompts when expired.
+- Auditing & observability gaps
+  - Emit audit events for permission checks (success/failure with admin_id, permission key, target route/resource).
+  - Add monitoring/dashboard/alerts for permission-deny spikes to catch misconfigurations.
+- Testing & safety rails
+  - Add unit tests that walk RoutePermissionRegistry vs router to ensure all admin routes are mapped and guarded.
+  - Dry-run mode in lower envs to log routes missing permission mappings when new endpoints are added.
+  - Periodic “effective ACL” report per admin to detect privilege creep (roles + allows/denies + derived permissions).
+- Migration path
+  - Start with role-based enforcement; then add per-admin allow/deny overrides (keep report-only toggle to ease rollout).
+  - Backfill permission map for existing routes and run in “report-only” mode to surface gaps before strict enforcement.
