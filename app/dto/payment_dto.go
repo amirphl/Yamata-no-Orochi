@@ -11,7 +11,7 @@ import (
 type ChargeWalletRequest struct {
 	AmountWithTax uint64 `json:"amount" validate:"required,min=1000,max=1000000000"` // Amount in Tomans (minimum 1000, maximum 1000000000)
 	CustomerID    uint   `json:"-"`
-	Lang          string `json:"lang,omitempty" validate:"omitempty,oneof=FA EN"`
+	Lang          string `json:"lang,omitempty" validate:"omitempty,oneof=FA EN fa en"`
 }
 
 // ChargeWalletResponse represents the response after successfully charging a wallet
@@ -65,16 +65,19 @@ type GetTransactionHistoryRequest struct {
 
 // TransactionHistoryItem represents a single transaction history item
 type TransactionHistoryItem struct {
-	UUID          string            `json:"uuid"`                                        // Transaction UUID
-	Status        string            `json:"status"`                                      // Transaction status
-	Amount        uint64            `json:"amount"`                                      // Amount in Tomans
-	Currency      string            `json:"currency"`                                    // Currency (usually TMN)
-	Operation     string            `json:"operation"`                                   // Operation name for display
-	DateTime      time.Time         `json:"datetime"`                                    // When the transaction occurred
-	ExternalRef   *string           `json:"external_ref,omitempty" validate:"omitempty"` // External reference (e.g., Atipay reference)
-	BalanceBefore map[string]uint64 `json:"balance_before"`                              // Balance before transaction
-	BalanceAfter  map[string]uint64 `json:"balance_after"`                               // Balance after transaction
-	Metadata      map[string]any    `json:"metadata,omitempty" validate:"omitempty"`     // Additional transaction metadata
+	UUID               string            `json:"uuid"`                                        // Transaction UUID
+	Status             string            `json:"status"`                                      // Transaction status
+	Amount             uint64            `json:"amount"`                                      // Amount in Tomans
+	CustomerCredit     uint64            `json:"customer_credit"`                              // Customer credit portion (when applicable)
+	AgencyShareWithTax uint64            `json:"agency_share_with_tax"`                       // Agency share with tax (when applicable)
+	Currency           string            `json:"currency"`                                    // Currency (usually TMN)
+	Operation          string            `json:"operation"`                                   // Operation name for display
+	Source             string            `json:"source"`                                      // Metadata source key
+	DateTime           time.Time         `json:"datetime"`                                    // When the transaction occurred
+	ExternalRef        *string           `json:"external_ref,omitempty" validate:"omitempty"` // External reference (e.g., Atipay reference)
+	BalanceBefore      map[string]uint64 `json:"balance_before"`                              // Balance before transaction
+	BalanceAfter       map[string]uint64 `json:"balance_after"`                               // Balance after transaction
+	Metadata           map[string]any    `json:"metadata,omitempty" validate:"omitempty"`     // Additional transaction metadata
 }
 
 // TransactionHistoryResponse represents the response for transaction history
