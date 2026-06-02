@@ -24,6 +24,7 @@ type PaymentHandlerInterface interface {
 	SubmitDepositReceipt(c fiber.Ctx) error
 	ListDepositReceipts(c fiber.Ctx) error
 	PreviewProformaInvoice(c fiber.Ctx) error
+	PreviewProformaInvoiceByAmount(c fiber.Ctx) error
 	DownloadDepositReceiptFile(c fiber.Ctx) error
 	UpdateDepositReceiptFile(c fiber.Ctx) error
 	DeleteDepositReceiptFile(c fiber.Ctx) error
@@ -600,7 +601,7 @@ func (h *PaymentHandler) PreviewProformaInvoice(c fiber.Ctx) error {
 	receiptUUID := c.Query("receipt_uuid")
 	lang := c.Query("lang")
 	if strings.TrimSpace(receiptUUID) == "" {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid receipt_uuid", "INVALID_RECEIPT", nil)
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "receipt_uuid is required", "INVALID_RECEIPT", nil)
 	}
 	resp, err := h.paymentFlow.PreviewProformaInvoice(h.createRequestContext(c, "/api/v1/payments/proforma/preview"), customerID, receiptUUID, lang)
 	if err != nil {
@@ -610,7 +611,50 @@ func (h *PaymentHandler) PreviewProformaInvoice(c fiber.Ctx) error {
 		if businessflow.IsDepositReceiptNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Receipt not found", "RECEIPT_NOT_FOUND", nil)
 		}
+		if businessflow.IsAmountTooLow(err) || businessflow.IsAmountNotMultiple(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
+		}
 		log.Println("Preview proforma failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to preview proforma invoice", "PROFORMA_PREVIEW_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Proforma preview generated", resp)
+}
+
+// PreviewProformaInvoiceByAmount returns proforma data using user-provided amount (no receipt).
+// @Summary Preview proforma invoice by amount
+// @Description Returns proforma invoice data using supplied amount (no receipt).
+// @Tags Payments
+// @Produce json
+// @Param amount query int true "Amount with tax (Toman)"
+// @Param lang query string false "Language (FA or EN)"
+// @Success 200 {object} dto.APIResponse{data=dto.ProformaPreviewResponse} "Preview generated"
+// @Failure 400 {object} dto.APIResponse "Invalid amount or language"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/payments/proforma/preview-by-amount [get]
+func (h *PaymentHandler) PreviewProformaInvoiceByAmount(c fiber.Ctx) error {
+	customerID, _ := c.Locals("customer_id").(uint)
+	if customerID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	amountStr := c.Query("amount")
+	if strings.TrimSpace(amountStr) == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Amount is required", "INVALID_AMOUNT", nil)
+	}
+	amount, err := strconv.ParseUint(amountStr, 10, 64)
+	if err != nil || amount == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
+	}
+	lang := c.Query("lang")
+	resp, err := h.paymentFlow.PreviewProformaInvoiceByAmount(h.createRequestContext(c, "/api/v1/payments/proforma/preview-by-amount"), customerID, amount, lang)
+	if err != nil {
+		if businessflow.IsInvalidLanguage(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid language", "INVALID_LANGUAGE", nil)
+		}
+		if businessflow.IsAmountTooLow(err) || businessflow.IsAmountNotMultiple(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid amount", "INVALID_AMOUNT", nil)
+		}
+		log.Println("Preview proforma by amount failed", err)
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to preview proforma invoice", "PROFORMA_PREVIEW_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Proforma preview generated", resp)
