@@ -34,6 +34,7 @@ type PaymentFlow interface {
 	SubmitDepositReceipt(ctx context.Context, req *dto.SubmitDepositReceiptRequest, metadata *ClientMetadata) (*dto.SubmitDepositReceiptResponse, error)
 	ListDepositReceipts(ctx context.Context, customerID uint, lang string) (*dto.ListDepositReceiptsResponse, error)
 	PreviewProformaInvoice(ctx context.Context, customerID uint, receiptUUID string, lang string) (*dto.ProformaPreviewResponse, error)
+	PreviewProformaInvoiceByAmount(ctx context.Context, customerID uint, amountWithTax uint64, lang string) (*dto.ProformaPreviewResponse, error)
 	DownloadDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) ([]byte, string, string, error)
 	UpdateDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string, req *dto.UpdateDepositReceiptFileRequest) error
 	DeleteDepositReceiptFile(ctx context.Context, customerID uint, receiptUUID string) error
@@ -221,6 +222,7 @@ func (p *PaymentFlowImpl) createPaymentRequest(ctx context.Context, customer mod
 		"agency_discount_id":    agencyDiscount.ID,
 		"agency_id":             customer.ReferrerAgencyID,
 		"customer_id":           customer.ID,
+		"payment_channel":       "atipay",
 	})
 
 	// Create payment request
@@ -812,6 +814,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		"agency_share_tax":      taxAgencyShare,
 		"customer_credit":       customerCredit,
 		"atipay_response":       atipayRequest,
+		"payment_channel":       m["payment_channel"],
 	}
 	if source, ok := m["source"]; ok {
 		metadata["payment_request_source"] = source
@@ -881,6 +884,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 		return err
 	}
 
+	// Update agency wallet balance
 	newAgencyShareWithTax := agencyBalance.AgencyShareWithTax + agencyShareWithTax
 	metadata["source"] = models.TransactionSourceIncreaseAgencyShareWithTax
 	metadata["operation"] = "increase_agency_share_with_tax"
@@ -1230,30 +1234,26 @@ func (p *PaymentFlowImpl) GetTransactionHistory(ctx context.Context, req *dto.Ge
 	// Calculate offset for pagination
 	offset := (req.Page - 1) * req.PageSize
 
-	filter := models.TransactionFilter{
-		WalletID:      &wallet.ID,
-		CustomerID:    &customer.ID,
-		CreatedAfter:  req.StartDate,
-		CreatedBefore: req.EndDate,
-	}
+	var txType *models.TransactionType
 	if req.Type != nil {
-		filter.Type = utils.ToPtr(models.TransactionType(*req.Type))
+		txType = utils.ToPtr(models.TransactionType(*req.Type))
 	}
+	var status *models.TransactionStatus
 	if req.Status != nil {
-		filter.Status = utils.ToPtr(models.TransactionStatus(*req.Status))
+		status = utils.ToPtr(models.TransactionStatus(*req.Status))
 	}
 
-	// Get transactions with pagination using available methods
-	transactions, err := p.transactionRepo.ByFilter(ctx, filter, "id DESC", int(req.PageSize), int(offset))
-	if err != nil {
-		return nil, err
-	}
-
-	filter = models.TransactionFilter{
-		WalletID:   &wallet.ID,
-		CustomerID: &customer.ID,
-	}
-	totalCount, err := p.transactionRepo.Count(ctx, filter)
+	transactions, totalCount, err := p.transactionRepo.GetHistoryWithMetadata(
+		ctx,
+		wallet.ID,
+		customer.ID,
+		req.StartDate,
+		req.EndDate,
+		txType,
+		status,
+		int(req.PageSize),
+		int(offset),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1299,12 +1299,6 @@ func (p *PaymentFlowImpl) validateGetTransactionHistoryRequest(req *dto.GetTrans
 
 // convertTransactionToTransactionHistoryItem converts a transaction model to a transaction history item DTO
 func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction *models.Transaction) (dto.TransactionHistoryItem, error) {
-	// Get human-readable operation name
-	operation := dto.TransactionTypeDisplay[transaction.Type]
-	if operation == "" {
-		operation = string(transaction.Type)
-	}
-
 	// Get human-readable status
 	status := dto.TransactionStatusDisplay[transaction.Status]
 	if status == "" {
@@ -1320,27 +1314,112 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	var balanceBefore map[string]uint64
 	var balanceAfter map[string]uint64
 
-	err := json.Unmarshal(transaction.BalanceBefore, &balanceBefore)
-	if err != nil {
+	if err := json.Unmarshal(transaction.BalanceBefore, &balanceBefore); err != nil {
 		return dto.TransactionHistoryItem{}, err
 	}
-	err = json.Unmarshal(transaction.BalanceAfter, &balanceAfter)
-	if err != nil {
+	if err := json.Unmarshal(transaction.BalanceAfter, &balanceAfter); err != nil {
 		return dto.TransactionHistoryItem{}, err
 	}
 
+	// Parse metadata for source/operation and financial breakdown
+	meta := map[string]any{}
+	_ = json.Unmarshal(transaction.Metadata, &meta)
+
+	source := toString(meta["source"])
+	operation := toString(meta["operation"])
+	if operation == "" {
+		operation = dto.TransactionTypeDisplay[transaction.Type]
+		if operation == "" {
+			operation = string(transaction.Type)
+		}
+	}
+	amount := toUint64(meta["amount"])
+	customerCredit := toUint64(meta["customer_credit"])
+	agencyShareWithTax := toUint64(meta["agency_share_with_tax"])
+
+	// Apply case-specific rules
+	switch {
+	case source == "payment_callback_increase_customer_free_plus_credit" && operation == "increase_customer_free_plus_credit":
+		// amount & customerCredit already parsed; agency share forced to 0
+		if amount == 0 {
+			amount = transaction.Amount
+		}
+		agencyShareWithTax = 0
+	case source == models.TransactionSourceIncreaseAgencyShareWithTax && operation == "increase_agency_share_with_tax":
+		// For agency share entries, zero out amount/credit and keep agency share
+		amount = 0
+		customerCredit = 0
+	default:
+		// Fallback to transaction amount
+		if amount == 0 {
+			amount = transaction.Amount
+		}
+	}
+
 	return dto.TransactionHistoryItem{
-		UUID:          transaction.UUID.String(),
-		Status:        status,
-		Amount:        transaction.Amount,
-		Currency:      transaction.Currency,
-		Operation:     operation,
-		DateTime:      transaction.CreatedAt,
-		ExternalRef:   externalRef,
-		BalanceBefore: balanceBefore,
-		BalanceAfter:  balanceAfter,
-		Metadata:      nil,
+		UUID:               transaction.UUID.String(),
+		Status:             status,
+		Amount:             amount,
+		CustomerCredit:     customerCredit,
+		AgencyShareWithTax: agencyShareWithTax,
+		Currency:           transaction.Currency,
+		Operation:          operation,
+		Source:             source,
+		DateTime:           transaction.CreatedAt,
+		ExternalRef:        externalRef,
+		BalanceBefore:      balanceBefore,
+		BalanceAfter:       balanceAfter,
+		Metadata:           meta,
 	}, nil
+}
+
+func toString(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case fmt.Stringer:
+		return t.String()
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+func toUint64(v any) uint64 {
+	switch t := v.(type) {
+	case nil:
+		return 0
+	case uint64:
+		return t
+	case uint:
+		return uint64(t)
+	case int64:
+		if t < 0 {
+			return 0
+		}
+		return uint64(t)
+	case int:
+		if t < 0 {
+			return 0
+		}
+		return uint64(t)
+	case float64:
+		if t < 0 {
+			return 0
+		}
+		return uint64(t)
+	case json.Number:
+		if i, err := t.Int64(); err == nil && i > 0 {
+			return uint64(i)
+		}
+		if f, err := t.Float64(); err == nil && f > 0 {
+			return uint64(f)
+		}
+		return 0
+	default:
+		return 0
+	}
 }
 
 // calculatePaginationInfo calculates pagination metadata
@@ -1613,6 +1692,78 @@ func (p *PaymentFlowImpl) PreviewProformaInvoice(ctx context.Context, customerID
 	if buyerName == "" && customer.CompanyName != nil {
 		buyerName = *customer.CompanyName
 	}
+	data := map[string]any{
+		"invoice_number":  invoiceNumber,
+		"date":            now.Format("2006-01-02"),
+		"amount_with_tax": amountWithTax,
+		"amount":          real,
+		"tax":             tax,
+		"service": map[string]any{
+			"description": serviceDesc,
+		},
+		"buyer": map[string]any{
+			"customer_uuid": customer.UUID.String(),
+			"name":          buyerName,
+			"company_name":  customer.CompanyName,
+			"mobile":        customer.RepresentativeMobile,
+			"company_phone": customer.CompanyPhone,
+			"address":       customer.CompanyAddress,
+			"national_id":   customer.NationalID,
+			"postal_code":   customer.PostalCode,
+			"email":         customer.Email,
+		},
+		"seller": map[string]any{
+			"name":           sellerName,
+			"economic_code":  "N/A",
+			"national_id":    "N/A",
+			"sheba":          "N/A",
+			"bank_name":      "N/A",
+			"account_number": "N/A",
+			"card_number":    "N/A",
+			"iban":           "N/A",
+		},
+		"notes": notes,
+		"lang":  lang,
+	}
+	return &dto.ProformaPreviewResponse{Success: true, Data: data}, nil
+}
+
+// PreviewProformaInvoiceByAmount builds proforma data using a user-supplied amount (no receipt).
+func (p *PaymentFlowImpl) PreviewProformaInvoiceByAmount(ctx context.Context, customerID uint, amountWithTax uint64, lang string) (*dto.ProformaPreviewResponse, error) {
+	lang = strings.ToUpper(strings.TrimSpace(lang))
+	if lang == "" {
+		lang = "EN"
+	}
+	if lang != "EN" && lang != "FA" {
+		return nil, ErrInvalidLanguage
+	}
+	// if amountWithTax < 1000 {
+	// 	return nil, ErrAmountTooLow
+	// }
+	// if amountWithTax%1000 != 0 {
+	// 	return nil, ErrAmountNotMultiple
+	// }
+	customer, err := getCustomer(ctx, p.customerRepo, customerID)
+	if err != nil {
+		return nil, err
+	}
+	now := utils.UTCNow()
+	invoiceNumber := "-"
+	real := uint64(float64(amountWithTax) * 10 / 11)
+	tax := amountWithTax - real
+	serviceDesc := "Jazebeh wallet top-up"
+	notes := "This is a proforma invoice. Final invoice will be issued after payment confirmation."
+	sellerName := "Jazebeh Platform"
+	if lang == "FA" {
+		serviceDesc = "شارژ کیف پول جاذبه"
+		notes = "این پیش‌فاکتور است؛ فاکتور نهایی پس از پرداخت و تأیید صادر می‌شود."
+		sellerName = "پلتفرم جاذبه"
+	}
+	buyerName := strings.TrimSpace(customer.RepresentativeFirstName + " " + customer.RepresentativeLastName)
+	if buyerName == "" && customer.CompanyName != nil {
+		buyerName = *customer.CompanyName
+	}
+
 	data := map[string]any{
 		"invoice_number":  invoiceNumber,
 		"date":            now.Format("2006-01-02"),
