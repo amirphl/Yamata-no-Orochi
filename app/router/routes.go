@@ -42,6 +42,7 @@ type FiberRouter struct {
 	paymentAdminHandler            handlers.PaymentAdminHandlerInterface
 	agencyHandler                  handlers.AgencyHandlerInterface
 	authMiddleware                 *middleware.AuthMiddleware
+	authzMiddleware                *middleware.AuthorizationMiddleware
 	authAdminHandler               handlers.AuthAdminHandlerInterface
 	authBotHandler                 handlers.AuthBotHandlerInterface
 	campaignAdminHandler           handlers.CampaignAdminHandlerInterface
@@ -62,6 +63,7 @@ type FiberRouter struct {
 	multimediaBotHandler           handlers.MultimediaBotHandlerInterface
 	platformSettingsHandler        handlers.PlatformSettingsHandlerInterface
 	platformSettingsAdminHandler   handlers.PlatformSettingsAdminHandlerInterface
+	accessControlHandler           handlers.AccessControlHandlerInterface
 }
 
 // NewFiberRouter creates a new Fiber router
@@ -72,6 +74,7 @@ func NewFiberRouter(
 	paymentAdminHandler handlers.PaymentAdminHandlerInterface,
 	agencyHandler handlers.AgencyHandlerInterface,
 	authMiddleware *middleware.AuthMiddleware,
+	authzMiddleware *middleware.AuthorizationMiddleware,
 	authAdminHandler handlers.AuthAdminHandlerInterface,
 	authBotHandler handlers.AuthBotHandlerInterface,
 	campaignAdminHandler handlers.CampaignAdminHandlerInterface,
@@ -92,6 +95,7 @@ func NewFiberRouter(
 	multimediaBotHandler handlers.MultimediaBotHandlerInterface,
 	platformSettingsHandler handlers.PlatformSettingsHandlerInterface,
 	platformSettingsAdminHandler handlers.PlatformSettingsAdminHandlerInterface,
+	accessControlHandler handlers.AccessControlHandlerInterface,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
@@ -116,6 +120,7 @@ func NewFiberRouter(
 		paymentAdminHandler:            paymentAdminHandler,
 		agencyHandler:                  agencyHandler,
 		authMiddleware:                 authMiddleware,
+		authzMiddleware:                authzMiddleware,
 		authAdminHandler:               authAdminHandler,
 		authBotHandler:                 authBotHandler,
 		campaignAdminHandler:           campaignAdminHandler,
@@ -137,6 +142,7 @@ func NewFiberRouter(
 		multimediaBotHandler:           multimediaBotHandler,
 		platformSettingsHandler:        platformSettingsHandler,
 		platformSettingsAdminHandler:   platformSettingsAdminHandler,
+		accessControlHandler:           accessControlHandler,
 	}
 }
 
@@ -262,6 +268,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCampaigns := api.Group("/admin/campaigns")
 	adminCampaigns.Use(r.authMiddleware.AdminAuthenticate())
 	adminCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminCampaigns.Use(r.authzMiddleware.AdminAuthorize())
 	adminCampaigns.Get("/", r.campaignAdminHandler.ListCampaigns)
 	adminCampaigns.Get("/:id", r.campaignAdminHandler.GetCampaign)
 	adminCampaigns.Post("/approve", r.campaignAdminHandler.ApproveCampaign)
@@ -274,6 +281,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminSegmentPF := api.Group("/admin/segment-price-factors")
 	adminSegmentPF.Use(r.authMiddleware.AdminAuthenticate())
 	adminSegmentPF.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminSegmentPF.Use(r.authzMiddleware.AdminAuthorize())
 	adminSegmentPF.Post("/", r.segmentPriceFactorAdminHandler.CreateSegmentPriceFactor)
 	adminSegmentPF.Get("/", r.segmentPriceFactorAdminHandler.ListSegmentPriceFactors)
 	adminSegmentPF.Get("/level3-options", r.segmentPriceFactorAdminHandler.ListLevel3Options)
@@ -307,6 +315,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminShortLinks := api.Group("/admin/short-links")
 	adminShortLinks.Use(r.authMiddleware.AdminAuthenticate())
 	adminShortLinks.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminShortLinks.Use(r.authzMiddleware.AdminAuthorize())
 	adminShortLinks.Post("/upload-csv", r.shortLinkAdminHandler.UploadCSV)
 	adminShortLinks.Post("/download", r.shortLinkAdminHandler.DownloadByScenario)
 	adminShortLinks.Post("/download-with-clicks", r.shortLinkAdminHandler.DownloadWithClicksByScenario)
@@ -317,6 +326,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCustomers := api.Group("/admin/customer-management")
 	adminCustomers.Use(r.authMiddleware.AdminAuthenticate())
 	adminCustomers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminCustomers.Use(r.authzMiddleware.AdminAuthorize())
 	adminCustomers.Get("/", r.adminCustomerManagementHandler.ListCustomers)
 	adminCustomers.Get("/shares", r.adminCustomerManagementHandler.GetCustomersShares)
 	adminCustomers.Get("/:customer_id", r.adminCustomerManagementHandler.GetCustomerWithCampaigns)
@@ -337,6 +347,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminLineNumbers := api.Group("/admin/line-numbers")
 	adminLineNumbers.Use(r.authMiddleware.AdminAuthenticate())
 	adminLineNumbers.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminLineNumbers.Use(r.authzMiddleware.AdminAuthorize())
 	adminLineNumbers.Get("/", r.lineNumberAdminHandler.ListLineNumbers)
 	adminLineNumbers.Post("/", r.lineNumberAdminHandler.CreateLineNumber)
 	adminLineNumbers.Put("/", r.lineNumberAdminHandler.UpdateLineNumbersBatch)
@@ -354,6 +365,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminTickets := api.Group("/admin/tickets")
 	adminTickets.Use(r.authMiddleware.AdminAuthenticate())
 	adminTickets.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminTickets.Use(r.authzMiddleware.AdminAuthorize())
 	adminTickets.Post("/reply", r.ticketHandler.AdminCreateResponse)
 	adminTickets.Get("/", r.ticketHandler.AdminList)
 
@@ -375,6 +387,7 @@ func (r *FiberRouter) SetupRoutes() {
 	payments.Get("/deposit-receipts", r.authMiddleware.Authenticate(), r.paymentHandler.ListDepositReceipts)
 	// Proforma invoice preview
 	payments.Get("/proforma/preview", r.authMiddleware.Authenticate(), r.paymentHandler.PreviewProformaInvoice)
+	payments.Get("/proforma/preview-by-amount", r.authMiddleware.Authenticate(), r.paymentHandler.PreviewProformaInvoiceByAmount)
 	// Receipt file download
 	payments.Get("/deposit-receipts/:receipt_uuid/file", r.authMiddleware.Authenticate(), r.paymentHandler.DownloadDepositReceiptFile)
 	// Receipt file update/delete
@@ -385,6 +398,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminPayments := api.Group("/admin/payments")
 	adminPayments.Use(r.authMiddleware.AdminAuthenticate())
 	adminPayments.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminPayments.Use(r.authzMiddleware.AdminAuthorize())
 	adminPayments.Post("/charge-wallet", r.paymentAdminHandler.ChargeWallet)
 	adminPayments.Get("/deposit-receipts", r.paymentAdminHandler.ListDepositReceipts)
 	adminPayments.Get("/deposit-receipts/:uuid/file", r.paymentAdminHandler.GetDepositReceiptFile)
@@ -423,6 +437,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminMedia := api.Group("/admin/media")
 	adminMedia.Use(r.authMiddleware.AdminAuthenticate())
 	adminMedia.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminMedia.Use(r.authzMiddleware.AdminAuthorize())
 	adminMedia.Get("/:uuid", r.multimediaAdminHandler.Download)
 	adminMedia.Get("/:uuid/preview", r.multimediaAdminHandler.Preview)
 
@@ -436,9 +451,18 @@ func (r *FiberRouter) SetupRoutes() {
 	adminPlatformSettings := api.Group("/admin/platform-settings")
 	adminPlatformSettings.Use(r.authMiddleware.AdminAuthenticate())
 	adminPlatformSettings.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminPlatformSettings.Use(r.authzMiddleware.AdminAuthorize())
 	adminPlatformSettings.Get("/", r.platformSettingsAdminHandler.List)
 	adminPlatformSettings.Put("/status", r.platformSettingsAdminHandler.ChangeStatus)
 	adminPlatformSettings.Put("/metadata", r.platformSettingsAdminHandler.AddMetadata)
+
+	// Admin access-control (maker-checker)
+	acl := api.Group("/admin/access-control")
+	acl.Use(r.authMiddleware.AdminAuthenticate())
+	acl.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	acl.Use(r.authzMiddleware.AdminAuthorize())
+	acl.Post("/requests", r.accessControlHandler.CreateRequest)
+	acl.Post("/requests/:uuid/decision", r.accessControlHandler.ApproveRequest)
 
 	// Public short-link redirect (no auth)
 	r.app.Get("/s/:uid", r.shortLinkHandler.Visit)
@@ -532,8 +556,7 @@ func (r *FiberRouter) setupMiddleware() {
 				!contains(c.Path(), "/health") &&
 					!contains(c.Path(), "/docs")
 		},
-		Expiration:   30 * time.Minute,
-		CacheControl: true,
+		Expiration: 30 * time.Minute,
 	}))
 
 	// Advanced logging middleware
