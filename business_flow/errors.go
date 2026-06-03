@@ -174,6 +174,13 @@ var (
 	ErrDepositReceiptFileTooLarge     = errors.New("deposit receipt file too large")
 	ErrDepositReceiptFileInvalidType  = errors.New("deposit receipt file type is not allowed")
 	ErrDepositReceiptFileEmpty        = errors.New("deposit receipt file is empty")
+
+	// Platform base prices
+	ErrPlatformBasePriceNotFound = errors.New("platform base price not found")
+
+	ErrNotFound     = errors.New("not found")
+	ErrInvalidState = errors.New("invalid state")
+	ErrForbidden    = errors.New("forbidden")
 )
 
 type BusinessError struct {
@@ -678,3 +685,7 @@ func IsDepositReceiptFileInvalidType(err error) bool {
 	return errors.Is(err, ErrDepositReceiptFileInvalidType)
 }
 func IsDepositReceiptFileEmpty(err error) bool { return errors.Is(err, ErrDepositReceiptFileEmpty) }
+
+func IsPlatformBasePriceNotFound(err error) bool {
+	return errors.Is(err, ErrPlatformBasePriceNotFound)
+}
