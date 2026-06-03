@@ -49,6 +49,7 @@ type CampaignFlowImpl struct {
 	auditRepo            repository.AuditLogRepository
 	lineNumberRepo       repository.LineNumberRepository
 	segmentPriceRepo     repository.SegmentPriceFactorRepository
+	platformBaseRepo     repository.PlatformBasePriceRepository
 	notifier             services.NotificationService
 	adminConfig          config.AdminConfig
 	cacheConfig          *config.CacheConfig
@@ -58,10 +59,6 @@ type CampaignFlowImpl struct {
 
 const (
 	defaultShortLinkDomain = "jo1n.ir"
-	basePriceSMS           = uint64(200)
-	basePriceBale          = uint64(150)
-	basePriceRubika        = uint64(200)
-	basePriceSPlus         = uint64(200)
 	pagePrice              = uint64(200)
 	minCampaignBudget      = uint64(100_000)
 	maxCampaignBudget      = uint64(160_000_000)
@@ -83,6 +80,7 @@ func NewCampaignFlow(
 	auditRepo repository.AuditLogRepository,
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
+	platformBaseRepo repository.PlatformBasePriceRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -100,6 +98,7 @@ func NewCampaignFlow(
 		auditRepo:            auditRepo,
 		lineNumberRepo:       lineNumberRepo,
 		segmentPriceRepo:     segmentPriceRepo,
+		platformBaseRepo:     platformBaseRepo,
 		notifier:             notifier,
 		adminConfig:          adminConfig,
 		cacheConfig:          cacheConfig,
@@ -414,6 +413,14 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				return err
 			}
 
+			pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, *platform)
+			if err != nil {
+				return err
+			}
+			if pbp == nil {
+				return ErrPlatformBasePriceNotFound
+			}
+
 			cost, err := s.CalculateCampaignCost(txCtx, &dto.CalculateCampaignCostRequest{
 				Title:              title,
 				Level1:             level1,
@@ -479,8 +486,6 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 			numPages := s.calculateSMSParts(content)
 
-			selectedBasePrice := s.selectBasePrice(campaign.Spec.Platform)
-
 			// Build metadata with full campaign spec
 			meta := map[string]any{
 				"source":                   "campaign_update",
@@ -489,7 +494,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 				"amount":                   cost.TotalCost,
 				"currency":                 utils.TomanCurrency,
 				"campaign_spec":            campaign.Spec,
-				"base_price":               selectedBasePrice,
+				"base_price":               pbp.Price,
 				"page_price":               pagePrice,
 				"num_pages":                numPages,
 				"line_number_price_factor": lineNumberPriceFactor,
@@ -1002,11 +1007,18 @@ func (s *CampaignFlowImpl) computeCostInputs(
 	}
 
 	pricePerMsg := uint64(0)
-	base := s.selectBasePrice(platform)
+
+	pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, platform)
+	if err != nil {
+		return 0, 0, NewBusinessError("PLATFORM_BASE_PRICE_FETCH_FAILED", "Failed to fetch platform base price", err)
+	}
+	if pbp == nil {
+		return 0, 0, NewBusinessError("PLATFORM_BASE_PRICE_NOT_FOUND", "Platform base price not found for platform "+platform, ErrPlatformBasePriceNotFound)
+	}
 	if platform == models.CampaignPlatformSMS {
-		pricePerMsg = uint64(pagePrice*numPages) + base*uint64(float64(lineNumberFactor)*segmentPriceFactor)
+		pricePerMsg = uint64(pagePrice*numPages) + pbp.Price*uint64(float64(lineNumberFactor)*segmentPriceFactor)
 	} else {
-		pricePerMsg = uint64(pagePrice*1) + base*uint64(float64(1)*segmentPriceFactor)
+		pricePerMsg = uint64(pagePrice*1) + pbp.Price*uint64(float64(1)*segmentPriceFactor)
 	}
 
 	// Calculate campaign capacity (target audience size)
@@ -2087,21 +2099,6 @@ func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
 		}
 	}
 	return count
-}
-
-func (s *CampaignFlowImpl) selectBasePrice(platform string) uint64 {
-	switch platform {
-	case models.CampaignPlatformSMS:
-		return basePriceSMS
-	case models.CampaignPlatformBale:
-		return basePriceBale
-	case models.CampaignPlatformRubika:
-		return basePriceRubika
-	case models.CampaignPlatformSPlus:
-		return basePriceSPlus
-	default:
-		return basePriceSMS
-	}
 }
 
 func sanitizeShortLinkDomain(domain *string) (string, error) {
