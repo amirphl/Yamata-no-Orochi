@@ -102,17 +102,17 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
     command: >
-      sh -c "
-        mkdir -p /backups &&
+      sh -c '
+        set -euo pipefail
+        mkdir -p /backups
         while true; do
-          ts=$(date -u +%Y%m%dT%H%M%SZ) &&
-          PGPASSWORD=\"$DB_PASSWORD\" pg_dump -h \"$DB_HOST\" -p \"$DB_PORT\" -U \"$DB_USER\" -d \"$DB_NAME\" -Fc \
-            -f \"/backups/${DB_NAME}-${ts}.dump\" &&
-          echo \"[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup completed: ${DB_NAME}-${ts}.dump\" || \
-          echo \"[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup FAILED\" >&2;
-          sleep \"${BACKUP_INTERVAL_SECONDS:-86400}\";
+          ts=$(date -u +%Y%m%dT%H%M%SZ)
+          export PGPASSWORD="${DB_PASSWORD}"
+          pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" -Fc -f "/backups/${DB_NAME}-${ts}.dump"
+          echo "[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup completed: ${DB_NAME}-${ts}.dump"
+          sleep "${BACKUP_INTERVAL_SECONDS:-86400}"
         done
-      "
+      '
     volumes:
       - postgres_backups_beta:/backups
     networks:
@@ -374,7 +374,15 @@ services:
       yamata-network-beta:
         ipv4_address: 172.30.0.20
     healthcheck:
-      test: ["CMD", "curl", "-f", "--noproxy", "localhost", "http://localhost:8080/api/v1/health"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "--noproxy",
+          "localhost",
+          "http://localhost:8080/api/v1/health",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -403,8 +411,8 @@ services:
       - ./docker/nginx/gzip.conf:/etc/nginx/gzip.conf:ro
       - ./docker/nginx/proxy.conf:/etc/nginx/proxy.conf:ro
       - nginx_logs_beta:/var/log/nginx
-      - /etc/letsencrypt:/etc/letsencrypt:ro  # Let's Encrypt certificates
-      - ./docker/nginx/public:/var/www/jaazebeh:ro  # Static site root for jaazebeh.ir
+      - /etc/letsencrypt:/etc/letsencrypt:ro # Let's Encrypt certificates
+      - ./docker/nginx/public:/var/www/jaazebeh:ro # Static site root for jaazebeh.ir
     ports:
       - "80:80"
       - "443:443"
@@ -412,7 +420,15 @@ services:
       yamata-network-beta:
         ipv4_address: 172.30.0.30
     healthcheck:
-      test: ["CMD", "curl", "-f", "--noproxy", "app-beta", "http://app-beta:8080/api/v1/health"]
+      test:
+        [
+          "CMD",
+          "curl",
+          "-f",
+          "--noproxy",
+          "app-beta",
+          "http://app-beta:8080/api/v1/health",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -426,7 +442,7 @@ services:
       - /tmp
 
   cert-monitor-beta:
-    image: python:3.11-slim
+    image: yamata-cert-monitor-beta
     container_name: yamata-cert-monitor-beta
     restart: unless-stopped
     depends_on:
@@ -445,14 +461,11 @@ services:
       SMS_RETRY_COUNT: ${SMS_RETRY_COUNT}
       SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD}
       SMS_TIMEOUT: ${SMS_TIMEOUT}
-      PYTHONPATH: /tmp/pip/lib/python3.11/site-packages
     volumes:
       - ./scripts/cert_monitor.py:/app/cert_monitor.py:ro
       - ./docker/nginx/sites-available/yamata-beta.conf:/etc/nginx/sites-available/yamata-beta.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
-    command: >
-      sh -c "pip install --no-cache-dir --prefix /tmp/pip requests cryptography
-      && PYTHONPATH=/tmp/pip/lib/python3.11/site-packages python /app/cert_monitor.py"
+    command: ["python", "/app/cert_monitor.py"]
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.90
@@ -474,15 +487,15 @@ services:
       yamata-network-beta:
         ipv4_address: 172.30.0.40
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
-      - '--storage.tsdb.retention.time=15d'
-      - '--web.enable-lifecycle'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/etc/prometheus/console_libraries"
+      - "--web.console.templates=/etc/prometheus/consoles"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
     security_opt:
       - no-new-privileges:true
-    user: "65534:65534"  # nobody user
+    user: "65534:65534" # nobody user
 
   # Grafana (Optional - for monitoring dashboards)
   grafana-beta:
@@ -496,8 +509,8 @@ services:
       GF_SECURITY_COOKIE_SAMESITE: strict
       GF_SECURITY_STRICT_TRANSPORT_SECURITY: true
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/yamata-overview.json
-      GF_SERVER_ROOT_URL: https://${MONITORING_DOMAIN}/grafana/
-      GF_SERVER_SERVE_FROM_SUB_PATH: 'true'
+      GF_SERVER_ROOT_URL: "https://${MONITORING_DOMAIN}/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana_data_beta:/var/lib/grafana
       - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -511,7 +524,7 @@ services:
       - prometheus-beta
     security_opt:
       - no-new-privileges:true
-    user: "472:472"  # grafana user 
+    user: "472:472" # grafana user
 
   # Postgres Exporter for DB metrics
   postgres-exporter-beta:
@@ -520,12 +533,15 @@ services:
     restart: unless-stopped
     environment:
       DATA_SOURCE_NAME: postgresql://${DB_USER}:${DB_PASSWORD}@postgres-beta:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE}
+      # Optional config file for custom metrics; bind if provided
+    volumes:
+      - ./docker/postgres_exporter/postgres_exporter.yml:/postgres_exporter.yml:ro
     depends_on:
       postgres-beta:
         condition: service_healthy
     networks:
       yamata-network-beta:
-        ipv4_address: 172.30.0.60
+        ipv4_address: 172.30.0.61
 
   # Node Exporter for host metrics
   node-exporter-beta:
@@ -533,9 +549,9 @@ services:
     container_name: yamata-node-exporter-beta
     restart: unless-stopped
     command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--path.rootfs=/rootfs'
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
@@ -581,7 +597,15 @@ services:
       yamata-network-beta:
         ipv4_address: 172.30.0.60
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost/health"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost/health",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
