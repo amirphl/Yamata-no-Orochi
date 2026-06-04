@@ -1,5 +1,5 @@
 # Multi-stage build for production
-FROM golang:1.24.5-alpine AS builder
+FROM golang:1.26.2-alpine3.23 AS builder
 
 # Build arguments for proxy configuration
 ARG HTTP_PROXY
@@ -50,6 +50,7 @@ COPY config/ ./config/
 COPY models/ ./models/
 COPY repository/ ./repository/
 COPY utils/ ./utils/
+COPY logging.go ./
 COPY main.go ./
 COPY templates/ ./templates/
 
@@ -71,7 +72,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -ldflags='-w -s -extldflags "-static"' \
     -a -installsuffix cgo \
     -o yamata-no-orochi \
-    main.go
+    .
 
 # Production image
 FROM alpine:3.22
