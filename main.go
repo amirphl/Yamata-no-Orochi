@@ -372,6 +372,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
 	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
+	platformBasePriceRepo := repository.NewPlatformBasePriceRepository(db)
 	// Crypto payment repositories
 	cryptoPaymentRequestRepo := repository.NewCryptoPaymentRequestRepository(db)
 	cryptoDepositRepo := repository.NewCryptoDepositRepository(db)
@@ -443,6 +444,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		auditRepo,
 		lineNumberRepo,
 		segmentPriceFactorRepo,
+		platformBasePriceRepo,
 		db,
 		rc,
 		notificationService,
@@ -591,6 +593,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	segmentPriceFactorFlow := businessflow.NewSegmentPriceFactorFlow(segmentPriceFactorRepo)
 
+	accessControlFlow := businessflow.NewAccessControlFlow(adminRepo, repository.NewACLChangeRequestRepository(db), auditRepo)
+
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
@@ -615,6 +619,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	multimediaBotHandler := handlers.NewMultimediaBotHandler(multimediaBotFlow)
 	platformSettingsHandler := handlers.NewPlatformSettingsHandler(platformSettingsFlow)
 	platformSettingsAdminHandler := handlers.NewPlatformSettingsAdminHandler(platformSettingsAdminFlow)
+	accessControlHandler := handlers.NewAccessControlHandler(accessControlFlow)
 
 	profileHandler := handlers.NewProfileHandler(profileFlow)
 
@@ -623,6 +628,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
+	authzMiddleware := middleware.NewAuthorizationMiddleware(adminRepo)
 
 	// Initialize router
 	appRouter := router.NewFiberRouter(
@@ -632,6 +638,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		paymentAdminHandler,
 		agencyHandler,
 		authMiddleware,
+		authzMiddleware,
 		authAdminHandler,
 		authBotHandler,
 		campaignAdminHandler,
@@ -652,6 +659,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		multimediaBotHandler,
 		platformSettingsHandler,
 		platformSettingsAdminHandler,
+		accessControlHandler,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
