@@ -1,0 +1,5 @@
+global:
+  scrape_timeout: 10s
+target:
+  # leave empty to use DATA_SOURCE_NAME env var; file presence silences startup warning
+  uri: ""
