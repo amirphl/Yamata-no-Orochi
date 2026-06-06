@@ -1,7 +1,5 @@
 -- Migration: Populate denormalized short_link_clicks fields from short_links
 
-BEGIN;
-
 UPDATE short_link_clicks c
 SET uid = sl.uid,
     campaign_id = sl.campaign_id,
@@ -15,5 +13,3 @@ SET uid = sl.uid,
     short_link_updated_at = sl.updated_at
 FROM short_links sl
 WHERE c.short_link_id = sl.id;
-
-COMMIT;
