@@ -3,6 +3,15 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0088_add_admin_permissions_down.sql...'
+\i migrations/0088_add_admin_permissions_down.sql
+
+\echo 'Running 0087_create_acl_change_requests_down.sql...'
+\i migrations/0087_create_acl_change_requests_down.sql
+
+\echo 'Running 0086_create_platform_base_prices_down.sql...'
+\i migrations/0086_create_platform_base_prices_down.sql
+
 \echo 'Running 0085_add_admin_deposit_receipt_review_action_down.sql...'
 \i migrations/0085_add_admin_deposit_receipt_review_action_down.sql
 
