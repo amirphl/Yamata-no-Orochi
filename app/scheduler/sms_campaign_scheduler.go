@@ -437,8 +437,10 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 	if err != nil {
 		return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
 	}
-	if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
-		return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
+	if stats != nil && stats["aggregatedTotalRecords"] != nil && stats["aggregatedTotalRecords"].(int64) > 0 {
+		if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
+			return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
+		}
 	}
 
 	s.logger.Printf("SMS scheduler: campaign id=%d all batches sent", c.ID)
@@ -785,8 +787,10 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 	}
 
 	if stats != nil {
-		if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
-			return err
+		if stats["aggregatedTotalRecords"] != nil && stats["aggregatedTotalRecords"].(int64) > 0 {
+			if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -954,8 +958,10 @@ func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.
 		if pc == nil {
 			return fmt.Errorf("processed campaign not found for processed campaign id=%d", job.ProcessedCampaignID)
 		}
-		if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
-			return err
+		if stats["aggregatedTotalRecords"] != nil && stats["aggregatedTotalRecords"].(int64) > 0 {
+			if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -983,8 +989,9 @@ func (s *SMSCampaignScheduler) updateProcessedCampaignStats(ctx context.Context,
 	// Fallback before any status jobs land.
 	// if agg.AggregatedTotalRecords == 0 && len(trackingResults) == 0 {
 	if agg.AggregatedTotalRecords == 0 {
-		s.logger.Printf("updateProcessedCampaignStats: no status results yet for processed_campaign_id=%d, falling back to sent rows", processedCampaignID)
-		return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
+		// s.logger.Printf("updateProcessedCampaignStats: no status results yet for processed_campaign_id=%d, falling back to sent rows", processedCampaignID)
+		// return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
+		return nil, nil
 	}
 
 	stats := map[string]any{
