@@ -25,6 +25,7 @@ type ChargeWalletResponse struct {
 type AdminChargeWalletRequest struct {
 	CustomerID     uint   `json:"customer_id" validate:"required,min=1"`
 	AmountWithTax  uint64 `json:"amount_with_tax" validate:"required,min=1000,max=1000000000"`
+	AdminNote      string `json:"admin_note,omitempty" validate:"omitempty,max=1000"`
 	IdempotencyKey string `json:"idempotency_key,omitempty" validate:"omitempty,min=8,max=128"`
 }
 
@@ -38,6 +39,29 @@ type AdminChargeWalletResponse struct {
 	CustomerID       uint   `json:"customer_id"`
 	AdminID          uint   `json:"admin_id"`
 	AmountWithTax    uint64 `json:"amount_with_tax"`
+}
+
+// AdminPreviewWalletChargeImpactRequest represents a read-only admin preview for a wallet charge.
+type AdminPreviewWalletChargeImpactRequest struct {
+	CustomerID    uint   `json:"customer_id" validate:"required,min=1"`
+	AmountWithTax uint64 `json:"amount_with_tax" validate:"required,min=1000,max=1000000000"`
+}
+
+// AdminPreviewWalletChargeImpactResponse represents the calculated effects of an admin wallet charge.
+type AdminPreviewWalletChargeImpactResponse struct {
+	Message            string  `json:"message"`
+	Success            bool    `json:"success"`
+	CustomerID         uint    `json:"customer_id"`
+	AgencyID           uint    `json:"agency_id"`
+	AgencyDiscountID   uint    `json:"agency_discount_id"`
+	DiscountRate       float64 `json:"discount_rate"`
+	AmountWithTax      uint64  `json:"amount_with_tax"`
+	Amount             uint64  `json:"amount"`
+	Tax                uint64  `json:"tax"`
+	FreeIncrease       uint64  `json:"free_increase"`
+	CreditIncrease     uint64  `json:"credit_increase"`
+	AgencyShareWithTax uint64  `json:"agency_share_with_tax"`
+	SystemShareWithTax uint64  `json:"system_share_with_tax"`
 }
 
 // AtipayRequest represents the callback data from Atipay after payment completion
@@ -74,6 +98,7 @@ type TransactionHistoryItem struct {
 	Currency            string            `json:"currency"`                                                  // Currency (usually TMN)
 	Operation           string            `json:"operation"`                                                 // Operation name for display
 	Source              string            `json:"source"`                                                    // Metadata source key
+	DepositMethod       string            `json:"deposit_method,omitempty"`                                  // payment_gateway, deposit_receipt, or admin_charge
 	DateTime            time.Time         `json:"datetime"`                                                  // When the transaction occurred
 	ExternalRef         *string           `json:"external_ref,omitempty" validate:"omitempty"`               // External reference (e.g., Atipay reference)
 	CustomerInvoiceUUID *string           `json:"customer_invoice_uuid,omitempty" validate:"omitempty,uuid"` //
@@ -89,16 +114,18 @@ type TransactionHistoryResponse struct {
 }
 
 type AdminListTransactionsRequest struct {
-	Page       uint       `json:"page" validate:"min=1"`
-	PageSize   uint       `json:"page_size" validate:"min=1,max=100"`
-	StartDate  *time.Time `json:"start_date,omitempty" validate:"omitempty"`
-	EndDate    *time.Time `json:"end_date,omitempty" validate:"omitempty"`
-	CustomerID *uint      `json:"customer_id,omitempty" validate:"omitempty,min=1"`
+	Page         uint       `json:"page" validate:"min=1"`
+	PageSize     uint       `json:"page_size" validate:"min=1,max=100"`
+	StartDate    *time.Time `json:"start_date,omitempty" validate:"omitempty"`
+	EndDate      *time.Time `json:"end_date,omitempty" validate:"omitempty"`
+	CustomerID   *uint      `json:"customer_id,omitempty" validate:"omitempty,min=1"`
+	CustomerName *string    `json:"customer_name,omitempty" validate:"omitempty"`
 }
 
 type AdminTransactionItem struct {
 	UUID                string                       `json:"uuid"`
 	CustomerID          uint                         `json:"customer_id"`
+	CustomerFullName    string                       `json:"customer_full_name"`
 	Customer            AdminTransactionCustomerInfo `json:"customer"`
 	Status              string                       `json:"status"`
 	Amount              uint64                       `json:"amount"`
@@ -107,6 +134,7 @@ type AdminTransactionItem struct {
 	Currency            string                       `json:"currency"`
 	Operation           string                       `json:"operation"`
 	Source              string                       `json:"source"`
+	DepositMethod       string                       `json:"deposit_method,omitempty"`
 	DateTime            time.Time                    `json:"datetime"`
 	ExternalRef         *string                      `json:"external_ref,omitempty" validate:"omitempty"`
 	CustomerInvoiceUUID *string                      `json:"customer_invoice_uuid,omitempty" validate:"omitempty,uuid"`
@@ -213,20 +241,21 @@ type SubmitDepositReceiptResponse struct {
 	Status      string `json:"status"`
 }
 type DepositReceiptItem struct {
-	UUID          string    `json:"uuid"`
-	CustomerID    uint      `json:"customer_id"`
-	Amount        uint64    `json:"amount"`
-	Currency      string    `json:"currency"`
-	Status        string    `json:"status"`
-	StatusReason  string    `json:"status_reason,omitempty"`
-	RejectionNote *string   `json:"rejection_note,omitempty"`
-	Lang          string    `json:"lang"`
-	FileName      string    `json:"file_name"`
-	ContentType   string    `json:"content_type"`
-	FileSize      int64     `json:"file_size"`
-	PreviewBase64 string    `json:"preview_base64,omitempty"`
-	PreviewType   string    `json:"preview_type,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	UUID             string    `json:"uuid"`
+	CustomerID       uint      `json:"customer_id"`
+	CustomerFullName string    `json:"customer_full_name"`
+	Amount           uint64    `json:"amount"`
+	Currency         string    `json:"currency"`
+	Status           string    `json:"status"`
+	StatusReason     string    `json:"status_reason,omitempty"`
+	RejectionNote    *string   `json:"rejection_note,omitempty"`
+	Lang             string    `json:"lang"`
+	FileName         string    `json:"file_name"`
+	ContentType      string    `json:"content_type"`
+	FileSize         int64     `json:"file_size"`
+	PreviewBase64    string    `json:"preview_base64,omitempty"`
+	PreviewType      string    `json:"preview_type,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type ListDepositReceiptsResponse struct {
