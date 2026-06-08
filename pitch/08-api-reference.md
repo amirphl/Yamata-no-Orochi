@@ -31,6 +31,7 @@ All protected endpoints require `Authorization: Bearer <token>` unless stated ot
 |---|---|---|---|
 | GET | `/admin/auth/captcha/init` | Get CAPTCHA for admin login | Public |
 | POST | `/admin/auth/login` | Admin login (username + password + CAPTCHA) | Public |
+| POST | `/admin/auth/login/verify-otp` | Complete admin login with OTP | Public |
 
 ---
 
@@ -39,6 +40,18 @@ All protected endpoints require `Authorization: Bearer <token>` unless stated ot
 | Method | Path | Description | Auth |
 |---|---|---|---|
 | POST | `/bot/auth/login` | Bot API key exchange for JWT | Public |
+
+---
+
+## Public Platform Endpoints
+
+| Method | Path | Description | Auth |
+|---|---|---|---|
+| GET | `/health` | Reverse-proxy health endpoint backed by `GET /api/v1/health` | Public |
+| GET | `/s/:uid` | Redirect short link (click tracking) | Public |
+| GET | `/:uid` | Redirect short link (root) | Public |
+| GET | `/s/tst:uid` | Redirect test short link | Public |
+| GET | `/tst:uid` | Redirect test short link | Public |
 
 ---
 
@@ -176,8 +189,6 @@ All protected endpoints require `Authorization: Bearer <token>` unless stated ot
 
 | Method | Path | Description | Auth |
 |---|---|---|---|
-| GET | `/s/:uid` | Redirect short link (click tracking) | Public |
-| GET | `/:uid` | Redirect short link (root) | Public |
 | POST | `/bot/short-links` | Bulk create short links | Bot |
 | POST | `/bot/short-links/one` | Create single short link | Bot |
 | POST | `/bot/short-links/allocate` | Allocate short link pool | Bot |
