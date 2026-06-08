@@ -84,7 +84,6 @@ mindmap
 | Clustering v1 | Complete |
 | UTM / Short Link Tracker | Production |
 | Online Payments (Atipay) | Production |
-| Crypto Payments (Oxapay) | Production |
 | Manual Deposit Receipts | Production |
 | Agency Sub-account System | Production |
 | Support Tickets | Production |

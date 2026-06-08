@@ -31,7 +31,7 @@ All diagrams use [Mermaid](https://mermaid.js.org/) and render natively in GitHu
 | 03 | [03-ai-pipeline.md](03-ai-pipeline.md) | Behavioral profiling pipeline, continuous learning, tag coverage |
 | 04 | [04-data-model.md](04-data-model.md) | ER diagram, core entities, financial model, auth model |
 | 05 | [05-deployment.md](05-deployment.md) | Infrastructure, Docker containers, networking, graceful shutdown |
-| 06 | [06-financial-flow.md](06-financial-flow.md) | Wallet, online payments, deposit receipts, crypto, transactions |
+| 06 | [06-financial-flow.md](06-financial-flow.md) | Wallet, online payments, deposit receipts, transactions |
 | 07 | [07-auth-security.md](07-auth-security.md) | Authentication flows, RBAC, maker-checker, security headers |
 | 08 | [08-api-reference.md](08-api-reference.md) | Complete API endpoint reference by role |
 | 09 | [09-scheduler.md](09-scheduler.md) | Background campaign schedulers, status polling, audience cache |
@@ -48,6 +48,6 @@ All diagrams use [Mermaid](https://mermaid.js.org/) and render natively in GitHu
 
 **User roles**: Customer (Individual / Marketing Agency) · Admin (Back-Office) · Bot (Internal)
 
-**Payment methods**: Online (Atipay) · Crypto (Oxapay) · Manual Deposit Receipt
+**Payment methods**: Online (Atipay) · Manual Deposit Receipt
 
 **Tech stack**: Go 1.26 · Fiber v3 · PostgreSQL 15 · Redis 8 · GORM · JWT · Prometheus · Grafana · GlitchTip · Nginx · Docker

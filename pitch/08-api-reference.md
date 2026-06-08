@@ -138,17 +138,6 @@ All protected endpoints require `Authorization: Bearer <token>` unless stated ot
 
 ---
 
-## Crypto Payments
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/crypto/payments/request` | Create crypto payment request |
-| GET | `/crypto/payments/:uuid/status` | Get payment status |
-| POST | `/crypto/payments/verify` | Manual verification |
-| POST | `/crypto/providers/:platform/callback` | Provider webhook (Public) |
-
----
-
 ## Agency / Sub-accounts (`/reports/agency`)
 
 | Method | Path | Description |

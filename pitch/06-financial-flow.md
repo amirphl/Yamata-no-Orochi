@@ -12,7 +12,6 @@ graph TB
 
     subgraph Funding
         Atipay[Atipay Payment Gateway]
-        Crypto[Crypto — Oxapay]
         Deposit[Manual Deposit Receipt]
         AdminCharge[Admin Manual Charge]
     end
@@ -24,7 +23,6 @@ graph TB
     end
 
     Atipay --> CW
-    Crypto --> CW
     Deposit --> CW
     AdminCharge --> CW
     CW --> Campaign
@@ -78,25 +76,6 @@ sequenceDiagram
 
 ---
 
-## Crypto Payment Flow (Oxapay)
-
-```mermaid
-sequenceDiagram
-    participant Customer
-    participant Platform as Jazebeh API
-    participant Oxapay
-
-    Customer->>Platform: POST /crypto/payments/request\n{amount, currency}
-    Platform->>Oxapay: Create crypto invoice
-    Oxapay-->>Platform: Payment address + expiry
-    Platform-->>Customer: Crypto address to send funds
-    Oxapay->>Platform: POST /crypto/providers/oxapay/callback
-    Platform->>Platform: Verify & credit wallet
-    Customer->>Platform: GET /crypto/payments/:uuid/status
-```
-
----
-
 ## Campaign Cost Calculation
 
 ```mermaid
@@ -128,7 +107,6 @@ flowchart TD
 | `agency_commission` | + | Commission earned by agency |
 | `tax` | - | Tax portion transferred to tax wallet |
 | `admin_charge` | + | Manual admin credit |
-| `crypto_deposit` | + | Crypto payment received |
 
 ---
 
