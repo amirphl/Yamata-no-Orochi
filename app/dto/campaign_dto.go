@@ -283,7 +283,7 @@ type GetLastInitiatedCampaignResponse struct {
 // AdminListCampaignsFilter holds filters for admin campaign listing
 type AdminListCampaignsFilter struct {
 	Title     *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Status    *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in_progress waiting_for_approval approved rejected expired"`
+	Status    *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in-progress waiting-for-approval approved rejected expired cancelled running executed cancelled-by-admin"`
 	StartDate *time.Time `json:"start_date,omitempty" validate:"omitempty"`
 	EndDate   *time.Time `json:"end_date,omitempty" validate:"omitempty"`
 	Page      int        `json:"page" validate:"omitempty,min=1,max=1000000"`
