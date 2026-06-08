@@ -98,6 +98,9 @@ const (
 	AuditActionAdminLineNumberList                   = "admin_line_number_list"
 	AuditActionAdminLineNumberUpdate                 = "admin_line_number_update"
 	AuditActionAdminLineNumberReport                 = "admin_line_number_report"
+	AuditActionAdminACLRequestCreated                = "admin_acl_request_created"
+	AuditActionAdminACLRequestApproved               = "admin_acl_request_approved"
+	AuditActionAdminACLRequestRejected               = "admin_acl_request_rejected"
 )
 
 // AuditLogFilter represents filter criteria for audit log queries
