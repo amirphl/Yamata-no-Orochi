@@ -53,6 +53,7 @@ func (d *DepositReceipt) BeforeCreate(tx *gorm.DB) error {
 // DepositReceiptFilter provides filtering options for queries.
 type DepositReceiptFilter struct {
 	CustomerID    *uint
+	CustomerName  *string
 	Status        *DepositReceiptStatus
 	Lang          *string
 	CreatedAfter  *time.Time
