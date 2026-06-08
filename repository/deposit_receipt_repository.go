@@ -5,6 +5,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"gorm.io/gorm"
@@ -77,6 +78,17 @@ func (r *depositReceiptRepository) List(ctx context.Context, f models.DepositRec
 	q := r.db.WithContext(ctx).Model(&models.DepositReceipt{})
 	if f.CustomerID != nil {
 		q = q.Where("customer_id = ?", *f.CustomerID)
+	}
+	if f.CustomerName != nil {
+		name := strings.TrimSpace(*f.CustomerName)
+		if name != "" {
+			pattern := "%" + name + "%"
+			customerSubQuery := q.Session(&gorm.Session{}).
+				Model(&models.Customer{}).
+				Select("id").
+				Where("representative_first_name ILIKE ? OR representative_last_name ILIKE ? OR company_name ILIKE ?", pattern, pattern, pattern)
+			q = q.Where("customer_id IN (?)", customerSubQuery)
+		}
 	}
 	if f.Status != nil {
 		q = q.Where("status = ?", *f.Status)
