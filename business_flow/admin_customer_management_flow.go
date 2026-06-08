@@ -23,10 +23,12 @@ type AdminCustomerManagementFlow interface {
 
 // AdminCustomerManagementFlowImpl implements AdminCustomerManagementFlow
 type AdminCustomerManagementFlowImpl struct {
-	transactionRepo repository.TransactionRepository
-	customerRepo    repository.CustomerRepository
-	campaignRepo    repository.CampaignRepository
-	auditRepo       repository.AuditLogRepository
+	transactionRepo  repository.TransactionRepository
+	customerRepo     repository.CustomerRepository
+	campaignRepo     repository.CampaignRepository
+	auditRepo        repository.AuditLogRepository
+	lineNumberRepo   repository.LineNumberRepository
+	segmentPriceRepo repository.SegmentPriceFactorRepository
 }
 
 const (
@@ -39,12 +41,16 @@ func NewAdminCustomerManagementFlow(
 	campaignRepo repository.CampaignRepository,
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
+	lineNumberRepo repository.LineNumberRepository,
+	segmentPriceRepo repository.SegmentPriceFactorRepository,
 ) AdminCustomerManagementFlow {
 	return &AdminCustomerManagementFlowImpl{
-		transactionRepo: transactionRepo,
-		customerRepo:    customerRepo,
-		campaignRepo:    campaignRepo,
-		auditRepo:       auditRepo,
+		transactionRepo:  transactionRepo,
+		customerRepo:     customerRepo,
+		campaignRepo:     campaignRepo,
+		auditRepo:        auditRepo,
+		lineNumberRepo:   lineNumberRepo,
+		segmentPriceRepo: segmentPriceRepo,
 	}
 }
 
@@ -243,6 +249,7 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 			}
 		}
 		clicks := clickCounts[c.ID]
+		totalClicks := clicks
 		// DTO uses float64 (not *float64), so fall back to 0.0 when there is no
 		// delivery data yet rather than leaving the field absent.
 		cr := computeClickRate(clicks, totalSentFloat)
@@ -250,18 +257,80 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 		if cr != nil {
 			clickRate = *cr
 		}
+
+		segmentPriceFactor, lineNumberPriceFactor, err := f.readCampaignPriceFactorsFromMetadata(ctx, c.ID)
+		if err != nil {
+			return nil, NewBusinessError("GET_ADMIN_CUSTOMER_CAMPAIGNS_FAILED", "Failed to get campaign metadata", err)
+		}
+		if segmentPriceFactor == nil && len(c.Spec.Level3s) > 0 {
+			factors, factorErr := f.segmentPriceRepo.LatestByLevel3sForPlatform(ctx, c.Spec.Level3s, c.Spec.Platform)
+			if factorErr != nil {
+				return nil, NewBusinessError("GET_ADMIN_CUSTOMER_CAMPAIGNS_FAILED", "Failed to get segment price factor", factorErr)
+			}
+			maxFactor := 0.0
+			for _, level3 := range c.Spec.Level3s {
+				if factor, ok := factors[level3]; ok && factor > maxFactor {
+					maxFactor = factor
+				}
+			}
+			if maxFactor > 0 {
+				segmentPriceFactor = &maxFactor
+			}
+		}
+		if lineNumberPriceFactor == nil && c.Spec.LineNumber != nil {
+			lineNumber, lineErr := f.lineNumberRepo.ByValue(ctx, *c.Spec.LineNumber)
+			if lineErr != nil {
+				return nil, NewBusinessError("GET_ADMIN_CUSTOMER_CAMPAIGNS_FAILED", "Failed to get line number price factor", lineErr)
+			}
+			if lineNumber != nil {
+				lineNumberPriceFactor = &lineNumber.PriceFactor
+			}
+		}
+		segmentPriceFactorValue := float64(-1)
+		if segmentPriceFactor != nil {
+			segmentPriceFactorValue = *segmentPriceFactor
+		}
+		lineNumberPriceFactorValue := float64(-1)
+		if lineNumberPriceFactor != nil {
+			lineNumberPriceFactorValue = *lineNumberPriceFactor
+		}
 		resp.Campaigns = append(resp.Campaigns, dto.AdminCustomerCampaignItem{
-			CampaignID:     c.ID,
-			Title:          c.Spec.Title,
-			CreatedAt:      c.CreatedAt,
-			ScheduleAt:     c.Spec.ScheduleAt,
-			Status:         c.Status.String(),
-			LineNumber:     c.Spec.LineNumber,
-			Level3s:        c.Spec.Level3s,
-			NumAudience:    c.NumAudience,
-			TotalSent:      totalSent,
-			TotalDelivered: totalDelivered,
-			ClickRate:      clickRate,
+			CampaignID:                  c.ID,
+			ID:                          c.ID,
+			UUID:                        c.UUID.String(),
+			Status:                      c.Status.String(),
+			CreatedAt:                   c.CreatedAt,
+			UpdatedAt:                   c.UpdatedAt,
+			Title:                       c.Spec.Title,
+			Level1:                      c.Spec.Level1,
+			Level2s:                     c.Spec.Level2s,
+			Level3s:                     c.Spec.Level3s,
+			Tags:                        c.Spec.Tags,
+			Sex:                         c.Spec.Sex,
+			City:                        c.Spec.City,
+			AdLink:                      c.Spec.AdLink,
+			Content:                     c.Spec.Content,
+			ShortLinkDomain:             c.Spec.ShortLinkDomain,
+			Category:                    c.Spec.Category,
+			Job:                         c.Spec.Job,
+			ScheduleAt:                  c.Spec.ScheduleAt,
+			LineNumber:                  c.Spec.LineNumber,
+			MediaUUID:                   c.Spec.MediaUUID,
+			PlatformSettingsID:          c.Spec.PlatformSettingsID,
+			Platform:                    c.Spec.Platform,
+			Budget:                      c.Spec.Budget,
+			Comment:                     c.Comment,
+			SegmentPriceFactor:          segmentPriceFactorValue,
+			LineNumberPriceFactor:       lineNumberPriceFactorValue,
+			Statistics:                  stats,
+			TotalClicks:                 &totalClicks,
+			ClickRate:                   clickRate,
+			NumAudience:                 c.NumAudience,
+			CustomerFullName:            formatCampaignPartyFullName(c.Customer),
+			AgencyFullName:              formatCampaignAgencyFullName(c.Customer),
+			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
+			TotalSent:                   totalSent,
+			TotalDelivered:              totalDelivered,
 		})
 	}
 	logAdminAction(ctx, f.auditRepo, models.AuditActionAdminViewCustomer, "Admin fetched customer with campaigns", true, &customerID, map[string]any{
@@ -399,4 +468,29 @@ func isSystemOrTaxCustomer(cust *models.Customer) bool {
 		strings.EqualFold(cust.Email, taxCustomerEmail) ||
 		strings.EqualFold(fullName, "System Account") ||
 		strings.EqualFold(fullName, "Tax Collector")
+}
+
+func (f *AdminCustomerManagementFlowImpl) readCampaignPriceFactorsFromMetadata(ctx context.Context, campaignID uint) (*float64, *float64, error) {
+	source := "campaign_update"
+	operation := "reserve_budget"
+	txs, err := f.transactionRepo.ByFilter(ctx, models.TransactionFilter{
+		CampaignID: &campaignID,
+		Source:     &source,
+		Operation:  &operation,
+	}, "id DESC", 1, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(txs) == 0 || len(txs[0].Metadata) == 0 {
+		return nil, nil, nil
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
+		return nil, nil, nil
+	}
+
+	segmentPriceFactor := parseMetadataFloat(meta["segment_price_factor"])
+	lineNumberPriceFactor := parseMetadataFloat(meta["line_number_price_factor"])
+	return segmentPriceFactor, lineNumberPriceFactor, nil
 }
