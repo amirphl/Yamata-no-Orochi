@@ -439,8 +439,10 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 	if err != nil {
 		return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
 	}
-	if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
-		return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
+	if stats != nil && stats["aggregatedTotalRecords"] != nil && stats["aggregatedTotalRecords"].(int64) > 0 {
+		if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
+			return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
+		}
 	}
 
 	s.logger.Printf("Splus scheduler: campaign id=%d all batches sent", c.ID)
@@ -993,8 +995,10 @@ func (s *SplusCampaignScheduler) handleStatusJob(ctx context.Context, job *model
 		if pc == nil {
 			return fmt.Errorf("processed campaign not found for processed campaign id=%d", job.ProcessedCampaignID)
 		}
-		if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
-			return err
+		if stats["aggregatedTotalRecords"] != nil && stats["aggregatedTotalRecords"].(int64) > 0 {
+			if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
