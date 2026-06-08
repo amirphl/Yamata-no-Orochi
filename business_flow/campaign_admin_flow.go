@@ -145,11 +145,13 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 	}
 
 	// Sort order mirrors the in-memory logic that was previously applied after
-	// fetching: null/empty schedule_at first, then upcoming (>= NOW()) before past,
+	// fetching, but keeps initiated and in-progress campaigns at the end:
+	// null/empty schedule_at first, then upcoming (>= NOW()) before past,
 	// upcoming sorted soonest-first, past sorted most-recent-first.
 	// The regex guard (RFC3339 prefix) prevents a ::timestamptz cast error on
 	// malformed values; PostgreSQL short-circuits AND before evaluating the cast.
 	const scheduleAtOrder = `
+		CASE WHEN status IN ('initiated', 'in-progress') THEN 1 ELSE 0 END ASC,
 		CASE WHEN spec->>'schedule_at' IS NULL OR spec->>'schedule_at' = '' THEN 0 ELSE 1 END ASC,
 		CASE WHEN spec->>'schedule_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' AND (spec->>'schedule_at')::timestamptz >= NOW() THEN 0 ELSE 1 END ASC,
 		CASE WHEN spec->>'schedule_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}' AND (spec->>'schedule_at')::timestamptz >= NOW() THEN (spec->>'schedule_at')::timestamptz END ASC NULLS LAST,
@@ -1024,10 +1026,11 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 			}
 
 			meta := map[string]any{
-				"source":      "admin_campaign_cancel",
-				"operation":   "cancel_campaign_refund_frozen_missed_approval_deadline",
-				"campaign_id": campaign.ID,
-				"comment":     req.Comment,
+				"source":        "admin_campaign_cancel",
+				"operation":     "cancel_campaign_refund_frozen_missed_approval_deadline",
+				"campaign_id":   campaign.ID,
+				"comment":       req.Comment,
+				"refund_amount": amount,
 			}
 			metaBytes, _ := json.Marshal(meta)
 
@@ -1107,10 +1110,11 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 			}
 
 			meta := map[string]any{
-				"source":      "admin_campaign_cancel",
-				"operation":   "cancel_campaign_refund_spent",
-				"campaign_id": campaign.ID,
-				"comment":     req.Comment,
+				"source":        "admin_campaign_cancel",
+				"operation":     "cancel_campaign_refund_spent",
+				"campaign_id":   campaign.ID,
+				"comment":       req.Comment,
+				"refund_amount": amount,
 			}
 			metaBytes, _ := json.Marshal(meta)
 
