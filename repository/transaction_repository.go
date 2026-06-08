@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -401,6 +402,17 @@ func (r *TransactionRepositoryImpl) applyFilter(query *gorm.DB, filter models.Tr
 	}
 	if filter.CustomerID != nil {
 		query = query.Where("customer_id = ?", *filter.CustomerID)
+	}
+	if filter.CustomerName != nil {
+		name := strings.TrimSpace(*filter.CustomerName)
+		if name != "" {
+			pattern := "%" + name + "%"
+			customerSubQuery := query.Session(&gorm.Session{}).
+				Model(&models.Customer{}).
+				Select("id").
+				Where("representative_first_name ILIKE ? OR representative_last_name ILIKE ? OR company_name ILIKE ?", pattern, pattern, pattern)
+			query = query.Where("customer_id IN (?)", customerSubQuery)
+		}
 	}
 	if filter.ExternalReference != nil {
 		query = query.Where("external_reference = ?", *filter.ExternalReference)
