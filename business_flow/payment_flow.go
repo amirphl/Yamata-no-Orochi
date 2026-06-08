@@ -1371,6 +1371,7 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 	customerCredit := toUint64(meta["customer_credit"])
 	agencyShareWithTax := toUint64(meta["agency_share_with_tax"])
 	refund := toUint64(meta["refund_amount"])
+	depositMethod := deriveDepositMethod(meta)
 
 	customerInvoiceUUID := customerInvoiceUUIDFromMetadata(meta)
 
@@ -1410,10 +1411,11 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 		CustomerCredit:     customerCredit,
 		AgencyShareWithTax: agencyShareWithTax,
 		Refund:             refund,
-		// Currency:            transaction.Currency,
-		// Operation:           operation,
-		// Source:              source,
-		DateTime: transaction.CreatedAt,
+		// Currency:           transaction.Currency,
+		// Operation:          operation,
+		// Source:             source,
+		DepositMethod: depositMethod,
+		DateTime:      transaction.CreatedAt,
 		// ExternalRef:         externalRef,
 		// BalanceBefore:       balanceBefore,
 		// BalanceAfter:        balanceAfter,
@@ -1433,6 +1435,38 @@ func toString(v any) string {
 	default:
 		return fmt.Sprint(v)
 	}
+}
+
+func deriveDepositMethod(metadata map[string]any) string {
+	paymentChannel := strings.TrimSpace(toString(metadata["payment_channel"]))
+	switch paymentChannel {
+	case "atipay":
+		return "payment_gateway"
+	case "deposit_receipt_manual":
+		return "deposit_receipt"
+	case "admin_direct_charge":
+		return "admin_charge"
+	}
+
+	switch strings.TrimSpace(toString(metadata["payment_request_source"])) {
+	case "wallet_recharge":
+		return "payment_gateway"
+	case "deposit_receipt":
+		return "deposit_receipt"
+	case "wallet_recharge_admin":
+		return "admin_charge"
+	}
+
+	switch strings.TrimSpace(toString(metadata["source"])) {
+	case "wallet_recharge":
+		return "payment_gateway"
+	case "deposit_receipt":
+		return "deposit_receipt"
+	case "wallet_recharge_admin":
+		return "admin_charge"
+	}
+
+	return ""
 }
 
 func toUint64(v any) uint64 {
