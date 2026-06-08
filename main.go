@@ -505,7 +505,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		agencyDiscountRepo,
 		depositReceiptRepo,
 		multimediaRepo,
-		notificationService,
+		otpSMSService,
 		cfg.Admin,
 		cfg.Message,
 		cfg.Cache,
