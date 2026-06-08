@@ -1,6 +1,10 @@
 package dto
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // AdminCustomersSharesRequest holds optional date filters for the report
 type AdminCustomersSharesRequest struct {
@@ -65,17 +69,42 @@ type AdminCustomerDetailDTO struct {
 
 // AdminCustomerCampaignItem summarizes a campaign for admin list
 type AdminCustomerCampaignItem struct {
-	CampaignID     uint       `json:"campaign_id"`
-	Title          *string    `json:"title"`
-	CreatedAt      time.Time  `json:"created_at"`
-	ScheduleAt     *time.Time `json:"schedule_at,omitempty"`
-	Status         string     `json:"status"`
-	LineNumber     *string    `json:"line_number,omitempty"`
-	Level3s        []string   `json:"level3s,omitempty"`
-	NumAudience    *uint64    `json:"num_audience,omitempty"`
-	TotalSent      uint64     `json:"total_sent"`
-	TotalDelivered uint64     `json:"total_delivered"`
-	ClickRate      float64    `json:"click_rate"`
+	CampaignID                  uint           `json:"campaign_id"`
+	ID                          uint           `json:"id"`
+	UUID                        string         `json:"uuid"`
+	Status                      string         `json:"status"`
+	CreatedAt                   time.Time      `json:"created_at"`
+	UpdatedAt                   *time.Time     `json:"updated_at,omitempty"`
+	Title                       *string        `json:"title,omitempty"`
+	Level1                      *string        `json:"level1,omitempty"`
+	Level2s                     []string       `json:"level2s,omitempty"`
+	Level3s                     []string       `json:"level3s,omitempty"`
+	Tags                        []string       `json:"tags,omitempty"`
+	Sex                         *string        `json:"sex,omitempty"`
+	City                        []string       `json:"city,omitempty"`
+	AdLink                      *string        `json:"adlink,omitempty"`
+	Content                     *string        `json:"content,omitempty"`
+	ShortLinkDomain             *string        `json:"short_link_domain,omitempty"`
+	Category                    *string        `json:"job_category,omitempty"`
+	Job                         *string        `json:"job,omitempty"`
+	ScheduleAt                  *time.Time     `json:"scheduleat,omitempty"`
+	LineNumber                  *string        `json:"line_number,omitempty"`
+	MediaUUID                   *uuid.UUID     `json:"media_uuid,omitempty"`
+	PlatformSettingsID          *uint          `json:"platform_settings_id,omitempty"`
+	Platform                    string         `json:"platform"`
+	Budget                      *uint64        `json:"budget,omitempty"`
+	Comment                     *string        `json:"comment,omitempty"`
+	SegmentPriceFactor          float64        `json:"segment_price_factor,omitempty"`
+	LineNumberPriceFactor       float64        `json:"line_number_price_factor,omitempty"`
+	Statistics                  map[string]any `json:"statistics,omitempty"`
+	TotalClicks                 *int64         `json:"total_clicks,omitempty"`
+	ClickRate                   float64        `json:"click_rate"`
+	NumAudience                 *uint64        `json:"num_audience,omitempty"`
+	CustomerFullName            *string        `json:"customer_full_name,omitempty"`
+	AgencyFullName              *string        `json:"agency_full_name,omitempty"`
+	TargetAudienceExcelFileUUID *string        `json:"target_audience_excel_file_uuid,omitempty"`
+	TotalSent                   uint64         `json:"total_sent"`
+	TotalDelivered              uint64         `json:"total_delivered"`
 }
 
 // AdminCustomerWithCampaignsResponse response payload
