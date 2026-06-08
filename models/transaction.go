@@ -125,6 +125,7 @@ type TransactionFilter struct {
 	Currency          *string            `json:"currency,omitempty"`
 	WalletID          *uint              `json:"wallet_id,omitempty"`
 	CustomerID        *uint              `json:"customer_id,omitempty"`
+	CustomerName      *string            `json:"customer_name,omitempty"`
 	ExternalReference *string            `json:"external_reference,omitempty"`
 	CreatedAfter      *time.Time         `json:"created_after,omitempty"`
 	CreatedBefore     *time.Time         `json:"created_before,omitempty"`
