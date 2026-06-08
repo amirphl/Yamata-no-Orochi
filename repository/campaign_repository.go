@@ -26,8 +26,9 @@ func NewCampaignRepository(db *gorm.DB) CampaignRepository {
 
 // statisticsWithoutTrackingResults is the SELECT expression that returns all statistics
 // keys except "trackingResults", which can be very large and is excluded from read queries.
-const statisticsWithoutTrackingResults = "id, uuid, customer_id, status, created_at, updated_at, spec, comment, " +
-	"(statistics - 'trackingResults') AS statistics, num_audience"
+const statisticsWithoutTrackingResults = "campaigns.id, campaigns.uuid, campaigns.customer_id, campaigns.status, " +
+	"campaigns.created_at, campaigns.updated_at, campaigns.spec, campaigns.comment, " +
+	"(campaigns.statistics - 'trackingResults') AS statistics, campaigns.num_audience"
 
 // ByID retrieves an campaign by ID
 func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Campaign, error) {
@@ -455,19 +456,26 @@ func (r *CampaignRepositoryImpl) Exists(ctx context.Context, filter models.Campa
 // applyFilter applies filter conditions to the GORM query
 func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.CampaignFilter) *gorm.DB {
 	if filter.ID != nil {
-		db = db.Where("id = ?", *filter.ID)
+		db = db.Where("campaigns.id = ?", *filter.ID)
 	}
 	if filter.UUID != nil {
-		db = db.Where("uuid = ?", *filter.UUID)
+		db = db.Where("campaigns.uuid = ?", *filter.UUID)
 	}
 	if filter.CustomerID != nil {
-		db = db.Where("customer_id = ?", *filter.CustomerID)
+		db = db.Where("campaigns.customer_id = ?", *filter.CustomerID)
 	}
 	if filter.Status != nil {
-		db = db.Where("status = ?", *filter.Status)
+		db = db.Where("campaigns.status = ?", *filter.Status)
 	}
 	if filter.Title != nil {
-		db = db.Where("spec->>'title' ILIKE ?", "%"+*filter.Title+"%")
+		searchTerm := "%" + *filter.Title + "%"
+		db = db.Joins("LEFT JOIN customers ON customers.id = campaigns.customer_id").
+			Where(`(
+				campaigns.spec->>'title' ILIKE ?
+				OR customers.representative_first_name ILIKE ?
+				OR customers.representative_last_name ILIKE ?
+				OR customers.company_name ILIKE ?
+			)`, searchTerm, searchTerm, searchTerm, searchTerm)
 	}
 	if filter.Level1 != nil {
 		db = db.Where("spec->>'level1' = ?", *filter.Level1)
@@ -491,16 +499,16 @@ func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.Campaign
 		db = db.Where("COALESCE(NULLIF(spec->>'platform', ''), ?) = ?", models.CampaignPlatformSMS, *filter.Platform)
 	}
 	if filter.CreatedAfter != nil {
-		db = db.Where("created_at >= ?", *filter.CreatedAfter)
+		db = db.Where("campaigns.created_at >= ?", *filter.CreatedAfter)
 	}
 	if filter.CreatedBefore != nil {
-		db = db.Where("created_at < ?", *filter.CreatedBefore)
+		db = db.Where("campaigns.created_at < ?", *filter.CreatedBefore)
 	}
 	if filter.UpdatedAfter != nil {
-		db = db.Where("updated_at > ?", *filter.UpdatedAfter)
+		db = db.Where("campaigns.updated_at > ?", *filter.UpdatedAfter)
 	}
 	if filter.UpdatedBefore != nil {
-		db = db.Where("updated_at < ?", *filter.UpdatedBefore)
+		db = db.Where("campaigns.updated_at < ?", *filter.UpdatedBefore)
 	}
 	if filter.ScheduleAfter != nil {
 		db = db.Where("(spec->>'schedule_at')::timestamptz > ?", *filter.ScheduleAfter)
