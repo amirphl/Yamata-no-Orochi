@@ -55,7 +55,7 @@ type PaymentFlowImpl struct {
 	agencyDiscountRepo  repository.AgencyDiscountRepository
 	depositReceiptRepo  repository.DepositReceiptRepository
 	multimediaRepo      repository.MultimediaAssetRepository
-	notifier            services.NotificationService
+	notifier            services.SMSService
 	adminCfg            config.AdminConfig
 	messageCfg          config.MessageConfig
 	cacheCfg            config.CacheConfig
@@ -80,7 +80,7 @@ func NewPaymentFlow(
 	agencyDiscountRepo repository.AgencyDiscountRepository,
 	depositReceiptRepo repository.DepositReceiptRepository,
 	multimediaRepo repository.MultimediaAssetRepository,
-	notifier services.NotificationService,
+	notifier services.SMSService,
 	adminCfg config.AdminConfig,
 	messageCfg config.MessageConfig,
 	cacheCfg config.CacheConfig,
@@ -1389,6 +1389,13 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 		amount = 0
 		customerCredit = 0
 		agencyShareWithTax = 0
+	case source == "admin_campaign_cancel" && (operation == "cancel_campaign_refund_frozen_missed_approval_deadline" || operation == "cancel_campaign_refund_spent"):
+		amount = 0
+		customerCredit = 0
+		agencyShareWithTax = 0
+		if refund == 0 {
+			refund = transaction.Amount
+		}
 	default:
 		// Fallback to transaction amount
 		if amount == 0 {
