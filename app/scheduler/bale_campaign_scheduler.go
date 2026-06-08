@@ -464,7 +464,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
 	}
 
-	if stats != nil && stats["aggregatedTotalRecords"] != nil && stats["aggregatedTotalRecords"].(int64) > 0 {
+	if stats != nil && stats["aggregatedTotalSent"] != nil && stats["aggregatedTotalSent"].(int64) > 0 {
 		if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
 			return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
 		}
@@ -968,7 +968,7 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		if pc == nil {
 			return fmt.Errorf("processed campaign not found for processed campaign id=%d", job.ProcessedCampaignID)
 		}
-		if stats["aggregatedTotalRecords"] != nil && stats["aggregatedTotalRecords"].(int64) > 0 {
+		if stats["aggregatedTotalSent"] != nil && stats["aggregatedTotalSent"].(int64) > 0 {
 			if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
 				return err
 			}
