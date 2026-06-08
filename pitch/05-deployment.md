@@ -41,7 +41,6 @@ graph TB
         Rubika[Rubika Messenger]
         Splus[Soroush Plus]
         Atipay[Atipay — Payment Gateway]
-        Oxapay[Oxapay — Crypto Payments]
     end
 
     Users --> Nginx
@@ -55,7 +54,6 @@ graph TB
     App --> Rubika
     App --> Splus
     App --> Atipay
-    App --> Oxapay
     Prometheus --> App
     Prometheus --> PGExporter
     Prometheus --> NodeExporter
