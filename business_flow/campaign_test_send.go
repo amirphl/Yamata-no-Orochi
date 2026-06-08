@@ -20,6 +20,7 @@ import (
 )
 
 const campaignTestCooldown = 30 * time.Second
+const asyncCampaignTestSendTimeout = 60 * time.Second
 
 func (s *CampaignFlowImpl) SendCampaignTestMessage(ctx context.Context, req *dto.SendCampaignTestMessageRequest, metadata *ClientMetadata) (*dto.SendCampaignTestMessageResponse, error) {
 	if req == nil {
@@ -252,8 +253,10 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 	recipient string,
 	body string,
 ) (softErr error, hardErr error) {
-	sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
+	baseCtx := context.Background()
+	if ctx != nil {
+		baseCtx = context.WithoutCancel(ctx)
+	}
 
 	switch platform {
 	case models.CampaignPlatformSMS:
@@ -264,23 +267,25 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		if lineNumber == "" {
 			return nil, ErrCampaignLineNumberRequired
 		}
-		if _, err := s.fetchLineNumberPriceFactor(sendCtx, &lineNumber); err != nil {
+		if _, err := s.fetchLineNumberPriceFactor(ctx, &lineNumber); err != nil {
 			return nil, err
 		}
 		client := scheduler.NewPayamSMSClient(s.payamSMSConfig)
-		resp, err := client.SendBatch(sendCtx, lineNumber, []scheduler.PayamSMSItem{{
-			Recipient:  recipient,
-			Body:       body,
-			TrackingID: buildProviderTestID("test-sms", campaign.CustomerID),
-		}})
-		if err == nil && len(resp) > 0 {
-			log.Printf("sendCampaignTestMessageBestEffort: PayamSMS response for campaign test send (line number: %s): %+v", lineNumber, resp)
-		}
-
-		return err, nil
+		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			resp, err := client.SendBatch(sendCtx, lineNumber, []scheduler.PayamSMSItem{{
+				Recipient:  recipient,
+				Body:       body,
+				TrackingID: buildProviderTestID("test-sms", campaign.CustomerID),
+			}})
+			if err == nil && len(resp) > 0 {
+				log.Printf("sendCampaignTestMessageBestEffort: PayamSMS response for campaign test send (line number: %s): %+v", lineNumber, resp)
+			}
+			return err
+		})
+		return nil, nil
 
 	case models.CampaignPlatformBale:
-		settings, err := s.requireActivePlatformSettings(sendCtx, campaign, platform)
+		settings, err := s.requireActivePlatformSettings(ctx, campaign, platform)
 		if err != nil {
 			return nil, err
 		}
@@ -293,40 +298,48 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		}
 
 		baleClient := scheduler.NewBaleClient(s.baleConfig)
-		var fileID *string
+		var mediaPath string
 		if campaign.Spec.MediaUUID != nil {
-			path, err := s.resolveCampaignMediaPath(sendCtx, campaign)
+			path, err := s.resolveCampaignMediaPath(ctx, campaign)
 			if err != nil {
 				return nil, err
 			}
-			up, err := baleClient.UploadFile(sendCtx, path)
-			if err != nil {
-				return nil, err
-			}
-			if up != nil && strings.TrimSpace(up.FileID) != "" {
-				v := strings.TrimSpace(up.FileID)
-				fileID = &v
-			}
+			mediaPath = path
 		}
 
-		resp, err := baleClient.SendMessage(sendCtx, &scheduler.BaleSendMessageRequest{
-			RequestID:   buildProviderTestID("test-bale", campaign.CustomerID),
-			BotID:       botID,
-			PhoneNumber: recipient,
-			MessageData: scheduler.BaleSendMessageData{
-				Message: &scheduler.BaleMessage{
-					Text:   body,
-					FileID: fileID,
+		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			var fileID *string
+			if mediaPath != "" {
+				up, err := baleClient.UploadFile(sendCtx, mediaPath)
+				if err != nil {
+					return err
+				}
+				if up != nil && strings.TrimSpace(up.FileID) != "" {
+					v := strings.TrimSpace(up.FileID)
+					fileID = &v
+				}
+			}
+
+			resp, err := baleClient.SendMessage(sendCtx, &scheduler.BaleSendMessageRequest{
+				RequestID:   buildProviderTestID("test-bale", campaign.CustomerID),
+				BotID:       botID,
+				PhoneNumber: recipient,
+				MessageData: scheduler.BaleSendMessageData{
+					Message: &scheduler.BaleMessage{
+						Text:   body,
+						FileID: fileID,
+					},
 				},
-			},
+			})
+			if err == nil && resp != nil {
+				log.Printf("sendCampaignTestMessageBestEffort: Response from Bale provider: %+v", resp)
+			}
+			return err
 		})
-		if err == nil && resp != nil {
-			log.Printf("sendCampaignTestMessageBestEffort: Response from Bale provider: %+v", resp)
-		}
-		return err, nil
+		return nil, nil
 
 	case models.CampaignPlatformRubika:
-		settings, err := s.requireActivePlatformSettings(sendCtx, campaign, platform)
+		settings, err := s.requireActivePlatformSettings(ctx, campaign, platform)
 		if err != nil {
 			return nil, err
 		}
@@ -339,36 +352,43 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		}
 
 		rubikaClient := scheduler.NewRubikaClient(s.rubikaConfig)
-		var fileID *string
+		var mediaPath string
 		if campaign.Spec.MediaUUID != nil {
-			path, err := s.resolveCampaignMediaPath(sendCtx, campaign)
+			path, err := s.resolveCampaignMediaPath(ctx, campaign)
 			if err != nil {
 				return nil, err
 			}
-
-			up, err := rubikaClient.UploadFile(sendCtx, path)
-			if err != nil {
-				return nil, err
-			}
-			if up != nil && strings.TrimSpace(up.Data.FileID) != "" {
-				v := strings.TrimSpace(up.Data.FileID)
-				fileID = &v
-			}
+			mediaPath = path
 		}
 
-		resp, err := rubikaClient.SendBulkMessages(sendCtx, serviceID, []scheduler.RubikaMessagePayload{{
-			Phone:  recipient,
-			Text:   body,
-			FileID: fileID,
-		}})
-		if err == nil && resp != nil {
-			log.Printf("sendCampaignTestMessageBestEffort: Response from Rubika provider: %+v", resp)
-		}
+		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			var fileID *string
+			if mediaPath != "" {
+				up, err := rubikaClient.UploadFile(sendCtx, mediaPath)
+				if err != nil {
+					return err
+				}
+				if up != nil && strings.TrimSpace(up.Data.FileID) != "" {
+					v := strings.TrimSpace(up.Data.FileID)
+					fileID = &v
+				}
+			}
 
-		return err, nil
+			resp, err := rubikaClient.SendBulkMessages(sendCtx, serviceID, []scheduler.RubikaMessagePayload{{
+				Phone:  recipient,
+				Text:   body,
+				FileID: fileID,
+			}})
+			if err == nil && resp != nil {
+				log.Printf("sendCampaignTestMessageBestEffort: Response from Rubika provider: %+v", resp)
+			}
+
+			return err
+		})
+		return nil, nil
 
 	case models.CampaignPlatformSPlus:
-		settings, err := s.requireActivePlatformSettings(sendCtx, campaign, platform)
+		settings, err := s.requireActivePlatformSettings(ctx, campaign, platform)
 		if err != nil {
 			return nil, err
 		}
@@ -378,36 +398,65 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		}
 
 		splusClient := scheduler.NewSplusClient(s.splusConfig)
-		var fileID *string
+		var mediaPath string
 		if campaign.Spec.MediaUUID != nil {
-			path, err := s.resolveCampaignMediaPath(sendCtx, campaign)
+			path, err := s.resolveCampaignMediaPath(ctx, campaign)
 			if err != nil {
 				return nil, err
 			}
-
-			up, err := splusClient.UploadFile(sendCtx, botID, path)
-			if err != nil {
-				return nil, err
-			}
-			if up != nil && strings.TrimSpace(up.FileID) != "" {
-				v := strings.TrimSpace(up.FileID)
-				fileID = &v
-			}
+			mediaPath = path
 		}
 
-		resp, err := splusClient.SendMessage(sendCtx, botID, &scheduler.SplusSendMessageRequest{
-			PhoneNumber: recipient,
-			Text:        body,
-			FileID:      fileID,
+		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			var fileID *string
+			if mediaPath != "" {
+				up, err := splusClient.UploadFile(sendCtx, botID, mediaPath)
+				if err != nil {
+					return err
+				}
+				if up != nil && strings.TrimSpace(up.FileID) != "" {
+					v := strings.TrimSpace(up.FileID)
+					fileID = &v
+				}
+			}
+
+			resp, err := splusClient.SendMessage(sendCtx, botID, &scheduler.SplusSendMessageRequest{
+				PhoneNumber: recipient,
+				Text:        body,
+				FileID:      fileID,
+			})
+			if err == nil && resp != nil {
+				log.Printf("sendCampaignTestMessageBestEffort: Response from SPlus provider: %+v", resp)
+			}
+			return err
 		})
-		if err == nil && resp != nil {
-			log.Printf("sendCampaignTestMessageBestEffort: Response from SPlus provider: %+v", resp)
-		}
-		return err, nil
+		return nil, nil
 
 	default:
 		return nil, ErrCampaignPlatformInvalid
 	}
+}
+
+func (s *CampaignFlowImpl) runAsyncCampaignTestSend(
+	baseCtx context.Context,
+	platform string,
+	recipient string,
+	fn func(context.Context) error,
+) {
+	go func() {
+		sendCtx, cancel := context.WithTimeout(baseCtx, asyncCampaignTestSendTimeout)
+		defer cancel()
+
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				log.Printf("sendCampaignTestMessageBestEffort: panic during async %s test send to %s: %v", platform, maskPhoneNumber(recipient), recovered)
+			}
+		}()
+
+		if err := fn(sendCtx); err != nil {
+			log.Printf("sendCampaignTestMessageBestEffort: async %s test send to %s failed: %v", platform, maskPhoneNumber(recipient), err)
+		}
+	}()
 }
 
 func (s *CampaignFlowImpl) resolveCampaignMediaPath(ctx context.Context, campaign models.Campaign) (string, error) {
