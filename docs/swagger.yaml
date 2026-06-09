@@ -168,6 +168,9 @@ definitions:
     type: object
   dto.AdminChargeWalletRequest:
     properties:
+      admin_note:
+        maxLength: 1000
+        type: string
       amount_with_tax:
         maximum: 1000000000
         minimum: 1000
@@ -285,30 +288,87 @@ definitions:
     type: object
   dto.AdminCustomerCampaignItem:
     properties:
+      adlink:
+        type: string
+      agency_full_name:
+        type: string
+      budget:
+        type: integer
       campaign_id:
         type: integer
+      city:
+        items:
+          type: string
+        type: array
       click_rate:
         type: number
+      comment:
+        type: string
+      content:
+        type: string
       created_at:
         type: string
+      customer_full_name:
+        type: string
+      id:
+        type: integer
+      job:
+        type: string
+      job_category:
+        type: string
+      level1:
+        type: string
+      level2s:
+        items:
+          type: string
+        type: array
       level3s:
         items:
           type: string
         type: array
       line_number:
         type: string
+      line_number_price_factor:
+        type: number
+      media_uuid:
+        type: string
       num_audience:
         type: integer
-      schedule_at:
+      platform:
         type: string
+      platform_settings_id:
+        type: integer
+      scheduleat:
+        type: string
+      segment_price_factor:
+        type: number
+      sex:
+        type: string
+      short_link_domain:
+        type: string
+      statistics:
+        additionalProperties: {}
+        type: object
       status:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      target_audience_excel_file_uuid:
         type: string
       title:
         type: string
+      total_clicks:
+        type: integer
       total_delivered:
         type: integer
       total_sent:
         type: integer
+      updated_at:
+        type: string
+      uuid:
+        type: string
     type: object
   dto.AdminCustomerDetailDTO:
     properties:
@@ -486,6 +546,8 @@ definitions:
     properties:
       adlink:
         type: string
+      agency_full_name:
+        type: string
       budget:
         type: integer
       city:
@@ -499,6 +561,8 @@ definitions:
       content:
         type: string
       created_at:
+        type: string
+      customer_full_name:
         type: string
       id:
         type: integer
@@ -522,6 +586,8 @@ definitions:
         type: number
       media_uuid:
         type: string
+      num_audience:
+        type: integer
       platform:
         type: string
       platform_settings_id:
@@ -601,6 +667,17 @@ definitions:
       total_sent:
         type: integer
     type: object
+  dto.AdminListCampaignsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminGetCampaignResponse'
+        type: array
+      message:
+        type: string
+      pagination:
+        $ref: '#/definitions/dto.PaginationInfo'
+    type: object
   dto.AdminListCustomersResponse:
     properties:
       items:
@@ -666,6 +743,33 @@ definitions:
       pagination:
         $ref: '#/definitions/dto.TransactionHistoryPaginationInfo'
     type: object
+  dto.AdminLoginInitResponse:
+    properties:
+      already_sent:
+        type: boolean
+      challenge_id:
+        type: string
+      masked_phone:
+        type: string
+      message:
+        type: string
+      otp_expires_at:
+        type: string
+      otp_sent:
+        type: boolean
+      requires_two_factor:
+        type: boolean
+    type: object
+  dto.AdminLoginVerifyOTPRequest:
+    properties:
+      challenge_id:
+        type: string
+      otp_code:
+        type: string
+    required:
+    - challenge_id
+    - otp_code
+    type: object
   dto.AdminPagePriceItem:
     properties:
       created_at:
@@ -711,6 +815,48 @@ definitions:
         type: string
       website:
         type: string
+    type: object
+  dto.AdminPreviewWalletChargeImpactRequest:
+    properties:
+      amount_with_tax:
+        maximum: 1000000000
+        minimum: 1000
+        type: integer
+      customer_id:
+        minimum: 1
+        type: integer
+    required:
+    - amount_with_tax
+    - customer_id
+    type: object
+  dto.AdminPreviewWalletChargeImpactResponse:
+    properties:
+      agency_discount_id:
+        type: integer
+      agency_id:
+        type: integer
+      agency_share_with_tax:
+        type: integer
+      amount:
+        type: integer
+      amount_with_tax:
+        type: integer
+      credit_increase:
+        type: integer
+      customer_id:
+        type: integer
+      discount_rate:
+        type: number
+      free_increase:
+        type: integer
+      message:
+        type: string
+      success:
+        type: boolean
+      system_share_with_tax:
+        type: integer
+      tax:
+        type: integer
     type: object
   dto.AdminRejectCampaignRequest:
     properties:
@@ -825,11 +971,15 @@ definitions:
         $ref: '#/definitions/dto.AdminTransactionCustomerInfo'
       customer_credit:
         type: integer
+      customer_full_name:
+        type: string
       customer_id:
         type: integer
       customer_invoice_uuid:
         type: string
       datetime:
+        type: string
+      deposit_method:
         type: string
       external_ref:
         type: string
@@ -1948,6 +2098,8 @@ definitions:
         type: string
       currency:
         type: string
+      customer_full_name:
+        type: string
       customer_id:
         type: integer
       file_name:
@@ -2731,6 +2883,9 @@ definitions:
       datetime:
         description: When the transaction occurred
         type: string
+      deposit_method:
+        description: payment_gateway, deposit_receipt, or admin_charge
+        type: string
       external_ref:
         description: External reference (e.g., Atipay reference)
         type: string
@@ -3035,7 +3190,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Verify captcha and authenticate admin with username/password
+      description: Verify captcha and admin credentials, then send/reuse an OTP for
+        two-factor login
       parameters:
       - description: Admin login data
         in: body
@@ -3043,6 +3199,49 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/dto.AdminCaptchaVerifyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OTP challenge created
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminLoginInitResponse'
+              type: object
+        "400":
+          description: Invalid request or captcha
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Incorrect credentials or admin not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Admin inactive
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin login
+      tags:
+      - Admin Authentication
+  /api/v1/admin/auth/login/verify-otp:
+    post:
+      consumes:
+      - application/json
+      description: Verify admin OTP and issue access/refresh tokens
+      parameters:
+      - description: Admin login OTP verification data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminLoginVerifyOTPRequest'
       produces:
       - application/json
       responses:
@@ -3067,11 +3266,11 @@ paths:
                   type: object
               type: object
         "400":
-          description: Invalid request or captcha
+          description: Invalid request body
           schema:
             $ref: '#/definitions/dto.APIResponse'
         "401":
-          description: Incorrect credentials or admin not found
+          description: Invalid or expired OTP
           schema:
             $ref: '#/definitions/dto.APIResponse'
         "403":
@@ -3082,7 +3281,7 @@ paths:
           description: Internal server error
           schema:
             $ref: '#/definitions/dto.APIResponse'
-      summary: Admin login
+      summary: Admin login OTP verification
       tags:
       - Admin Authentication
   /api/v1/admin/campaigns:
@@ -3105,6 +3304,17 @@ paths:
         in: query
         name: end_date
         type: string
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: Page size
+        in: query
+        maximum: 100
+        name: limit
+        type: integer
       produces:
       - application/json
       responses:
@@ -3115,9 +3325,7 @@ paths:
             - $ref: '#/definitions/dto.APIResponse'
             - properties:
                 data:
-                  items:
-                    $ref: '#/definitions/dto.GetCampaignResponse'
-                  type: array
+                  $ref: '#/definitions/dto.AdminListCampaignsResponse'
               type: object
         "400":
           description: Validation error
@@ -3242,7 +3450,9 @@ paths:
       consumes:
       - application/json
       description: Cancel an approved campaign by admin and refund consumed budget
-        to customer
+        to customer. Approved campaigns still require at least 2 minutes before schedule_at;
+        a waiting-for-approval campaign that already missed schedule_at may also be
+        cancelled.
       parameters:
       - description: Cancellation payload
         in: body
@@ -3386,7 +3596,8 @@ paths:
       consumes:
       - application/json
       description: Admin reschedules an eligible campaign; schedule_at must be UTC
-        and its Tehran-local time must be between 08:00 and 21:00.
+        and its Tehran-local time must be between 08:00 and 21:00. A waiting-for-approval
+        campaign whose deadline was missed may still be rescheduled.
       parameters:
       - description: Reschedule payload
         in: body
@@ -3624,7 +3835,8 @@ paths:
       consumes:
       - application/json
       description: Create a line number with name (optional), unique value, price
-        factor, priority (optional), and is_active (optional)
+        factor, priority (optional), and is_active (optional). If the line number
+        already exists, its mutable fields are updated.
       parameters:
       - description: Create line number payload
         in: body
@@ -3649,7 +3861,7 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
         "500":
-          description: Creation failed
+          description: Create or update failed
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Create Line Number (Admin)
@@ -3894,6 +4106,50 @@ paths:
       summary: Charge Wallet By Admin
       tags:
       - Payments Admin
+  /api/v1/admin/payments/charge-wallet/preview:
+    post:
+      consumes:
+      - application/json
+      description: Admin endpoint to preview free balance, credit, and agency share
+        changes before charging a customer wallet
+      parameters:
+      - description: Admin wallet charge preview payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminPreviewWalletChargeImpactRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Wallet charge impact calculated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminPreviewWalletChargeImpactResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized admin
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Customer or discount not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Preview Wallet Charge Impact
+      tags:
+      - Payments Admin
   /api/v1/admin/payments/deposit-receipts:
     get:
       description: Lists deposit receipts with optional filters and previews.
@@ -3910,6 +4166,10 @@ paths:
         in: query
         name: customer_id
         type: integer
+      - description: Filter by customer representative/company name
+        in: query
+        name: customer_name
+        type: string
       - description: Limit (default 50)
         in: query
         name: limit
@@ -4057,6 +4317,10 @@ paths:
         in: query
         name: customer_id
         type: integer
+      - description: Optional customer name/company filter
+        in: query
+        name: customer_name
+        type: string
       produces:
       - application/json
       responses:
