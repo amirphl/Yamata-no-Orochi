@@ -22,15 +22,15 @@ type AdminLineNumberFlow interface {
 }
 
 type AdminLineNumberFlowImpl struct {
-	lineRepo repository.LineNumberRepository
-	db       *gorm.DB
+	lineRepo  repository.LineNumberRepository
+	db        *gorm.DB
 	auditRepo repository.AuditLogRepository
 }
 
 func NewAdminLineNumberFlow(lineRepo repository.LineNumberRepository, db *gorm.DB, auditRepo repository.AuditLogRepository) AdminLineNumberFlow {
 	return &AdminLineNumberFlowImpl{
-		lineRepo: lineRepo,
-		db:       db,
+		lineRepo:  lineRepo,
+		db:        db,
 		auditRepo: auditRepo,
 	}
 }
@@ -57,7 +57,26 @@ func (f *AdminLineNumberFlowImpl) Create(ctx context.Context, req *dto.AdminCrea
 		return nil, err
 	}
 	if existing != nil {
-		return nil, NewBusinessError("LINE_NUMBER_EXISTS", "Line number already exists", ErrLineNumberAlreadyExists)
+		existing.Name = req.Name
+		existing.PriceFactor = req.PriceFactor
+		existing.Priority = req.Priority
+		existing.IsActive = req.IsActive
+		existing.UpdatedAt = utils.UTCNow()
+
+		if err := f.lineRepo.Update(ctx, existing); err != nil {
+			logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberUpdate, "Admin update existing line number", false, nil, map[string]any{
+				"line_number": value,
+				"id":          existing.ID,
+			}, err)
+			return nil, err
+		}
+
+		resp := ToLineNumberDTO(*existing)
+		logAdminAction(ctx, f.auditRepo, models.AuditActionAdminLineNumberUpdate, "Admin update existing line number", true, nil, map[string]any{
+			"line_number": value,
+			"id":          existing.ID,
+		}, nil)
+		return &resp, nil
 	}
 
 	// Build entity
