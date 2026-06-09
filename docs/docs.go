@@ -219,7 +219,7 @@ const docTemplate = `{
         },
         "/api/v1/admin/auth/login": {
             "post": {
-                "description": "Verify captcha and authenticate admin with username/password",
+                "description": "Verify captcha and admin credentials, then send/reuse an OTP for two-factor login",
                 "consumes": [
                     "application/json"
                 ],
@@ -238,6 +238,76 @@ const docTemplate = `{
                         "required": true,
                         "schema": {
                             "$ref": "#/definitions/dto.AdminCaptchaVerifyRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OTP challenge created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminLoginInitResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request or captcha",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Incorrect credentials or admin not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Admin inactive",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/auth/login/verify-otp": {
+            "post": {
+                "description": "Verify admin OTP and issue access/refresh tokens",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Authentication"
+                ],
+                "summary": "Admin login OTP verification",
+                "parameters": [
+                    {
+                        "description": "Admin login OTP verification data",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminLoginVerifyOTPRequest"
                         }
                     }
                 ],
@@ -278,13 +348,13 @@ const docTemplate = `{
                         }
                     },
                     "400": {
-                        "description": "Invalid request or captcha",
+                        "description": "Invalid request body",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
                     },
                     "401": {
-                        "description": "Incorrect credentials or admin not found",
+                        "description": "Invalid or expired OTP",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -338,6 +408,21 @@ const docTemplate = `{
                         "description": "Filter created_at \u003c= end_date (RFC3339)",
                         "name": "end_date",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Page size",
+                        "name": "limit",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -352,10 +437,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/dto.GetCampaignResponse"
-                                            }
+                                            "$ref": "#/definitions/dto.AdminListCampaignsResponse"
                                         }
                                     }
                                 }
@@ -501,7 +583,7 @@ const docTemplate = `{
         },
         "/api/v1/admin/campaigns/cancel": {
             "post": {
-                "description": "Cancel an approved campaign by admin and refund consumed budget to customer",
+                "description": "Cancel an approved campaign by admin and refund consumed budget to customer. Approved campaigns still require at least 2 minutes before schedule_at; a waiting-for-approval campaign that already missed schedule_at may also be cancelled.",
                 "consumes": [
                     "application/json"
                 ],
@@ -735,7 +817,7 @@ const docTemplate = `{
         },
         "/api/v1/admin/campaigns/reschedule": {
             "post": {
-                "description": "Admin reschedules an eligible campaign; schedule_at must be UTC and its Tehran-local time must be between 08:00 and 21:00.",
+                "description": "Admin reschedules an eligible campaign; schedule_at must be UTC and its Tehran-local time must be between 08:00 and 21:00. A waiting-for-approval campaign whose deadline was missed may still be rescheduled.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1242,7 +1324,7 @@ const docTemplate = `{
                 }
             },
             "post": {
-                "description": "Create a line number with name (optional), unique value, price factor, priority (optional), and is_active (optional)",
+                "description": "Create a line number with name (optional), unique value, price factor, priority (optional), and is_active (optional). If the line number already exists, its mutable fields are updated.",
                 "consumes": [
                     "application/json"
                 ],
@@ -1290,7 +1372,7 @@ const docTemplate = `{
                         }
                     },
                     "500": {
-                        "description": "Creation failed",
+                        "description": "Create or update failed",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -1617,6 +1699,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/payments/charge-wallet/preview": {
+            "post": {
+                "description": "Admin endpoint to preview free balance, credit, and agency share changes before charging a customer wallet",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments Admin"
+                ],
+                "summary": "Preview Wallet Charge Impact",
+                "parameters": [
+                    {
+                        "description": "Admin wallet charge preview payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminPreviewWalletChargeImpactRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Wallet charge impact calculated successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminPreviewWalletChargeImpactResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized admin",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Customer or discount not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/payments/deposit-receipts": {
             "get": {
                 "description": "Lists deposit receipts with optional filters and previews.",
@@ -1644,6 +1796,12 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Filter by customer ID",
                         "name": "customer_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by customer representative/company name",
+                        "name": "customer_name",
                         "in": "query"
                     },
                     {
@@ -1870,6 +2028,12 @@ const docTemplate = `{
                         "type": "integer",
                         "description": "Optional customer filter",
                         "name": "customer_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Optional customer name/company filter",
+                        "name": "customer_name",
                         "in": "query"
                     }
                 ],
@@ -7313,6 +7477,10 @@ const docTemplate = `{
                 "customer_id"
             ],
             "properties": {
+                "admin_note": {
+                    "type": "string",
+                    "maxLength": 1000
+                },
                 "amount_with_tax": {
                     "type": "integer",
                     "maximum": 1000000000,
@@ -7481,14 +7649,56 @@ const docTemplate = `{
         "dto.AdminCustomerCampaignItem": {
             "type": "object",
             "properties": {
+                "adlink": {
+                    "type": "string"
+                },
+                "agency_full_name": {
+                    "type": "string"
+                },
+                "budget": {
+                    "type": "integer"
+                },
                 "campaign_id": {
                     "type": "integer"
+                },
+                "city": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "click_rate": {
                     "type": "number"
                 },
+                "comment": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
+                },
+                "customer_full_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "job": {
+                    "type": "string"
+                },
+                "job_category": {
+                    "type": "string"
+                },
+                "level1": {
+                    "type": "string"
+                },
+                "level2s": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "level3s": {
                     "type": "array",
@@ -7499,23 +7709,66 @@ const docTemplate = `{
                 "line_number": {
                     "type": "string"
                 },
+                "line_number_price_factor": {
+                    "type": "number"
+                },
+                "media_uuid": {
+                    "type": "string"
+                },
                 "num_audience": {
                     "type": "integer"
                 },
-                "schedule_at": {
+                "platform": {
                     "type": "string"
+                },
+                "platform_settings_id": {
+                    "type": "integer"
+                },
+                "scheduleat": {
+                    "type": "string"
+                },
+                "segment_price_factor": {
+                    "type": "number"
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "short_link_domain": {
+                    "type": "string"
+                },
+                "statistics": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
                 "status": {
                     "type": "string"
                 },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "target_audience_excel_file_uuid": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
+                },
+                "total_clicks": {
+                    "type": "integer"
                 },
                 "total_delivered": {
                     "type": "integer"
                 },
                 "total_sent": {
                     "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
                 }
             }
         },
@@ -7785,6 +8038,9 @@ const docTemplate = `{
                 "adlink": {
                     "type": "string"
                 },
+                "agency_full_name": {
+                    "type": "string"
+                },
                 "budget": {
                     "type": "integer"
                 },
@@ -7804,6 +8060,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "created_at": {
+                    "type": "string"
+                },
+                "customer_full_name": {
                     "type": "string"
                 },
                 "id": {
@@ -7838,6 +8097,9 @@ const docTemplate = `{
                 },
                 "media_uuid": {
                     "type": "string"
+                },
+                "num_audience": {
+                    "type": "integer"
                 },
                 "platform": {
                     "type": "string"
@@ -7959,6 +8221,23 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminListCampaignsResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminGetCampaignResponse"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "$ref": "#/definitions/dto.PaginationInfo"
+                }
+            }
+        },
         "dto.AdminListCustomersResponse": {
             "type": "object",
             "properties": {
@@ -8060,6 +8339,47 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminLoginInitResponse": {
+            "type": "object",
+            "properties": {
+                "already_sent": {
+                    "type": "boolean"
+                },
+                "challenge_id": {
+                    "type": "string"
+                },
+                "masked_phone": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "otp_expires_at": {
+                    "type": "string"
+                },
+                "otp_sent": {
+                    "type": "boolean"
+                },
+                "requires_two_factor": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "dto.AdminLoginVerifyOTPRequest": {
+            "type": "object",
+            "required": [
+                "challenge_id",
+                "otp_code"
+            ],
+            "properties": {
+                "challenge_id": {
+                    "type": "string"
+                },
+                "otp_code": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminPagePriceItem": {
             "type": "object",
             "properties": {
@@ -8127,6 +8447,68 @@ const docTemplate = `{
                 },
                 "website": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.AdminPreviewWalletChargeImpactRequest": {
+            "type": "object",
+            "required": [
+                "amount_with_tax",
+                "customer_id"
+            ],
+            "properties": {
+                "amount_with_tax": {
+                    "type": "integer",
+                    "maximum": 1000000000,
+                    "minimum": 1000
+                },
+                "customer_id": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "dto.AdminPreviewWalletChargeImpactResponse": {
+            "type": "object",
+            "properties": {
+                "agency_discount_id": {
+                    "type": "integer"
+                },
+                "agency_id": {
+                    "type": "integer"
+                },
+                "agency_share_with_tax": {
+                    "type": "integer"
+                },
+                "amount": {
+                    "type": "integer"
+                },
+                "amount_with_tax": {
+                    "type": "integer"
+                },
+                "credit_increase": {
+                    "type": "integer"
+                },
+                "customer_id": {
+                    "type": "integer"
+                },
+                "discount_rate": {
+                    "type": "number"
+                },
+                "free_increase": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "system_share_with_tax": {
+                    "type": "integer"
+                },
+                "tax": {
+                    "type": "integer"
                 }
             }
         },
@@ -8301,6 +8683,9 @@ const docTemplate = `{
                 "customer_credit": {
                     "type": "integer"
                 },
+                "customer_full_name": {
+                    "type": "string"
+                },
                 "customer_id": {
                     "type": "integer"
                 },
@@ -8308,6 +8693,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "datetime": {
+                    "type": "string"
+                },
+                "deposit_method": {
                     "type": "string"
                 },
                 "external_ref": {
@@ -9928,6 +10316,9 @@ const docTemplate = `{
                 "currency": {
                     "type": "string"
                 },
+                "customer_full_name": {
+                    "type": "string"
+                },
                 "customer_id": {
                     "type": "integer"
                 },
@@ -11077,6 +11468,10 @@ const docTemplate = `{
                 },
                 "datetime": {
                     "description": "When the transaction occurred",
+                    "type": "string"
+                },
+                "deposit_method": {
+                    "description": "payment_gateway, deposit_receipt, or admin_charge",
                     "type": "string"
                 },
                 "external_ref": {
