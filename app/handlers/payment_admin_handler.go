@@ -20,6 +20,7 @@ import (
 // PaymentAdminHandlerInterface defines the contract for admin payment handlers.
 type PaymentAdminHandlerInterface interface {
 	ChargeWallet(c fiber.Ctx) error
+	PreviewWalletChargeImpact(c fiber.Ctx) error
 	ListDepositReceipts(c fiber.Ctx) error
 	ListTransactions(c fiber.Ctx) error
 	GetDepositReceiptFile(c fiber.Ctx) error
@@ -78,6 +79,7 @@ func (h *PaymentAdminHandler) ChargeWallet(c fiber.Ctx) error {
 	if err := c.Bind().JSON(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
 	}
+	req.AdminNote = strings.TrimSpace(req.AdminNote)
 	if strings.TrimSpace(req.IdempotencyKey) == "" {
 		req.IdempotencyKey = strings.TrimSpace(c.Get("Idempotency-Key"))
 	}
@@ -157,6 +159,88 @@ func (h *PaymentAdminHandler) ChargeWallet(c fiber.Ctx) error {
 	return h.SuccessResponse(c, fiber.StatusOK, "Wallet charged successfully by admin", result)
 }
 
+// PreviewWalletChargeImpact calculates the expected balance/share changes for an admin wallet charge.
+// @Summary Preview Wallet Charge Impact
+// @Description Admin endpoint to preview free balance, credit, and agency share changes before charging a customer wallet
+// @Tags Payments Admin
+// @Accept json
+// @Produce json
+// @Param request body dto.AdminPreviewWalletChargeImpactRequest true "Admin wallet charge preview payload"
+// @Success 200 {object} dto.APIResponse{data=dto.AdminPreviewWalletChargeImpactResponse} "Wallet charge impact calculated successfully"
+// @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized admin"
+// @Failure 404 {object} dto.APIResponse "Customer or discount not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/admin/payments/charge-wallet/preview [post]
+func (h *PaymentAdminHandler) PreviewWalletChargeImpact(c fiber.Ctx) error {
+	var req dto.AdminPreviewWalletChargeImpactRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	adminID, ok := c.Locals("admin_id").(uint)
+	if !ok || adminID == 0 {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Admin ID not found in context", "MISSING_ADMIN_ID", nil)
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	metadata.SetRequestID(strings.TrimSpace(c.Get("X-Request-ID")))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/charge-wallet/preview", 30*time.Second)
+	defer cancel()
+
+	result, err := h.paymentAdminFlow.AdminPreviewWalletChargeImpact(ctx, &req, metadata, adminID)
+	if err != nil {
+		if businessflow.IsCustomerNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Customer not found", "CUSTOMER_NOT_FOUND", nil)
+		}
+		if businessflow.IsAccountInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Customer account is inactive", "ACCOUNT_INACTIVE", nil)
+		}
+		if businessflow.IsReferrerAgencyIDRequired(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Referrer agency ID is required", "REFERRER_AGENCY_ID_REQUIRED", nil)
+		}
+		if businessflow.IsAgencyDiscountNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency discount not found", "AGENCY_DISCOUNT_NOT_FOUND", nil)
+		}
+		if businessflow.IsAmountTooLow(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Amount is too low", "AMOUNT_TOO_LOW", nil)
+		}
+		if businessflow.IsAmountNotMultiple(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Amount must be a multiple of the required increment", "AMOUNT_NOT_MULTIPLE", nil)
+		}
+		if businessflow.IsAgencyNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Agency not found", "AGENCY_NOT_FOUND", nil)
+		}
+		if businessflow.IsAgencyInactive(err) {
+			return h.ErrorResponse(c, fiber.StatusForbidden, "Agency account is inactive", "AGENCY_INACTIVE", nil)
+		}
+		if businessflow.IsShebaNumberInvalid(err) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Agency sheba number is invalid", "SHEBA_NUMBER_INVALID", nil)
+		}
+		if businessflow.IsSystemUserNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "System user not found", "SYSTEM_USER_NOT_FOUND", nil)
+		}
+		if businessflow.IsSystemUserShebaNumberNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "System user sheba number not found", "SYSTEM_USER_SHEBA_NUMBER_NOT_FOUND", nil)
+		}
+		if businessflow.IsSystemWalletNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "System wallet not found", "SYSTEM_WALLET_NOT_FOUND", nil)
+		}
+
+		log.Println("Admin wallet charge impact preview failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Wallet charge impact preview failed", "WALLET_CHARGE_IMPACT_PREVIEW_FAILED", nil)
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Wallet charge impact calculated successfully", result)
+}
+
 // ListDepositReceipts lists receipts with filters.
 // @Summary Admin list deposit receipts
 // @Description Lists deposit receipts with optional filters and previews.
@@ -165,6 +249,7 @@ func (h *PaymentAdminHandler) ChargeWallet(c fiber.Ctx) error {
 // @Param status query string false "Receipt status (pending|approved|rejected)"
 // @Param lang query string false "Language filter (FA or EN)"
 // @Param customer_id query int false "Filter by customer ID"
+// @Param customer_name query string false "Filter by customer representative/company name"
 // @Param limit query int false "Limit (default 50)"
 // @Param offset query int false "Offset"
 // @Param order query string false "Order by clause (default id DESC)"
@@ -202,6 +287,9 @@ func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 		cu := uint(cid)
 		f.CustomerID = &cu
 	}
+	if customerName := strings.TrimSpace(c.Query("customer_name")); customerName != "" {
+		f.CustomerName = &customerName
+	}
 	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/payments/deposit-receipts", 30*time.Second)
 	defer cancel()
 	resp, err := h.paymentAdminFlow.AdminListDepositReceipts(ctx, f, limit, offset, order)
@@ -225,6 +313,7 @@ func (h *PaymentAdminHandler) ListDepositReceipts(c fiber.Ctx) error {
 // @Param start_date query string false "Start date (RFC3339)"
 // @Param end_date query string false "End date (RFC3339)"
 // @Param customer_id query int false "Optional customer filter"
+// @Param customer_name query string false "Optional customer name/company filter"
 // @Success 200 {object} dto.APIResponse{data=dto.AdminListTransactionsResponse} "Transactions retrieved"
 // @Failure 400 {object} dto.APIResponse "Validation error"
 // @Failure 401 {object} dto.APIResponse "Unauthorized"
@@ -274,13 +363,18 @@ func (h *PaymentAdminHandler) ListTransactions(c fiber.Ctx) error {
 		cid := uint(parsed)
 		customerID = &cid
 	}
+	var customerName *string
+	if v := strings.TrimSpace(c.Query("customer_name")); v != "" {
+		customerName = &v
+	}
 
 	req := &dto.AdminListTransactionsRequest{
-		Page:       page,
-		PageSize:   pageSize,
-		StartDate:  startDate,
-		EndDate:    endDate,
-		CustomerID: customerID,
+		Page:         page,
+		PageSize:     pageSize,
+		StartDate:    startDate,
+		EndDate:      endDate,
+		CustomerID:   customerID,
+		CustomerName: customerName,
 	}
 
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
