@@ -427,6 +427,7 @@ func (r *FiberRouter) SetupRoutes() {
 	adminPayments.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
 	adminPayments.Use(r.authzMiddleware.AdminAuthorize())
 	adminPayments.Post("/charge-wallet", r.paymentAdminHandler.ChargeWallet)
+	adminPayments.Post("/charge-wallet/preview", r.paymentAdminHandler.PreviewWalletChargeImpact)
 	adminPayments.Get("/transactions", r.paymentAdminHandler.ListTransactions)
 	adminPayments.Get("/deposit-receipts", r.paymentAdminHandler.ListDepositReceipts)
 	adminPayments.Get("/deposit-receipts/:uuid/file", r.paymentAdminHandler.GetDepositReceiptFile)
