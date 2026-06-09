@@ -28,6 +28,7 @@ var RoutePermissionRegistry = []RoutePermission{
 
 	// Payments admin
 	{"POST", "/api/v1/admin/payments/charge-wallet", PermissionPaymentChargeWallet, "Charge wallet (admin)"},
+	{"POST", "/api/v1/admin/payments/charge-wallet/preview", PermissionPaymentChargeWallet, "Preview wallet charge impact (admin)"},
 	{"GET", "/api/v1/admin/payments/transactions", PermissionPaymentRead, "List filtered transactions"},
 	{"GET", "/api/v1/admin/payments/deposit-receipts", PermissionPaymentReceiptReview, "List deposit receipts"},
 	{"GET", "/api/v1/admin/payments/deposit-receipts/", PermissionPaymentReceiptReview, "Get deposit receipt file"}, // path prefix covers /deposit-receipts/:uuid/file
