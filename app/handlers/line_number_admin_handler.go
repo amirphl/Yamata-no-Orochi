@@ -43,16 +43,16 @@ func (h *LineNumberAdminHandler) SuccessResponse(c fiber.Ctx, status int, messag
 	return c.Status(status).JSON(dto.APIResponse{Success: true, Message: message, Data: data})
 }
 
-// CreateLineNumber creates a new line number (admin only)
+// CreateLineNumber creates a new line number or updates an existing one (admin only)
 // @Summary Create Line Number (Admin)
-// @Description Create a line number with name (optional), unique value, price factor, priority (optional), and is_active (optional)
+// @Description Create a line number with name (optional), unique value, price factor, priority (optional), and is_active (optional). If the line number already exists, its mutable fields are updated.
 // @Tags Admin Line Numbers
 // @Accept json
 // @Produce json
 // @Param request body dto.AdminCreateLineNumberRequest true "Create line number payload"
 // @Success 200 {object} dto.APIResponse{data=dto.AdminLineNumberDTO}
 // @Failure 400 {object} dto.APIResponse "Validation error"
-// @Failure 500 {object} dto.APIResponse "Creation failed"
+// @Failure 500 {object} dto.APIResponse "Create or update failed"
 // @Router /api/v1/admin/line-numbers/ [post]
 func (h *LineNumberAdminHandler) CreateLineNumber(c fiber.Ctx) error {
 	var req dto.AdminCreateLineNumberRequest
@@ -77,13 +77,10 @@ func (h *LineNumberAdminHandler) CreateLineNumber(c fiber.Ctx) error {
 		if businessflow.IsPriceFactorInvalid(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Price factor must be greater than zero", "PRICE_FACTOR_INVALID", nil)
 		}
-		if businessflow.IsLineNumberAlreadyExists(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Line number already exists", "LINE_NUMBER_ALREADY_EXISTS", nil)
-		}
 		log.Println("Create line number failed:", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Create line number failed", "LINE_NUMBER_CREATE_FAILED", nil)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Create or update line number failed", "LINE_NUMBER_CREATE_FAILED", nil)
 	}
-	return h.SuccessResponse(c, fiber.StatusOK, "Line number created", res)
+	return h.SuccessResponse(c, fiber.StatusOK, "Line number created or updated", res)
 }
 
 // ListLineNumbers returns all line numbers (admin)
