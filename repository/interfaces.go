@@ -63,6 +63,12 @@ type LineNumberRepository interface {
 	UpdateBatch(ctx context.Context, lines []*models.LineNumber) error
 }
 
+// PlatformBasePriceRepository defines operations for platform base prices.
+type PlatformBasePriceRepository interface {
+	Insert(ctx context.Context, p *models.PlatformBasePrice) error
+	LatestByPlatform(ctx context.Context, platform string) (*models.PlatformBasePrice, error)
+}
+
 // CustomerRepository defines operations for customers
 type CustomerRepository interface {
 	Repository[models.Customer, models.CustomerFilter]
@@ -146,11 +152,19 @@ type TransactionRepository interface {
 	ByExternalReference(ctx context.Context, externalReference string) (*models.Transaction, error)
 	GetPendingTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
 	GetCompletedTransactions(ctx context.Context, limit, offset int) ([]*models.Transaction, error)
+	// History queries
+	GetHistoryWithMetadata(ctx context.Context, walletID uint, customerID uint, startDate, endDate *time.Time, txType *models.TransactionType, status *models.TransactionStatus, limit, offset int) ([]*models.Transaction, int64, error)
 	// Reports
 	AggregateAgencyTransactionsByCustomers(ctx context.Context, agencyID uint, nameLike string, startDate, endDate *time.Time, orderBy string) ([]*AgencyCustomerTransactionAggregate, error)
 	AggregateAgencyTransactionsByDiscounts(ctx context.Context, agencyID uint, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error)
 	AggregateCustomersShares(ctx context.Context, startDate, endDate *time.Time) ([]*CustomerShareAggregate, error)
 	AggregateCustomerTransactionsByDiscounts(ctx context.Context, customerID uint, orderBy string) ([]*AgencyCustomerDiscountAggregate, error)
+}
+
+// ACLChangeRequestRepository defines operations for maker-checker requests.
+type ACLChangeRequestRepository interface {
+	Repository[models.ACLChangeRequest, models.ACLChangeRequestFilter]
+	ByUUID(ctx context.Context, id uuid.UUID) (*models.ACLChangeRequest, error)
 }
 
 // BalanceSnapshotRepository defines the interface for balance snapshot data access
