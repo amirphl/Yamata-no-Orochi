@@ -603,7 +603,14 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	adminLineNumberFlow := businessflow.NewAdminLineNumberFlow(lineNumberRepo, db, auditRepo)
 
-	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(customerRepo, campaignRepo, transactionRepo, auditRepo)
+	adminCustomerManagementFlow := businessflow.NewAdminCustomerManagementFlow(
+		customerRepo,
+		campaignRepo,
+		transactionRepo,
+		auditRepo,
+		lineNumberRepo,
+		segmentPriceFactorRepo,
+	)
 
 	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, multimediaRepo, platformSettingsRepo, cfg.Cache, db, rc)
 	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
