@@ -269,6 +269,59 @@ func (r *TransactionRepositoryImpl) Count(ctx context.Context, filter models.Tra
 	return count, nil
 }
 
+// GetHistoryWithMetadata returns transactions for history view filtered by customer/wallet/date
+// and restricted to known source/operation pairs used in payment callbacks.
+func (r *TransactionRepositoryImpl) GetHistoryWithMetadata(
+	ctx context.Context,
+	walletID uint,
+	customerID uint,
+	startDate, endDate *time.Time,
+	txType *models.TransactionType,
+	status *models.TransactionStatus,
+	limit, offset int,
+) ([]*models.Transaction, int64, error) {
+	db := r.getDB(ctx)
+
+	query := db.Model(&models.Transaction{}).
+		Where("wallet_id = ?", walletID).
+		Where("customer_id = ?", customerID).
+		Where(`((metadata->>'source' = ? AND metadata->>'operation' = ?) OR (metadata->>'source' = ? AND metadata->>'operation' = ?))`,
+			"payment_callback_increase_customer_free_plus_credit", "increase_customer_free_plus_credit",
+			models.TransactionSourceIncreaseAgencyShareWithTax, "increase_agency_share_with_tax")
+
+	if startDate != nil {
+		query = query.Where("created_at >= ?", *startDate)
+	}
+	if endDate != nil {
+		query = query.Where("created_at <= ?", *endDate)
+	}
+	if txType != nil {
+		query = query.Where("type = ?", *txType)
+	}
+	if status != nil {
+		query = query.Where("status = ?", *status)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+
+	var transactions []*models.Transaction
+	if err := query.Order("id DESC").Find(&transactions).Error; err != nil {
+		return nil, 0, err
+	}
+
+	return transactions, total, nil
+}
+
 // Exists checks if any transaction matching the filter exists
 func (r *TransactionRepositoryImpl) Exists(ctx context.Context, filter models.TransactionFilter) (bool, error) {
 	count, err := r.Count(ctx, filter)
