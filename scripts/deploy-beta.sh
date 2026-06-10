@@ -418,7 +418,17 @@ start_services() {
 	
 	# Start all supporting services explicitly, excluding app-beta to allow safe DB migration
 	# Note: nginx-beta depends on app-beta, so we start it after app-beta to avoid pulling app-beta up implicitly
-	$docker_cmd compose -f docker-compose.beta.yml up -d postgres-beta redis-beta prometheus-beta grafana-beta frontend-beta
+	$docker_cmd compose -f docker-compose.beta.yml up -d \
+		postgres-beta \
+		redis-beta \
+		prometheus-beta \
+		grafana-beta \
+		frontend-beta \
+		postgres-backup-beta \
+		postgres-exporter-beta \
+		node-exporter-beta \
+		cadvisor-beta \
+		cert-monitor-beta
 	
 	print_success "Core services started successfully (app-beta not started)"
 }
