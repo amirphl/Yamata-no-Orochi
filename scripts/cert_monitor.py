@@ -65,6 +65,9 @@ def load_cert_expiry(p: Path) -> datetime:
         if not block:
             continue
         cert = x509.load_pem_x509_certificate(block, default_backend())
+        # Prefer timezone-aware API if available to avoid deprecation warnings
+        if hasattr(cert, "not_valid_after_utc"):
+            return cert.not_valid_after_utc
         return cert.not_valid_after.replace(tzinfo=timezone.utc)
     raise ValueError(f"No certificate found in {p}")
 
