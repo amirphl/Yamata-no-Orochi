@@ -1,0 +1,2 @@
+-- Description: Down migration for bundle audit actions
+-- PostgreSQL enums do not support removing values directly.
