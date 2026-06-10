@@ -323,5 +323,20 @@
 \echo 'Running 0105_create_rubika_status_results.sql...'
 \i migrations/0105_create_rubika_status_results.sql
 
+\echo 'Running 0106_add_admin_preview_wallet_charge_impact_audit_actions.sql...'
+\i migrations/0106_add_admin_preview_wallet_charge_impact_audit_actions.sql
+
+\echo 'Running 0107_create_bundles.sql...'
+\i migrations/0107_create_bundles.sql
+
+\echo 'Running 0108_add_bundle_audit_actions.sql...'
+\i migrations/0108_add_bundle_audit_actions.sql
+
+\echo 'Running 0109_backfill_bundles_from_campaigns.sql...'
+\i migrations/0109_backfill_bundles_from_campaigns.sql
+
+\echo 'Running 0110_add_bundle_id_and_phase_to_campaigns.sql...'
+\i migrations/0110_add_bundle_id_and_phase_to_campaigns.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
