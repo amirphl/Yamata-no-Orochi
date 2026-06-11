@@ -218,6 +218,9 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			CustomerFullName:   formatCampaignPartyFullName(c.Customer),
 			AgencyFullName:     formatCampaignAgencyFullName(c.Customer),
 
+			BundleID: c.BundleID,
+			Phase:    campaignPhasePtr(c.Phase),
+
 			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 		})
 	}
@@ -334,6 +337,9 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		NumAudience:           c.NumAudience,
 		CustomerFullName:      formatCampaignPartyFullName(c.Customer),
 		AgencyFullName:        formatCampaignAgencyFullName(c.Customer),
+
+		BundleID: c.BundleID,
+		Phase:    campaignPhasePtr(c.Phase),
 
 		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 	}
