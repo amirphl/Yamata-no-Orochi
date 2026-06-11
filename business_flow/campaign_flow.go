@@ -47,6 +47,7 @@ type CampaignFlow interface {
 // CampaignFlowImpl implements the campaign business flow
 type CampaignFlowImpl struct {
 	campaignRepo          repository.CampaignRepository
+	bundleRepo            repository.BundleRepository
 	shortLinkRepo         repository.ShortLinkRepository
 	customerRepo          repository.CustomerRepository
 	multimediaRepo        repository.MultimediaAssetRepository
@@ -88,6 +89,7 @@ var allowedShortLinkDomains = []string{"jo1n.ir", "joinsahel.ir"}
 // NewCampaignFlow creates a new campaign flow instance
 func NewCampaignFlow(
 	campaignRepo repository.CampaignRepository,
+	bundleRepo repository.BundleRepository,
 	shortLinkRepo repository.ShortLinkRepository,
 	customerRepo repository.CustomerRepository,
 	multimediaRepo repository.MultimediaAssetRepository,
@@ -115,6 +117,7 @@ func NewCampaignFlow(
 ) CampaignFlow {
 	return &CampaignFlowImpl{
 		campaignRepo:          campaignRepo,
+		bundleRepo:            bundleRepo,
 		shortLinkRepo:         shortLinkRepo,
 		customerRepo:          customerRepo,
 		multimediaRepo:        multimediaRepo,
@@ -176,6 +179,8 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 	if err := s.ensureCreateCampaignRefs(
 		ctx,
 		req.CustomerID,
+		req.BundleID,
+		req.Phase,
 		req.LineNumber,
 		req.Level3s,
 		sanitizedPlatform,
@@ -284,6 +289,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 		targetAudienceExcelFileUUID  = req.TargetAudienceExcelFileUUID
 		usingTargetAudienceExcelFile = targetAudienceExcelFileUUID != nil && *targetAudienceExcelFileUUID != ""
+
+		bundleID = req.BundleID
+		phase    = req.Phase
 	)
 	if req.Title == nil {
 		title = campaign.Spec.Title
@@ -343,6 +351,12 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Platform == nil {
 		platform = utils.ToPtr(campaign.Spec.Platform)
 	}
+	if req.BundleID == nil {
+		bundleID = campaign.BundleID
+	}
+	if req.Phase == nil {
+		phase = campaignPhasePtr(campaign.Phase)
+	}
 
 	sanitizedShortLinkDomain, err := sanitizeShortLinkDomain(shortLinkDomain)
 	if err != nil {
@@ -374,6 +388,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	if err := s.ensureUpdateCampaignRefs(
 		ctx,
 		customer.ID,
+		bundleID,
+		phase,
 		lineNumber,
 		level3s,
 		sanitizedPlatform,
@@ -678,6 +694,8 @@ func (s *CampaignFlowImpl) CloneCampaign(ctx context.Context, req *dto.CloneCamp
 		Comment:     nil,
 		Statistics:  json.RawMessage(`{}`),
 		NumAudience: utils.ToPtr(uint64(0)),
+		BundleID:    src.BundleID,
+		Phase:       src.Phase,
 	}
 
 	if err := s.campaignRepo.Save(ctx, &clone); err != nil {
@@ -1572,8 +1590,56 @@ func (s *CampaignFlowImpl) resolvePlatformSettingsName(ctx context.Context, id *
 	return settings.Name, nil
 }
 
+func campaignPhasePtr(phase models.CampaignPhase) *string {
+	if !phase.Valid() {
+		return nil
+	}
+	value := phase.String()
+	return &value
+}
+
+func campaignPhaseOrDefault(phase *string) models.CampaignPhase {
+	if phase == nil {
+		return models.CampaignPhaseExecution
+	}
+	trimmed := strings.TrimSpace(*phase)
+	campaignPhase := models.CampaignPhase(trimmed)
+	if !campaignPhase.Valid() {
+		return models.CampaignPhaseExecution
+	}
+	return campaignPhase
+}
+
+func validateCampaignPhaseInput(phase *string, required bool) error {
+	if phase == nil {
+		if required {
+			return ErrCampaignPhaseRequired
+		}
+		return nil
+	}
+
+	trimmed := strings.TrimSpace(*phase)
+	if trimmed == "" {
+		if required {
+			return ErrCampaignPhaseRequired
+		}
+		return ErrCampaignPhaseInvalid
+	}
+
+	if !models.CampaignPhase(trimmed).Valid() {
+		return ErrCampaignPhaseInvalid
+	}
+
+	return nil
+}
+
 // buildCampaignResponse constructs a GetCampaignResponse from a campaign model and its display enrichments.
 func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto.GetCampaignResponse {
+	var bundleTitle *string
+	if c.Bundle != nil {
+		bundleTitle = &c.Bundle.Title
+	}
+
 	return dto.GetCampaignResponse{
 		ID:                          c.ID,
 		UUID:                        c.UUID.String(),
@@ -1603,6 +1669,9 @@ func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto
 		Budget:                      c.Spec.Budget,
 		NumAudience:                 c.NumAudience,
 		Comment:                     c.Comment,
+		BundleID:                    c.BundleID,
+		BundleTitle:                 bundleTitle,
+		Phase:                       campaignPhasePtr(c.Phase),
 		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 	}
 }
@@ -1648,13 +1717,27 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	// Build filter
 	filter := models.CampaignFilter{CustomerID: &req.CustomerID}
 	if req.Filter != nil {
-		if req.Filter.Title != nil && *req.Filter.Title != "" {
-			filter.Title = req.Filter.Title
+		if req.Filter.Title != nil {
+			title := strings.TrimSpace(*req.Filter.Title)
+			if title != "" {
+				filter.Title = &title
+			}
 		}
-		if req.Filter.Status != nil && *req.Filter.Status != "" {
-			status := models.CampaignStatus(*req.Filter.Status)
+		if req.Filter.Status != nil {
+			statusValue := strings.TrimSpace(*req.Filter.Status)
+			status := models.CampaignStatus(statusValue)
 			if status.Valid() {
 				filter.Status = &status
+			}
+		}
+		if req.Filter.BundleID != nil && *req.Filter.BundleID > 0 {
+			filter.BundleID = req.Filter.BundleID
+		}
+		if req.Filter.Phase != nil {
+			phaseValue := strings.TrimSpace(*req.Filter.Phase)
+			phase := models.CampaignPhase(phaseValue)
+			if phase.Valid() {
+				filter.Phase = &phase
 			}
 		}
 	}
@@ -1805,6 +1888,12 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, re
 
 	if req.CustomerID == 0 {
 		return ErrCustomerNotFound
+	}
+	if req.BundleID == nil || *req.BundleID == 0 {
+		return ErrBundleNotFound
+	}
+	if err := validateCampaignPhaseInput(req.Phase, true); err != nil {
+		return err
 	}
 	if req.Title == nil || (req.Title != nil && *req.Title == "") {
 		return ErrCampaignTitleRequired
@@ -2006,6 +2095,8 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 		CustomerID: customer.ID,
 		Status:     models.CampaignStatusInitiated,
 		Spec:       spec,
+		BundleID:   req.BundleID,
+		Phase:      campaignPhaseOrDefault(req.Phase),
 	})
 	if err != nil {
 		return nil, err
@@ -2020,9 +2111,36 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	return c, nil
 }
 
+func (s *CampaignFlowImpl) ensureCampaignBundleAndPhase(ctx context.Context, customerID uint, bundleID *uint, phase *string, required bool) error {
+	if required && (bundleID == nil || *bundleID == 0) {
+		return ErrBundleNotFound
+	}
+	if err := validateCampaignPhaseInput(phase, required); err != nil {
+		return err
+	}
+	if bundleID == nil || *bundleID == 0 {
+		return nil
+	}
+
+	bundle, err := s.bundleRepo.ByID(ctx, *bundleID)
+	if err != nil {
+		return err
+	}
+	if bundle == nil {
+		return ErrBundleNotFound
+	}
+	if bundle.CustomerID != customerID {
+		return ErrBundleAccessDenied
+	}
+
+	return nil
+}
+
 func (s *CampaignFlowImpl) ensureCreateCampaignRefs(
 	ctx context.Context,
 	customerID uint,
+	bundleID *uint,
+	phase *string,
 	lineNumber *string,
 	level3s []string,
 	platform string,
@@ -2030,6 +2148,10 @@ func (s *CampaignFlowImpl) ensureCreateCampaignRefs(
 	targetAudienceExcelFileUUID *string,
 	platformSettingsID *uint,
 ) error {
+	if err := s.ensureCampaignBundleAndPhase(ctx, customerID, bundleID, phase, true); err != nil {
+		return err
+	}
+
 	if platform != models.CampaignPlatformSMS && lineNumber != nil {
 		return ErrCampaignLineNumberNotApplicable
 	}
@@ -2113,6 +2235,8 @@ func (s *CampaignFlowImpl) ensureCreateCampaignRefs(
 func (s *CampaignFlowImpl) ensureUpdateCampaignRefs(
 	ctx context.Context,
 	customerID uint,
+	bundleID *uint,
+	phase *string,
 	lineNumber *string,
 	level3s []string,
 	platform string,
@@ -2121,6 +2245,10 @@ func (s *CampaignFlowImpl) ensureUpdateCampaignRefs(
 	platformSettingsID *uint,
 	finalize bool,
 ) error {
+	if err := s.ensureCampaignBundleAndPhase(ctx, customerID, bundleID, phase, false); err != nil {
+		return err
+	}
+
 	usingTargetAudienceExcelFile := targetAudienceExcelFileUUID != nil && strings.TrimSpace(*targetAudienceExcelFileUUID) != ""
 
 	if finalize {
@@ -2216,6 +2344,7 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 
 	// At least one field should be provided for update
 	hasUpdateFields := req.Title != nil || req.Level1 != nil || len(req.Level2s) > 0 || len(req.Level3s) > 0 ||
+		req.BundleID != nil || req.Phase != nil ||
 		req.TargetAudienceExcelFileUUID != nil || len(req.Tags) > 0 || req.Sex != nil || len(req.City) > 0 ||
 		req.AdLink != nil || req.Content != nil ||
 		req.ScheduleAt != nil || req.LineNumber != nil || req.Budget != nil || req.ShortLinkDomain != nil ||
@@ -2233,6 +2362,12 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 		if *req.Budget < minCampaignBudget || *req.Budget > maxCampaignBudget {
 			return ErrCampaignBudgetOutOfRange
 		}
+	}
+	if req.BundleID != nil && *req.BundleID == 0 {
+		return ErrBundleNotFound
+	}
+	if err := validateCampaignPhaseInput(req.Phase, false); err != nil {
+		return err
 	}
 
 	// if req.ScheduleAt != nil && !req.ScheduleAt.IsZero() {
@@ -2339,6 +2474,8 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 	if err := s.ensureUpdateCampaignRefs(
 		ctx,
 		campaign.CustomerID,
+		campaign.BundleID,
+		campaignPhasePtr(campaign.Phase),
 		campaign.Spec.LineNumber,
 		campaign.Spec.Level3s,
 		campaign.Spec.Platform,
@@ -2432,11 +2569,16 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	if req.Budget != nil && *req.Budget != 0 {
 		spec.Budget = req.Budget
 	}
-
 	ensureCampaignSpecDefaults(&spec)
 
 	// Update the campaign spec
 	existingCampaign.Spec = spec
+	if req.BundleID != nil {
+		existingCampaign.BundleID = req.BundleID
+	}
+	if req.Phase != nil {
+		existingCampaign.Phase = campaignPhaseOrDefault(req.Phase)
+	}
 	existingCampaign.Status = models.CampaignStatusInProgress
 	existingCampaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
 
