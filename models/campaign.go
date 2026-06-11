@@ -13,12 +13,15 @@ import (
 
 // CampaignStatus represents the status of an campaign
 type CampaignStatus string
+type CampaignPhase string
 
 const (
 	CampaignPlatformSMS                             = "sms"
 	CampaignPlatformRubika                          = "rubika"
 	CampaignPlatformBale                            = "bale"
 	CampaignPlatformSPlus                           = "splus"
+	CampaignPhaseTest                CampaignPhase  = "test"
+	CampaignPhaseExecution           CampaignPhase  = "execution"
 	CampaignStatusInitiated          CampaignStatus = "initiated"
 	CampaignStatusInProgress         CampaignStatus = "in-progress"
 	CampaignStatusWaitingForApproval CampaignStatus = "waiting-for-approval"
@@ -84,6 +87,44 @@ func (s CampaignStatus) Value() (driver.Value, error) {
 		return nil, fmt.Errorf("invalid CampaignStatus: %s", s)
 	}
 	return string(s), nil
+}
+
+func (p CampaignPhase) String() string {
+	return string(p)
+}
+
+func (p CampaignPhase) Valid() bool {
+	switch p {
+	case CampaignPhaseTest, CampaignPhaseExecution:
+		return true
+	default:
+		return false
+	}
+}
+
+func (p *CampaignPhase) Scan(value any) error {
+	if value == nil {
+		*p = ""
+		return nil
+	}
+
+	switch v := value.(type) {
+	case string:
+		*p = CampaignPhase(v)
+	case []byte:
+		*p = CampaignPhase(string(v))
+	default:
+		return fmt.Errorf("cannot scan %T into CampaignPhase", value)
+	}
+
+	return nil
+}
+
+func (p CampaignPhase) Value() (driver.Value, error) {
+	if !p.Valid() {
+		return nil, fmt.Errorf("invalid CampaignPhase: %s", p)
+	}
+	return string(p), nil
 }
 
 // CampaignSpec represents the JSON specification for an campaign
@@ -161,8 +202,12 @@ type Campaign struct {
 	// Number of targeted audiences
 	NumAudience *uint64 `gorm:"type:bigint" json:"num_audience,omitempty"`
 
+	BundleID *uint         `gorm:"index:idx_campaigns_bundle_id" json:"bundle_id,omitempty"`
+	Phase    CampaignPhase `gorm:"type:campaign_phase;not null;default:'execution'" json:"phase"`
+
 	// Relations
 	Customer *Customer `gorm:"foreignKey:CustomerID;references:ID" json:"customer,omitempty"`
+	Bundle   *Bundle   `gorm:"foreignKey:BundleID;references:ID" json:"bundle,omitempty"`
 }
 
 // TableName returns the table name for the model
@@ -243,6 +288,8 @@ type CampaignFilter struct {
 	ScheduleBefore     *time.Time      `json:"schedule_before,omitempty"`
 	MinBudget          *uint64         `json:"min_budget,omitempty"`
 	MaxBudget          *uint64         `json:"max_budget,omitempty"`
+	BundleID           *uint           `json:"bundle_id,omitempty"`
+	Phase              *CampaignPhase  `json:"phase,omitempty"`
 }
 
 // GetStatusDisplayName returns a human-readable status name
