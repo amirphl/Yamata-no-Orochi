@@ -119,6 +119,9 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 			Comment:            c.Comment,
 			NumAudiences:       c.NumAudience,
 
+			BundleID: c.BundleID,
+			Phase:    campaignPhasePtr(c.Phase),
+
 			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 		})
 	}
