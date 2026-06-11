@@ -118,12 +118,20 @@ type AuditLogRepository interface {
 	ListSecurityEvents(ctx context.Context, limit, offset int) ([]*models.AuditLog, error)
 }
 
+// BundleRepository defines operations for bundles.
+type BundleRepository interface {
+	Repository[models.Bundle, models.BundleFilter]
+	ByID(ctx context.Context, id uint) (*models.Bundle, error)
+	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Bundle, error)
+}
+
 // CampaignRepository defines the interface for campaign data access
 type CampaignRepository interface {
 	Repository[models.Campaign, models.CampaignFilter]
 	ByID(ctx context.Context, id uint) (*models.Campaign, error)
 	ByUUID(ctx context.Context, uuid string) (*models.Campaign, error)
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Campaign, error)
+	ByCustomerIDAndBundleIDs(ctx context.Context, customerID uint, bundleIDs []uint) ([]*models.Campaign, error)
 	ByStatus(ctx context.Context, status models.CampaignStatus, limit, offset int) ([]*models.Campaign, error)
 	Update(ctx context.Context, campaign models.Campaign) error
 	UpdateStatistics(ctx context.Context, id uint, stats json.RawMessage) error
