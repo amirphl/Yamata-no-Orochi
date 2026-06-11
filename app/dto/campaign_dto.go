@@ -28,6 +28,9 @@ type CreateCampaignRequest struct {
 	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
 	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
 
+	BundleID *uint   `json:"bundle_id" validate:"required,min=1"`
+	Phase    *string `json:"phase" validate:"required,max=255"`
+
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
 
@@ -63,6 +66,9 @@ type UpdateCampaignRequest struct {
 	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
 	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
 	Finalize           *bool      `json:"finalize,omitempty" validate:"omitempty"`
+
+	BundleID *uint   `json:"bundle_id,omitempty" validate:"omitempty,min=1"`
+	Phase    *string `json:"phase,omitempty" validate:"omitempty,max=255"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
@@ -121,39 +127,43 @@ type GetCampaignRequest struct {
 
 // GetCampaignResponse represents the campaign specification in responses
 type GetCampaignResponse struct {
-	ID                 uint           `json:"id"`
-	UUID               string         `json:"uuid"`
-	Status             string         `json:"status"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          *time.Time     `json:"updated_at,omitempty"`
-	Title              *string        `json:"title,omitempty" validate:"omitempty"`
-	Level1             *string        `json:"level1,omitempty" validate:"omitempty"`
-	Level2s            []string       `json:"level2s,omitempty" validate:"omitempty"`
-	Level3s            []string       `json:"level3s,omitempty" validate:"omitempty"`
-	Tags               []string       `json:"tags,omitempty" validate:"omitempty"`
-	Sex                *string        `json:"sex,omitempty" validate:"omitempty"`
-	City               []string       `json:"city,omitempty" validate:"omitempty"`
-	AdLink             *string        `json:"adlink,omitempty" validate:"omitempty"`
-	Content            *string        `json:"content,omitempty" validate:"omitempty"`
-	ShortLinkDomain    *string        `json:"short_link_domain,omitempty" validate:"omitempty"`
-	Category           *string        `json:"job_category,omitempty" validate:"omitempty"`
-	Job                *string        `json:"job,omitempty" validate:"omitempty"`
-	ScheduleAt         *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber         *string        `json:"line_number,omitempty" validate:"omitempty"`
-	MediaUUID          *uuid.UUID     `json:"media_uuid,omitempty"`
-	PlatformSettingsID *uint          `json:"platform_settings_id,omitempty"`
-	Platform           string         `json:"platform"`
-	LinePriceFactor    *float64       `json:"line_price_factor,omitempty"`
-	SegmentPriceFactor *float64       `json:"segment_price_factor,omitempty"`
-	Budget             *uint64        `json:"budget,omitempty" validate:"omitempty"`
-	NumAudience        *uint64        `json:"num_audience,omitempty"`
-	Comment            *string        `json:"comment,omitempty" validate:"omitempty"`
-	Statistics         map[string]any `json:"statistics,omitempty"`
-	ClickRate          *float64       `json:"click_rate,omitempty"`
-	TotalClicks        *int64         `json:"total_clicks,omitempty"`
+	ID                   uint           `json:"id"`
+	UUID                 string         `json:"uuid"`
+	Status               string         `json:"status"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            *time.Time     `json:"updated_at,omitempty"`
+	Title                *string        `json:"title,omitempty" validate:"omitempty"`
+	Level1               *string        `json:"level1,omitempty" validate:"omitempty"`
+	Level2s              []string       `json:"level2s,omitempty" validate:"omitempty"`
+	Level3s              []string       `json:"level3s,omitempty" validate:"omitempty"`
+	Tags                 []string       `json:"tags,omitempty" validate:"omitempty"`
+	Sex                  *string        `json:"sex,omitempty" validate:"omitempty"`
+	City                 []string       `json:"city,omitempty" validate:"omitempty"`
+	AdLink               *string        `json:"adlink,omitempty" validate:"omitempty"`
+	Content              *string        `json:"content,omitempty" validate:"omitempty"`
+	ShortLinkDomain      *string        `json:"short_link_domain,omitempty" validate:"omitempty"`
+	Category             *string        `json:"job_category,omitempty" validate:"omitempty"`
+	Job                  *string        `json:"job,omitempty" validate:"omitempty"`
+	ScheduleAt           *time.Time     `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber           *string        `json:"line_number,omitempty" validate:"omitempty"`
+	MediaUUID            *uuid.UUID     `json:"media_uuid,omitempty"`
+	PlatformSettingsID   *uint          `json:"platform_settings_id,omitempty"`
+	PlatformSettingsName *string        `json:"platform_settings_name,omitempty"`
+	Platform             string         `json:"platform"`
+	LinePriceFactor      *float64       `json:"line_price_factor,omitempty"`
+	SegmentPriceFactor   *float64       `json:"segment_price_factor,omitempty"`
+	Budget               *uint64        `json:"budget,omitempty" validate:"omitempty"`
+	NumAudience          *uint64        `json:"num_audience,omitempty"`
+	Comment              *string        `json:"comment,omitempty" validate:"omitempty"`
+	Statistics           map[string]any `json:"statistics,omitempty"`
+	ClickRate            *float64       `json:"click_rate,omitempty"`
+	TotalClicks          *int64         `json:"total_clicks,omitempty"`
+
+	BundleID    *uint   `json:"bundle_id,omitempty"`
+	BundleTitle *string `json:"bundle_title,omitempty"`
+	Phase       *string `json:"phase,omitempty"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
-	PlatformSettingsName        *string `json:"platform_settings_name,omitempty"`
 }
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
@@ -247,8 +257,10 @@ type CalculateCampaignCostResponse struct {
 
 // ListCampaignsFilter represents filter criteria for listing campaigns in request layer
 type ListCampaignsFilter struct {
-	Title  *string `json:"title,omitempty" validate:"omitempty,max=255"`
-	Status *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected cancelled running executed expired"`
+	Title    *string `json:"title,omitempty" validate:"omitempty,max=255"`
+	Status   *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected cancelled running executed expired"`
+	BundleID *uint   `json:"bundle_id,omitempty" validate:"omitempty,min=1"`
+	Phase    *string `json:"phase,omitempty" validate:"omitempty,oneof=test execution"`
 }
 
 // ListCampaignsRequest represents a paginated list request for user's campaigns
@@ -324,6 +336,9 @@ type AdminGetCampaignResponse struct {
 	NumAudience           *uint64        `json:"num_audience,omitempty"`
 	CustomerFullName      *string        `json:"customer_full_name,omitempty"`
 	AgencyFullName        *string        `json:"agency_full_name,omitempty"`
+
+	BundleID *uint   `json:"bundle_id,omitempty"`
+	Phase    *string `json:"phase,omitempty" validate:"omitempty"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
@@ -446,6 +461,9 @@ type BotGetCampaignResponse struct {
 	Budget             *uint64                          `json:"budget,omitempty" validate:"omitempty"`
 	Comment            *string                          `json:"comment,omitempty" validate:"omitempty"`
 	NumAudiences       *uint64                          `json:"num_audiences"`
+
+	BundleID *uint   `json:"bundle_id,omitempty"`
+	Phase    *string `json:"phase,omitempty" validate:"omitempty"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
