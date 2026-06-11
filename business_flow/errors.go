@@ -176,6 +176,12 @@ var (
 	// Short link related errors
 	ErrShortLinkNotFound = errors.New("short link not found")
 
+	// Bundle related errors
+	ErrBundleNotFound        = errors.New("bundle not found")
+	ErrBundleAccessDenied    = errors.New("bundle access denied")
+	ErrCampaignPhaseRequired = errors.New("phase is required")
+	ErrCampaignPhaseInvalid  = errors.New("phase is invalid")
+
 	// Crypto payments
 	ErrCryptoRequestNotFound         = errors.New("crypto payment request not found")
 	ErrCryptoRequestAlreadyFinalized = errors.New("crypto payment request already finalized")
