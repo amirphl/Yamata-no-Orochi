@@ -110,9 +110,9 @@ func (s PlatformSettingsStatus) Value() (driver.Value, error) {
 type PlatformSettings struct {
 	ID           uint                     `gorm:"primaryKey;autoIncrement" json:"id"`
 	UUID         uuid.UUID                `gorm:"type:uuid;uniqueIndex;not null;default:gen_random_uuid()" json:"uuid"`
-	CustomerID   uint                     `gorm:"not null;index" json:"customer_id"`
+	CustomerID   uint                     `gorm:"not null;index;uniqueIndex:uk_platform_settings_customer_name,priority:1" json:"customer_id"`
 	Platform     string                   `gorm:"type:varchar(20);not null;index" json:"platform"`
-	Name         *string                  `gorm:"type:varchar(255)" json:"name,omitempty"`
+	Name         *string                  `gorm:"type:varchar(255);uniqueIndex:uk_platform_settings_customer_name,priority:2" json:"name,omitempty"`
 	Description  *string                  `gorm:"type:text" json:"description,omitempty"`
 	MultimediaID *uint                    `gorm:"index" json:"multimedia_id,omitempty"`
 	Metadata     PlatformSettingsMetadata `gorm:"type:jsonb;not null;default:'{}'" json:"metadata"`
@@ -145,6 +145,7 @@ type PlatformSettingsFilter struct {
 	ID            *uint                   `json:"id,omitempty"`
 	UUID          *uuid.UUID              `json:"uuid,omitempty"`
 	CustomerID    *uint                   `json:"customer_id,omitempty"`
+	Name          *string                 `json:"name,omitempty"`
 	Platform      *string                 `json:"platform,omitempty"`
 	Status        *PlatformSettingsStatus `json:"status,omitempty"`
 	MultimediaID  *uint                   `json:"multimedia_id,omitempty"`
