@@ -520,6 +520,8 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 	orderby := c.Query("orderby", "newest")
 	title := c.Query("title")
 	status := c.Query("status")
+	bundleIDStr := c.Query("bundle_id")
+	phase := c.Query("phase")
 
 	// Get authenticated customer ID
 	customerID, ok := c.Locals("customer_id").(uint)
@@ -529,13 +531,24 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 
 	// Build request DTO
 	var filter *dto.ListCampaignsFilter
-	if title != "" || status != "" {
+	if title != "" || status != "" || bundleIDStr != "" || phase != "" {
 		filter = &dto.ListCampaignsFilter{}
 		if title != "" {
 			filter.Title = &title
 		}
 		if status != "" {
 			filter.Status = &status
+		}
+		if bundleIDStr != "" {
+			bundleID, err := strconv.ParseUint(bundleIDStr, 10, 64)
+			if err != nil || bundleID == 0 {
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid bundle ID", "INVALID_BUNDLE_ID", nil)
+			}
+			parsedBundleID := uint(bundleID)
+			filter.BundleID = &parsedBundleID
+		}
+		if phase != "" {
+			filter.Phase = &phase
 		}
 	}
 	req := &dto.ListCampaignsRequest{
