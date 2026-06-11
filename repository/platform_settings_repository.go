@@ -61,6 +61,9 @@ func (r *PlatformSettingsRepositoryImpl) applyFilter(query *gorm.DB, filter mode
 	if filter.CustomerID != nil {
 		query = query.Where("customer_id = ?", *filter.CustomerID)
 	}
+	if filter.Name != nil {
+		query = query.Where("name = ?", *filter.Name)
+	}
 	if filter.Platform != nil {
 		query = query.Where("platform = ?", *filter.Platform)
 	}
