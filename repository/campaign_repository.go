@@ -39,6 +39,7 @@ func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Cam
 		Preload("Customer").
 		Preload("Customer.AccountType").
 		Preload("Customer.ReferrerAgency").
+		Preload("Bundle").
 		Last(&campaign, id).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -74,6 +75,27 @@ func (r *CampaignRepositoryImpl) ByUUID(ctx context.Context, uuid string) (*mode
 func (r *CampaignRepositoryImpl) ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Campaign, error) {
 	filter := models.CampaignFilter{CustomerID: &customerID}
 	return r.ByFilter(ctx, filter, "created_at DESC", limit, offset)
+}
+
+// ByCustomerIDAndBundleIDs retrieves campaigns for a customer that belong to any
+// of the provided bundle IDs. Only fields needed by bundle-level aggregation are selected.
+func (r *CampaignRepositoryImpl) ByCustomerIDAndBundleIDs(ctx context.Context, customerID uint, bundleIDs []uint) ([]*models.Campaign, error) {
+	if len(bundleIDs) == 0 {
+		return []*models.Campaign{}, nil
+	}
+
+	db := r.getDB(ctx)
+	var campaigns []*models.Campaign
+	err := db.Model(&models.Campaign{}).
+		Select("id", "bundle_id", "phase", "statistics").
+		Where("customer_id = ?", customerID).
+		Where("bundle_id IN ?", bundleIDs).
+		Find(&campaigns).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return campaigns, nil
 }
 
 // ByStatus retrieves campaigns by status with pagination
@@ -417,7 +439,8 @@ func (r *CampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.Cam
 	query = query.Select(statisticsWithoutTrackingResults).
 		Preload("Customer").
 		Preload("Customer.AccountType").
-		Preload("Customer.ReferrerAgency")
+		Preload("Customer.ReferrerAgency").
+		Preload("Bundle")
 
 	err := query.Find(&campaigns).Error
 	if err != nil {
@@ -521,6 +544,12 @@ func (r *CampaignRepositoryImpl) applyFilter(db *gorm.DB, filter models.Campaign
 	}
 	if filter.MaxBudget != nil {
 		db = db.Where("CAST(spec->>'budget' AS BIGINT) <= ?", *filter.MaxBudget)
+	}
+	if filter.BundleID != nil {
+		db = db.Where("campaigns.bundle_id = ?", *filter.BundleID)
+	}
+	if filter.Phase != nil {
+		db = db.Where("campaigns.phase = ?", *filter.Phase)
 	}
 
 	return db
