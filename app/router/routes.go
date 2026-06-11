@@ -38,6 +38,7 @@ type Router interface {
 type FiberRouter struct {
 	app                            *fiber.App
 	authHandler                    handlers.AuthHandlerInterface
+	bundleHandler                  handlers.BundleHandlerInterface
 	campaignHandler                handlers.CampaignHandlerInterface
 	paymentHandler                 handlers.PaymentHandlerInterface
 	paymentAdminHandler            handlers.PaymentAdminHandlerInterface
@@ -72,6 +73,7 @@ type FiberRouter struct {
 // NewFiberRouter creates a new Fiber router
 func NewFiberRouter(
 	authHandler handlers.AuthHandlerInterface,
+	bundleHandler handlers.BundleHandlerInterface,
 	campaignHandler handlers.CampaignHandlerInterface,
 	paymentHandler handlers.PaymentHandlerInterface,
 	paymentAdminHandler handlers.PaymentAdminHandlerInterface,
@@ -120,6 +122,7 @@ func NewFiberRouter(
 	return &FiberRouter{
 		app:                            app,
 		authHandler:                    authHandler,
+		bundleHandler:                  bundleHandler,
 		campaignHandler:                campaignHandler,
 		paymentHandler:                 paymentHandler,
 		paymentAdminHandler:            paymentAdminHandler,
@@ -273,6 +276,13 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/initiated/last", r.campaignHandler.GetLastInitiatedCampaign)
 	campaigns.Get("/:id/export", r.campaignHandler.ExportCampaignReport)
 	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
+
+	// Bundle routes (protected with authentication)
+	bundles := api.Group("/bundles")
+	bundles.Use(r.authMiddleware.Authenticate())
+	bundles.Post("/", r.bundleHandler.Create)
+	bundles.Get("/", r.bundleHandler.List)
+	bundles.Get("/:id", r.bundleHandler.Get)
 
 	// Admin campaigns listing and actions
 	adminCampaigns := api.Group("/admin/campaigns")
