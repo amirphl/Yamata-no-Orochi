@@ -176,7 +176,8 @@ var (
 	ErrDepositReceiptFileEmpty        = errors.New("deposit receipt file is empty")
 
 	// Platform base prices
-	ErrPlatformBasePriceNotFound = errors.New("platform base price not found")
+	ErrPlatformBasePriceNotFound  = errors.New("platform base price not found")
+	ErrPlatformSettingsNameExists = errors.New("platform settings name already exists for this customer")
 
 	ErrNotFound     = errors.New("not found")
 	ErrInvalidState = errors.New("invalid state")
@@ -688,4 +689,8 @@ func IsDepositReceiptFileEmpty(err error) bool { return errors.Is(err, ErrDeposi
 
 func IsPlatformBasePriceNotFound(err error) bool {
 	return errors.Is(err, ErrPlatformBasePriceNotFound)
+}
+
+func IsPlatformSettingsNameExists(err error) bool {
+	return errors.Is(err, ErrPlatformSettingsNameExists)
 }
