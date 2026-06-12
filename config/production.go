@@ -244,27 +244,16 @@ type AtipayConfig struct {
 }
 
 type AdminConfig struct {
-	Mobiles []string `json:"admin_mobile"`
+	Mobiles          []string `json:"admin_mobile"`
+	DepositReviewers []string `json:"admin_deposit_reviewer"`
 }
 
 func (c AdminConfig) ActiveMobiles() []string {
-	if len(c.Mobiles) == 0 {
-		return nil
-	}
-	result := make([]string, 0, len(c.Mobiles))
-	seen := make(map[string]struct{}, len(c.Mobiles))
-	for _, mobile := range c.Mobiles {
-		trimmed := strings.TrimSpace(mobile)
-		if trimmed == "" {
-			continue
-		}
-		if _, ok := seen[trimmed]; ok {
-			continue
-		}
-		seen[trimmed] = struct{}{}
-		result = append(result, trimmed)
-	}
-	return result
+	return normalizeMobileList(c.Mobiles)
+}
+
+func (c AdminConfig) ActiveDepositReviewers() []string {
+	return normalizeMobileList(c.DepositReviewers)
 }
 
 func (c AdminConfig) HasMobile(mobile string) bool {
@@ -278,6 +267,26 @@ func (c AdminConfig) HasMobile(mobile string) bool {
 		}
 	}
 	return false
+}
+
+func normalizeMobileList(mobiles []string) []string {
+	if len(mobiles) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(mobiles))
+	seen := make(map[string]struct{}, len(mobiles))
+	for _, mobile := range mobiles {
+		trimmed := strings.TrimSpace(mobile)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }
 
 type BotConfig struct {
@@ -370,6 +379,7 @@ type MessageConfig struct {
 	OTPResendVerificationCodeTemplate     string `json:"otp_resend_verification_code_template"`
 	PasswordResetVerificationCodeTemplate string `json:"password_reset_verification_code_template"`
 	CampaignRejectedTemplate              string `json:"campaign_rejected_template"`
+	DepositReceiptSubmittedTemplate       string `json:"deposit_receipt_submitted_template"`
 }
 
 // LoadProductionConfig loads and validates configuration from environment variables
@@ -541,7 +551,8 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Terminal: getEnvString("ATIPAY_TERMINAL", ""),
 		},
 		Admin: AdminConfig{
-			Mobiles: getEnvStringSlice("ADMIN_MOBILE", []string{}),
+			Mobiles:          getEnvStringSlice("ADMIN_MOBILE", []string{}),
+			DepositReviewers: getEnvStringSlice("ADMIN_DEPOSIT_REVIEWER", []string{}),
 		},
 		System: SystemConfig{
 			SystemUserUUID:    getEnvString("SYSTEM_USER_UUID", ""),
@@ -618,6 +629,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			OTPResendVerificationCodeTemplate:     getEnvString("MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE", "Your new verification code is: %s. Valid for %v minutes."),
 			PasswordResetVerificationCodeTemplate: getEnvString("MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE", "Your password reset code is: %s. This code will expire in %v minutes."),
 			CampaignRejectedTemplate:              getEnvString("MESSAGE_CAMPAIGN_REJECTED_TEMPLATE", "Your campaign has been rejected."),
+			DepositReceiptSubmittedTemplate:       getEnvString("MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE", "سلام شارژی در سامانه جاذبه انجام شده است. لطفا از پنل ادمین فاکتور مربوطه را صادر و آپلود نمایید"),
 		},
 	}
 
