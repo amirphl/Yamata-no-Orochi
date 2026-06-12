@@ -60,6 +60,7 @@ func (h *PlatformSettingsHandler) SuccessResponse(c fiber.Ctx, statusCode int, m
 // @Param request body dto.CreatePlatformSettingsRequest true "Platform settings payload"
 // @Success 201 {object} dto.APIResponse{data=dto.CreatePlatformSettingsResponse} "Created"
 // @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 409 {object} dto.APIResponse "Duplicate name"
 // @Failure 401 {object} dto.APIResponse "Unauthorized"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
 // @Router /api/v1/platform-settings [post]
@@ -85,6 +86,8 @@ func (h *PlatformSettingsHandler) Create(c fiber.Ctx) error {
 				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request", be.Code, be.Error())
 			case "MULTIMEDIA_NOT_FOUND":
 				return h.ErrorResponse(c, fiber.StatusBadRequest, "Multimedia not found", be.Code, be.Error())
+			case "PLATFORM_SETTINGS_NAME_ALREADY_EXISTS":
+				return h.ErrorResponse(c, fiber.StatusConflict, "Platform settings name already exists", be.Code, nil)
 			case "MISSING_CUSTOMER_ID":
 				return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found", be.Code, be.Error())
 			}
