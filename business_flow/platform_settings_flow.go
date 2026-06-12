@@ -2,9 +2,13 @@ package businessflow
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	"github.com/amirphl/Yamata-no-Orochi/app/services"
+	"github.com/amirphl/Yamata-no-Orochi/config"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -21,16 +25,22 @@ type PlatformSettingsFlow interface {
 type PlatformSettingsFlowImpl struct {
 	platformSettingsRepo repository.PlatformSettingsRepository
 	multimediaRepo       repository.MultimediaAssetRepository
+	notifier             services.NotificationService
+	adminCfg             config.AdminConfig
 }
 
 // NewPlatformSettingsFlow creates a new platform settings flow.
 func NewPlatformSettingsFlow(
 	platformSettingsRepo repository.PlatformSettingsRepository,
 	multimediaRepo repository.MultimediaAssetRepository,
+	notifier services.NotificationService,
+	adminCfg config.AdminConfig,
 ) PlatformSettingsFlow {
 	return &PlatformSettingsFlowImpl{
 		platformSettingsRepo: platformSettingsRepo,
 		multimediaRepo:       multimediaRepo,
+		notifier:             notifier,
+		adminCfg:             adminCfg,
 	}
 }
 
@@ -43,6 +53,24 @@ func (f *PlatformSettingsFlowImpl) CreatePlatformSettings(ctx context.Context, r
 	customerID, ok := customerIDAny.(uint)
 	if !ok || customerID == 0 {
 		return nil, NewBusinessError("MISSING_CUSTOMER_ID", "customer id is required", nil)
+	}
+
+	var normalizedName *string
+	if req.Name != nil {
+		t := strings.TrimSpace(*req.Name)
+		normalizedName = &t
+	}
+	if normalizedName != nil && *normalizedName != "" {
+		exists, err := f.platformSettingsRepo.Exists(ctx, models.PlatformSettingsFilter{
+			CustomerID: &customerID,
+			Name:       normalizedName,
+		})
+		if err != nil {
+			return nil, NewBusinessError("PLATFORM_SETTINGS_DUPLICATE_CHECK_FAILED", "failed to check duplicate platform settings name", err)
+		}
+		if exists {
+			return nil, NewBusinessError("PLATFORM_SETTINGS_NAME_ALREADY_EXISTS", "platform settings name already exists for this customer", ErrPlatformSettingsNameExists)
+		}
 	}
 
 	status := models.PlatformSettingsStatusInitialized
@@ -66,7 +94,7 @@ func (f *PlatformSettingsFlowImpl) CreatePlatformSettings(ctx context.Context, r
 		UUID:         uuid.New(),
 		CustomerID:   customerID,
 		Platform:     req.Platform,
-		Name:         req.Name,
+		Name:         normalizedName,
 		Description:  req.Description,
 		MultimediaID: multimediaID,
 		Metadata:     map[string]any{},
@@ -75,6 +103,20 @@ func (f *PlatformSettingsFlowImpl) CreatePlatformSettings(ctx context.Context, r
 
 	if err := f.platformSettingsRepo.Save(ctx, &row); err != nil {
 		return nil, err
+	}
+
+	// Notify admins via SMS (best-effort).
+	if f.notifier != nil {
+		name := "-"
+		if row.Name != nil && strings.TrimSpace(*row.Name) != "" {
+			name = strings.TrimSpace(*row.Name)
+		}
+		msg := fmt.Sprintf("New platform settings created: platform=%s\n name=%s", row.Platform, name)
+		go func() {
+			for _, mobile := range f.adminCfg.ActiveMobiles() {
+				_ = f.notifier.SendSMS(context.Background(), mobile, msg, nil)
+			}
+		}()
 	}
 
 	return &dto.CreatePlatformSettingsResponse{
