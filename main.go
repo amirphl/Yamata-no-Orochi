@@ -396,6 +396,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	ticketRepo := repository.NewTicketRepository(db)
 	multimediaRepo := repository.NewMultimediaAssetRepository(db)
 	platformSettingsRepo := repository.NewPlatformSettingsRepository(db)
+	bundleRepo := repository.NewBundleRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
 	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
@@ -467,6 +468,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	campaignFlow := businessflow.NewCampaignFlow(
 		campaignRepo,
+		bundleRepo,
 		shortLinkRepo,
 		customerRepo,
 		multimediaRepo,
@@ -620,6 +622,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	multimediaAdminFlow := businessflow.NewMultimediaAdminFlow(customerRepo, multimediaRepo)
 	multimediaBotFlow := businessflow.NewMultimediaBotFlow(multimediaRepo)
 	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo, notificationService, cfg.Admin)
+	bundleFlow := businessflow.NewBundleFlow(bundleRepo, campaignRepo, customerRepo, auditRepo, db)
 	platformSettingsAdminFlow := businessflow.NewPlatformSettingsAdminFlow(platformSettingsRepo, multimediaRepo)
 	platformBasePriceFlow := businessflow.NewPlatformBasePriceFlow(platformBasePriceRepo)
 	platformBasePriceAdminFlow := businessflow.NewPlatformBasePriceAdminFlow(platformBasePriceRepo, auditRepo)
@@ -640,6 +643,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
+	bundleHandler := handlers.NewBundleHandler(bundleFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 	paymentAdminHandler := handlers.NewPaymentAdminHandler(paymentAdminFlow)
@@ -678,6 +682,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	// Initialize router
 	appRouter := router.NewFiberRouter(
 		authHandler,
+		bundleHandler,
 		campaignHandler,
 		paymentHandler,
 		paymentAdminHandler,
