@@ -218,7 +218,7 @@ type CalculateCampaignCostResponse struct {
 // ListCampaignsFilter represents filter criteria for listing campaigns in request layer
 type ListCampaignsFilter struct {
 	Title  *string `json:"title,omitempty" validate:"omitempty,max=255"`
-	Status *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected cancelled running executed"`
+	Status *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected cancelled running executed expired"`
 }
 
 // ListCampaignsRequest represents a paginated list request for user's campaigns
@@ -253,7 +253,7 @@ type GetLastInitiatedCampaignResponse struct {
 // AdminListCampaignsFilter holds filters for admin campaign listing
 type AdminListCampaignsFilter struct {
 	Title     *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Status    *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in_progress waiting_for_approval approved rejected"`
+	Status    *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in_progress waiting_for_approval approved rejected expired"`
 	StartDate *time.Time `json:"start_date,omitempty" validate:"omitempty"`
 	EndDate   *time.Time `json:"end_date,omitempty" validate:"omitempty"`
 }
