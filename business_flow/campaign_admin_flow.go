@@ -115,7 +115,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		}
 	}
 
-	rows, err := s.campaignRepo.ByFilter(ctx, cf, "created_at DESC", 0, 0)
+	rows, err := s.campaignRepo.ByFilter(ctx, cf, "updated_at DESC", 0, 0)
 	if err != nil {
 		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", false, nil, map[string]any{
 			"status": filter.Status,
