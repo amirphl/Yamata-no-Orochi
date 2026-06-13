@@ -25,6 +25,7 @@ const (
 	CampaignStatusApproved           CampaignStatus = "approved"
 	CampaignStatusRunning            CampaignStatus = "running"
 	CampaignStatusExecuted           CampaignStatus = "executed"
+	CampaignStatusExpired            CampaignStatus = "expired"
 	CampaignStatusRejected           CampaignStatus = "rejected"
 	CampaignStatusCancelled          CampaignStatus = "cancelled"
 	CampaignStatusCancelledByAdmin   CampaignStatus = "cancelled-by-admin"
@@ -51,7 +52,7 @@ func (s CampaignStatus) Valid() bool {
 		CampaignStatusWaitingForApproval, CampaignStatusApproved,
 		CampaignStatusRejected, CampaignStatusCancelled,
 		CampaignStatusCancelledByAdmin,
-		CampaignStatusRunning, CampaignStatusExecuted:
+		CampaignStatusRunning, CampaignStatusExecuted, CampaignStatusExpired:
 		return true
 	default:
 		return false
@@ -253,8 +254,18 @@ func (c *Campaign) GetStatusDisplayName() string {
 		return "Waiting for Approval"
 	case CampaignStatusApproved:
 		return "Approved"
+	case CampaignStatusExpired:
+		return "Expired"
 	case CampaignStatusRejected:
 		return "Rejected"
+	case CampaignStatusCancelled:
+		return "Cancelled"
+	case CampaignStatusCancelledByAdmin:
+		return "Cancelled by Admin"
+	case CampaignStatusRunning:
+		return "Running"
+	case CampaignStatusExecuted:
+		return "Executed"
 	default:
 		return "Unknown"
 	}
@@ -271,8 +282,16 @@ func (c *Campaign) GetStatusColor() string {
 		return "#ffc107" // yellow
 	case CampaignStatusApproved:
 		return "#28a745" // green
+	case CampaignStatusExpired:
+		return "#fd7e14" // orange
 	case CampaignStatusRejected:
 		return "#dc3545" // red
+	case CampaignStatusCancelled, CampaignStatusCancelledByAdmin:
+		return "#6c757d" // gray
+	case CampaignStatusRunning:
+		return "#17a2b8" // cyan
+	case CampaignStatusExecuted:
+		return "#343a40" // dark gray
 	default:
 		return "#6c757d" // gray
 	}
