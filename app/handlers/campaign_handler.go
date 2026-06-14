@@ -188,7 +188,7 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 
 // CancelCampaign handles customer-initiated campaign cancellation
 // @Summary Cancel Campaign
-// @Description Cancel a campaign that is waiting for approval and refund reserved budget
+// @Description Cancel a campaign that is waiting for approval, or approved but not yet scheduled to start
 // @Tags Campaigns
 // @Produce json
 // @Param id path int true "Campaign ID"
@@ -439,7 +439,7 @@ func (h *CampaignHandler) CalculateCampaignCostV2(c fiber.Ctx) error {
 // @Param limit query int true "Items per page (max 100)"
 // @Param orderby query string false "Order by (newest|oldest)" default(newest)
 // @Param title query string false "Filter by title (contains)"
-// @Param status query string false "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|cancelled|cancelled-by-admin)"
+// @Param status query string false "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|expired|cancelled|cancelled-by-admin)"
 // @Success 200 {object} dto.APIResponse{data=dto.ListCampaignsResponse}
 // @Failure 400 {object} dto.APIResponse "Validation error"
 // @Failure 401 {object} dto.APIResponse "Unauthorized"
@@ -660,6 +660,12 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 	}
 	if businessflow.IsMultipleFreezeTransactionsFound(err) {
 		return h.ErrorResponse(c, fiber.StatusConflict, "Multiple freeze transactions found", "MULTIPLE_FREEZE_TRANSACTIONS_FOUND", nil)
+	}
+	if businessflow.IsCampaignDebitTransactionNotFound(err) {
+		return h.ErrorResponse(c, fiber.StatusConflict, "Campaign debit transaction not found", "CAMPAIGN_DEBIT_TRANSACTION_NOT_FOUND", nil)
+	}
+	if businessflow.IsMultipleCampaignDebitTransactionsFound(err) {
+		return h.ErrorResponse(c, fiber.StatusConflict, "Multiple campaign debit transactions found", "MULTIPLE_CAMPAIGN_DEBIT_TRANSACTIONS_FOUND", nil)
 	}
 
 	if businessflow.IsCampaignPlatformRequired(err) || businessflow.IsCampaignPlatformInvalid(err) {
