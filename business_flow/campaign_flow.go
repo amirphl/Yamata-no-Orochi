@@ -210,22 +210,21 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_NOT_ALLOWED", "Campaign cannot be updated in current status", ErrCampaignUpdateNotAllowed)
 	}
 
-	if req.ScheduleAt == nil && campaign.Spec.ScheduleAt == nil {
-		req.ScheduleAt = utils.ToPtr(utils.UTCNow().Add(time.Hour))
-		campaign.Spec.ScheduleAt = req.ScheduleAt
-	}
+	// if req.ScheduleAt == nil && campaign.Spec.ScheduleAt == nil {
+	// 	req.ScheduleAt = new(utils.UTCNow().Add(time.Hour))
+	// 	campaign.Spec.ScheduleAt = req.ScheduleAt
+	// }
 
 	// Validate schedule time must be at least 10 minutes in the future
-	scheduleTime := req.ScheduleAt
-	if scheduleTime == nil {
-		scheduleTime = campaign.Spec.ScheduleAt
-	}
-	if scheduleTime != nil && !scheduleTime.IsZero() {
-		if scheduleTime.Before(utils.UTCNow().Add(10 * time.Minute)) {
-			// TODO:
-			// return nil, NewBusinessError("INVALID_SCHEDULE_TIME", "Schedule time must be at least 10 minutes in the future", ErrScheduleTimeTooSoon)
-		}
-	}
+	// scheduleTime := req.ScheduleAt
+	// if scheduleTime == nil {
+	// 	scheduleTime = campaign.Spec.ScheduleAt
+	// }
+	// if scheduleTime != nil && !scheduleTime.IsZero() {
+	// 	if scheduleTime.Before(utils.UTCNow().Add(10 * time.Minute)) {
+	// 		return nil, NewBusinessError("INVALID_SCHEDULE_TIME", "Schedule time must be at least 10 minutes in the future", ErrScheduleTimeTooSoon)
+	// 	}
+	// }
 
 	var (
 		title              = req.Title
@@ -607,6 +606,8 @@ func (s *CampaignFlowImpl) CloneCampaign(ctx context.Context, req *dto.CloneCamp
 		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
 	}
 
+	src.Spec.ScheduleAt = nil // Clear schedule to avoid cloning campaigns with past schedule times
+
 	clone := models.Campaign{
 		UUID:        uuid.New(),
 		CustomerID:  src.CustomerID,
@@ -635,7 +636,7 @@ func (s *CampaignFlowImpl) CloneCampaign(ctx context.Context, req *dto.CloneCamp
 	}, nil
 }
 
-// CancelCampaign allows a customer to cancel their own campaign waiting for approval and refunds the reserved budget.
+// CancelCampaign allows a customer to cancel their own campaign and refunds budget according to current campaign status.
 func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error) {
 	if req == nil || req.CampaignID == 0 {
 		return nil, NewBusinessError("CANCEL_CAMPAIGN_VALIDATION_FAILED", "campaign_id is required", ErrCampaignNotFound)
@@ -655,33 +656,10 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 		if campaign.CustomerID != req.CustomerID {
 			return ErrCampaignAccessDenied
 		}
-		if campaign.Status != models.CampaignStatusWaitingForApproval {
-			return ErrCampaignNotWaitingForApproval
-		}
-
 		customer, err := getCustomer(txCtx, s.customerRepo, campaign.CustomerID)
 		if err != nil {
 			return err
 		}
-
-		freezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
-			CustomerID: &campaign.CustomerID,
-			CampaignID: &campaign.ID,
-			Source:     utils.ToPtr("campaign_update"),
-			Operation:  utils.ToPtr("reserve_budget"),
-			Type:       utils.ToPtr(models.TransactionTypeFreeze),
-			Status:     utils.ToPtr(models.TransactionStatusCompleted),
-		}, "id DESC", 0, 0)
-		if err != nil {
-			return err
-		}
-		if len(freezeTxs) == 0 {
-			return ErrFreezeTransactionNotFound
-		}
-		if len(freezeTxs) > 1 {
-			return ErrMultipleFreezeTransactionsFound
-		}
-		freezeTx := freezeTxs[0]
 
 		wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
 		if err != nil {
@@ -692,67 +670,177 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 			return err
 		}
 
-		amount := freezeTx.Amount
-		if latestBalance.FrozenBalance < amount {
-			return ErrInsufficientFunds
-		}
+		switch campaign.Status {
+		case models.CampaignStatusWaitingForApproval:
+			freezeTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CustomerID: &campaign.CustomerID,
+				CampaignID: &campaign.ID,
+				Source:     utils.ToPtr("campaign_update"),
+				Operation:  utils.ToPtr("reserve_budget"),
+				Type:       utils.ToPtr(models.TransactionTypeFreeze),
+				Status:     utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id DESC", 0, 0)
+			if err != nil {
+				return err
+			}
+			if len(freezeTxs) == 0 {
+				return ErrFreezeTransactionNotFound
+			}
+			if len(freezeTxs) > 1 {
+				return ErrMultipleFreezeTransactionsFound
+			}
+			freezeTx := freezeTxs[0]
 
-		meta := map[string]any{
-			"source":      "campaign_cancel",
-			"operation":   "cancel_campaign_refund_frozen",
-			"campaign_id": campaign.ID,
-			"comment":     req.Comment,
-		}
-		metaBytes, _ := json.Marshal(meta)
+			amount := freezeTx.Amount
+			if latestBalance.FrozenBalance < amount {
+				return ErrInsufficientFunds
+			}
 
-		newFrozen := latestBalance.FrozenBalance - amount
-		newCredit := latestBalance.CreditBalance + amount
+			meta := map[string]any{
+				"source":      "campaign_cancel",
+				"operation":   "cancel_campaign_refund_frozen",
+				"campaign_id": campaign.ID,
+				"comment":     req.Comment,
+			}
+			metaBytes, _ := json.Marshal(meta)
 
-		newSnap := &models.BalanceSnapshot{
-			UUID:               uuid.New(),
-			CorrelationID:      freezeTx.CorrelationID,
-			WalletID:           wallet.ID,
-			CustomerID:         customer.ID,
-			FreeBalance:        latestBalance.FreeBalance,
-			FrozenBalance:      newFrozen,
-			LockedBalance:      latestBalance.LockedBalance,
-			CreditBalance:      newCredit,
-			SpentOnCampaign:    latestBalance.SpentOnCampaign,
-			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
-			TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
-			Reason:             "campaign_cancelled_budget_refund",
-			Description:        fmt.Sprintf("Refund reserved budget for cancelled campaign %d", campaign.ID),
-			Metadata:           metaBytes,
-		}
-		if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
-			return err
-		}
+			newFrozen := latestBalance.FrozenBalance - amount
+			newCredit := latestBalance.CreditBalance + amount
 
-		beforeMap, err := latestBalance.GetBalanceMap()
-		if err != nil {
-			return err
-		}
-		afterMap, err := newSnap.GetBalanceMap()
-		if err != nil {
-			return err
-		}
+			newSnap := &models.BalanceSnapshot{
+				UUID:               uuid.New(),
+				CorrelationID:      freezeTx.CorrelationID,
+				WalletID:           wallet.ID,
+				CustomerID:         customer.ID,
+				FreeBalance:        latestBalance.FreeBalance,
+				FrozenBalance:      newFrozen,
+				LockedBalance:      latestBalance.LockedBalance,
+				CreditBalance:      newCredit,
+				SpentOnCampaign:    latestBalance.SpentOnCampaign,
+				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+				TotalBalance:       latestBalance.FreeBalance + newFrozen + latestBalance.LockedBalance + newCredit + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+				Reason:             "campaign_cancelled_budget_refund",
+				Description:        fmt.Sprintf("Refund reserved budget for cancelled campaign %d", campaign.ID),
+				Metadata:           metaBytes,
+			}
+			if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+				return err
+			}
 
-		refundTx := &models.Transaction{
-			UUID:          uuid.New(),
-			CorrelationID: freezeTx.CorrelationID,
-			Type:          models.TransactionTypeRefund,
-			Status:        models.TransactionStatusCompleted,
-			Amount:        amount,
-			Currency:      utils.TomanCurrency,
-			WalletID:      wallet.ID,
-			CustomerID:    customer.ID,
-			BalanceBefore: beforeMap,
-			BalanceAfter:  afterMap,
-			Description:   fmt.Sprintf("Refund reserved budget for cancelled campaign %d", campaign.ID),
-			Metadata:      metaBytes,
-		}
-		if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
-			return err
+			beforeMap, err := latestBalance.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+			afterMap, err := newSnap.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+
+			refundTx := &models.Transaction{
+				UUID:          uuid.New(),
+				CorrelationID: freezeTx.CorrelationID,
+				Type:          models.TransactionTypeRefund,
+				Status:        models.TransactionStatusCompleted,
+				Amount:        amount,
+				Currency:      utils.TomanCurrency,
+				WalletID:      wallet.ID,
+				CustomerID:    customer.ID,
+				BalanceBefore: beforeMap,
+				BalanceAfter:  afterMap,
+				Description:   fmt.Sprintf("Refund reserved budget for cancelled campaign %d", campaign.ID),
+				Metadata:      metaBytes,
+			}
+			if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+				return err
+			}
+		case models.CampaignStatusApproved:
+			if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() || !campaign.Spec.ScheduleAt.After(utils.UTCNow()) {
+				return ErrCampaignNotWaitingForApproval
+			}
+
+			debitTxs, err := s.transactionRepo.ByFilter(txCtx, models.TransactionFilter{
+				CustomerID: &campaign.CustomerID,
+				CampaignID: &campaign.ID,
+				Source:     utils.ToPtr("admin_campaign_approve"),
+				Operation:  utils.ToPtr("approve_campaign_budget_consume"),
+				Type:       utils.ToPtr(models.TransactionTypeFee),
+				Status:     utils.ToPtr(models.TransactionStatusCompleted),
+			}, "id DESC", 0, 0)
+			if err != nil {
+				return err
+			}
+			if len(debitTxs) == 0 {
+				return ErrCampaignDebitTransactionNotFound
+			}
+			if len(debitTxs) > 1 {
+				return ErrMultipleCampaignDebitTransactionsFound
+			}
+			debitTx := debitTxs[0]
+
+			amount := debitTx.Amount
+			if latestBalance.SpentOnCampaign < amount {
+				return ErrInsufficientFunds
+			}
+
+			meta := map[string]any{
+				"source":      "campaign_cancel",
+				"operation":   "cancel_campaign_refund_spent_after_approval",
+				"campaign_id": campaign.ID,
+				"comment":     req.Comment,
+			}
+			metaBytes, _ := json.Marshal(meta)
+
+			newCredit := latestBalance.CreditBalance + amount
+			newSpentOnCampaign := latestBalance.SpentOnCampaign - amount
+
+			newSnap := &models.BalanceSnapshot{
+				UUID:               uuid.New(),
+				CorrelationID:      debitTx.CorrelationID,
+				WalletID:           wallet.ID,
+				CustomerID:         customer.ID,
+				FreeBalance:        latestBalance.FreeBalance,
+				FrozenBalance:      latestBalance.FrozenBalance,
+				LockedBalance:      latestBalance.LockedBalance,
+				CreditBalance:      newCredit,
+				SpentOnCampaign:    newSpentOnCampaign,
+				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+				TotalBalance:       latestBalance.FreeBalance + latestBalance.FrozenBalance + latestBalance.LockedBalance + newCredit + newSpentOnCampaign + latestBalance.AgencyShareWithTax,
+				Reason:             "campaign_cancelled_budget_refund_after_approval",
+				Description:        fmt.Sprintf("Refund spent budget for cancelled campaign %d after approval", campaign.ID),
+				Metadata:           metaBytes,
+			}
+			if err := s.balanceSnapshotRepo.Save(txCtx, newSnap); err != nil {
+				return err
+			}
+
+			beforeMap, err := latestBalance.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+			afterMap, err := newSnap.GetBalanceMap()
+			if err != nil {
+				return err
+			}
+
+			refundTx := &models.Transaction{
+				UUID:          uuid.New(),
+				CorrelationID: debitTx.CorrelationID,
+				Type:          models.TransactionTypeRefund,
+				Status:        models.TransactionStatusCompleted,
+				Amount:        amount,
+				Currency:      utils.TomanCurrency,
+				WalletID:      wallet.ID,
+				CustomerID:    customer.ID,
+				BalanceBefore: beforeMap,
+				BalanceAfter:  afterMap,
+				Description:   fmt.Sprintf("Refund spent budget for cancelled campaign %d after approval", campaign.ID),
+				Metadata:      metaBytes,
+			}
+			if err := s.transactionRepo.Save(txCtx, refundTx); err != nil {
+				return err
+			}
+		default:
+			return ErrCampaignNotWaitingForApproval
 		}
 
 		campaign.Status = models.CampaignStatusCancelled
@@ -1092,6 +1180,9 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	if err != nil {
 		return nil, err
 	}
+	if err := s.expireCustomerCampaigns(ctx, req.CustomerID); err != nil {
+		return nil, err
+	}
 
 	// Normalize pagination
 	page := max(1, req.Page)
@@ -1119,12 +1210,12 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	}
 
 	// Order by
-	orderBy := "created_at DESC"
+	orderBy := "updated_at DESC"
 	switch req.OrderBy {
 	case "oldest":
-		orderBy = "created_at ASC"
+		orderBy = "updated_at ASC"
 	case "newest":
-		orderBy = "created_at DESC"
+		orderBy = "updated_at DESC"
 	}
 
 	// Count total
@@ -1713,11 +1804,11 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 		}
 	}
 
-	if req.ScheduleAt != nil && !req.ScheduleAt.IsZero() {
-		if !isScheduleWithinTehranWindow(*req.ScheduleAt) {
-			return ErrScheduleTimeOutsideWindow
-		}
-	}
+	// if req.ScheduleAt != nil && !req.ScheduleAt.IsZero() {
+	// 	if !isScheduleWithinTehranWindow(*req.ScheduleAt) {
+	// 		return ErrScheduleTimeOutsideWindow
+	// 	}
+	// }
 
 	return nil
 }
@@ -1781,10 +1872,14 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 		return ErrCampaignContentRequired
 	}
 	if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.IsZero() {
-		return ErrScheduleTimeNotPresent
+		campaign.Spec.ScheduleAt = new(utils.UTCNow().Add(20 * time.Minute))
+		// return ErrScheduleTimeNotPresent
 	}
 	if campaign.Spec.ScheduleAt.Before(utils.UTCNow().Add(10 * time.Minute)) {
 		return ErrScheduleTimeTooSoon
+	}
+	if !isScheduleWithinTehranWindow(*campaign.Spec.ScheduleAt) {
+		return ErrScheduleTimeOutsideWindow
 	}
 	if campaign.Spec.Platform == models.CampaignPlatformSMS && (campaign.Spec.LineNumber == nil || *campaign.Spec.LineNumber == "") {
 		return ErrCampaignLineNumberRequired
@@ -1869,6 +1964,8 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if req.ScheduleAt != nil {
 		spec.ScheduleAt = req.ScheduleAt
+	} else {
+		spec.ScheduleAt = nil
 	}
 	if req.LineNumber != nil && *req.LineNumber != "" {
 		spec.LineNumber = req.LineNumber
@@ -1905,6 +2002,33 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	err := s.campaignRepo.Update(ctx, *existingCampaign)
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (s *CampaignFlowImpl) expireCustomerCampaigns(ctx context.Context, customerID uint) error {
+	now := utils.UTCNow()
+
+	st := models.CampaignStatusWaitingForApproval
+	rows, err := s.campaignRepo.ByFilter(ctx, models.CampaignFilter{
+		CustomerID: &customerID,
+		Status:     &st,
+	}, "", 0, 0)
+	if err != nil {
+		return err
+	}
+
+	for _, c := range rows {
+		if c.Spec.ScheduleAt == nil || c.Spec.ScheduleAt.IsZero() {
+			continue
+		}
+		if !c.Spec.ScheduleAt.Before(now) {
+			continue
+		}
+		if err := s.campaignRepo.UpdateStatus(ctx, c.ID, models.CampaignStatusExpired); err != nil {
+			return err
+		}
 	}
 
 	return nil
