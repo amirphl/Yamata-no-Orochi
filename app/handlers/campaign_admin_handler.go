@@ -67,7 +67,7 @@ func (h *CampaignAdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, mess
 // @Tags Admin Campaigns
 // @Produce json
 // @Param title query string false "Filter by title (contains)"
-// @Param status query string false "Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected)"
+// @Param status query string false "Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected|expired)"
 // @Param start_date query string false "Filter created_at >= start_date (RFC3339)"
 // @Param end_date query string false "Filter created_at <= end_date (RFC3339)"
 // @Success 200 {object} dto.APIResponse{data=[]dto.GetCampaignResponse}
