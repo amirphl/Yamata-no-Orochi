@@ -66,7 +66,9 @@ type LineNumberRepository interface {
 // PlatformBasePriceRepository defines operations for platform base prices.
 type PlatformBasePriceRepository interface {
 	Insert(ctx context.Context, p *models.PlatformBasePrice) error
+	UpdatePriceByPlatform(ctx context.Context, platform string, price uint64) error
 	LatestByPlatform(ctx context.Context, platform string) (*models.PlatformBasePrice, error)
+	List(ctx context.Context) ([]*models.PlatformBasePrice, error)
 }
 
 // CustomerRepository defines operations for customers
