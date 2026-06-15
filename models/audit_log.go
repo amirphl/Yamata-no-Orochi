@@ -98,6 +98,8 @@ const (
 	AuditActionAdminLineNumberList                   = "admin_line_number_list"
 	AuditActionAdminLineNumberUpdate                 = "admin_line_number_update"
 	AuditActionAdminLineNumberReport                 = "admin_line_number_report"
+	AuditActionAdminPlatformBasePriceList            = "admin_platform_base_price_list"
+	AuditActionAdminPlatformBasePriceUpdate          = "admin_platform_base_price_update"
 	AuditActionAdminACLRequestCreated                = "admin_acl_request_created"
 	AuditActionAdminACLRequestApproved               = "admin_acl_request_approved"
 	AuditActionAdminACLRequestRejected               = "admin_acl_request_rejected"
