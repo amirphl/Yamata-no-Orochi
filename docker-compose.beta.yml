@@ -29,6 +29,325 @@ volumes:
   sentry_redis_data_beta:
     driver: local
 
+# ─── Shared configuration fragments ────────────────────────────────────────────
+# Both app slots (blue / green) inherit this block via YAML merge keys.
+x-app-common: &app-common
+  image: yamata-no-orochi
+  restart: unless-stopped
+  depends_on:
+    postgres-beta:
+      condition: service_healthy
+    redis-beta:
+      condition: service_healthy
+  environment:
+    # Database Configuration
+    DB_HOST: postgres-beta
+    DB_PORT: ${DB_PORT}
+    DB_NAME: ${DB_NAME}
+    DB_USER: ${DB_USER}
+    DB_PASSWORD: ${DB_PASSWORD}
+    DB_SSL_MODE: ${DB_SSL_MODE}
+    DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS}
+    DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS}
+    DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME}
+    DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME}
+    DB_SLOW_QUERY_LOG: ${DB_SLOW_QUERY_LOG}
+    DB_SLOW_QUERY_TIME: ${DB_SLOW_QUERY_TIME}
+
+    # Server Configuration
+    SERVER_HOST: ${SERVER_HOST}
+    SERVER_PORT: ${SERVER_PORT}
+    SERVER_READ_TIMEOUT: ${SERVER_READ_TIMEOUT}
+    SERVER_WRITE_TIMEOUT: ${SERVER_WRITE_TIMEOUT}
+    SERVER_IDLE_TIMEOUT: ${SERVER_IDLE_TIMEOUT}
+    SERVER_SHUTDOWN_TIMEOUT: ${SERVER_SHUTDOWN_TIMEOUT}
+    SERVER_BODY_LIMIT: ${SERVER_BODY_LIMIT}
+    SERVER_ENABLE_PPROF: ${SERVER_ENABLE_PPROF}
+    SERVER_ENABLE_METRICS: ${SERVER_ENABLE_METRICS}
+    SERVER_TRUSTED_PROXIES: ${SERVER_TRUSTED_PROXIES}
+    SERVER_PROXY_HEADER: ${SERVER_PROXY_HEADER}
+    SERVER_ENABLE_COMPRESSION: ${SERVER_ENABLE_COMPRESSION}
+    SERVER_COMPRESSION_LEVEL: ${SERVER_COMPRESSION_LEVEL}
+
+    # Security Configuration
+    TLS_ENABLED: ${TLS_ENABLED}
+    TLS_CERT_FILE: ${TLS_CERT_FILE}
+    TLS_KEY_FILE: ${TLS_KEY_FILE}
+    TLS_MIN_VERSION: ${TLS_MIN_VERSION}
+    HSTS_MAX_AGE: ${HSTS_MAX_AGE}
+    HSTS_INCLUDE_SUBDOMAINS: ${HSTS_INCLUDE_SUBDOMAINS}
+    HSTS_PRELOAD: ${HSTS_PRELOAD}
+
+    # CORS Configuration
+    CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+    ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+    CORS_ALLOWED_METHODS: ${CORS_ALLOWED_METHODS}
+    CORS_ALLOWED_HEADERS: ${CORS_ALLOWED_HEADERS}
+    CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS}
+    CORS_MAX_AGE: ${CORS_MAX_AGE}
+
+    # Rate Limiting
+    AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT}
+    GLOBAL_RATE_LIMIT: ${GLOBAL_RATE_LIMIT}
+    RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW}
+    RATE_LIMIT_MEMORY: ${RATE_LIMIT_MEMORY}
+
+    # Content Security Policy
+    CSP_POLICY: ${CSP_POLICY}
+    X_FRAME_OPTIONS: ${X_FRAME_OPTIONS}
+    X_CONTENT_TYPE_OPTIONS: ${X_CONTENT_TYPE_OPTIONS}
+    XSS_PROTECTION: ${XSS_PROTECTION}
+    REFERRER_POLICY: ${REFERRER_POLICY}
+
+    # API Security
+    REQUIRE_API_KEY: ${REQUIRE_API_KEY}
+    API_KEY_HEADER: ${API_KEY_HEADER}
+    ALLOWED_API_KEYS: ${ALLOWED_API_KEYS}
+    IP_WHITELIST: ${IP_WHITELIST}
+    IP_BLACKLIST: ${IP_BLACKLIST}
+
+    # Password & Authentication
+    PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH}
+    PASSWORD_REQUIRE_UPPER: ${PASSWORD_REQUIRE_UPPER}
+    PASSWORD_REQUIRE_LOWER: ${PASSWORD_REQUIRE_LOWER}
+    PASSWORD_REQUIRE_NUMBER: ${PASSWORD_REQUIRE_NUMBER}
+    PASSWORD_REQUIRE_SYMBOL: ${PASSWORD_REQUIRE_SYMBOL}
+    BCRYPT_COST: ${BCRYPT_COST}
+
+    # JWT Configuration
+    JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
+    JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
+    JWT_USE_RSA_KEYS: ${JWT_USE_RSA_KEYS}
+    JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL}
+    JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL}
+    JWT_ISSUER: ${JWT_ISSUER}
+    JWT_AUDIENCE: ${JWT_AUDIENCE}
+    JWT_ALGORITHM: ${JWT_ALGORITHM}
+
+    # Session Security
+    SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE}
+    SESSION_COOKIE_HTTPONLY: ${SESSION_COOKIE_HTTPONLY}
+    SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE}
+    SESSION_TIMEOUT: ${SESSION_TIMEOUT}
+    SESSION_CLEANUP_INTERVAL: ${SESSION_CLEANUP_INTERVAL}
+
+    # SMS Configuration
+    SMS_PROVIDER_DOMAIN: ${SMS_PROVIDER_DOMAIN}
+    SMS_API_KEY: ${SMS_API_KEY}
+    SMS_SOURCE_NUMBER: ${SMS_SOURCE_NUMBER}
+    SMS_RETRY_COUNT: ${SMS_RETRY_COUNT}
+    SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD}
+    SMS_TIMEOUT: ${SMS_TIMEOUT}
+
+    # Email Configuration
+    EMAIL_HOST: ${EMAIL_HOST}
+    EMAIL_PORT: ${EMAIL_PORT}
+    EMAIL_USERNAME: ${EMAIL_USERNAME}
+    EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+    EMAIL_FROM_EMAIL: ${EMAIL_FROM_EMAIL}
+    EMAIL_FROM_NAME: ${EMAIL_FROM_NAME}
+    EMAIL_USE_TLS: ${EMAIL_USE_TLS}
+    EMAIL_USE_STARTTLS: ${EMAIL_USE_STARTTLS}
+    EMAIL_RATE_LIMIT: ${EMAIL_RATE_LIMIT}
+    EMAIL_RETRY_ATTEMPTS: ${EMAIL_RETRY_ATTEMPTS}
+    EMAIL_TIMEOUT: ${EMAIL_TIMEOUT}
+
+    # Logging Configuration
+    LOG_LEVEL: ${LOG_LEVEL}
+    LOG_FORMAT: ${LOG_FORMAT}
+    LOG_OUTPUT: ${LOG_OUTPUT}
+    LOG_FILE_PATH: ${LOG_FILE_PATH}
+    LOG_MAX_SIZE: ${LOG_MAX_SIZE}
+    LOG_MAX_BACKUPS: ${LOG_MAX_BACKUPS}
+    LOG_MAX_AGE: ${LOG_MAX_AGE}
+    LOG_COMPRESS: ${LOG_COMPRESS}
+    LOG_ENABLE_CALLER: ${LOG_ENABLE_CALLER}
+    LOG_ENABLE_STACKTRACE: ${LOG_ENABLE_STACKTRACE}
+    LOG_ENABLE_ACCESS: ${LOG_ENABLE_ACCESS}
+    LOG_ACCESS_PATH: ${LOG_ACCESS_PATH}
+    LOG_ACCESS_FORMAT: ${LOG_ACCESS_FORMAT}
+    LOG_ENABLE_AUDIT: ${LOG_ENABLE_AUDIT}
+    LOG_AUDIT_PATH: ${LOG_AUDIT_PATH}
+    LOG_ENABLE_SECURITY: ${LOG_ENABLE_SECURITY}
+    LOG_SECURITY_PATH: ${LOG_SECURITY_PATH}
+
+    # Metrics Configuration
+    METRICS_ENABLED: ${METRICS_ENABLED}
+    METRICS_PORT: ${METRICS_PORT}
+    METRICS_PATH: ${METRICS_PATH}
+    METRICS_ENABLE_PPROF: ${METRICS_ENABLE_PPROF}
+    METRICS_PPROF_PORT: ${METRICS_PPROF_PORT}
+    METRICS_ENABLE_PROMETHEUS: ${METRICS_ENABLE_PROMETHEUS}
+    METRICS_PROMETHEUS_PATH: ${METRICS_PROMETHEUS_PATH}
+    METRICS_COLLECT_DB: ${METRICS_COLLECT_DB}
+    METRICS_COLLECT_CACHE: ${METRICS_COLLECT_CACHE}
+    METRICS_COLLECT_APP: ${METRICS_COLLECT_APP}
+
+    # Ensure libraries that need cache write to tmpfs, not $HOME
+    XDG_CACHE_HOME: /tmp
+
+    # Cache Configuration
+    CACHE_ENABLED: ${CACHE_ENABLED}
+    CACHE_PROVIDER: ${CACHE_PROVIDER}
+    CACHE_REDIS_URL: redis://redis-beta:6379
+    CACHE_REDIS_DB: ${CACHE_REDIS_DB}
+    CACHE_REDIS_PREFIX: ${CACHE_REDIS_PREFIX}
+    CACHE_DEFAULT_TTL: ${CACHE_DEFAULT_TTL}
+    CACHE_MAX_MEMORY: ${CACHE_MAX_MEMORY}
+    CACHE_CLEANUP_INTERVAL: ${CACHE_CLEANUP_INTERVAL}
+
+    # Deployment Configuration
+    DOMAIN: ${DOMAIN}
+    API_DOMAIN: ${API_DOMAIN}
+    MONITORING_DOMAIN: ${MONITORING_DOMAIN}
+    CERTBOT_EMAIL: ${CERTBOT_EMAIL}
+    GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    REDIS_PASSWORD: ${REDIS_PASSWORD}
+    BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET}
+    BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY}
+    BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY}
+    APP_ENV: ${APP_ENV}
+    VERSION: ${VERSION:-1.0.0}
+    COMMIT_HASH: ${COMMIT_HASH:-unknown}
+    BUILD_TIME: ${BUILD_TIME:-unknown}
+    SENTRY_DSN: ${SENTRY_DSN}
+    SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
+    SENTRY_RELEASE: ${SENTRY_RELEASE}
+    SENTRY_SERVER_NAME: ${SENTRY_SERVER_NAME}
+    SENTRY_TIMEOUT: ${SENTRY_TIMEOUT}
+    SENTRY_CAPTURE_4XX: ${SENTRY_CAPTURE_4XX}
+    SENTRY_CAPTURE_5XX: ${SENTRY_CAPTURE_5XX}
+
+    # Atipay Configuration
+    ATIPAY_API_KEY: ${ATIPAY_API_KEY}
+    ATIPAY_TERMINAL: ${ATIPAY_TERMINAL}
+
+    ADMIN_MOBILE: ${ADMIN_MOBILE}
+    ADMIN_DEPOSIT_REVIEWER: ${ADMIN_DEPOSIT_REVIEWER}
+    ADMIN_2FA_MOBILES: ${ADMIN_2FA_MOBILES}
+    SYSTEM_USER_UUID: ${SYSTEM_USER_UUID}
+    TAX_USER_UUID: ${TAX_USER_UUID}
+    SYSTEM_USER_MOBILE: ${SYSTEM_USER_MOBILE}
+    TAX_USER_MOBILE: ${TAX_USER_MOBILE}
+    SYSTEM_USER_EMAIL: ${SYSTEM_USER_EMAIL}
+    TAX_USER_EMAIL: ${TAX_USER_EMAIL}
+    SYSTEM_WALLET_UUID: ${SYSTEM_WALLET_UUID}
+    TAX_WALLET_UUID: ${TAX_WALLET_UUID}
+    SYSTEM_SHEBA_NUMBER: ${SYSTEM_SHEBA_NUMBER}
+
+    # PayamSMS Configuration
+    PAYAM_SMS_TOKEN_URL: ${PAYAM_SMS_TOKEN_URL}
+    PAYAM_SMS_SYSTEM_NAME: ${PAYAM_SMS_SYSTEM_NAME}
+    PAYAM_SMS_USERNAME: ${PAYAM_SMS_USERNAME}
+    PAYAM_SMS_PASSWORD: ${PAYAM_SMS_PASSWORD}
+    PAYAM_SMS_SCOPE: ${PAYAM_SMS_SCOPE}
+    PAYAM_SMS_GRANT_TYPE: ${PAYAM_SMS_GRANT_TYPE}
+    PAYAM_SMS_ROOT_ACCESS_TOKEN: ${PAYAM_SMS_ROOT_ACCESS_TOKEN}
+
+    # Bale Configuration
+    BALE_API_ACCESS_KEY: ${BALE_API_ACCESS_KEY}
+    BALE_PROVIDER: ${BALE_PROVIDER}
+    BALE_LEGACY_DOMAIN: ${BALE_LEGACY_DOMAIN}
+    BALE_NAJVA_DOMAIN: ${BALE_NAJVA_DOMAIN}
+
+    # Rubika Configuration
+    RUBIKA_TOKEN: ${RUBIKA_TOKEN}
+    RUBIKA_SERVICE_ID: ${RUBIKA_SERVICE_ID}
+    RUBIKA_BASE_URL: ${RUBIKA_BASE_URL}
+
+    # SPlus Configuration
+    SPLUS_TOKEN: ${SPLUS_TOKEN}
+    SPLUS_BASE_URL: ${SPLUS_BASE_URL}
+
+    # Bot Configuration
+    BOT_USERNAME: ${BOT_USERNAME}
+    BOT_PASSWORD: ${BOT_PASSWORD}
+    BOT_API_DOMAIN: ${BOT_API_DOMAIN}
+
+    # Scheduler Configuration
+    CAMPAIGN_EXECUTION_ENABLED: ${CAMPAIGN_EXECUTION_ENABLED}
+    CAMPAIGN_EXECUTION_INTERVAL: ${CAMPAIGN_EXECUTION_INTERVAL}
+    CAMPAIGN_MESSAGE_SEND_DELAY: ${CAMPAIGN_MESSAGE_SEND_DELAY}
+
+    # Crypto Configuration
+    CRYPTO_DEFAULT_PLATFORM: ${CRYPTO_DEFAULT_PLATFORM}
+    CRYPTO_SUPPORTED_COINS: ${CRYPTO_SUPPORTED_COINS}
+    OXA_BASE_URL: ${OXA_BASE_URL}
+    OXA_API_KEY: ${OXA_API_KEY}
+    OXA_TIMEOUT: ${OXA_TIMEOUT}
+
+    # Message Configuration
+    MESSAGE_SIGNUP_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_SIGNUP_VERIFICATION_CODE_TEMPLATE}
+    MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE}
+    MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE}
+    MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE}
+    MESSAGE_CAMPAIGN_REJECTED_TEMPLATE: ${MESSAGE_CAMPAIGN_REJECTED_TEMPLATE}
+    MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE: ${MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE}
+    MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE: ${MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE}
+
+  volumes:
+    - app_logs_beta:/var/log/yamata
+    - uploads_beta:/data
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "curl",
+        "-f",
+        "--noproxy",
+        "localhost",
+        "http://localhost:8080/api/v1/health",
+      ]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 10s
+  security_opt:
+    - no-new-privileges:true
+  read_only: true
+  tmpfs:
+    - /tmp
+    - /var/cache
+  user: "appuser"
+
+# Both frontend slots inherit this block.
+x-frontend-common: &frontend-common
+  image: yamata-frontend-beta
+  restart: unless-stopped
+  environment:
+    - NODE_ENV=production
+    - REACT_APP_PRODUCTION_DOMAIN=jazz.xerexchain.com
+    - REACT_APP_ENABLE_ANALYTICS=true
+    - REACT_APP_PRIMARY_COLOR=#2563eb
+    - REACT_APP_THEME=light
+    - REACT_APP_DEFAULT_LANGUAGE=en
+    - REACT_APP_SUPPORTED_LANGUAGES=en,fa
+  volumes:
+    - frontend_logs_beta:/var/log/nginx
+    - frontend_logs_beta:/app/logs
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "wget",
+        "--no-verbose",
+        "--tries=1",
+        "--spider",
+        "http://localhost/health",
+      ]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+  labels:
+    - "traefik.enable=true"
+    - "traefik.http.routers.frontend-beta.rule=Host(`jazz.xerexchain.com`)"
+    - "traefik.http.routers.frontend-beta.entrypoints=websecure"
+    - "traefik.http.routers.frontend-beta.tls.certresolver=letsencrypt"
+    - "traefik.http.services.frontend-beta.loadbalancer.server.port=80"
+
+# ─── Services ───────────────────────────────────────────────────────────────────
 services:
   # PostgreSQL Database
   postgres-beta:
@@ -183,301 +502,34 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # Application
-  app-beta:
-    image: yamata-no-orochi
-    container_name: yamata-app-beta
-    restart: unless-stopped
-    depends_on:
-      postgres-beta:
-        condition: service_healthy
-      redis-beta:
-        condition: service_healthy
-    environment:
-      # Database Configuration
-      DB_HOST: postgres-beta
-      DB_PORT: ${DB_PORT}
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_SSL_MODE: ${DB_SSL_MODE}
-      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS}
-      DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS}
-      DB_CONN_MAX_LIFETIME: ${DB_CONN_MAX_LIFETIME}
-      DB_CONN_MAX_IDLE_TIME: ${DB_CONN_MAX_IDLE_TIME}
-      DB_SLOW_QUERY_LOG: ${DB_SLOW_QUERY_LOG}
-      DB_SLOW_QUERY_TIME: ${DB_SLOW_QUERY_TIME}
-
-      # Server Configuration
-      SERVER_HOST: ${SERVER_HOST}
-      SERVER_PORT: ${SERVER_PORT}
-      SERVER_READ_TIMEOUT: ${SERVER_READ_TIMEOUT}
-      SERVER_WRITE_TIMEOUT: ${SERVER_WRITE_TIMEOUT}
-      SERVER_IDLE_TIMEOUT: ${SERVER_IDLE_TIMEOUT}
-      SERVER_SHUTDOWN_TIMEOUT: ${SERVER_SHUTDOWN_TIMEOUT}
-      SERVER_BODY_LIMIT: ${SERVER_BODY_LIMIT}
-      SERVER_ENABLE_PPROF: ${SERVER_ENABLE_PPROF}
-      SERVER_ENABLE_METRICS: ${SERVER_ENABLE_METRICS}
-      SERVER_TRUSTED_PROXIES: ${SERVER_TRUSTED_PROXIES}
-      SERVER_PROXY_HEADER: ${SERVER_PROXY_HEADER}
-      SERVER_ENABLE_COMPRESSION: ${SERVER_ENABLE_COMPRESSION}
-      SERVER_COMPRESSION_LEVEL: ${SERVER_COMPRESSION_LEVEL}
-
-      # Security Configuration
-      TLS_ENABLED: ${TLS_ENABLED}
-      TLS_CERT_FILE: ${TLS_CERT_FILE}
-      TLS_KEY_FILE: ${TLS_KEY_FILE}
-      TLS_MIN_VERSION: ${TLS_MIN_VERSION}
-      HSTS_MAX_AGE: ${HSTS_MAX_AGE}
-      HSTS_INCLUDE_SUBDOMAINS: ${HSTS_INCLUDE_SUBDOMAINS}
-      HSTS_PRELOAD: ${HSTS_PRELOAD}
-
-      # CORS Configuration
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
-      CORS_ALLOWED_METHODS: ${CORS_ALLOWED_METHODS}
-      CORS_ALLOWED_HEADERS: ${CORS_ALLOWED_HEADERS}
-      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS}
-      CORS_MAX_AGE: ${CORS_MAX_AGE}
-
-      # Rate Limiting
-      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT}
-      GLOBAL_RATE_LIMIT: ${GLOBAL_RATE_LIMIT}
-      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW}
-      RATE_LIMIT_MEMORY: ${RATE_LIMIT_MEMORY}
-
-      # Content Security Policy
-      CSP_POLICY: ${CSP_POLICY}
-      X_FRAME_OPTIONS: ${X_FRAME_OPTIONS}
-      X_CONTENT_TYPE_OPTIONS: ${X_CONTENT_TYPE_OPTIONS}
-      XSS_PROTECTION: ${XSS_PROTECTION}
-      REFERRER_POLICY: ${REFERRER_POLICY}
-
-      # API Security
-      REQUIRE_API_KEY: ${REQUIRE_API_KEY}
-      API_KEY_HEADER: ${API_KEY_HEADER}
-      ALLOWED_API_KEYS: ${ALLOWED_API_KEYS}
-      IP_WHITELIST: ${IP_WHITELIST}
-      IP_BLACKLIST: ${IP_BLACKLIST}
-
-      # Password & Authentication
-      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH}
-      PASSWORD_REQUIRE_UPPER: ${PASSWORD_REQUIRE_UPPER}
-      PASSWORD_REQUIRE_LOWER: ${PASSWORD_REQUIRE_LOWER}
-      PASSWORD_REQUIRE_NUMBER: ${PASSWORD_REQUIRE_NUMBER}
-      PASSWORD_REQUIRE_SYMBOL: ${PASSWORD_REQUIRE_SYMBOL}
-      BCRYPT_COST: ${BCRYPT_COST}
-
-      # JWT Configuration
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY}
-      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY}
-      JWT_USE_RSA_KEYS: ${JWT_USE_RSA_KEYS}
-      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL}
-      JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL}
-      JWT_ISSUER: ${JWT_ISSUER}
-      JWT_AUDIENCE: ${JWT_AUDIENCE}
-      JWT_ALGORITHM: ${JWT_ALGORITHM}
-
-      # Session Security
-      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE}
-      SESSION_COOKIE_HTTPONLY: ${SESSION_COOKIE_HTTPONLY}
-      SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE}
-      SESSION_TIMEOUT: ${SESSION_TIMEOUT}
-      SESSION_CLEANUP_INTERVAL: ${SESSION_CLEANUP_INTERVAL}
-
-      # SMS Configuration
-      SMS_PROVIDER_DOMAIN: ${SMS_PROVIDER_DOMAIN}
-      SMS_API_KEY: ${SMS_API_KEY}
-      SMS_SOURCE_NUMBER: ${SMS_SOURCE_NUMBER}
-      SMS_RETRY_COUNT: ${SMS_RETRY_COUNT}
-      SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD}
-      SMS_TIMEOUT: ${SMS_TIMEOUT}
-
-      # Email Configuration
-      EMAIL_HOST: ${EMAIL_HOST}
-      EMAIL_PORT: ${EMAIL_PORT}
-      EMAIL_USERNAME: ${EMAIL_USERNAME}
-      EMAIL_PASSWORD: ${EMAIL_PASSWORD}
-      EMAIL_FROM_EMAIL: ${EMAIL_FROM_EMAIL}
-      EMAIL_FROM_NAME: ${EMAIL_FROM_NAME}
-      EMAIL_USE_TLS: ${EMAIL_USE_TLS}
-      EMAIL_USE_STARTTLS: ${EMAIL_USE_STARTTLS}
-      EMAIL_RATE_LIMIT: ${EMAIL_RATE_LIMIT}
-      EMAIL_RETRY_ATTEMPTS: ${EMAIL_RETRY_ATTEMPTS}
-      EMAIL_TIMEOUT: ${EMAIL_TIMEOUT}
-
-      # Logging Configuration
-      LOG_LEVEL: ${LOG_LEVEL}
-      LOG_FORMAT: ${LOG_FORMAT}
-      LOG_OUTPUT: ${LOG_OUTPUT}
-      LOG_FILE_PATH: ${LOG_FILE_PATH}
-      LOG_MAX_SIZE: ${LOG_MAX_SIZE}
-      LOG_MAX_BACKUPS: ${LOG_MAX_BACKUPS}
-      LOG_MAX_AGE: ${LOG_MAX_AGE}
-      LOG_COMPRESS: ${LOG_COMPRESS}
-      LOG_ENABLE_CALLER: ${LOG_ENABLE_CALLER}
-      LOG_ENABLE_STACKTRACE: ${LOG_ENABLE_STACKTRACE}
-      LOG_ENABLE_ACCESS: ${LOG_ENABLE_ACCESS}
-      LOG_ACCESS_PATH: ${LOG_ACCESS_PATH}
-      LOG_ACCESS_FORMAT: ${LOG_ACCESS_FORMAT}
-      LOG_ENABLE_AUDIT: ${LOG_ENABLE_AUDIT}
-      LOG_AUDIT_PATH: ${LOG_AUDIT_PATH}
-      LOG_ENABLE_SECURITY: ${LOG_ENABLE_SECURITY}
-      LOG_SECURITY_PATH: ${LOG_SECURITY_PATH}
-
-      # Metrics Configuration
-      METRICS_ENABLED: ${METRICS_ENABLED}
-      METRICS_PORT: ${METRICS_PORT}
-      METRICS_PATH: ${METRICS_PATH}
-      METRICS_ENABLE_PPROF: ${METRICS_ENABLE_PPROF}
-      METRICS_PPROF_PORT: ${METRICS_PPROF_PORT}
-      METRICS_ENABLE_PROMETHEUS: ${METRICS_ENABLE_PROMETHEUS}
-      METRICS_PROMETHEUS_PATH: ${METRICS_PROMETHEUS_PATH}
-      METRICS_COLLECT_DB: ${METRICS_COLLECT_DB}
-      METRICS_COLLECT_CACHE: ${METRICS_COLLECT_CACHE}
-      METRICS_COLLECT_APP: ${METRICS_COLLECT_APP}
-
-      # Ensure libraries that need cache write to tmpfs, not $HOME
-      XDG_CACHE_HOME: /tmp
-
-      # Cache Configuration
-      CACHE_ENABLED: ${CACHE_ENABLED}
-      CACHE_PROVIDER: ${CACHE_PROVIDER}
-      CACHE_REDIS_URL: redis://redis-beta:6379
-      CACHE_REDIS_DB: ${CACHE_REDIS_DB}
-      CACHE_REDIS_PREFIX: ${CACHE_REDIS_PREFIX}
-      CACHE_DEFAULT_TTL: ${CACHE_DEFAULT_TTL}
-      CACHE_MAX_MEMORY: ${CACHE_MAX_MEMORY}
-      CACHE_CLEANUP_INTERVAL: ${CACHE_CLEANUP_INTERVAL}
-
-      # Deployment Configuration
-      DOMAIN: ${DOMAIN}
-      API_DOMAIN: ${API_DOMAIN}
-      MONITORING_DOMAIN: ${MONITORING_DOMAIN}
-      CERTBOT_EMAIL: ${CERTBOT_EMAIL}
-      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      BACKUP_S3_BUCKET: ${BACKUP_S3_BUCKET}
-      BACKUP_S3_ACCESS_KEY: ${BACKUP_S3_ACCESS_KEY}
-      BACKUP_S3_SECRET_KEY: ${BACKUP_S3_SECRET_KEY}
-      APP_ENV: ${APP_ENV}
-      VERSION: ${VERSION:-1.0.0}
-      COMMIT_HASH: ${COMMIT_HASH:-unknown}
-      BUILD_TIME: ${BUILD_TIME:-unknown}
-      SENTRY_DSN: ${SENTRY_DSN}
-      SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT}
-      SENTRY_RELEASE: ${SENTRY_RELEASE}
-      SENTRY_SERVER_NAME: ${SENTRY_SERVER_NAME}
-      SENTRY_TIMEOUT: ${SENTRY_TIMEOUT}
-      SENTRY_CAPTURE_4XX: ${SENTRY_CAPTURE_4XX}
-      SENTRY_CAPTURE_5XX: ${SENTRY_CAPTURE_5XX}
-
-      # Atipay Configuration
-      ATIPAY_API_KEY: ${ATIPAY_API_KEY}
-      ATIPAY_TERMINAL: ${ATIPAY_TERMINAL}
-
-      ADMIN_MOBILE: ${ADMIN_MOBILE}
-      ADMIN_DEPOSIT_REVIEWER: ${ADMIN_DEPOSIT_REVIEWER}
-      SYSTEM_USER_UUID: ${SYSTEM_USER_UUID}
-      TAX_USER_UUID: ${TAX_USER_UUID}
-      SYSTEM_USER_MOBILE: ${SYSTEM_USER_MOBILE}
-      TAX_USER_MOBILE: ${TAX_USER_MOBILE}
-      SYSTEM_USER_EMAIL: ${SYSTEM_USER_EMAIL}
-      TAX_USER_EMAIL: ${TAX_USER_EMAIL}
-      SYSTEM_WALLET_UUID: ${SYSTEM_WALLET_UUID}
-      TAX_WALLET_UUID: ${TAX_WALLET_UUID}
-      SYSTEM_SHEBA_NUMBER: ${SYSTEM_SHEBA_NUMBER}
-
-      # PayamSMS Configuration
-      PAYAM_SMS_TOKEN_URL: ${PAYAM_SMS_TOKEN_URL}
-      PAYAM_SMS_SYSTEM_NAME: ${PAYAM_SMS_SYSTEM_NAME}
-      PAYAM_SMS_USERNAME: ${PAYAM_SMS_USERNAME}
-      PAYAM_SMS_PASSWORD: ${PAYAM_SMS_PASSWORD}
-      PAYAM_SMS_SCOPE: ${PAYAM_SMS_SCOPE}
-      PAYAM_SMS_GRANT_TYPE: ${PAYAM_SMS_GRANT_TYPE}
-      PAYAM_SMS_ROOT_ACCESS_TOKEN: ${PAYAM_SMS_ROOT_ACCESS_TOKEN}
-
-      # Bale Configuration
-      BALE_API_ACCESS_KEY: ${BALE_API_ACCESS_KEY}
-      BALE_PROVIDER: ${BALE_PROVIDER}
-      BALE_LEGACY_DOMAIN: ${BALE_LEGACY_DOMAIN}
-      BALE_NAJVA_DOMAIN: ${BALE_NAJVA_DOMAIN}
-
-      # Rubika Configuration
-      RUBIKA_TOKEN: ${RUBIKA_TOKEN}
-      RUBIKA_SERVICE_ID: ${RUBIKA_SERVICE_ID}
-      RUBIKA_BASE_URL: ${RUBIKA_BASE_URL}
-
-      # SPlus Configuration
-      SPLUS_TOKEN: ${SPLUS_TOKEN}
-      SPLUS_BASE_URL: ${SPLUS_BASE_URL}
-
-      # Bot Configuration
-      BOT_USERNAME: ${BOT_USERNAME}
-      BOT_PASSWORD: ${BOT_PASSWORD}
-      BOT_API_DOMAIN: ${BOT_API_DOMAIN}
-
-      # Scheduler Configuration
-      CAMPAIGN_EXECUTION_ENABLED: ${CAMPAIGN_EXECUTION_ENABLED}
-      CAMPAIGN_EXECUTION_INTERVAL: ${CAMPAIGN_EXECUTION_INTERVAL}
-      CAMPAIGN_MESSAGE_SEND_DELAY: ${CAMPAIGN_MESSAGE_SEND_DELAY}
-
-      # Crypto Configuration
-      CRYPTO_DEFAULT_PLATFORM: ${CRYPTO_DEFAULT_PLATFORM}
-      CRYPTO_SUPPORTED_COINS: ${CRYPTO_SUPPORTED_COINS}
-      OXA_BASE_URL: ${OXA_BASE_URL}
-      OXA_API_KEY: ${OXA_API_KEY}
-      OXA_TIMEOUT: ${OXA_TIMEOUT}
-
-      # Message Configuration
-      MESSAGE_SIGNUP_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_SIGNUP_VERIFICATION_CODE_TEMPLATE}
-      MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_SIGNIN_VERIFICATION_CODE_TEMPLATE}
-      MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_OTP_RESEND_VERIFICATION_CODE_TEMPLATE}
-      MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE: ${MESSAGE_PASSWORD_RESET_VERIFICATION_CODE_TEMPLATE}
-      MESSAGE_CAMPAIGN_REJECTED_TEMPLATE: ${MESSAGE_CAMPAIGN_REJECTED_TEMPLATE}
-      MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE: ${MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE}
-      MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE: ${MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE}
-
-    volumes:
-      - app_logs_beta:/var/log/yamata
-      - uploads_beta:/data
-    # ports:
-    #   - "127.0.0.1:8080:8080"  # Only accessible from localhost
-    #   - "127.0.0.1:9090:9090"  # Metrics port
+  # ── Application – Blue slot (active on even deploys) ────────────────────────
+  # The deploy script tags the built image as yamata-no-orochi:blue before
+  # starting this service, so both slots always run their own image layer.
+  app-blue:
+    <<: *app-common
+    image: yamata-no-orochi:blue
+    container_name: yamata-app-blue
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.20
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "--noproxy",
-          "localhost",
-          "http://localhost:8080/api/v1/health",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    security_opt:
-      - no-new-privileges:true
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/cache
-    user: "appuser"
+
+  # ── Application – Green slot (active on odd deploys) ────────────────────────
+  app-green:
+    <<: *app-common
+    image: yamata-no-orochi:green
+    container_name: yamata-app-green
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.21
 
   # Nginx Reverse Proxy
+  # NOTE: nginx has no hard depends_on on app-blue/app-green on purpose —
+  # the deploy script controls startup order and nginx does a graceful reload
+  # when the active slot changes, so nginx itself never needs to restart.
   nginx-beta:
     image: nginx:1.29-alpine
     container_name: yamata-nginx-beta
     restart: unless-stopped
-    depends_on:
-      app-beta:
-        condition: service_healthy
     volumes:
       - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./docker/nginx/sites-available/generated/beta:/etc/nginx/sites-available:ro
@@ -494,19 +546,14 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.30
+    # Healthcheck verifies the nginx master process is alive (not the backend).
+    # The deploy script independently waits for the backend to become healthy
+    # before reloading nginx config to point at the new slot.
     healthcheck:
-      test:
-        [
-          "CMD",
-          "curl",
-          "-f",
-          "--noproxy",
-          "app-beta",
-          "http://app-beta:8080/api/v1/health",
-        ]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      test: ["CMD-SHELL", "test -s /var/run/nginx.pid"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
       start_period: 10s
     security_opt:
       - no-new-privileges:true
@@ -572,6 +619,43 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.90
+    tmpfs:
+      - /tmp
+
+  domain-monitor-beta:
+    build:
+      context: .
+      dockerfile: docker/domain-monitor/Dockerfile
+    image: yamata-domain-monitor-beta
+    container_name: yamata-domain-monitor-beta
+    restart: unless-stopped
+    environment:
+      DOMAIN_MONITOR_URL: ${DOMAIN_MONITOR_URL:-http://jo1n.ir/9e13x}
+      DOMAIN_MONITOR_INTERVAL: ${DOMAIN_MONITOR_INTERVAL:-5m}
+      DOMAIN_MONITOR_TIMEOUT: ${DOMAIN_MONITOR_TIMEOUT:-20s}
+      DOMAIN_MONITOR_EXPECTED_STATUSES: ${DOMAIN_MONITOR_EXPECTED_STATUSES:-200}
+      DOMAIN_MONITOR_ALERT_PHONES: ${DOMAIN_MONITOR_ALERT_PHONES:-}
+      DOMAIN_MONITOR_RETRY_COUNT: ${DOMAIN_MONITOR_RETRY_COUNT:-3}
+      DOMAIN_MONITOR_BACKOFF_INITIAL: ${DOMAIN_MONITOR_BACKOFF_INITIAL:-5s}
+      DOMAIN_MONITOR_BACKOFF_MULTIPLIER: ${DOMAIN_MONITOR_BACKOFF_MULTIPLIER:-2}
+      DOMAIN_MONITOR_BACKOFF_MAX: ${DOMAIN_MONITOR_BACKOFF_MAX:-1m}
+      DOMAIN_MONITOR_RECOVERY_SMS: ${DOMAIN_MONITOR_RECOVERY_SMS:-true}
+      DOMAIN_MONITOR_VERIFY_TLS: ${DOMAIN_MONITOR_VERIFY_TLS:-true}
+      DOMAIN_MONITOR_LOG_LEVEL: ${DOMAIN_MONITOR_LOG_LEVEL:-INFO}
+      DOMAIN_MONITOR_USER_AGENT: ${DOMAIN_MONITOR_USER_AGENT:-yamata-domain-monitor/1.0}
+      ADMIN_MOBILE: ${ADMIN_MOBILE}
+      SMS_PROVIDER_DOMAIN: ${SMS_PROVIDER_DOMAIN}
+      SMS_API_KEY: ${SMS_API_KEY}
+      SMS_SOURCE_NUMBER: ${SMS_SOURCE_NUMBER}
+      SMS_RETRY_COUNT: ${SMS_RETRY_COUNT}
+      SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD}
+      SMS_TIMEOUT: ${SMS_TIMEOUT}
+    volumes:
+      - ./scripts/domain_monitor.py:/app/domain_monitor.py:ro
+    command: ["python", "/app/domain_monitor.py"]
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.91
     tmpfs:
       - /tmp
 
@@ -681,41 +765,20 @@ services:
       yamata-network-beta:
         ipv4_address: 172.30.0.80
 
-  frontend-beta:
-    image: yamata-frontend-beta
-    container_name: frontend-beta
-    restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - REACT_APP_PRODUCTION_DOMAIN=jazz.xerexchain.com
-      - REACT_APP_ENABLE_ANALYTICS=true
-      - REACT_APP_PRIMARY_COLOR=#2563eb
-      - REACT_APP_THEME=light
-      - REACT_APP_DEFAULT_LANGUAGE=en
-      - REACT_APP_SUPPORTED_LANGUAGES=en,fa
-    volumes:
-      - frontend_logs_beta:/var/log/nginx
-      - frontend_logs_beta:/app/logs
+  # ── Frontend – Blue slot ─────────────────────────────────────────────────────
+  frontend-blue:
+    <<: *frontend-common
+    image: yamata-frontend-beta:blue
+    container_name: frontend-blue
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.60
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "wget",
-          "--no-verbose",
-          "--tries=1",
-          "--spider",
-          "http://localhost/health",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend-beta.rule=Host(`jazz.xerexchain.com`)"
-      - "traefik.http.routers.frontend-beta.entrypoints=websecure"
-      - "traefik.http.routers.frontend-beta.tls.certresolver=letsencrypt"
-      - "traefik.http.services.frontend-beta.loadbalancer.server.port=80"
+
+  # ── Frontend – Green slot ────────────────────────────────────────────────────
+  frontend-green:
+    <<: *frontend-common
+    image: yamata-frontend-beta:green
+    container_name: frontend-green
+    networks:
+      yamata-network-beta:
+        ipv4_address: 172.30.0.62
