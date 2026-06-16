@@ -10,7 +10,7 @@ type Bundle struct {
 	Title                 string          `gorm:"type:varchar(255);not null" json:"title"`
 	Objective             string          `gorm:"type:varchar(1023);not null" json:"objective"`
 	TargetAudiencePersona string          `gorm:"type:varchar(1023);not null" json:"target_audience_persona"`
-	AdLink                *string         `gorm:"type:varchar(2047)" json:"adlink,omitempty"`
+	Adlink                *string         `gorm:"type:varchar(2047)" json:"adlink,omitempty"`
 	Description           *string         `gorm:"type:varchar(2047)" json:"description,omitempty"`
 	ShortLinkDomain       *string         `gorm:"type:varchar(255)" json:"short_link_domain,omitempty"`
 	TargetCustomerName    *string         `gorm:"type:varchar(255)" json:"target_customer_name,omitempty"`
