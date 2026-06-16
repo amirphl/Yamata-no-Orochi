@@ -286,7 +286,7 @@ func (r *TransactionRepositoryImpl) GetHistoryWithMetadata(
 		Where("wallet_id = ?", walletID).
 		Where("customer_id = ?", customerID).
 		Where(`((metadata->>'source' = ? AND metadata->>'operation' = ?) OR (metadata->>'source' = ? AND metadata->>'operation' = ?))`,
-			"payment_callback_increase_customer_free_plus_credit", "increase_customer_free_plus_credit",
+			models.TransactionSourceIncreaseCustomerFreePlusCredit, "increase_customer_free_plus_credit",
 			models.TransactionSourceIncreaseAgencyShareWithTax, "increase_agency_share_with_tax")
 
 	if startDate != nil {
