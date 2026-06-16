@@ -39,9 +39,10 @@ const (
 )
 
 const (
-	TransactionSourceIncreaseAgencyShareWithTax = "payment_callback_increase_agency_share_with_tax"
-	TransactionSourceIncreaseRealSystemShare    = "payment_callback_increase_system_locked_(real_system_share)"
-	TransactionSourceIncreaseTaxSystemShare     = "payment_callback_increase_tax_locked_(tax_system_share)"
+	TransactionSourceIncreaseAgencyShareWithTax     = "payment_callback_increase_agency_share_with_tax"
+	TransactionSourceIncreaseRealSystemShare        = "payment_callback_increase_system_locked_(real_system_share)"
+	TransactionSourceIncreaseTaxSystemShare         = "payment_callback_increase_tax_locked_(tax_system_share)"
+	TransactionSourceIncreaseCustomerFreePlusCredit = "payment_callback_increase_customer_free_plus_credit"
 )
 
 // Transaction represents an immutable financial transaction in the system
