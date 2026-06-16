@@ -49,6 +49,7 @@ type FiberRouter struct {
 	lineNumberHandler              handlers.LineNumberHandlerInterface
 	lineNumberAdminHandler         handlers.LineNumberAdminHandlerInterface
 	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface
+	platformBasePriceAdminHandler  handlers.PlatformBasePriceAdminHandlerInterface
 	segmentPriceFactorHandler      handlers.SegmentPriceFactorHandlerInterface
 	adminCustomerManagementHandler handlers.AdminCustomerManagementHandlerInterface
 	campaignBotHandler             handlers.CampaignBotHandlerInterface
@@ -81,6 +82,7 @@ func NewFiberRouter(
 	lineNumberHandler handlers.LineNumberHandlerInterface,
 	lineNumberAdminHandler handlers.LineNumberAdminHandlerInterface,
 	segmentPriceFactorAdminHandler handlers.SegmentPriceFactorAdminHandlerInterface,
+	platformBasePriceAdminHandler handlers.PlatformBasePriceAdminHandlerInterface,
 	segmentPriceFactorHandler handlers.SegmentPriceFactorHandlerInterface,
 	adminCustomerManagemetHandler handlers.AdminCustomerManagementHandlerInterface,
 	campaignBotHandler handlers.CampaignBotHandlerInterface,
@@ -127,6 +129,7 @@ func NewFiberRouter(
 		lineNumberHandler:              lineNumberHandler,
 		lineNumberAdminHandler:         lineNumberAdminHandler,
 		segmentPriceFactorAdminHandler: segmentPriceFactorAdminHandler,
+		platformBasePriceAdminHandler:  platformBasePriceAdminHandler,
 		segmentPriceFactorHandler:      segmentPriceFactorHandler,
 
 		adminCustomerManagementHandler: adminCustomerManagemetHandler,
@@ -285,6 +288,14 @@ func (r *FiberRouter) SetupRoutes() {
 	adminSegmentPF.Post("/", r.segmentPriceFactorAdminHandler.CreateSegmentPriceFactor)
 	adminSegmentPF.Get("/", r.segmentPriceFactorAdminHandler.ListSegmentPriceFactors)
 	adminSegmentPF.Get("/level3-options", r.segmentPriceFactorAdminHandler.ListLevel3Options)
+
+	// Admin platform base prices
+	adminPlatformBasePrice := api.Group("/admin/platform-base-prices")
+	adminPlatformBasePrice.Use(r.authMiddleware.AdminAuthenticate())
+	adminPlatformBasePrice.Use(func(c fiber.Ctx) error { return middleware.RequireAdminAuth(c) })
+	adminPlatformBasePrice.Use(r.authzMiddleware.AdminAuthorize())
+	adminPlatformBasePrice.Get("/", r.platformBasePriceAdminHandler.List)
+	adminPlatformBasePrice.Put("/", r.platformBasePriceAdminHandler.Update)
 
 	// Bot campaigns routes (protected)
 	botCampaigns := api.Group("/bot/campaigns")
