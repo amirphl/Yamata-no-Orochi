@@ -3,6 +3,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0111_remove_bundle_id_and_phase_from_campaigns_down.sql...'
+\i migrations/0111_remove_bundle_id_and_phase_from_campaigns_down.sql
+
 \echo 'Running 0110_add_bundle_id_and_phase_to_campaigns_down.sql...'
 \i migrations/0110_add_bundle_id_and_phase_to_campaigns_down.sql
 
