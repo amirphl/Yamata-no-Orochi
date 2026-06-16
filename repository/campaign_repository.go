@@ -28,7 +28,8 @@ func NewCampaignRepository(db *gorm.DB) CampaignRepository {
 // keys except "trackingResults", which can be very large and is excluded from read queries.
 const statisticsWithoutTrackingResults = "campaigns.id, campaigns.uuid, campaigns.customer_id, campaigns.status, " +
 	"campaigns.created_at, campaigns.updated_at, campaigns.spec, campaigns.comment, " +
-	"(campaigns.statistics - 'trackingResults') AS statistics, campaigns.num_audience"
+	"(campaigns.statistics - 'trackingResults') AS statistics, campaigns.num_audience, " +
+	"campaigns.bundle_id, campaigns.phase"
 
 // ByID retrieves an campaign by ID
 func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Campaign, error) {
