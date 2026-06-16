@@ -338,5 +338,8 @@
 \echo 'Running 0110_add_bundle_id_and_phase_to_campaigns.sql...'
 \i migrations/0110_add_bundle_id_and_phase_to_campaigns.sql
 
+\echo 'Running 0111_create_bundle_audience_selections.sql...'
+\i migrations/0111_create_bundle_audience_selections.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
