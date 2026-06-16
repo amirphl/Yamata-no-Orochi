@@ -60,6 +60,8 @@ var RoutePermissionRegistry = []RoutePermission{
 	{"POST", "/api/v1/admin/segment-price-factors", PermissionPlatformBasePriceEdit, "Create segment price factor"},
 	{"GET", "/api/v1/admin/segment-price-factors", PermissionPlatformBasePriceRead, "List segment price factors"},
 	{"GET", "/api/v1/admin/segment-price-factors/level3-options", PermissionPlatformBasePriceRead, "List level3 options"},
+	{"GET", "/api/v1/admin/platform-base-prices", PermissionPlatformBasePriceRead, "List platform base prices"},
+	{"PUT", "/api/v1/admin/platform-base-prices", PermissionPlatformBasePriceEdit, "Update platform base price"},
 
 	// Access control (maker-checker)
 	{"POST", "/api/v1/admin/access-control/requests", PermissionACLManage, "Create ACL change request"},
