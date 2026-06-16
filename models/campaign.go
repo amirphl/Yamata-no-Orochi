@@ -133,12 +133,13 @@ type CampaignSpec struct {
 	Title *string `json:"title,omitempty"`
 
 	// Target audience
-	Level1  *string  `json:"level1,omitempty"`
-	Level2s []string `json:"level2s,omitempty"`
-	Level3s []string `json:"level3s,omitempty"`
-	Tags    []string `json:"tags,omitempty"`
-	Sex     *string  `json:"sex,omitempty"`
-	City    []string `json:"city,omitempty"`
+	Level1         *string  `json:"level1,omitempty"`
+	Level2s        []string `json:"level2s,omitempty"`
+	Level3s        []string `json:"level3s,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	AudienceGrades []string `json:"audience_grades"`
+	Sex            *string  `json:"sex,omitempty"`
+	City           []string `json:"city,omitempty"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 
