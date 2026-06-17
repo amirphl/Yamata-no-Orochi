@@ -163,7 +163,7 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 	}
 	req.ShortLinkDomain = shortLinkDomain
 
-	category, job, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job)
+	category, job, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job, true)
 	if err != nil {
 		return nil, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
 	}
@@ -267,116 +267,20 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	// 	}
 	// }
 
-	var (
-		title              = req.Title
-		level1             = req.Level1
-		level2s            = req.Level2s
-		level3s            = req.Level3s
-		tags               = req.Tags
-		sex                = req.Sex
-		city               = req.City
-		adLink             = req.AdLink
-		content            = req.Content
-		scheduleAt         = req.ScheduleAt
-		lineNumber         = req.LineNumber
-		budget             = req.Budget
-		shortLinkDomain    = req.ShortLinkDomain
-		category           = req.Category
-		job                = req.Job
-		mediaUUID          = req.MediaUUID
-		platformSettingsID = req.PlatformSettingsID
-		platform           = req.Platform
-
-		targetAudienceExcelFileUUID  = req.TargetAudienceExcelFileUUID
-		usingTargetAudienceExcelFile = targetAudienceExcelFileUUID != nil && *targetAudienceExcelFileUUID != ""
-
-		bundleID = req.BundleID
-		phase    = req.Phase
-	)
-	if req.Title == nil {
-		title = campaign.Spec.Title
-	}
-	if req.Level1 == nil {
-		level1 = campaign.Spec.Level1
-	}
-	if req.Level2s == nil {
-		level2s = campaign.Spec.Level2s
-	}
-	if req.Level3s == nil {
-		level3s = campaign.Spec.Level3s
-	}
-	if req.Tags == nil {
-		tags = campaign.Spec.Tags
-	}
-	// TODO:
-	// if req.TargetAudienceExcelFileUUID == nil {
-	// 	targetAudienceExcelFileUUID = campaign.Spec.TargetAudienceExcelFileUUID
-	// }
-	if req.Sex == nil {
-		sex = campaign.Spec.Sex
-	}
-	if req.City == nil {
-		city = campaign.Spec.City
-	}
-	if req.AdLink == nil {
-		adLink = campaign.Spec.AdLink
-	}
-	if req.Content == nil {
-		content = campaign.Spec.Content
-	}
-	if req.ScheduleAt == nil {
-		scheduleAt = campaign.Spec.ScheduleAt
-	}
-	if req.LineNumber == nil {
-		lineNumber = campaign.Spec.LineNumber
-	}
-	if req.Budget == nil {
-		budget = campaign.Spec.Budget
-	}
-	if req.ShortLinkDomain == nil {
-		shortLinkDomain = campaign.Spec.ShortLinkDomain
-	}
-	if req.Category == nil {
-		category = campaign.Spec.Category
-	}
-	if req.Job == nil {
-		job = campaign.Spec.Job
-	}
-	if req.MediaUUID == nil {
-		mediaUUID = campaign.Spec.MediaUUID
-	}
-	if req.PlatformSettingsID == nil {
-		platformSettingsID = campaign.Spec.PlatformSettingsID
-	}
-	if req.Platform == nil {
-		platform = utils.ToPtr(campaign.Spec.Platform)
-	}
-	if req.BundleID == nil {
-		bundleID = campaign.BundleID
-	}
-	if req.Phase == nil {
-		phase = campaignPhasePtr(campaign.Phase)
-	}
-
-	sanitizedShortLinkDomain, err := sanitizeShortLinkDomain(shortLinkDomain)
+	sanitizedShortLinkDomain, err := sanitizeShortLinkDomain(req.ShortLinkDomain)
 	if err != nil {
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
 	}
-	shortLinkDomain = sanitizedShortLinkDomain
+	req.ShortLinkDomain = sanitizedShortLinkDomain
 
-	sanitizedCategory, sanitizedJob, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, category, job)
+	sanitizedCategory, sanitizedJob, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job, true)
 	if err != nil {
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
 	}
-	category = sanitizedCategory
-	job = sanitizedJob
 	req.Category = sanitizedCategory
 	req.Job = sanitizedJob
-	req.MediaUUID = mediaUUID
-	// req.TargetAudienceExcelFileUUID = targetAudienceExcelFileUUID
-	req.PlatformSettingsID = platformSettingsID
 
-	sanitizedPlatform, err := sanitizeCampaignPlatform(platform)
+	sanitizedPlatform, err := sanitizeCampaignPlatform(req.Platform)
 	if err != nil {
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
 	}
@@ -388,14 +292,14 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	if err := s.ensureUpdateCampaignRefs(
 		ctx,
 		customer.ID,
-		bundleID,
-		phase,
-		lineNumber,
-		level3s,
-		sanitizedPlatform,
-		mediaUUID,
-		targetAudienceExcelFileUUID,
-		platformSettingsID,
+		req.BundleID,
+		req.Phase,
+		req.LineNumber,
+		req.Level3s,
+		*req.Platform,
+		req.MediaUUID,
+		req.TargetAudienceExcelFileUUID,
+		req.PlatformSettingsID,
 		finalize,
 	); err != nil {
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
@@ -410,35 +314,6 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	// Line number: validate exist in database and is available for the campaign schedule time (not reserved by another campaign)
 	// * Move line number and segment price factor queries to ensureCreateCampaignRefs function
 
-	capacity, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
-		Title:              title,
-		Level1:             level1,
-		Level2s:            level2s,
-		Level3s:            level3s,
-		Tags:               tags,
-		Sex:                sex,
-		City:               city,
-		AdLink:             adLink,
-		Content:            content,
-		ScheduleAt:         scheduleAt,
-		LineNumber:         lineNumber,
-		MediaUUID:          mediaUUID,
-		PlatformSettingsID: platformSettingsID,
-		Platform:           &sanitizedPlatform,
-		Budget:             budget,
-		ShortLinkDomain:    shortLinkDomain,
-		Category:           category,
-		Job:                job,
-
-		TargetAudienceExcelFileUUID: targetAudienceExcelFileUUID,
-	}, metadata)
-	if err != nil {
-		return nil, NewBusinessError("CAPACITY_CALCULATION_FAILED", "Failed to calculate campaign capacity", err)
-	}
-	if !usingTargetAudienceExcelFile && capacity.Capacity < utils.MinAcceptableCampaignCapacity {
-		return nil, NewBusinessError("INSUFFICIENT_CAPACITY", "Insufficient campaign capacity", ErrInsufficientCampaignCapacity)
-	}
-
 	// Use transaction for atomicity
 	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		// Update campaign
@@ -446,48 +321,56 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			return err
 		}
 
+		// retrieve campaign again (last state)
+		campaign, err := getCampaign(txCtx, s.campaignRepo, req.UUID, req.CustomerID)
+		if err != nil {
+			return err
+		}
+
+		capacity, err := s.CalculateCampaignCapacity(txCtx, &dto.CalculateCampaignCapacityRequest{
+			CampaignID: campaign.ID,
+			CustomerID: campaign.CustomerID,
+		}, metadata)
+		if err != nil {
+			return err
+		}
+		usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
+		if !usingTargetAudienceExcelFile && capacity.Capacity < utils.MinAcceptableCampaignCapacity {
+			return ErrInsufficientCampaignCapacity
+		}
+
 		if req.Finalize != nil && *req.Finalize {
-			// TODO:
-			// Validate all REQUIRED fields are present like line number, budget, etc
-			// schedule time must be present and be in future
-
-			// retrieve campaign again (last state)
-			campaign, err := getCampaign(txCtx, s.campaignRepo, req.UUID, req.CustomerID)
-			if err != nil {
-				return err
-			}
-
 			if err := s.canFinalizeCampaign(txCtx, campaign, customer); err != nil {
 				return err
 			}
 
 			lineNumberPriceFactor := defaultLineNumberPriceFactor
 			if campaign.Spec.Platform == models.CampaignPlatformSMS {
-				lineNumberPriceFactor, err = s.fetchLineNumberPriceFactor(txCtx, lineNumber)
+				lineNumberPriceFactor, err = s.fetchLineNumberPriceFactor(txCtx, campaign.Spec.LineNumber)
 				if err != nil {
 					return err
 				}
 			}
 
 			segmentPriceFactor := defaultSegmentPriceFactor
-			usingTargetAudienceExcelFile := targetAudienceExcelFileUUID != nil && *targetAudienceExcelFileUUID != ""
+			usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && *campaign.Spec.TargetAudienceExcelFileUUID != ""
 			if usingTargetAudienceExcelFile {
 				segmentPriceFactor = defaultSegmentPriceFactor
 			} else {
-				segmentPriceFactor, err = s.fetchSegmentPriceFactor(txCtx, level3s, sanitizedPlatform)
+				segmentPriceFactor, err = s.fetchSegmentPriceFactor(txCtx, campaign.Spec.Level3s, sanitizedPlatform)
 				if err != nil {
 					return err
 				}
 			}
 
-			pbp, err := s.platformBaseRepo.LatestByPlatform(txCtx, *platform)
+			pbp, err := s.platformBaseRepo.LatestByPlatform(txCtx, campaign.Spec.Platform)
 			if err != nil {
 				return err
 			}
 			if pbp == nil {
 				return ErrPlatformBasePriceNotFound
 			}
-			pp, err := s.pagePriceRepo.LatestByPlatform(txCtx, *platform)
+			pp, err := s.pagePriceRepo.LatestByPlatform(txCtx, campaign.Spec.Platform)
 			if err != nil {
 				return err
 			}
@@ -496,27 +379,8 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			}
 
 			cost, err := s.CalculateCampaignCost(txCtx, &dto.CalculateCampaignCostRequest{
-				Title:              title,
-				Level1:             level1,
-				Level2s:            level2s,
-				Level3s:            level3s,
-				Tags:               tags,
-				Sex:                sex,
-				City:               city,
-				AdLink:             adLink,
-				Content:            content,
-				ScheduleAt:         scheduleAt,
-				LineNumber:         lineNumber,
-				MediaUUID:          mediaUUID,
-				PlatformSettingsID: platformSettingsID,
-				Platform:           &sanitizedPlatform,
-				Budget:             budget,
-				ShortLinkDomain:    shortLinkDomain,
-				Category:           category,
-				Job:                job,
-				CustomerID:         req.CustomerID,
-
-				TargetAudienceExcelFileUUID: targetAudienceExcelFileUUID,
+				CampaignID: campaign.ID,
+				CustomerID: campaign.CustomerID,
 			}, metadata)
 			if err != nil {
 				return err
@@ -530,7 +394,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			}
 
 			// Fetch wallet free balance
-			wallet, err := getWallet(txCtx, s.walletRepo, req.CustomerID)
+			wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
 			if err != nil {
 				return err
 			}
@@ -560,7 +424,12 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			}
 			newFrozenBalance := latestBalance.FrozenBalance + cost.TotalCost
 
-			numPages := s.calculateParts(content, sanitizedPlatform)
+			numPages := s.calculateParts(
+				campaign.Spec.Content,
+				campaign.Spec.AdLink,
+				campaign.Spec.ShortLinkDomain,
+				sanitizedPlatform,
+			)
 
 			// Build metadata with full campaign spec
 			meta := map[string]any{
@@ -683,8 +552,8 @@ func (s *CampaignFlowImpl) CloneCampaign(ctx context.Context, req *dto.CloneCamp
 		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
 	}
 
+	ensureCampaignSpecDefaults(&src.Spec)
 	src.Spec.ScheduleAt = nil // Clear schedule to avoid cloning campaigns with past schedule times
-	// src.Spec.TargetAudienceExcelFileUUID = nil
 
 	clone := models.Campaign{
 		UUID:        uuid.New(),
@@ -1120,13 +989,29 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 		return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", err)
 	}
 
-	usingTargetAudienceExcelFile := req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != ""
-	if usingTargetAudienceExcelFile {
-		customerID, ok := ctx.Value(utils.CustomerIDKey).(uint)
-		if !ok || customerID == 0 {
-			return nil, NewBusinessError("CUSTOMER_ID_REQUIRED", "Customer id is required for excel audience", ErrCustomerNotFound)
+	campaign, err := getCampaignByID(ctx, s.campaignRepo, req.CampaignID, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
+	}
+	ensureCampaignSpecDefaults(&campaign.Spec)
+
+	usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
+	if !usingTargetAudienceExcelFile {
+		if campaign.Spec.Level1 == nil {
+			return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", ErrCampaignLevel1Required)
 		}
-		count, err := s.CountTargetAudienceFromExcelFile(ctx, customerID, strings.TrimSpace(*req.TargetAudienceExcelFileUUID))
+		if len(campaign.Spec.Level2s) == 0 {
+			return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", ErrCampaignLevel2sRequired)
+		}
+		if len(campaign.Spec.Level3s) == 0 {
+			return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", ErrCampaignLevel3sRequired)
+		}
+		if len(campaign.Spec.Tags) == 0 {
+			return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", ErrCampaignTagsRequired)
+		}
+	}
+	if usingTargetAudienceExcelFile {
+		count, err := s.CountTargetAudienceFromExcelFile(ctx, campaign.CustomerID, strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID))
 		if err != nil {
 			switch {
 			case errors.Is(err, os.ErrNotExist):
@@ -1138,13 +1023,29 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 			}
 		}
 		return &dto.CalculateCampaignCapacityResponse{
-			Message:  "Campaign capacity calculated successfully",
-			Capacity: count,
+			Message:               "Campaign capacity calculated successfully",
+			Capacity:              count,
+			AudienceGradeCapacity: map[string]uint64{audienceGradeA: 0, audienceGradeB: 0, audienceGradeC: 0},
+		}, nil
+	}
+
+	if csvCapacity, foundAllLevel3s, err := calculateCampaignCapacityFromCSV(campaign.Spec.Platform, campaign.Spec.Level3s, campaign.Spec.AudienceGrades); err == nil {
+		if !foundAllLevel3s {
+			return &dto.CalculateCampaignCapacityResponse{
+				Message:               "Campaign capacity calculated successfully",
+				Capacity:              0,
+				AudienceGradeCapacity: csvCapacity.AudienceGradeCapacity,
+			}, nil
+		}
+		return &dto.CalculateCampaignCapacityResponse{
+			Message:               "Campaign capacity calculated successfully",
+			Capacity:              csvCapacity.TotalCapacity,
+			AudienceGradeCapacity: csvCapacity.AudienceGradeCapacity,
 		}, nil
 	}
 
 	// Fetch audience spec (from cache or file)
-	specResp, err := s.ListAudienceSpec(ctx, req.Platform)
+	specResp, err := s.ListAudienceSpec(ctx, &campaign.Spec.Platform)
 	if err != nil {
 		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_FAILED", "Failed to load audience spec", err)
 	}
@@ -1152,8 +1053,8 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 	var capacity uint64
 
 	// Build a set of requested tags for quick lookup
-	tagSet := make(map[string]struct{}, len(req.Tags))
-	for _, t := range req.Tags {
+	tagSet := make(map[string]struct{}, len(campaign.Spec.Tags))
+	for _, t := range campaign.Spec.Tags {
 		if t != "" {
 			tagSet[t] = struct{}{}
 		}
@@ -1161,19 +1062,19 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 
 	// Sum available audience only for requested Level1/Level2/Level3 keys
 	// Respect provided tags: if tags set is empty, count all items; otherwise only items with matching tags.
-	if req.Level1 != nil {
-		l1k := *req.Level1
+	if campaign.Spec.Level1 != nil {
+		l1k := *campaign.Spec.Level1
 		l1map, ok := specResp.Spec[l1k]
 		if ok {
 			// prepare lookups for requested level2s and level3s
-			level2Set := make(map[string]struct{}, len(req.Level2s))
-			for _, l2 := range req.Level2s {
+			level2Set := make(map[string]struct{}, len(campaign.Spec.Level2s))
+			for _, l2 := range campaign.Spec.Level2s {
 				if l2 != "" {
 					level2Set[l2] = struct{}{}
 				}
 			}
-			level3Set := make(map[string]struct{}, len(req.Level3s))
-			for _, l3 := range req.Level3s {
+			level3Set := make(map[string]struct{}, len(campaign.Spec.Level3s))
+			for _, l3 := range campaign.Spec.Level3s {
 				if l3 != "" {
 					level3Set[l3] = struct{}{}
 				}
@@ -1216,39 +1117,35 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 	}
 
 	return &dto.CalculateCampaignCapacityResponse{
-		Message:  "Campaign capacity calculated successfully",
-		Capacity: capacity,
+		Message:               "Campaign capacity calculated successfully",
+		Capacity:              capacity,
+		AudienceGradeCapacity: map[string]uint64{audienceGradeA: 0, audienceGradeB: 0, audienceGradeC: 0},
 	}, nil
 }
 
 // CalculateCampaignCost handles the campaign cost calculation process
 func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.CalculateCampaignCostRequest, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error) {
-	pricePerMsg, availableCapacity, err := s.computeCostInputs(ctx, &dto.CalculateCampaignCapacityRequest{
-		Title:              req.Title,
-		Level1:             req.Level1,
-		Level2s:            req.Level2s,
-		Level3s:            req.Level3s,
-		Tags:               req.Tags,
-		Sex:                req.Sex,
-		City:               req.City,
-		AdLink:             req.AdLink,
-		Content:            req.Content,
-		ScheduleAt:         req.ScheduleAt,
-		LineNumber:         req.LineNumber,
-		MediaUUID:          req.MediaUUID,
-		PlatformSettingsID: req.PlatformSettingsID,
-		Platform:           req.Platform,
-		Budget:             req.Budget,
+	if req.CampaignID == 0 {
+		return nil, NewBusinessError("CALCULATE_CAMPAIGN_COST_VALIDATION_FAILED", "Campaign cost calculation validation failed", ErrCampaignNotFound)
+	}
 
-		TargetAudienceExcelFileUUID: req.TargetAudienceExcelFileUUID,
-	}, req.Content, req.LineNumber, req.Level3s, metadata)
+	campaign, err := getCampaignByID(ctx, s.campaignRepo, req.CampaignID, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
+	}
+
+	pricePerMsg, availableCapacity, err := s.computeCostInputs(ctx, campaign, metadata)
 	if err != nil {
 		return nil, err
 	}
 
 	numTargetAudience := availableCapacity
+	budget := campaign.Spec.Budget
 	if req.Budget != nil {
-		numTargetAudience = uint64(math.Min(float64(availableCapacity), float64(*req.Budget)/float64(pricePerMsg)))
+		budget = req.Budget
+	}
+	if budget != nil {
+		numTargetAudience = uint64(math.Min(float64(availableCapacity), float64(*budget)/float64(pricePerMsg)))
 	}
 
 	totalCost := pricePerMsg * numTargetAudience
@@ -1271,24 +1168,12 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 // CalculateCampaignCostV2 calculates required cost for desired num_messages
 // and caps num_messages by available audience capacity.
 func (s *CampaignFlowImpl) CalculateCampaignCostV2(ctx context.Context, req *dto.CalculateCampaignCostV2Request, metadata *ClientMetadata) (*dto.CalculateCampaignCostResponse, error) {
-	pricePerMsg, availableCapacity, err := s.computeCostInputs(ctx, &dto.CalculateCampaignCapacityRequest{
-		Title:              req.Title,
-		Level1:             req.Level1,
-		Level2s:            req.Level2s,
-		Level3s:            req.Level3s,
-		Tags:               req.Tags,
-		Sex:                req.Sex,
-		City:               req.City,
-		AdLink:             req.AdLink,
-		Content:            req.Content,
-		ScheduleAt:         req.ScheduleAt,
-		LineNumber:         req.LineNumber,
-		MediaUUID:          req.MediaUUID,
-		PlatformSettingsID: req.PlatformSettingsID,
-		Platform:           req.Platform,
+	campaign, err := getCampaignByID(ctx, s.campaignRepo, req.CampaignID, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
+	}
 
-		TargetAudienceExcelFileUUID: req.TargetAudienceExcelFileUUID,
-	}, req.Content, req.LineNumber, req.Level3s, metadata)
+	pricePerMsg, availableCapacity, err := s.computeCostInputs(ctx, campaign, metadata)
 	if err != nil {
 		return nil, err
 	}
@@ -1317,54 +1202,52 @@ func (s *CampaignFlowImpl) CalculateCampaignCostV2(ctx context.Context, req *dto
 
 func (s *CampaignFlowImpl) computeCostInputs(
 	ctx context.Context,
-	req *dto.CalculateCampaignCapacityRequest,
-	content *string,
-	lineNumber *string,
-	level3s []string,
+	campaign models.Campaign,
 	metadata *ClientMetadata,
 ) (uint64, uint64, error) {
-	platform, err := sanitizeCampaignPlatform(req.Platform)
+	platform, err := sanitizeCampaignPlatform(&campaign.Spec.Platform)
 	if err != nil {
 		return 0, 0, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
 	}
 
-	if platform == models.CampaignPlatformSMS && lineNumber == nil {
+	if platform == models.CampaignPlatformSMS && campaign.Spec.LineNumber == nil {
 		return 0, 0, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required for SMS campaigns", ErrCampaignLineNumberRequired)
 	}
 
-	// if platform != models.CampaignPlatformSMS && lineNumber != nil {
-	// 	return 0, 0, NewBusinessError("LINE_NUMBER_NOT_APPLICABLE", "Line number is only applicable for SMS campaigns", ErrCampaignLineNumberNotApplicable)
-	// }
-
-	usingTargetAudienceExcelFile := req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != ""
-	if len(level3s) == 0 && !usingTargetAudienceExcelFile {
+	usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
+	if len(campaign.Spec.Level3s) == 0 && !usingTargetAudienceExcelFile {
 		return 0, 0, NewBusinessError("LEVEL3_REQUIRED", "At least one level3 option or target audience Excel file is required for cost calculation", ErrLevel3Required)
 	}
 
 	// Pricing constants
-	numParts := s.calculateParts(content, platform)
+	numParts := s.calculateParts(
+		campaign.Spec.Content,
+		campaign.Spec.AdLink,
+		campaign.Spec.ShortLinkDomain,
+		platform,
+	)
 
-	lineNumberFactor := 1.0
-	if platform == models.CampaignPlatformSMS && lineNumber != nil && strings.TrimSpace(*lineNumber) != "" {
+	lineNumberFactor := defaultLineNumberPriceFactor
+	if platform == models.CampaignPlatformSMS && campaign.Spec.LineNumber != nil && strings.TrimSpace(*campaign.Spec.LineNumber) != "" {
 		var err error
-		lineNumberFactor, err = s.fetchLineNumberPriceFactor(ctx, lineNumber)
+		lineNumberFactor, err = s.fetchLineNumberPriceFactor(ctx, campaign.Spec.LineNumber)
 		if err != nil {
 			return 0, 0, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
 		}
 	}
 
 	segmentPriceFactor := defaultSegmentPriceFactor
-	if len(level3s) > 0 && !usingTargetAudienceExcelFile {
-		maxFactor, err := s.fetchSegmentPriceFactor(ctx, level3s, platform)
+	if len(campaign.Spec.Level3s) > 0 && !usingTargetAudienceExcelFile {
+		maxFactor, err := s.fetchSegmentPriceFactor(ctx, campaign.Spec.Level3s, platform)
 		if err != nil {
 			if errors.Is(err, ErrSegmentPriceFactorNotFound) {
-				s.notifyMissingSegmentPriceFactor(level3s)
+				s.notifyMissingSegmentPriceFactor(campaign.Spec.Level3s)
 				return 0, 0, NewBusinessError("SEGMENT_PRICE_FACTOR_NOT_FOUND", "Segment price factor not found for provided level3 options", ErrSegmentPriceFactorNotFound)
 			}
 			return 0, 0, NewBusinessError("SEGMENT_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch segment price factors", err)
 		}
 		if maxFactor == 0 {
-			s.notifyMissingSegmentPriceFactor(level3s)
+			s.notifyMissingSegmentPriceFactor(campaign.Spec.Level3s)
 			return 0, 0, NewBusinessError("SEGMENT_PRICE_FACTOR_NOT_FOUND", "Segment price factor not found for provided level3 options", ErrSegmentPriceFactorNotFound)
 		}
 		segmentPriceFactor = maxFactor
@@ -1395,7 +1278,10 @@ func (s *CampaignFlowImpl) computeCostInputs(
 	}
 
 	// Calculate campaign capacity (target audience size)
-	capacityResp, err := s.CalculateCampaignCapacity(ctx, req, metadata)
+	capacityResp, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
+		CampaignID: campaign.ID,
+		CustomerID: campaign.CustomerID,
+	}, metadata)
 	if err != nil {
 		return 0, 0, NewBusinessError("CAPACITY_CALCULATION_FAILED", "Failed to calculate campaign capacity", err)
 	}
@@ -1635,6 +1521,8 @@ func validateCampaignPhaseInput(phase *string, required bool) error {
 
 // buildCampaignResponse constructs a GetCampaignResponse from a campaign model and its display enrichments.
 func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto.GetCampaignResponse {
+	ensureCampaignSpecDefaults(&c.Spec)
+
 	var bundleTitle *string
 	if c.Bundle != nil {
 		bundleTitle = &c.Bundle.Title
@@ -1672,6 +1560,7 @@ func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto
 		BundleID:                    c.BundleID,
 		BundleTitle:                 bundleTitle,
 		Phase:                       campaignPhasePtr(c.Phase),
+		AudienceGrades:              campaignAudienceGradesOrDefault(c.Spec.AudienceGrades),
 		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 	}
 }
@@ -1987,6 +1876,11 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, re
 			return ErrCampaignTagsRequired
 		}
 	}
+	if normalizedGrades, err := sanitizeAudienceGrades(req.AudienceGrades); err != nil {
+		return err
+	} else {
+		req.AudienceGrades = normalizedGrades
+	}
 
 	if _, err := sanitizeShortLinkDomain(req.ShortLinkDomain); err != nil {
 		return err
@@ -2086,6 +1980,7 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	if req.Budget != nil && *req.Budget != 0 {
 		spec.Budget = req.Budget
 	}
+	spec.AudienceGrades = campaignAudienceGradesOrDefault(req.AudienceGrades)
 
 	uid := uuid.New()
 
@@ -2345,7 +2240,7 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	// At least one field should be provided for update
 	hasUpdateFields := req.Title != nil || req.Level1 != nil || len(req.Level2s) > 0 || len(req.Level3s) > 0 ||
 		req.BundleID != nil || req.Phase != nil ||
-		req.TargetAudienceExcelFileUUID != nil || len(req.Tags) > 0 || req.Sex != nil || len(req.City) > 0 ||
+		req.TargetAudienceExcelFileUUID != nil || len(req.Tags) > 0 || req.AudienceGrades != nil || req.Sex != nil || len(req.City) > 0 ||
 		req.AdLink != nil || req.Content != nil ||
 		req.ScheduleAt != nil || req.LineNumber != nil || req.Budget != nil || req.ShortLinkDomain != nil ||
 		req.Category != nil || req.Job != nil ||
@@ -2366,6 +2261,11 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	if req.BundleID != nil && *req.BundleID == 0 {
 		return ErrBundleNotFound
 	}
+	if normalizedGrades, err := sanitizeAudienceGrades(req.AudienceGrades); err != nil {
+		return err
+	} else {
+		req.AudienceGrades = normalizedGrades
+	}
 	if err := validateCampaignPhaseInput(req.Phase, false); err != nil {
 		return err
 	}
@@ -2381,34 +2281,11 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 
 // validateCalculateCampaignCapacityRequest validates the request
 func (s *CampaignFlowImpl) validateCalculateCampaignCapacityRequest(req *dto.CalculateCampaignCapacityRequest) error {
-	usingTargetAudienceExcelFile := req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != ""
-
-	if !usingTargetAudienceExcelFile {
-		if req.Level1 == nil {
-			return ErrCampaignLevel1Required
-		}
-		if req.Level2s == nil {
-			return ErrCampaignLevel2sRequired
-		}
-		if len(req.Level2s) == 0 {
-			return ErrCampaignLevel2sRequired
-		}
-		if req.Level3s == nil {
-			return ErrCampaignLevel3sRequired
-		}
-		if len(req.Level3s) == 0 {
-			return ErrCampaignLevel3sRequired
-		}
-		if req.Tags == nil {
-			return ErrCampaignTagsRequired
-		}
-		if len(req.Tags) == 0 {
-			return ErrCampaignTagsRequired
-		}
+	if req.CampaignID == 0 {
+		return ErrCampaignNotFound
 	}
-
-	if _, err := sanitizeCampaignPlatform(req.Platform); err != nil {
-		return err
+	if req.CustomerID == 0 {
+		return ErrCustomerNotFound
 	}
 
 	return nil
@@ -2465,7 +2342,7 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 	if _, err := sanitizeShortLinkDomain(campaign.Spec.ShortLinkDomain); err != nil {
 		return err
 	}
-	if _, _, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, campaign.Spec.Category, campaign.Spec.Job); err != nil {
+	if _, _, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, campaign.Spec.Category, campaign.Spec.Job, true); err != nil {
 		return err
 	}
 	if _, err := sanitizeCampaignPlatform(utils.ToPtr(campaign.Spec.Platform)); err != nil {
@@ -2508,12 +2385,14 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 		spec.Level3s = req.Level3s
 	}
 	if req.TargetAudienceExcelFileUUID != nil {
-		if strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != "" {
-			excelFileUUID := strings.TrimSpace(*req.TargetAudienceExcelFileUUID)
+		excelFileUUID := strings.TrimSpace(*req.TargetAudienceExcelFileUUID)
+		if excelFileUUID != "" {
 			spec.TargetAudienceExcelFileUUID = &excelFileUUID
 		} else {
 			spec.TargetAudienceExcelFileUUID = nil
 		}
+	} else {
+		spec.TargetAudienceExcelFileUUID = nil
 	}
 	if len(req.Tags) > 0 {
 		spec.Tags = req.Tags
@@ -2526,24 +2405,22 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if req.AdLink != nil && *req.AdLink != "" {
 		spec.AdLink = req.AdLink
+	} else {
+		spec.AdLink = nil
 	}
 	if req.Content != nil && *req.Content != "" {
 		spec.Content = req.Content
 	}
 	if req.Category != nil && *req.Category != "" {
-		// TODO: sanitize category and job based on customer account type
 		spec.Category = req.Category
 	}
 	if req.Job != nil && *req.Job != "" {
-		// TODO: sanitize category and job based on customer account type
 		spec.Job = req.Job
 	}
 	if req.ShortLinkDomain != nil {
-		domain, err := sanitizeShortLinkDomain(req.ShortLinkDomain)
-		if err != nil {
-			return err
-		}
-		spec.ShortLinkDomain = domain
+		spec.ShortLinkDomain = req.ShortLinkDomain
+	} else {
+		spec.ShortLinkDomain = nil
 	}
 	if req.ScheduleAt != nil {
 		spec.ScheduleAt = req.ScheduleAt
@@ -2552,22 +2429,25 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 	if req.LineNumber != nil && *req.LineNumber != "" {
 		spec.LineNumber = req.LineNumber
+	} else {
+		// TODO: Nullify?
 	}
 	if req.MediaUUID != nil {
 		spec.MediaUUID = req.MediaUUID
 	}
 	if req.PlatformSettingsID != nil && *req.PlatformSettingsID != 0 {
 		spec.PlatformSettingsID = req.PlatformSettingsID
+	} else {
+		// TODO: Nullify?
 	}
 	if req.Platform != nil {
-		platform, err := sanitizeCampaignPlatform(req.Platform)
-		if err != nil {
-			return err
-		}
-		spec.Platform = platform
+		spec.Platform = *req.Platform
 	}
 	if req.Budget != nil && *req.Budget != 0 {
 		spec.Budget = req.Budget
+	}
+	if req.AudienceGrades != nil {
+		spec.AudienceGrades = campaignAudienceGradesOrDefault(req.AudienceGrades)
 	}
 	ensureCampaignSpecDefaults(&spec)
 
@@ -2575,6 +2455,7 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	existingCampaign.Spec = spec
 	if req.BundleID != nil {
 		existingCampaign.BundleID = req.BundleID
+		existingCampaign.Bundle = nil // Clear cached bundle to force reload with new ID
 	}
 	if req.Phase != nil {
 		existingCampaign.Phase = campaignPhaseOrDefault(req.Phase)
@@ -3205,7 +3086,12 @@ func (s *CampaignFlowImpl) resolveCampaignCostPerMessageFromMetadata(ctx context
 
 	numPages, ok := parseMetadataUint64(meta["num_pages"])
 	if !ok || numPages == 0 {
-		numPages = s.calculateParts(campaign.Spec.Content, campaign.Spec.Platform)
+		numPages = s.calculateParts(
+			campaign.Spec.Content,
+			campaign.Spec.AdLink,
+			campaign.Spec.ShortLinkDomain,
+			campaign.Spec.Platform,
+		)
 	}
 
 	f := parseMetadataFloat(meta["line_number_price_factor"])
@@ -3461,9 +3347,10 @@ func (s *CampaignFlowImpl) GetApprovedRunningSummary(ctx context.Context, custom
 	return resp, nil
 }
 
-// calculateParts calculates the number of content parts.
+// calculateParts calculates the number of SMS parts based on the effective
+// character count after link substitution rules are applied.
 // Non-SMS platforms always use a single part.
-func (s *CampaignFlowImpl) calculateParts(content *string, platform string) uint64 {
+func (s *CampaignFlowImpl) calculateParts(content *string, adLink *string, shortLinkDomain *string, platform string) uint64 {
 	if platform != models.CampaignPlatformSMS {
 		return 1
 	}
@@ -3473,7 +3360,7 @@ func (s *CampaignFlowImpl) calculateParts(content *string, platform string) uint
 	}
 
 	// Count characters with proper weighting (English=1, others=2)
-	charCount := s.countCharacters(*content)
+	charCount := s.countCharacters(*content, adLink, shortLinkDomain, platform)
 
 	// Calculate SMS parts based on character count
 	if charCount <= 70 {
@@ -3490,18 +3377,37 @@ func (s *CampaignFlowImpl) calculateParts(content *string, platform string) uint
 	return 6 // More than 330 characters
 }
 
-// countCharacters counts characters in text with proper weighting for different character types
-// English characters and numbers = 1, others (Farsi, Arabic, etc.) = 2
-// This implements the same logic as the frontend countCharacters function
-func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
+// countCharacters counts characters after applying campaign link expansion rules.
+func (s *CampaignFlowImpl) countCharacters(text string, adLink *string, shortLinkDomain *string, platform string) uint64 {
 	if text == "" {
+		if platform == models.CampaignPlatformSMS {
+			return 6
+		}
 		return 0
 	}
 
-	textWithoutLinkChar := strings.ReplaceAll(text, "{YOUR_LINK}", "")
+	textToCount := text
+
+	hasAdLink := adLink != nil && strings.TrimSpace(*adLink) != ""
+	hasShortLinkDomain := shortLinkDomain != nil && strings.TrimSpace(*shortLinkDomain) != ""
+
+	switch {
+	case hasAdLink && hasShortLinkDomain:
+		shortLinkText := strings.TrimSpace(*shortLinkDomain)
+		if !strings.HasPrefix(shortLinkText, "https://") {
+			shortLinkText = "https://" + shortLinkText
+		}
+		textToCount = strings.ReplaceAll(textToCount, "{YOUR_LINK}", shortLinkText)
+	case hasAdLink:
+		resolvedAdLink := strings.TrimSpace(*adLink)
+		if strings.Contains(resolvedAdLink, "{uid}") {
+			resolvedAdLink = strings.ReplaceAll(resolvedAdLink, "{uid}", "123456")
+		}
+		textToCount = strings.ReplaceAll(textToCount, "{YOUR_LINK}", resolvedAdLink)
+	}
 
 	var count uint64
-	for _, char := range textWithoutLinkChar {
+	for _, char := range textToCount {
 		// Check if character is English (ASCII range 32-126)
 		if char >= 32 && char <= 126 {
 			count += 1 // English character
@@ -3509,10 +3415,14 @@ func (s *CampaignFlowImpl) countCharacters(text string) uint64 {
 			// Non-English character (Farsi, Arabic, etc.)
 			// count += 2
 
-			// NOTE: As per new requirements, count all non-English characters as 1
 			count += 1
 		}
 	}
+
+	if platform == models.CampaignPlatformSMS {
+		count += 6
+	}
+
 	return count
 }
 
@@ -3530,7 +3440,7 @@ func sanitizeShortLinkDomain(domain *string) (*string, error) {
 	return &trimmed, nil
 }
 
-func sanitizeCategoryAndJob(accountType string, category, job *string) (*string, *string, error) {
+func sanitizeCategoryAndJob(accountType string, category, job *string, isMandatoryForAgency bool) (*string, *string, error) {
 	var sanitizedCategory, sanitizedJob *string
 	if category != nil {
 		cat := strings.TrimSpace(*category)
@@ -3547,7 +3457,7 @@ func sanitizeCategoryAndJob(accountType string, category, job *string) (*string,
 		sanitizedJob = &j
 	}
 
-	if accountType == models.AccountTypeMarketingAgency {
+	if accountType == models.AccountTypeMarketingAgency && isMandatoryForAgency {
 		if sanitizedCategory == nil || sanitizedJob == nil {
 			return nil, nil, ErrAgencyCategoryJobRequired
 		}
@@ -3577,6 +3487,39 @@ func ensureCampaignSpecDefaults(spec *models.CampaignSpec) {
 	if strings.TrimSpace(spec.Platform) == "" {
 		spec.Platform = models.CampaignPlatformSMS
 	}
+	if spec.AudienceGrades == nil {
+		spec.AudienceGrades = []string{"A", "B", "C"}
+	}
+}
+
+func sanitizeAudienceGrades(grades []string) ([]string, error) {
+	if grades == nil {
+		return nil, nil
+	}
+
+	valid := []string{"A", "B", "C"}
+	normalized := make([]string, 0, len(grades))
+	seen := make(map[string]struct{}, len(grades))
+	for _, grade := range grades {
+		trimmed := strings.ToUpper(strings.TrimSpace(grade))
+		if !slices.Contains(valid, trimmed) {
+			return nil, ErrCampaignAudienceGradesInvalid
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+
+	return normalized, nil
+}
+
+func campaignAudienceGradesOrDefault(grades []string) []string {
+	if grades == nil {
+		return []string{"A", "B", "C"}
+	}
+	return grades
 }
 
 // createAuditLog creates an audit log entry for the campaign operation
