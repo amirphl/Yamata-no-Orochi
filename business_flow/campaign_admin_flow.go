@@ -178,9 +178,15 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 
 	items := make([]dto.AdminGetCampaignResponse, 0, len(rows))
 	for _, c := range rows {
+		ensureCampaignSpecDefaults(&c.Spec)
+
 		var stats map[string]any
 		if len(c.Statistics) > 0 {
 			_ = json.Unmarshal(c.Statistics, &stats)
+		}
+		var bundleTitle *string
+		if c.Bundle != nil {
+			bundleTitle = &c.Bundle.Title
 		}
 		clicks := clickCounts[c.ID]
 		totalClicks := clicks
@@ -218,8 +224,11 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			CustomerFullName:   formatCampaignPartyFullName(c.Customer),
 			AgencyFullName:     formatCampaignAgencyFullName(c.Customer),
 
-			BundleID: c.BundleID,
-			Phase:    campaignPhasePtr(c.Phase),
+			BundleID:    c.BundleID,
+			BundleTitle: bundleTitle,
+			Phase:       campaignPhasePtr(c.Phase),
+
+			AudienceGrades: campaignAudienceGradesOrDefault(c.Spec.AudienceGrades),
 
 			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 		})
@@ -255,6 +264,7 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	if c == nil {
 		return nil, ErrCampaignNotFound
 	}
+	ensureCampaignSpecDefaults(&c.Spec)
 
 	var stats map[string]any
 	if len(c.Statistics) > 0 {
@@ -303,6 +313,10 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	// 		lineNumberPriceFactor = lineNumber.PriceFactor
 	// 	}
 	// }
+	var bundleTitle *string
+	if c.Bundle != nil {
+		bundleTitle = &c.Bundle.Title
+	}
 
 	resp := &dto.AdminGetCampaignResponse{
 		ID:                    c.ID,
@@ -338,8 +352,11 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		CustomerFullName:      formatCampaignPartyFullName(c.Customer),
 		AgencyFullName:        formatCampaignAgencyFullName(c.Customer),
 
-		BundleID: c.BundleID,
-		Phase:    campaignPhasePtr(c.Phase),
+		BundleID:    c.BundleID,
+		BundleTitle: bundleTitle,
+		Phase:       campaignPhasePtr(c.Phase),
+
+		AudienceGrades: campaignAudienceGradesOrDefault(c.Spec.AudienceGrades),
 
 		TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 	}
