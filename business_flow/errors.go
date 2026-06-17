@@ -68,6 +68,7 @@ var (
 	ErrScheduleTimeMustBeUTC                    = errors.New("schedule time must be UTC")
 	ErrCampaignCityRequired                     = errors.New("campaign city is required")
 	ErrCampaignTagsRequired                     = errors.New("campaign tags is required")
+	ErrCampaignAudienceGradesInvalid            = errors.New("campaign audience grades are invalid")
 	ErrCampaignUpdateRequired                   = errors.New("at least one field must be provided for update")
 	ErrCampaignUUIDRequired                     = errors.New("campaign UUID is required")
 	ErrCampaignMediaNotFound                    = errors.New("campaign media not found")
@@ -415,6 +416,10 @@ func IsCampaignCityRequired(err error) bool {
 
 func IsCampaignTagsRequired(err error) bool {
 	return errors.Is(err, ErrCampaignTagsRequired)
+}
+
+func IsCampaignAudienceGradesInvalid(err error) bool {
+	return errors.Is(err, ErrCampaignAudienceGradesInvalid)
 }
 
 func IsCampaignUpdateRequired(err error) bool {
