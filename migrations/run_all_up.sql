@@ -272,5 +272,14 @@
 \echo 'Running 0088_add_admin_permissions.sql...'
 \i migrations/0088_add_admin_permissions.sql
 
+\echo 'Running 0089_add_unique_customer_name_to_platform_settings.sql...'
+\i migrations/0089_add_unique_customer_name_to_platform_settings.sql
+
+\echo 'Running 0090_add_expired_status_to_sms_campaigns.sql...'
+\i migrations/0090_add_expired_status_to_sms_campaigns.sql
+
+\echo 'Running 0091_add_admin_platform_base_price_audit_actions.sql...'
+\i migrations/0091_add_admin_platform_base_price_audit_actions.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
