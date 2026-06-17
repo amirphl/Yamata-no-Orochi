@@ -87,6 +87,8 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 
 	items := make([]dto.BotGetCampaignResponse, 0, len(readyCampaigns))
 	for _, c := range readyCampaigns {
+		ensureCampaignSpecDefaults(&c.Spec)
+
 		var platformSettings *dto.BotCampaignPlatformSettingsSpec
 		if c.Spec.PlatformSettingsID != nil && *c.Spec.PlatformSettingsID != 0 {
 			platformSettings = platformSettingsByID[*c.Spec.PlatformSettingsID]
@@ -101,6 +103,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 			Title:              c.Spec.Title,
 			Level1:             c.Spec.Level1,
 			Level2s:            c.Spec.Level2s,
+			Level3s:            c.Spec.Level3s,
 			Tags:               c.Spec.Tags,
 			Sex:                c.Spec.Sex,
 			City:               c.Spec.City,
@@ -121,6 +124,8 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 
 			BundleID: c.BundleID,
 			Phase:    campaignPhasePtr(c.Phase),
+
+			AudienceGrades: campaignAudienceGradesOrDefault(c.Spec.AudienceGrades),
 
 			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
 		})
