@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
+	"github.com/amirphl/Yamata-no-Orochi/app/services"
 	"github.com/amirphl/Yamata-no-Orochi/config"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
@@ -50,6 +51,9 @@ type PaymentFlowImpl struct {
 	transactionRepo     repository.TransactionRepository
 	agencyDiscountRepo  repository.AgencyDiscountRepository
 	depositReceiptRepo  repository.DepositReceiptRepository
+	notifier            services.NotificationService
+	adminCfg            config.AdminConfig
+	messageCfg          config.MessageConfig
 	db                  *gorm.DB
 
 	// Atipay configuration
@@ -68,6 +72,9 @@ func NewPaymentFlow(
 	transactionRepo repository.TransactionRepository,
 	agencyDiscountRepo repository.AgencyDiscountRepository,
 	depositReceiptRepo repository.DepositReceiptRepository,
+	notifier services.NotificationService,
+	adminCfg config.AdminConfig,
+	messageCfg config.MessageConfig,
 	db *gorm.DB,
 	atipayCfg config.AtipayConfig,
 	sysCfg config.SystemConfig,
@@ -82,6 +89,9 @@ func NewPaymentFlow(
 		transactionRepo:     transactionRepo,
 		agencyDiscountRepo:  agencyDiscountRepo,
 		depositReceiptRepo:  depositReceiptRepo,
+		notifier:            notifier,
+		adminCfg:            adminCfg,
+		messageCfg:          messageCfg,
 		db:                  db,
 		atipayCfg:           atipayCfg,
 		sysCfg:              sysCfg,
@@ -827,7 +837,7 @@ func (p *PaymentFlowImpl) updateBalances(ctx context.Context, paymentRequest *mo
 	// Update customer wallet balance
 	newCustomerFreeBalance := customerBalance.FreeBalance + real
 	newCustomerCreditBalance := customerBalance.CreditBalance + customerCredit
-	metadata["source"] = "payment_callback_increase_customer_free_plus_credit"
+	metadata["source"] = models.TransactionSourceIncreaseCustomerFreePlusCredit
 	metadata["operation"] = "increase_customer_free_plus_credit"
 	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
@@ -1339,11 +1349,8 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 
 	// Apply case-specific rules
 	switch {
-	case source == "payment_callback_increase_customer_free_plus_credit" && operation == "increase_customer_free_plus_credit":
+	case source == models.TransactionSourceIncreaseCustomerFreePlusCredit && operation == "increase_customer_free_plus_credit":
 		// amount & customerCredit already parsed; agency share forced to 0
-		if amount == 0 {
-			amount = transaction.Amount
-		}
 		agencyShareWithTax = 0
 	case source == models.TransactionSourceIncreaseAgencyShareWithTax && operation == "increase_agency_share_with_tax":
 		// For agency share entries, zero out amount/credit and keep agency share
@@ -1369,7 +1376,7 @@ func (p *PaymentFlowImpl) convertTransactionToTransactionHistoryItem(transaction
 		ExternalRef:        externalRef,
 		BalanceBefore:      balanceBefore,
 		BalanceAfter:       balanceAfter,
-		Metadata:           meta,
+		// Metadata:           meta,
 	}, nil
 }
 
@@ -1608,6 +1615,19 @@ func (p *PaymentFlowImpl) SubmitDepositReceipt(ctx context.Context, req *dto.Sub
 	})
 	if err != nil {
 		return nil, NewBusinessError("DEPOSIT_RECEIPT_SUBMIT_FAILED", "Failed to submit deposit receipt", err)
+	}
+
+	// Notify deposit reviewers via SMS (best-effort).
+	if p.notifier != nil {
+		msg := strings.TrimSpace(p.messageCfg.DepositReceiptSubmittedTemplate)
+		if msg == "" {
+			msg = "A recharge has been completed in the Jazebeh platform. Please generate the related invoice through the admin panel and upload it."
+		}
+		go func() {
+			for _, mobile := range p.adminCfg.ActiveDepositReviewers() {
+				_ = p.notifier.SendSMS(context.Background(), mobile, msg, nil)
+			}
+		}()
 	}
 
 	return &dto.SubmitDepositReceiptResponse{
