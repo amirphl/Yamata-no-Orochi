@@ -16,9 +16,9 @@ type CreateBundleRequest struct {
 }
 
 type CreateBundleResponse struct {
-	Message   string `json:"message"`
-	ID        uint   `json:"id"`
-	CreatedAt string `json:"created_at"`
+	Message   string    `json:"message"`
+	ID        uint      `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 type GetBundleRequest struct {
@@ -32,8 +32,8 @@ type GetBundleResponse struct {
 }
 
 type ListBundlesFilter struct {
-	Title                 *string `json:"title,omitempty" validate:"omitempty,max=255"`
-	TargetAudiencePersona *string `json:"target_audience_persona,omitempty" validate:"omitempty,max=1023"`
+	Title              *string `json:"title,omitempty" validate:"omitempty,max=255"`
+	TargetCustomerName *string `json:"target_customer_name,omitempty" validate:"omitempty,max=255"`
 }
 
 type ListBundlesRequest struct {
@@ -52,7 +52,7 @@ type BundleItem struct {
 	Description           *string        `json:"description,omitempty"`
 	ShortLinkDomain       *string        `json:"short_link_domain,omitempty"`
 	TargetCustomerName    *string        `json:"target_customer_name,omitempty"`
-	Category              *string        `json:"category,omitempty"`
+	Category              *string        `json:"job_category,omitempty"`
 	Job                   *string        `json:"job,omitempty"`
 	Metadata              map[string]any `json:"metadata,omitempty"`
 	Statistics            map[string]any `json:"statistics,omitempty"`
