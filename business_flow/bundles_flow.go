@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -85,7 +84,7 @@ func (f *BundleFlowImpl) CreateBundle(ctx context.Context, req *dto.CreateBundle
 		return nil, NewBusinessError("CREATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
 	}
 
-	category, job, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job)
+	category, job, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job, false)
 	if err != nil {
 		return nil, NewBusinessError("CREATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
 	}
@@ -95,7 +94,7 @@ func (f *BundleFlowImpl) CreateBundle(ctx context.Context, req *dto.CreateBundle
 		Title:                 title,
 		Objective:             objective,
 		TargetAudiencePersona: targetAudiencePersona,
-		AdLink:                adLink,
+		Adlink:                adLink,
 		Description:           description,
 		ShortLinkDomain:       shortLinkDomain,
 		TargetCustomerName:    targetCustomerName,
@@ -129,7 +128,7 @@ func (f *BundleFlowImpl) CreateBundle(ctx context.Context, req *dto.CreateBundle
 	return &dto.CreateBundleResponse{
 		Message:   "Bundle created successfully",
 		ID:        row.ID,
-		CreatedAt: row.CreatedAt.Format(time.RFC3339),
+		CreatedAt: row.CreatedAt,
 	}, nil
 }
 
@@ -158,7 +157,7 @@ func (f *BundleFlowImpl) GetBundle(ctx context.Context, req *dto.GetBundleReques
 		Title:                 row.Title,
 		Objective:             row.Objective,
 		TargetAudiencePersona: row.TargetAudiencePersona,
-		AdLink:                row.AdLink,
+		AdLink:                row.Adlink,
 		Description:           row.Description,
 		ShortLinkDomain:       row.ShortLinkDomain,
 		TargetCustomerName:    row.TargetCustomerName,
@@ -214,10 +213,10 @@ func (f *BundleFlowImpl) ListBundles(ctx context.Context, req *dto.ListBundlesRe
 				filter.Title = &trimmed
 			}
 		}
-		if req.Filter.TargetAudiencePersona != nil {
-			trimmed := strings.TrimSpace(*req.Filter.TargetAudiencePersona)
+		if req.Filter.TargetCustomerName != nil {
+			trimmed := strings.TrimSpace(*req.Filter.TargetCustomerName)
 			if trimmed != "" {
-				filter.TargetAudiencePersona = &trimmed
+				filter.TargetCustomerName = &trimmed
 			}
 		}
 	}
@@ -239,7 +238,7 @@ func (f *BundleFlowImpl) ListBundles(ctx context.Context, req *dto.ListBundlesRe
 			Title:                 row.Title,
 			Objective:             row.Objective,
 			TargetAudiencePersona: row.TargetAudiencePersona,
-			AdLink:                row.AdLink,
+			AdLink:                row.Adlink,
 			Description:           row.Description,
 			ShortLinkDomain:       row.ShortLinkDomain,
 			TargetCustomerName:    row.TargetCustomerName,
