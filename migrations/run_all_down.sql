@@ -3,6 +3,15 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0091_add_admin_platform_base_price_audit_actions_down.sql...'
+\i migrations/0091_add_admin_platform_base_price_audit_actions_down.sql
+
+\echo 'Running 0090_add_expired_status_to_sms_campaigns_down.sql...'
+\i migrations/0090_add_expired_status_to_sms_campaigns_down.sql
+
+\echo 'Running 0089_add_unique_customer_name_to_platform_settings_down.sql...'
+\i migrations/0089_add_unique_customer_name_to_platform_settings_down.sql
+
 \echo 'Running 0088_add_admin_permissions_down.sql...'
 \i migrations/0088_add_admin_permissions_down.sql
 
