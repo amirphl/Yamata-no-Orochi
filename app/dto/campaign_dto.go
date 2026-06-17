@@ -31,6 +31,8 @@ type CreateCampaignRequest struct {
 	BundleID *uint   `json:"bundle_id" validate:"required,min=1"`
 	Phase    *string `json:"phase" validate:"required,max=255"`
 
+	AudienceGrades []string `json:"audience_grades,omitempty" validate:"omitempty,dive,oneof=A B C"`
+
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
 
@@ -69,6 +71,8 @@ type UpdateCampaignRequest struct {
 
 	BundleID *uint   `json:"bundle_id,omitempty" validate:"omitempty,min=1"`
 	Phase    *string `json:"phase,omitempty" validate:"omitempty,max=255"`
+
+	AudienceGrades []string `json:"audience_grades,omitempty" validate:"omitempty,dive,oneof=A B C"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
 }
@@ -163,88 +167,37 @@ type GetCampaignResponse struct {
 	BundleTitle *string `json:"bundle_title,omitempty"`
 	Phase       *string `json:"phase,omitempty"`
 
+	AudienceGrades []string `json:"audience_grades"`
+
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
 
 // CalculateCampaignCapacityRequest represents the request to calculate the capacity of an campaign
 type CalculateCampaignCapacityRequest struct {
-	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags               []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content            *string    `json:"content,omitempty" validate:"omitempty,max=4096,min=1"`
-	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
-	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
-	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
-	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-
-	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
+	CampaignID uint `json:"campaign_id" validate:"required,min=1"`
+	CustomerID uint `json:"-"`
 }
 
 // CalculateCampaignCapacityResponse represents the response to calculate the capacity of an campaign
 type CalculateCampaignCapacityResponse struct {
-	Message  string `json:"message"`
-	Capacity uint64 `json:"capacity"`
+	Message               string            `json:"message"`
+	Capacity              uint64            `json:"capacity"`
+	AudienceGradeCapacity map[string]uint64 `json:"audience_grade_capacity,omitempty"`
 }
 
 // CalculateCampaignCostRequest represents the request to calculate the cost of an campaign
 type CalculateCampaignCostRequest struct {
-	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags               []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content            *string    `json:"content,omitempty" validate:"omitempty,max=4096,min=1"`
-	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
-	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
-	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
-	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	CustomerID         uint       `json:"-"`
-
-	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
+	CampaignID uint    `json:"campaign_id" validate:"required,min=1"`
+	Budget     *uint64 `json:"budget,omitempty" validate:"omitempty"`
+	CustomerID uint    `json:"-"`
 }
 
 // CalculateCampaignCostV2Request represents the request to calculate required cost
 // for a desired number of messages (capped by available audience capacity).
 type CalculateCampaignCostV2Request struct {
-	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags               []string   `json:"tags,omitempty" validate:"omitempty"`
-	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content            *string    `json:"content,omitempty" validate:"omitempty,max=4096,min=1"`
-	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
-	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
-	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
-	NumMessages        uint64     `json:"num_messages" validate:"required,gt=0"`
-	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	CustomerID         uint       `json:"-"`
-
-	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
+	CampaignID  uint   `json:"campaign_id" validate:"required,min=1"`
+	NumMessages uint64 `json:"num_messages" validate:"required,gt=0"`
+	CustomerID  uint   `json:"-"`
 }
 
 // CalculateCampaignCostResponse represents the response to calculate the cost of an campaign
@@ -337,8 +290,11 @@ type AdminGetCampaignResponse struct {
 	CustomerFullName      *string        `json:"customer_full_name,omitempty"`
 	AgencyFullName        *string        `json:"agency_full_name,omitempty"`
 
-	BundleID *uint   `json:"bundle_id,omitempty"`
-	Phase    *string `json:"phase,omitempty" validate:"omitempty"`
+	BundleID    *uint   `json:"bundle_id,omitempty"`
+	BundleTitle *string `json:"bundle_title,omitempty"`
+	Phase       *string `json:"phase,omitempty" validate:"omitempty"`
+
+	AudienceGrades []string `json:"audience_grades"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
@@ -464,6 +420,8 @@ type BotGetCampaignResponse struct {
 
 	BundleID *uint   `json:"bundle_id,omitempty"`
 	Phase    *string `json:"phase,omitempty" validate:"omitempty"`
+
+	AudienceGrades []string `json:"audience_grades"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 }
