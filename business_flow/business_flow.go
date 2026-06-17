@@ -295,6 +295,21 @@ func getCampaign(ctx context.Context, campaignRepo repository.CampaignRepository
 	return *campaign, nil
 }
 
+func getCampaignByID(ctx context.Context, campaignRepo repository.CampaignRepository, campaignID uint, customerID uint) (models.Campaign, error) {
+	campaign, err := campaignRepo.ByID(ctx, campaignID)
+	if err != nil {
+		return models.Campaign{}, err
+	}
+	if campaign == nil {
+		return models.Campaign{}, ErrCampaignNotFound
+	}
+	if campaign.CustomerID != customerID {
+		return models.Campaign{}, ErrCampaignAccessDenied
+	}
+
+	return *campaign, nil
+}
+
 // canUpdateCampaign checks if a campaign can be updated based on its current status
 func canUpdateCampaign(status models.CampaignStatus) bool {
 	// Only campaigns with 'initiated' or 'in-progress' status can be updated
