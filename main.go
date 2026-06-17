@@ -462,6 +462,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		transactionRepo,
 		agencyDiscountRepo,
 		depositReceiptRepo,
+		notificationService,
+		cfg.Admin,
+		cfg.Message,
 		db,
 		cfg.Atipay,
 		cfg.System,
@@ -578,8 +581,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	multimediaFlow := businessflow.NewMultimediaFlow(customerRepo, multimediaRepo)
 	multimediaAdminFlow := businessflow.NewMultimediaAdminFlow(multimediaRepo)
 	multimediaBotFlow := businessflow.NewMultimediaBotFlow(multimediaRepo)
-	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo)
+	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo, notificationService, cfg.Admin)
 	platformSettingsAdminFlow := businessflow.NewPlatformSettingsAdminFlow(platformSettingsRepo, multimediaRepo)
+	platformBasePriceAdminFlow := businessflow.NewPlatformBasePriceAdminFlow(platformBasePriceRepo, auditRepo)
 
 	shortLinkVisitFlow := businessflow.NewShortLinkVisitFlow(shortLinkRepo, shortLinkClickRepo)
 
@@ -625,6 +629,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	segmentPriceFactorAdminHandler := handlers.NewSegmentPriceFactorAdminHandler(segmentPriceFactorFlow)
 	segmentPriceFactorHandler := handlers.NewSegmentPriceFactorHandler(segmentPriceFactorFlow)
+	platformBasePriceAdminHandler := handlers.NewPlatformBasePriceAdminHandler(platformBasePriceAdminFlow)
 
 	// Initialize auth middleware
 	authMiddleware := middleware.NewAuthMiddleware(tokenService)
@@ -645,6 +650,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberHandler,
 		lineNumberAdminHandler,
 		segmentPriceFactorAdminHandler,
+		platformBasePriceAdminHandler,
 		segmentPriceFactorHandler,
 		adminCustomerManagementHandler,
 		campaignBotHandler,
