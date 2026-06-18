@@ -15,6 +15,11 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
+const (
+	shortLinkUploadTimeout   = 5 * time.Minute
+	shortLinkDownloadTimeout = 5 * time.Minute
+)
+
 // ShortLinkAdminHandlerInterface defines admin endpoints for short links (CSV upload and downloads)
 type ShortLinkAdminHandlerInterface interface {
 	UploadCSV(c fiber.Ctx) error
@@ -73,7 +78,7 @@ func (h *ShortLinkAdminHandler) UploadCSV(c fiber.Ctx) error {
 	}
 	defer fh.Close()
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/upload-csv", 60*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/upload-csv", shortLinkUploadTimeout)
 	defer cancel()
 	res, flowErr := h.uploadFlow.CreateShortLinksFromCSV(ctx, fh, domain, scenarioName)
 	if flowErr != nil {
@@ -102,7 +107,7 @@ func (h *ShortLinkAdminHandler) DownloadByScenario(c fiber.Ctx) error {
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download", 60*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download", shortLinkDownloadTimeout)
 	defer cancel()
 	filename, data, err := h.downloadAll.DownloadShortLinksCSV(ctx, req.ScenarioID)
 	if err != nil {
@@ -132,7 +137,7 @@ func (h *ShortLinkAdminHandler) DownloadWithClicksByScenario(c fiber.Ctx) error 
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download-with-clicks", 60*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download-with-clicks", shortLinkDownloadTimeout)
 	defer cancel()
 	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksCSV(ctx, req.ScenarioID)
 	if err != nil {
@@ -162,7 +167,7 @@ func (h *ShortLinkAdminHandler) DownloadWithClicksByScenarioRange(c fiber.Ctx) e
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download-with-clicks-range", 120*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download-with-clicks-range", shortLinkDownloadTimeout)
 	defer cancel()
 	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksCSVRange(ctx, req.ScenarioFrom, req.ScenarioTo)
 	if err != nil {
@@ -192,7 +197,7 @@ func (h *ShortLinkAdminHandler) DownloadWithClicksByScenarioNameExcel(c fiber.Ct
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download-with-clicks-by-scenario-name", 60*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/short-links/download-with-clicks-by-scenario-name", shortLinkDownloadTimeout)
 	defer cancel()
 	filename, data, err := h.downloadHit.DownloadShortLinksWithClicksExcelByScenarioNameRegex(ctx, req.ScenarioNameRegex)
 	if err != nil {
