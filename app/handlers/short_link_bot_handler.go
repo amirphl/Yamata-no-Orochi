@@ -12,6 +12,11 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
+const (
+	shortLinkCreateTimeout   = 2 * time.Minute
+	shortLinkAllocateTimeout = 5 * time.Minute
+)
+
 // ShortLinkBotHandlerInterface defines contract for bot short link endpoints
 type ShortLinkBotHandlerInterface interface {
 	CreateShortLink(c fiber.Ctx) error
@@ -55,7 +60,7 @@ func (h *ShortLinkBotHandler) CreateShortLink(c fiber.Ctx) error {
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links/one", 30*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links/one", shortLinkCreateTimeout)
 	defer cancel()
 	res, err := h.flow.CreateShortLink(ctx, &req)
 	if err != nil {
@@ -83,7 +88,7 @@ func (h *ShortLinkBotHandler) CreateShortLinks(c fiber.Ctx) error {
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links", 30*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links", shortLinkCreateTimeout)
 	defer cancel()
 	res, err := h.flow.CreateShortLinks(ctx, &req)
 	if err != nil {
@@ -111,7 +116,7 @@ func (h *ShortLinkBotHandler) AllocateShortLinks(c fiber.Ctx) error {
 	if err := h.validator.Struct(&req); err != nil {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", err.Error())
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links/allocate", 30*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/short-links/allocate", shortLinkAllocateTimeout)
 	defer cancel()
 	codes, err := h.flow.GenerateAndCreateShortLinks(ctx, &req)
 	if err != nil {
