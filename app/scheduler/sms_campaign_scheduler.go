@@ -52,7 +52,8 @@ type SMSCampaignScheduler struct {
 
 	schedulerName string
 
-	audienceCache *AudienceCache
+	audienceCache      *AudienceCache
+	bundleAudienceCache *BundleAudienceCache
 }
 
 // NotificationSender is a minimal interface extracted from NotificationService for SMS
@@ -98,10 +99,11 @@ func NewCampaignScheduler(
 		interval:      interval,
 		adminCfg:      adminCfg,
 		botCfg:        botCfg,
-		botClient:     newHTTPBotClient(botCfg),
-		smsClient:     newHTTPPayamSMSClient(payamSMSCfg),
-		audienceCache: NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
-		schedulerName: "sms",
+		botClient:           newHTTPBotClient(botCfg),
+		smsClient:           newHTTPPayamSMSClient(payamSMSCfg),
+		audienceCache:       NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
+		bundleAudienceCache: NewBundleAudienceCache(repository.NewBundleAudienceSelectionRepository(db)),
+		schedulerName:       "sms",
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
@@ -271,7 +273,15 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
 		correlationID := uuid.NewString()
 		s.logger.Printf("SMS scheduler: campaign id=%d fetching audience phones (correlation_id=%s)", c.ID, correlationID)
-		audienceResult, err := s.fetchSMSAudiencePhones(ctx, c, jazzAccessToken, correlationID)
+		var (
+			audienceResult *AudiencePhonesResult
+			err            error
+		)
+		if c.BundleID != nil {
+			audienceResult, err = s.fetchSMSAudiencePhonesByBundle(ctx, c, jazzAccessToken, correlationID)
+		} else {
+			audienceResult, err = s.fetchSMSAudiencePhones(ctx, c, jazzAccessToken, correlationID)
+		}
 		if err != nil {
 			return fmt.Errorf("fetch audience phones for campaign id=%d: %w", c.ID, err)
 		}
@@ -672,6 +682,201 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
 	}
 	s.logger.Printf("fetchSMSAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
+	return &AudiencePhonesResult{
+		Phones:      phones,
+		IDs:         ids,
+		UIDs:        uids,
+		Codes:       codes,
+		SelectionID: sel.ID,
+	}, nil
+}
+
+// selectTagAudiences fetches audience profiles matching tagIDs (white first, then pink),
+// skipping any IDs present in exclude, up to numAudiences. If fewer than numAudiences
+// fresh profiles exist the caller receives whatever is available — no reset is performed.
+func (s *SMSCampaignScheduler) selectTagAudiences(
+	ctx context.Context,
+	campaignID uint,
+	tagIDs pq.Int32Array,
+	numAudiences int64,
+	exclude map[int64]struct{},
+) (phones []string, ids []int64, uids []string, err error) {
+	const limit = 10000000
+
+	phones = make([]string, 0, numAudiences)
+	ids = make([]int64, 0, numAudiences)
+	uids = make([]string, 0, numAudiences)
+
+	appendIfFresh := func(ap *models.AudienceProfile) {
+		if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
+			return
+		}
+		if exclude != nil {
+			if _, ok := exclude[int64(ap.ID)]; ok {
+				return
+			}
+		}
+		phones = append(phones, *ap.PhoneNumber)
+		ids = append(ids, int64(ap.ID))
+		uids = append(uids, ap.UID)
+	}
+
+	whites, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{
+		Tags:  &tagIDs,
+		Color: utils.ToPtr("white"),
+	}, "id DESC", limit, 0)
+	if err != nil {
+		s.logger.Printf("selectTagAudiences fetch white failed: campaign_id=%d err=%v", campaignID, err)
+		return nil, nil, nil, err
+	}
+	s.logger.Printf("selectTagAudiences white candidates: campaign_id=%d count=%d", campaignID, len(whites))
+
+	for _, ap := range whites {
+		if int64(len(phones)) >= numAudiences {
+			break
+		}
+		appendIfFresh(ap)
+	}
+
+	if int64(len(phones)) < numAudiences {
+		pinks, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{
+			Tags:  &tagIDs,
+			Color: utils.ToPtr("pink"),
+		}, "id DESC", limit, 0)
+		if err != nil {
+			s.logger.Printf("selectTagAudiences fetch pink failed: campaign_id=%d err=%v", campaignID, err)
+			return nil, nil, nil, err
+		}
+		s.logger.Printf("selectTagAudiences pink candidates: campaign_id=%d count=%d", campaignID, len(pinks))
+		for _, ap := range pinks {
+			if int64(len(phones)) >= numAudiences {
+				break
+			}
+			appendIfFresh(ap)
+		}
+	}
+
+	return phones, ids, uids, nil
+}
+
+// fetchSMSAudiencePhonesByBundle selects audiences for a campaign that belongs to a bundle.
+// Uniqueness is enforced across all campaigns in the bundle via (customer_id, bundle_id):
+// audiences already selected by earlier campaigns in the same bundle are excluded.
+// Unlike the tag-hash path there is no rolling-window reset — if fewer fresh audiences
+// exist than requested, the available subset is returned as-is.
+func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
+	ctx context.Context,
+	c dto.BotGetCampaignResponse,
+	jazzAccessToken string,
+	correlationID string,
+) (*AudiencePhonesResult, error) {
+	bundleID := *c.BundleID
+	numAudiences := int64(0)
+	if c.NumAudiences != nil {
+		numAudiences = int64(*c.NumAudiences)
+	}
+	s.logger.Printf("fetchSMSAudiencePhonesByBundle start: campaign_id=%d customer_id=%d bundle_id=%d num_audiences=%d correlation_id=%s",
+		c.ID, c.CustomerID, bundleID, numAudiences, correlationID)
+
+	if numAudiences <= 0 {
+		return nil, fmt.Errorf("campaign num_audiences must be positive")
+	}
+
+	toExtract := make([]uint, len(c.Tags))
+	for i, tag := range c.Tags {
+		tagID, err := strconv.ParseUint(tag, 10, 32)
+		if err != nil {
+			s.logger.Printf("fetchSMSAudiencePhonesByBundle tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
+			return nil, err
+		}
+		toExtract[i] = uint(tagID)
+	}
+	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
+	if err != nil {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle tags lookup failed: campaign_id=%d err=%v", c.ID, err)
+		return nil, err
+	}
+	tagIDs := make(pq.Int32Array, len(tags))
+	for i, tag := range tags {
+		tagIDs[i] = int32(tag.ID)
+	}
+	s.logger.Printf("fetchSMSAudiencePhonesByBundle tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
+
+	// Load the cumulative set of audience IDs already used by earlier campaigns in this bundle.
+	var exclude map[int64]struct{}
+	bundleSel, err := s.bundleAudienceCache.Latest(ctx, c.CustomerID, bundleID)
+	if err != nil {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle latest bundle selection failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
+		return nil, err
+	}
+	if bundleSel != nil {
+		exclude = bundleSel.IDs
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle bundle selection hit: campaign_id=%d bundle_id=%d prior_ids=%d", c.ID, bundleID, len(bundleSel.IDs))
+	} else {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle bundle selection miss: campaign_id=%d bundle_id=%d", c.ID, bundleID)
+	}
+
+	phones, ids, uids, err := s.selectTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Printf("fetchSMSAudiencePhonesByBundle selected: campaign_id=%d bundle_id=%d selected=%d requested=%d",
+		c.ID, bundleID, len(phones), numAudiences)
+
+	// Persist the newly selected IDs merged with the existing bundle selection.
+	sel, err := s.bundleAudienceCache.SaveWithMerge(ctx, c.CustomerID, bundleID, correlationID, ids)
+	if err != nil {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle selection save failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
+		return nil, err
+	}
+	s.logger.Printf("fetchSMSAudiencePhonesByBundle selection saved: campaign_id=%d bundle_id=%d selection_id=%d selected=%d",
+		c.ID, bundleID, sel.ID, len(ids))
+
+	if !hasCampaignAdLink(c.AdLink) {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle skipped short links: campaign_id=%d ad_link=empty", c.ID)
+		return &AudiencePhonesResult{
+			Phones:      phones,
+			IDs:         ids,
+			UIDs:        uids,
+			Codes:       make([]string, len(phones)),
+			SelectionID: sel.ID,
+		}, nil
+	}
+
+	if c.ShortLinkDomain == nil || strings.TrimSpace(*c.ShortLinkDomain) == "" {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle skipped short links: campaign_id=%d short_link_domain=empty", c.ID)
+		return &AudiencePhonesResult{
+			Phones:      phones,
+			IDs:         ids,
+			UIDs:        uids,
+			Codes:       make([]string, len(phones)),
+			SelectionID: sel.ID,
+		}, nil
+	}
+
+	items := make([]dto.PhoneWithAdLink, len(phones))
+	for i, p := range phones {
+		adLink := c.AdLink
+		if adLink != nil && strings.Contains(*adLink, "{uid}") {
+			resolved := strings.ReplaceAll(*adLink, "{uid}", uids[i])
+			adLink = &resolved
+		}
+		items[i] = dto.PhoneWithAdLink{Phone: p, AdLink: adLink}
+	}
+	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
+		CampaignID:      c.ID,
+		Items:           items,
+		ShortLinkDomain: *c.ShortLinkDomain,
+	})
+	if err != nil {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle allocate short links failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
+		return nil, err
+	}
+	if len(codes) != len(phones) {
+		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d bundle_id=%d: phones=%d codes=%d", c.ID, bundleID, len(phones), len(codes))
+	}
+	s.logger.Printf("fetchSMSAudiencePhonesByBundle success: campaign_id=%d bundle_id=%d selected=%d codes=%d selection_id=%d",
+		c.ID, bundleID, len(phones), len(codes), sel.ID)
 	return &AudiencePhonesResult{
 		Phones:      phones,
 		IDs:         ids,
