@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"strconv"
 	"time"
 
@@ -87,6 +88,7 @@ func (h *BundleHandler) Create(c fiber.Ctx) error {
 
 	res, err := h.flow.CreateBundle(ctx, &req, metadata)
 	if err != nil {
+		log.Println("Create bundle failed", err)
 		return h.handleBundleFlowError(c, err, fiber.StatusInternalServerError, "Failed to create bundle", "CREATE_BUNDLE_FAILED")
 	}
 
@@ -128,6 +130,7 @@ func (h *BundleHandler) Get(c fiber.Ctx) error {
 
 	res, err := h.flow.GetBundle(ctx, &req, metadata)
 	if err != nil {
+		log.Println("Get bundle failed", err)
 		return h.handleBundleFlowError(c, err, fiber.StatusInternalServerError, "Failed to get bundle", "GET_BUNDLE_FAILED")
 	}
 
@@ -142,7 +145,7 @@ func (h *BundleHandler) Get(c fiber.Ctx) error {
 // @Param page query int false "Page number" default(1)
 // @Param limit query int false "Items per page" default(10)
 // @Param title query string false "Title filter"
-// @Param target_audience_persona query string false "Target audience persona filter"
+// @Param target_customer_name query string false "Target customer name filter"
 // @Success 200 {object} dto.APIResponse{data=dto.ListBundlesResponse} "Retrieved"
 // @Failure 401 {object} dto.APIResponse "Unauthorized"
 // @Failure 500 {object} dto.APIResponse "Internal server error"
@@ -173,14 +176,14 @@ func (h *BundleHandler) List(c fiber.Ctx) error {
 
 	var filter *dto.ListBundlesFilter
 	title := c.Query("title")
-	targetAudiencePersona := c.Query("target_audience_persona")
-	if title != "" || targetAudiencePersona != "" {
+	targetCustomerName := c.Query("target_customer_name")
+	if title != "" || targetCustomerName != "" {
 		filter = &dto.ListBundlesFilter{}
 		if title != "" {
 			filter.Title = &title
 		}
-		if targetAudiencePersona != "" {
-			filter.TargetAudiencePersona = &targetAudiencePersona
+		if targetCustomerName != "" {
+			filter.TargetCustomerName = &targetCustomerName
 		}
 	}
 
@@ -197,6 +200,7 @@ func (h *BundleHandler) List(c fiber.Ctx) error {
 
 	res, err := h.flow.ListBundles(ctx, &req, metadata)
 	if err != nil {
+		log.Println("List bundles failed", err)
 		return h.handleBundleFlowError(c, err, fiber.StatusInternalServerError, "Failed to list bundles", "LIST_BUNDLES_FAILED")
 	}
 
