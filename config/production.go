@@ -412,15 +412,15 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 		Server: ServerConfig{
 			Host:              getEnvString("SERVER_HOST", "0.0.0.0"),
 			Port:              getEnvInt("SERVER_PORT", 8080),
-			ReadTimeout:       getEnvDuration("SERVER_READ_TIMEOUT", 30*time.Second),
-			WriteTimeout:      getEnvDuration("SERVER_WRITE_TIMEOUT", 30*time.Second),
+			ReadTimeout:       getEnvDuration("SERVER_READ_TIMEOUT", 5*time.Minute),
+			WriteTimeout:      getEnvDuration("SERVER_WRITE_TIMEOUT", 5*time.Minute),
 			IdleTimeout:       getEnvDuration("SERVER_IDLE_TIMEOUT", 120*time.Second),
 			ShutdownTimeout:   getEnvDuration("SERVER_SHUTDOWN_TIMEOUT", 30*time.Second),
-			BodyLimit:         getEnvInt("SERVER_BODY_LIMIT", 4*1024*1024), // 4MB
+			BodyLimit:         getEnvInt("SERVER_BODY_LIMIT", 100*1024*1024), // 100MB
 			EnablePprof:       getEnvBool("SERVER_ENABLE_PPROF", false),
 			EnableMetrics:     getEnvBool("SERVER_ENABLE_METRICS", true),
 			TrustedProxies:    getEnvStringSlice("SERVER_TRUSTED_PROXIES", []string{"127.0.0.1"}),
-			ProxyHeader:       getEnvString("SERVER_PROXY_HEADER", "X-Real-IP"),
+			ProxyHeader:       getEnvString("SERVER_PROXY_HEADER", "X-Forwarded-For"),
 			EnableCompression: getEnvBool("SERVER_ENABLE_COMPRESSION", true),
 			CompressionLevel:  getEnvInt("SERVER_COMPRESSION_LEVEL", 6),
 		},
