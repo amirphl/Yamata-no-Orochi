@@ -365,6 +365,12 @@ func (h *CampaignHandler) CalculateCampaignCapacity(c fiber.Ctx) error {
 	// Get client information
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID = customerID
+
 	// Call business logic with proper context
 	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/calculate-capacity", 30*time.Second)
 	defer cancel()
