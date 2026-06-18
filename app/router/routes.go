@@ -14,6 +14,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/app/handlers"
 	"github.com/amirphl/Yamata-no-Orochi/app/middleware"
 	"github.com/amirphl/Yamata-no-Orochi/app/observability"
+	"github.com/amirphl/Yamata-no-Orochi/config"
 	_ "github.com/amirphl/Yamata-no-Orochi/docs"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/gofiber/fiber/v3"
@@ -103,20 +104,21 @@ func NewFiberRouter(
 	platformSettingsHandler handlers.PlatformSettingsHandlerInterface,
 	platformSettingsAdminHandler handlers.PlatformSettingsAdminHandlerInterface,
 	accessControlHandler handlers.AccessControlHandlerInterface,
+	serverCfg config.ServerConfig,
 ) Router {
 	// Configure Fiber app
 	app := fiber.New(fiber.Config{
 		AppName:      "Yamata no Orochi API",
 		ServerHeader: "Yamata-no-Orochi",
 		ErrorHandler: errorHandler,
-		BodyLimit:    512 * 1024 * 1024, // 512MB to support large CSV uploads // TODO:
-		ReadTimeout:  5 * time.Minute,   // TODO:
-		WriteTimeout: 5 * time.Minute,   // TODO:
-		IdleTimeout:  60 * time.Second,
+		BodyLimit:    serverCfg.BodyLimit,
+		ReadTimeout:  serverCfg.ReadTimeout,
+		WriteTimeout: serverCfg.WriteTimeout,
+		IdleTimeout:  serverCfg.IdleTimeout,
 		JSONEncoder:  json.Marshal,
 		JSONDecoder:  json.Unmarshal,
 		// Trust proxy headers from nginx to get real client IP
-		ProxyHeader: "X-Forwarded-For",
+		ProxyHeader: serverCfg.ProxyHeader,
 	})
 
 	return &FiberRouter{
