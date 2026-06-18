@@ -712,6 +712,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		platformSettingsHandler,
 		platformSettingsAdminHandler,
 		accessControlHandler,
+		cfg.Server,
 	)
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
