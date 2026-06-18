@@ -15,6 +15,32 @@ definitions:
       price_factor:
         type: number
     type: object
+  dto.AdminACLChangeDecision:
+    properties:
+      reason:
+        type: string
+    type: object
+  dto.AdminACLChangeRequestCreate:
+    properties:
+      allow:
+        items:
+          type: string
+        type: array
+      deny:
+        items:
+          type: string
+        type: array
+      reason:
+        type: string
+      roles:
+        items:
+          type: string
+        type: array
+      target_admin_id:
+        type: integer
+    required:
+    - target_admin_id
+    type: object
   dto.AdminAddPlatformSettingsMetadataRequest:
     properties:
       id:
@@ -567,6 +593,15 @@ definitions:
       message:
         type: string
     type: object
+  dto.AdminListPlatformBasePricesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.AdminPlatformBasePriceItem'
+        type: array
+      message:
+        type: string
+    type: object
   dto.AdminListPlatformSettingsResponse:
     properties:
       items:
@@ -593,6 +628,13 @@ definitions:
         type: array
       message:
         type: string
+    type: object
+  dto.AdminPlatformBasePriceItem:
+    properties:
+      platform:
+        type: string
+      price:
+        type: integer
     type: object
   dto.AdminPlatformSettingsItem:
     properties:
@@ -723,6 +765,30 @@ definitions:
         type: array
     required:
     - items
+    type: object
+  dto.AdminUpdatePlatformBasePriceRequest:
+    properties:
+      platform:
+        enum:
+        - sms
+        - rubika
+        - bale
+        - splus
+        type: string
+      price:
+        type: integer
+    required:
+    - platform
+    - price
+    type: object
+  dto.AdminUpdatePlatformBasePriceResponse:
+    properties:
+      message:
+        type: string
+      platform:
+        type: string
+      price:
+        type: integer
     type: object
   dto.AgencyActiveDiscountItem:
     properties:
@@ -1417,6 +1483,8 @@ definitions:
         enum:
         - FA
         - EN
+        - fa
+        - en
         type: string
     required:
     - amount
@@ -2384,6 +2452,9 @@ definitions:
     type: object
   dto.TransactionHistoryItem:
     properties:
+      agency_share_with_tax:
+        description: Agency share with tax (when applicable)
+        type: integer
       amount:
         description: Amount in Tomans
         type: integer
@@ -2402,6 +2473,9 @@ definitions:
       currency:
         description: Currency (usually TMN)
         type: string
+      customer_credit:
+        description: Customer credit portion (when applicable)
+        type: integer
       datetime:
         description: When the transaction occurred
         type: string
@@ -2414,6 +2488,9 @@ definitions:
         type: object
       operation:
         description: Operation name for display
+        type: string
+      source:
+        description: Metadata source key
         type: string
       status:
         description: Transaction status
@@ -2571,6 +2648,109 @@ definitions:
 info:
   contact: {}
 paths:
+  /api/v1/admin/access-control/requests:
+    post:
+      consumes:
+      - application/json
+      description: Create a maker-checker access-control change request for another
+        admin (roles/allow/deny overrides)
+      parameters:
+      - description: Requested roles/permissions for target admin
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminACLChangeRequestCreate'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Request created (uuid, status)
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "400":
+          description: Invalid body
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Admin authentication required
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Failed to create request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Create ACL change request (maker)
+      tags:
+      - Admin Access Control
+  /api/v1/admin/access-control/requests/{uuid}/decision:
+    post:
+      consumes:
+      - application/json
+      description: Checker approves or rejects a pending ACL change request
+      parameters:
+      - description: Request UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: approve|reject (default approve)
+        in: query
+        name: action
+        type: string
+      - description: Optional reason
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.AdminACLChangeDecision'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Request updated (uuid, status)
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  additionalProperties:
+                    type: string
+                  type: object
+              type: object
+        "400":
+          description: Invalid UUID or body
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Admin authentication required
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden (self-approval or permission denied)
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Request not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Request not in pending state
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Approval failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Approve or reject ACL change request (checker)
+      tags:
+      - Admin Access Control
   /api/v1/admin/auth/captcha/init:
     get:
       description: Initialize rotate captcha for admin login (returns base64 images
@@ -2656,7 +2836,7 @@ paths:
         in: query
         name: title
         type: string
-      - description: Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected)
+      - description: Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected|expired)
         in: query
         name: status
         type: string
@@ -3484,6 +3664,66 @@ paths:
       summary: Admin update deposit receipt status
       tags:
       - Payments Admin
+  /api/v1/admin/platform-base-prices:
+    get:
+      description: List current platform base prices
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminListPlatformBasePricesResponse'
+              type: object
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin list platform base prices
+      tags:
+      - Admin Platform Base Price
+    put:
+      consumes:
+      - application/json
+      description: Update base price for a platform
+      parameters:
+      - description: Platform base price payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AdminUpdatePlatformBasePriceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.AdminUpdatePlatformBasePriceResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Platform base price not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Admin update platform base price
+      tags:
+      - Admin Platform Base Price
   /api/v1/admin/platform-settings:
     get:
       description: List platform settings (admin)
@@ -4677,7 +4917,7 @@ paths:
         in: query
         name: title
         type: string
-      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|cancelled|cancelled-by-admin)
+      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|expired|cancelled|cancelled-by-admin)
         in: query
         name: status
         type: string
@@ -4748,8 +4988,8 @@ paths:
       - Campaigns
   /api/v1/campaigns/{id}/cancel:
     post:
-      description: Cancel a campaign that is waiting for approval and refund reserved
-        budget
+      description: Cancel a campaign that is waiting for approval, or approved but
+        not yet scheduled to start
       parameters:
       - description: Campaign ID
         in: path
@@ -5748,6 +5988,46 @@ paths:
       summary: Preview proforma invoice
       tags:
       - Payments
+  /api/v1/payments/proforma/preview-by-amount:
+    get:
+      description: Returns proforma invoice data using supplied amount (no receipt).
+      parameters:
+      - description: Amount with tax (Toman)
+        in: query
+        name: amount
+        required: true
+        type: integer
+      - description: Language (FA or EN)
+        in: query
+        name: lang
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Preview generated
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ProformaPreviewResponse'
+              type: object
+        "400":
+          description: Invalid amount or language
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Preview proforma invoice by amount
+      tags:
+      - Payments
   /api/v1/platform-settings:
     get:
       description: List platform settings (authenticated)
@@ -5803,6 +6083,10 @@ paths:
             $ref: '#/definitions/dto.APIResponse'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Duplicate name
           schema:
             $ref: '#/definitions/dto.APIResponse'
         "500":
