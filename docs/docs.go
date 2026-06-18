@@ -15,6 +15,170 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/admin/access-control/requests": {
+            "post": {
+                "description": "Create a maker-checker access-control change request for another admin (roles/allow/deny overrides)",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Access Control"
+                ],
+                "summary": "Create ACL change request (maker)",
+                "parameters": [
+                    {
+                        "description": "Requested roles/permissions for target admin",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminACLChangeRequestCreate"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Request created (uuid, status)",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Admin authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Failed to create request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/access-control/requests/{uuid}/decision": {
+            "post": {
+                "description": "Checker approves or rejects a pending ACL change request",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Access Control"
+                ],
+                "summary": "Approve or reject ACL change request (checker)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Request UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "approve|reject (default approve)",
+                        "name": "action",
+                        "in": "query"
+                    },
+                    {
+                        "description": "Optional reason",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminACLChangeDecision"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Request updated (uuid, status)",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "object",
+                                            "additionalProperties": {
+                                                "type": "string"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID or body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Admin authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden (self-approval or permission denied)",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Request not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Request not in pending state",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Approval failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/auth/captcha/init": {
             "get": {
                 "description": "Initialize rotate captcha for admin login (returns base64 images and challenge ID)",
@@ -159,7 +323,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected)",
+                        "description": "Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected|expired)",
                         "name": "status",
                         "in": "query"
                     },
@@ -1477,6 +1641,106 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Receipt not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/platform-base-prices": {
+            "get": {
+                "description": "List current platform base prices",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Platform Base Price"
+                ],
+                "summary": "Admin list platform base prices",
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminListPlatformBasePricesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update base price for a platform",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin Platform Base Price"
+                ],
+                "summary": "Admin update platform base price",
+                "parameters": [
+                    {
+                        "description": "Platform base price payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AdminUpdatePlatformBasePriceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.AdminUpdatePlatformBasePriceResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Platform base price not found",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -3426,7 +3690,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|cancelled|cancelled-by-admin)",
+                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|running|executed|expired|cancelled|cancelled-by-admin)",
                         "name": "status",
                         "in": "query"
                     }
@@ -3855,7 +4119,7 @@ const docTemplate = `{
         },
         "/api/v1/campaigns/{id}/cancel": {
             "post": {
-                "description": "Cancel a campaign that is waiting for approval and refund reserved budget",
+                "description": "Cancel a campaign that is waiting for approval, or approved but not yet scheduled to start",
                 "produces": [
                     "application/json"
                 ],
@@ -5117,6 +5381,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/payments/proforma/preview-by-amount": {
+            "get": {
+                "description": "Returns proforma invoice data using supplied amount (no receipt).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Payments"
+                ],
+                "summary": "Preview proforma invoice by amount",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Amount with tax (Toman)",
+                        "name": "amount",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Language (FA or EN)",
+                        "name": "lang",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Preview generated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ProformaPreviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid amount or language",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/platform-settings": {
             "get": {
                 "description": "List platform settings (authenticated)",
@@ -5210,6 +5539,12 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Duplicate name",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -6043,6 +6378,46 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminACLChangeDecision": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.AdminACLChangeRequestCreate": {
+            "type": "object",
+            "required": [
+                "target_admin_id"
+            ],
+            "properties": {
+                "allow": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "deny": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "roles": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "target_admin_id": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.AdminAddPlatformSettingsMetadataRequest": {
             "type": "object",
             "required": [
@@ -6868,6 +7243,20 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AdminListPlatformBasePricesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.AdminPlatformBasePriceItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.AdminListPlatformSettingsResponse": {
             "type": "object",
             "properties": {
@@ -6907,6 +7296,17 @@ const docTemplate = `{
                 },
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.AdminPlatformBasePriceItem": {
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
                 }
             }
         },
@@ -7103,6 +7503,41 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/dto.AdminUpdateLineNumberItem"
                     }
+                }
+            }
+        },
+        "dto.AdminUpdatePlatformBasePriceRequest": {
+            "type": "object",
+            "required": [
+                "platform",
+                "price"
+            ],
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "enum": [
+                        "sms",
+                        "rubika",
+                        "bale",
+                        "splus"
+                    ]
+                },
+                "price": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AdminUpdatePlatformBasePriceResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "platform": {
+                    "type": "string"
+                },
+                "price": {
+                    "type": "integer"
                 }
             }
         },
@@ -8106,7 +8541,9 @@ const docTemplate = `{
                     "type": "string",
                     "enum": [
                         "FA",
-                        "EN"
+                        "EN",
+                        "fa",
+                        "en"
                     ]
                 }
             }
@@ -9521,6 +9958,10 @@ const docTemplate = `{
         "dto.TransactionHistoryItem": {
             "type": "object",
             "properties": {
+                "agency_share_with_tax": {
+                    "description": "Agency share with tax (when applicable)",
+                    "type": "integer"
+                },
                 "amount": {
                     "description": "Amount in Tomans",
                     "type": "integer"
@@ -9545,6 +9986,10 @@ const docTemplate = `{
                     "description": "Currency (usually TMN)",
                     "type": "string"
                 },
+                "customer_credit": {
+                    "description": "Customer credit portion (when applicable)",
+                    "type": "integer"
+                },
                 "datetime": {
                     "description": "When the transaction occurred",
                     "type": "string"
@@ -9560,6 +10005,10 @@ const docTemplate = `{
                 },
                 "operation": {
                     "description": "Operation name for display",
+                    "type": "string"
+                },
+                "source": {
+                    "description": "Metadata source key",
                     "type": "string"
                 },
                 "status": {
