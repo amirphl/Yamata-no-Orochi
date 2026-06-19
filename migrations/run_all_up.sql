@@ -341,5 +341,14 @@
 \echo 'Running 0111_create_bundle_audience_selections.sql...'
 \i migrations/0111_create_bundle_audience_selections.sql
 
+\echo 'Running 0112_create_audience_scores.sql...'
+\i migrations/0112_create_audience_scores.sql
+
+\echo 'Running 0113_create_src_layer_all_stats.sql...'
+\i migrations/0113_create_src_layer_all_stats.sql
+
+\echo 'Running 0114_add_normalized_score_to_audience_profiles.sql...'
+\i migrations/0114_add_normalized_score_to_audience_profiles.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
