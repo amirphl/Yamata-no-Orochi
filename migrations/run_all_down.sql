@@ -3,8 +3,17 @@
 
 \echo 'Starting database rollback...'
 
-\echo 'Running 0111_remove_bundle_id_and_phase_from_campaigns_down.sql...'
-\i migrations/0111_remove_bundle_id_and_phase_from_campaigns_down.sql
+\echo 'Running 0114_add_normalized_score_to_audience_profiles_down.sql...'
+\i migrations/0114_add_normalized_score_to_audience_profiles_down.sql
+
+\echo 'Running 0113_create_src_layer_all_stats_down.sql...'
+\i migrations/0113_create_src_layer_all_stats_down.sql
+
+\echo 'Running 0112_create_audience_scores_down.sql...'
+\i migrations/0112_create_audience_scores_down.sql
+
+\echo 'Running 0111_create_bundle_audience_selections_down.sql...'
+\i migrations/0111_create_bundle_audience_selections_down.sql
 
 \echo 'Running 0110_add_bundle_id_and_phase_to_campaigns_down.sql...'
 \i migrations/0110_add_bundle_id_and_phase_to_campaigns_down.sql
@@ -29,6 +38,9 @@
 
 \echo 'Running 0103_add_business_license_and_website_to_platform_settings_down.sql...'
 \i migrations/0103_add_business_license_and_website_to_platform_settings_down.sql
+
+\echo 'Running 0102_add_campaign_test_send_audit_action_down.sql...'
+\i migrations/0102_add_campaign_test_send_audit_action_down.sql
 
 \echo 'Running 0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids_down.sql...'
 \i migrations/0101_rename_campaign_status_jobs_customer_ids_to_tracking_ids_down.sql
