@@ -135,9 +135,34 @@ make build     # build bin/yamata-no-orochi
 make fmt
 make vet
 make lint
+make ci        # local version of the GitHub CI checks
+make docker-build
 ```
 
 Note: `make run-dev-simple` currently expects `scripts/run-dev.sh`, which is not present in this repository snapshot.
+
+## GitHub Automation
+
+GitHub Actions is configured for three automation layers:
+
+- `CI`: runs formatting checks, `go vet`, a maintained subset of tests, binary build, and production Docker build on every push and pull request.
+- `CD`: after successful CI on `main` or `master`, publishes the production image to `ghcr.io/<owner>/yamata-no-orochi` and uploads a deployment manifest artifact.
+- `Update`: Dependabot opens automated dependency PRs for Go modules, Docker dependencies, and GitHub Actions. Patch and minor updates can auto-merge after CI passes.
+
+The maintained CI test subset currently covers:
+
+- `./app/services`
+- `./app/scheduler`
+
+Deployment remains manual by design. The intended production flow is:
+
+```bash
+git pull
+docker build -f docker/Dockerfile.production -t yamata-no-orochi:local .
+./scripts/deploy-beta.sh
+```
+
+Additional GitHub CI/CD details and recommended repository settings are documented in [docs/GITHUB_CICD.md](docs/GITHUB_CICD.md).
 
 ## Database Migrations
 

@@ -76,6 +76,7 @@ type TokenServiceImpl struct {
 	useRSAKeys      bool
 	issuer          string
 	audience        string
+	revokedTokens   map[string]time.Time
 	mu              sync.RWMutex // Mutex for concurrent access to revokedTokens
 }
 
@@ -113,6 +114,7 @@ func NewTokenService(accessTokenTTL, refreshTokenTTL time.Duration, issuer, audi
 		useRSAKeys:      useRSAKeys,
 		issuer:          issuer,
 		audience:        audience,
+		revokedTokens:   make(map[string]time.Time),
 	}, nil
 }
 
@@ -542,32 +544,40 @@ func (s *TokenServiceImpl) RefreshToken(refreshToken string) (newAccessToken, ne
 
 // RevokeToken marks a token as revoked (in a real implementation, you'd store this in a database)
 func (s *TokenServiceImpl) RevokeToken(token string) error {
+	claims, err := s.GetTokenClaims(token)
+	if err != nil {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// In a production environment, you would:
-	// 1. Validate the token
-	// 2. Extract the token ID (jti)
-	// 3. Store the token ID in a revocation list (Redis/database)
-	// 4. Set an expiration on the revoked token entry
-
-	// claims, err := s.ValidateToken(token)
-	// if err != nil {
-	// 	return fmt.Errorf("invalid token: %w", err)
-	// }
-
-	// For now, we'll just validate the token
-	// In production, you'd add the token ID to a revocation list
-	// TODO:
+	s.cleanupExpiredRevocationsLocked()
+	s.revokedTokens[claims.TokenID] = claims.ExpiresAt
 
 	return nil
 }
 
 // GetTokenClaims extracts claims from a token without full validation
 func (s *TokenServiceImpl) GetTokenClaims(token string) (*TokenClaims, error) {
-	// Use ValidateToken to ensure proper validation and security
-	// TODO:
-	return nil, nil
+	parsedToken, err := s.parseToken(token)
+	if err != nil {
+		if strings.Contains(err.Error(), "expired") || strings.Contains(err.Error(), "exp") {
+			return nil, ErrTokenExpired
+		}
+		return nil, ErrTokenInvalid
+	}
+
+	if !parsedToken.Valid {
+		return nil, ErrTokenInvalid
+	}
+
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+
+	return mapCustomerTokenClaims(claims)
 }
 
 // IsTokenRevoked checks if a token has been revoked
@@ -576,15 +586,97 @@ func (s *TokenServiceImpl) IsTokenRevoked(token string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Extract token ID from the token
-	// claims, err := s.GetTokenClaims(token)
-	// if err != nil {
-	// 	return true // Consider invalid tokens as revoked
-	// }
+	claims, err := s.getTokenClaimsUnsafe(token)
+	if err != nil {
+		return false
+	}
 
-	// TODO:
+	expiry, ok := s.revokedTokens[claims.TokenID]
+	if !ok {
+		return false
+	}
 
-	return false
+	now := utils.UTCNow()
+	return now.Before(expiry) || now.Equal(expiry)
+}
+
+func (s *TokenServiceImpl) parseToken(token string) (*jwt.Token, error) {
+	if s.useRSAKeys {
+		return jwt.Parse(token, func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return s.publicKey, nil
+		})
+	}
+
+	return jwt.Parse(token, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return s.secretKey, nil
+	})
+}
+
+func (s *TokenServiceImpl) getTokenClaimsUnsafe(token string) (*TokenClaims, error) {
+	parsedToken, err := s.parseToken(token)
+	if err != nil {
+		return nil, err
+	}
+	if !parsedToken.Valid {
+		return nil, ErrTokenInvalid
+	}
+
+	claims, ok := parsedToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+
+	return mapCustomerTokenClaims(claims)
+}
+
+func (s *TokenServiceImpl) cleanupExpiredRevocationsLocked() {
+	now := utils.UTCNow()
+	for tokenID, expiresAt := range s.revokedTokens {
+		if now.After(expiresAt) {
+			delete(s.revokedTokens, tokenID)
+		}
+	}
+}
+
+func mapCustomerTokenClaims(claims jwt.MapClaims) (*TokenClaims, error) {
+	customerID, ok := claims["customer_id"].(float64)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+
+	tokenType, ok := claims["token_type"].(string)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+
+	tokenID, ok := claims["jti"].(string)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+
+	issuedAt, ok := claims["iat"].(float64)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+
+	expiresAt, ok := claims["exp"].(float64)
+	if !ok {
+		return nil, ErrTokenInvalid
+	}
+
+	return &TokenClaims{
+		CustomerID: uint(customerID),
+		TokenType:  tokenType,
+		TokenID:    tokenID,
+		IssuedAt:   time.Unix(int64(issuedAt), 0),
+		ExpiresAt:  time.Unix(int64(expiresAt), 0),
+	}, nil
 }
 
 // generateToken creates a signed JWT token
