@@ -456,4 +456,7 @@ type ShortLinkRepository interface {
 type ShortLinkClickRepository interface {
 	Repository[models.ShortLinkClick, any]
 	ByID(ctx context.Context, id uint) (*models.ShortLinkClick, error)
+	// DistinctShortLinkUIDsByCampaignID returns the distinct short-link UIDs (codes) that
+	// received at least one click for the given campaign. Used for the campaign click report.
+	DistinctShortLinkUIDsByCampaignID(ctx context.Context, campaignID uint) ([]string, error)
 }
