@@ -79,6 +79,18 @@ func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.Audien
 	if f.CreatedBefore != nil {
 		db = db.Where("created_at < ?", *f.CreatedBefore)
 	}
+	if ns := f.NormalizedScore; ns != nil {
+		switch {
+		case ns.LTE != nil && ns.OrGTE != nil:
+			db = db.Where("normalized_score <= ? OR normalized_score >= ?", *ns.LTE, *ns.OrGTE)
+		case ns.GTE != nil && ns.LTE != nil:
+			db = db.Where("normalized_score >= ? AND normalized_score <= ?", *ns.GTE, *ns.LTE)
+		case ns.GTE != nil:
+			db = db.Where("normalized_score >= ?", *ns.GTE)
+		case ns.LTE != nil:
+			db = db.Where("normalized_score <= ?", *ns.LTE)
+		}
+	}
 	return db
 }
 
