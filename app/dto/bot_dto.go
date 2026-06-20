@@ -116,3 +116,20 @@ type BotAllocateShortLinksResponse struct {
 	Message string   `json:"message"`
 	Codes   []string `json:"codes"`
 }
+
+// BotAudienceUIDItem pairs an audience profile UID with its short-link code.
+// Code is empty string when the campaign has no short link.
+type BotAudienceUIDItem struct {
+	UID  string `json:"uid"`
+	Code string `json:"code"`
+}
+
+// BotPushAudienceUIDsRequest carries a batch of uid/code pairs for a campaign.
+type BotPushAudienceUIDsRequest struct {
+	Items []BotAudienceUIDItem `json:"items" validate:"required,min=1,dive"`
+}
+
+// BotPushAudienceUIDsResponse acknowledges a successful push.
+type BotPushAudienceUIDsResponse struct {
+	Message string `json:"message"`
+}
