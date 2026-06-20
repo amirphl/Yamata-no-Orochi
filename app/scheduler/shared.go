@@ -377,3 +377,64 @@ func hashTags(tags []string) string {
 	h := sha1.Sum([]byte(strings.Join(cp, ",")))
 	return hex.EncodeToString(h[:])
 }
+
+// gradesNeedScoreFilter returns true when AudienceGrades specifies a subset of [A,B,C],
+// meaning a normalized_score filter must be applied during audience selection.
+func gradesNeedScoreFilter(grades []string) bool {
+	if len(grades) == 0 {
+		return false
+	}
+	set := make(map[string]struct{}, len(grades))
+	for _, g := range grades {
+		set[strings.ToUpper(strings.TrimSpace(g))] = struct{}{}
+	}
+	_, hasA := set["A"]
+	_, hasB := set["B"]
+	_, hasC := set["C"]
+	return !(hasA && hasB && hasC)
+}
+
+// gradesToScoreConstraint converts a grade set plus resolved percentiles into a
+// NormalizedScoreConstraint. Grade semantics:
+//
+//	A         → score >= p66
+//	B         → p33 <= score <= p66
+//	C         → score <= p33
+//	A+B       → score >= p33
+//	B+C       → score <= p66
+//	A+C       → score <= p33 OR score >= p66
+//	A+B+C / ∅ → no constraint
+func gradesToScoreConstraint(grades []string, p33, p66 float64) *models.NormalizedScoreConstraint {
+	set := make(map[string]struct{}, len(grades))
+	for _, g := range grades {
+		set[strings.ToUpper(strings.TrimSpace(g))] = struct{}{}
+	}
+	_, hasA := set["A"]
+	_, hasB := set["B"]
+	_, hasC := set["C"]
+
+	switch {
+	case hasA && hasB && hasC:
+		return nil
+	case hasA && hasB:
+		v := p33
+		return &models.NormalizedScoreConstraint{GTE: &v}
+	case hasB && hasC:
+		v := p66
+		return &models.NormalizedScoreConstraint{LTE: &v}
+	case hasA && hasC:
+		lte, gte := p33, p66
+		return &models.NormalizedScoreConstraint{LTE: &lte, OrGTE: &gte}
+	case hasA:
+		v := p66
+		return &models.NormalizedScoreConstraint{GTE: &v}
+	case hasB:
+		lo, hi := p33, p66
+		return &models.NormalizedScoreConstraint{GTE: &lo, LTE: &hi}
+	case hasC:
+		v := p33
+		return &models.NormalizedScoreConstraint{LTE: &v}
+	default:
+		return nil
+	}
+}
