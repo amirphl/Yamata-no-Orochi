@@ -11,11 +11,12 @@ import (
 // PhoneNumber is optional and unique when present
 // UID is a required unique identifier (external/system specific)
 type AudienceProfile struct {
-	ID          int64         `gorm:"primaryKey;autoIncrement;type:bigserial" json:"id"`
-	UID         string        `gorm:"size:255;not null;uniqueIndex:uk_audience_profiles_uid;index:idx_audience_profiles_uid" json:"uid"`
-	PhoneNumber *string       `gorm:"size:20;uniqueIndex:uk_audience_profiles_phone_number;index:idx_audience_profiles_phone_number" json:"phone_number,omitempty"`
-	Tags        pq.Int32Array `gorm:"type:integer[];index:idx_audience_profiles_tag_gin,using:gin" json:"tags"`
-	Color       string        `gorm:"size:20;not null;index:idx_audience_profiles_color" json:"color"`
+	ID              int64         `gorm:"primaryKey;autoIncrement;type:bigserial" json:"id"`
+	UID             string        `gorm:"size:255;not null;uniqueIndex:uk_audience_profiles_uid;index:idx_audience_profiles_uid" json:"uid"`
+	PhoneNumber     *string       `gorm:"size:20;uniqueIndex:uk_audience_profiles_phone_number;index:idx_audience_profiles_phone_number" json:"phone_number,omitempty"`
+	Tags            pq.Int32Array `gorm:"type:integer[];index:idx_audience_profiles_tag_gin,using:gin" json:"tags"`
+	Color           string        `gorm:"size:20;not null;index:idx_audience_profiles_color" json:"color"`
+	NormalizedScore *float64      `gorm:"column:normalized_score" json:"normalized_score,omitempty"`
 
 	CreatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_audience_profiles_created_at" json:"created_at"`
 	UpdatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"updated_at"`
@@ -25,14 +26,28 @@ func (AudienceProfile) TableName() string {
 	return "audience_profiles"
 }
 
+// NormalizedScoreConstraint expresses a WHERE predicate on normalized_score.
+//
+// Exactly one of the following patterns should be set per query:
+//   - GTE only:       normalized_score >= GTE
+//   - LTE only:       normalized_score <= LTE
+//   - GTE + LTE:      GTE <= normalized_score <= LTE
+//   - LTE + OrGTE:    normalized_score <= LTE OR normalized_score >= OrGTE
+type NormalizedScoreConstraint struct {
+	GTE   *float64
+	LTE   *float64
+	OrGTE *float64 // paired with LTE to form OR pattern
+}
+
 // AudienceProfileFilter represents filter criteria for audience profile queries
 // For array fields, use the *Contains filters to match any single value presence
 type AudienceProfileFilter struct {
-	ID            *uint
-	UID           *string
-	PhoneNumber   *string
-	Tags          *pq.Int32Array
-	Color         *string
-	CreatedAfter  *time.Time
-	CreatedBefore *time.Time
+	ID              *uint
+	UID             *string
+	PhoneNumber     *string
+	Tags            *pq.Int32Array
+	Color           *string
+	CreatedAfter    *time.Time
+	CreatedBefore   *time.Time
+	NormalizedScore *NormalizedScoreConstraint
 }
