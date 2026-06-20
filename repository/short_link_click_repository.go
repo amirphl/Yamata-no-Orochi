@@ -65,3 +65,13 @@ func (r *ShortLinkClickRepositoryImpl) Exists(ctx context.Context, filter any) (
 	}
 	return c > 0, nil
 }
+
+func (r *ShortLinkClickRepositoryImpl) DistinctShortLinkUIDsByCampaignID(ctx context.Context, campaignID uint) ([]string, error) {
+	db := excludeAutomatedClickTraffic(r.getDB(ctx))
+	var uids []string
+	err := db.Model(&models.ShortLinkClick{}).
+		Where("campaign_id = ? AND uid IS NOT NULL AND uid != ''", campaignID).
+		Distinct("uid").
+		Pluck("uid", &uids).Error
+	return uids, err
+}
