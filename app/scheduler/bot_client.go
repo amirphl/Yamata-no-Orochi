@@ -29,6 +29,7 @@ type BotClient interface {
 	DownloadTargetAudienceExcelFile(ctx context.Context, token string, campaignID uint) ([]byte, error)
 	AllocateShortLinks(ctx context.Context, token string, req *dto.BotAllocateShortLinksRequest) ([]string, error)
 	PushCampaignStatistics(ctx context.Context, processedCampaignID uint, stats map[string]any) error
+	PushCampaignAudienceUIDs(ctx context.Context, campaignID uint, uids, codes []string) error
 	CreateShortLinks(ctx context.Context, token string, reqBody *dto.BotCreateShortLinksRequest) error
 	DownloadCampaignMedia(ctx context.Context, token, mediaUUID string) (string, error)
 }
@@ -298,6 +299,55 @@ func (c *httpBotClient) PushCampaignStatistics(ctx context.Context, campaignID u
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return statusErr("push statistics", resp)
+	}
+	return nil
+}
+
+const audienceUIDChunkSize = 5000
+
+// PushCampaignAudienceUIDs sends all audience UIDs (and their short-link codes) to the
+// server in chunks of audienceUIDChunkSize. It logs in once and reuses the token for all
+// chunks so that a 250K-UID campaign only incurs one auth round-trip.
+func (c *httpBotClient) PushCampaignAudienceUIDs(ctx context.Context, campaignID uint, uids, codes []string) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	token, err := c.Login(ctx)
+	if err != nil {
+		return fmt.Errorf("push audience UIDs login: %w", err)
+	}
+	endpoint := c.endpoint(fmt.Sprintf("/api/v1/bot/campaigns/%d/audience-uids", campaignID))
+	for start := 0; start < len(uids); start += audienceUIDChunkSize {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("push audience UIDs context cancelled at offset %d: %w", start, err)
+		}
+		end := min(start+audienceUIDChunkSize, len(uids))
+		items := make([]dto.BotAudienceUIDItem, end-start)
+		for i, uid := range uids[start:end] {
+			code := ""
+			if start+i < len(codes) {
+				code = codes[start+i]
+			}
+			items[i] = dto.BotAudienceUIDItem{UID: uid, Code: code}
+		}
+		payload, err := marshalJSON(dto.BotPushAudienceUIDsRequest{Items: items})
+		if err != nil {
+			return fmt.Errorf("push audience UIDs marshal chunk [%d,%d): %w", start, end, err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+		if err != nil {
+			return fmt.Errorf("push audience UIDs build request chunk [%d,%d): %w", start, end, err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := c.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("push audience UIDs chunk [%d,%d): %w", start, end, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return fmt.Errorf("push audience UIDs chunk [%d,%d) http status: %d", start, end, resp.StatusCode)
+		}
 	}
 	return nil
 }
