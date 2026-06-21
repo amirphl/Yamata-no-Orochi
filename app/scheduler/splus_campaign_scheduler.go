@@ -33,15 +33,16 @@ const (
 )
 
 type SplusCampaignScheduler struct {
-	audRepo  repository.AudienceProfileRepository
-	tagRepo  repository.TagRepository
-	sentRepo repository.SentSplusMessageRepository
-	pcRepo   repository.ProcessedCampaignRepository
-	jobRepo  repository.CampaignStatusJobRepository
-	resRepo  repository.SplusStatusResultRepository
-	notifier NotificationSender
-	logger   *log.Logger
-	interval time.Duration
+	audRepo   repository.AudienceProfileRepository
+	tagRepo   repository.TagRepository
+	sentRepo  repository.SentSplusMessageRepository
+	pcRepo    repository.ProcessedCampaignRepository
+	jobRepo   repository.CampaignStatusJobRepository
+	resRepo   repository.SplusStatusResultRepository
+	statsRepo repository.SrcLayerAllStatsRepository
+	notifier  NotificationSender
+	logger    *log.Logger
+	interval  time.Duration
 
 	messageDelay time.Duration
 
@@ -68,6 +69,7 @@ func NewSplusCampaignScheduler(
 	pcRepo repository.ProcessedCampaignRepository,
 	jobRepo repository.CampaignStatusJobRepository,
 	resRepo repository.SplusStatusResultRepository,
+	statsRepo repository.SrcLayerAllStatsRepository,
 	notifier NotificationSender,
 	db *gorm.DB,
 	logger *log.Logger,
@@ -85,20 +87,21 @@ func NewSplusCampaignScheduler(
 	}
 
 	s := &SplusCampaignScheduler{
-		audRepo:       audRepo,
-		tagRepo:       tagRepo,
-		sentRepo:      sentRepo,
-		pcRepo:        pcRepo,
-		jobRepo:       jobRepo,
-		resRepo:       resRepo,
-		notifier:      notifier,
-		logger:        logger,
-		db:            db,
-		interval:      interval,
-		messageDelay:  messageDelay,
-		adminCfg:      adminCfg,
-		splusCfg:      splusCfg,
-		botCfg:        botCfg,
+		audRepo:             audRepo,
+		tagRepo:             tagRepo,
+		sentRepo:            sentRepo,
+		pcRepo:              pcRepo,
+		jobRepo:             jobRepo,
+		resRepo:             resRepo,
+		statsRepo:           statsRepo,
+		notifier:            notifier,
+		logger:              logger,
+		db:                  db,
+		interval:            interval,
+		messageDelay:        messageDelay,
+		adminCfg:            adminCfg,
+		splusCfg:            splusCfg,
+		botCfg:              botCfg,
 		botClient:           newHTTPBotClient(botCfg),
 		splusClient:         newHTTPSplusClient(splusCfg),
 		audienceCache:       NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
@@ -462,6 +465,15 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 	}
 	s.logger.Printf("Splus scheduler: campaign id=%d moved to executed", c.ID)
 
+	go func(campaignID uint, uids, codes []string) {
+		pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		if err := s.botClient.PushCampaignAudienceUIDs(pushCtx, campaignID, uids, codes); err != nil {
+			s.logger.Printf("Splus scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err)
+			s.notifyAdmin(fmt.Sprintf("Splus Scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err))
+		}
+	}(c.ID, uids, codes)
+
 	return nil
 }
 
@@ -550,6 +562,26 @@ func buildSplusStatusResultMetadata(item SplusStatusResponse, normalizedStatus m
 	return data
 }
 
+func (s *SplusCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error) {
+	if !gradesNeedScoreFilter(c.AudienceGrades) {
+		return nil, nil
+	}
+	if s.statsRepo == nil {
+		s.logger.Printf("resolveScoreConstraint: statsRepo not configured, skipping score filter for campaign id=%d", c.ID)
+		return nil, nil
+	}
+	percentiles, err := s.statsRepo.FetchPercentiles(ctx, c.Level1, c.Level2s, c.Level3s)
+	if err != nil {
+		return nil, fmt.Errorf("fetch percentiles for campaign id=%d: %w", c.ID, err)
+	}
+	if percentiles == nil {
+		s.logger.Printf("resolveScoreConstraint: no stats row found for campaign id=%d levels, skipping score filter", c.ID)
+		return nil, nil
+	}
+	s.logger.Printf("resolveScoreConstraint: campaign id=%d grades=%v p33=%.4f p66=%.4f", c.ID, c.AudienceGrades, percentiles.P33, percentiles.P66)
+	return gradesToScoreConstraint(c.AudienceGrades, percentiles.P33, percentiles.P66), nil
+}
+
 func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 	ctx context.Context,
 	c dto.BotGetCampaignResponse,
@@ -588,6 +620,12 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 	s.logger.Printf("fetchSplusAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
 	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
 
+	scoreConstraint, err := s.resolveScoreConstraint(ctx, c)
+	if err != nil {
+		s.logger.Printf("fetchSplusAudiencePhones resolve score constraint failed: campaign_id=%d err=%v", c.ID, err)
+		return nil, err
+	}
+
 	const limit = 10000000
 
 	tagsHash := hashTags(c.Tags)
@@ -609,7 +647,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 
 		// Splus campaigns intentionally do not segment audiences by color (white/pink).
 		// Color-based routing is SMS-specific, so Splus always queries by tag criteria only.
-		filter := models.AudienceProfileFilter{Tags: &tagIDs}
+		filter := models.AudienceProfileFilter{Tags: &tagIDs, NormalizedScore: scoreConstraint}
 		candidates, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
 			s.logger.Printf("fetchSplusAudiencePhones fetch candidates failed: campaign_id=%d err=%v", c.ID, err)
@@ -742,6 +780,7 @@ func (s *SplusCampaignScheduler) selectSplusTagAudiences(
 	tagIDs pq.Int32Array,
 	numAudiences int64,
 	exclude map[int64]struct{},
+	scoreConstraint *models.NormalizedScoreConstraint,
 ) (phones []string, ids []int64, uids []string, err error) {
 	const limit = 10000000
 
@@ -749,7 +788,7 @@ func (s *SplusCampaignScheduler) selectSplusTagAudiences(
 	ids = make([]int64, 0, numAudiences)
 	uids = make([]string, 0, numAudiences)
 
-	candidates, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{Tags: &tagIDs}, "id DESC", limit, 0)
+	candidates, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{Tags: &tagIDs, NormalizedScore: scoreConstraint}, "id DESC", limit, 0)
 	if err != nil {
 		s.logger.Printf("selectSplusTagAudiences fetch candidates failed: campaign_id=%d err=%v", campaignID, err)
 		return nil, nil, nil, err
@@ -818,6 +857,12 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 	}
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
 
+	scoreConstraint, err := s.resolveScoreConstraint(ctx, c)
+	if err != nil {
+		s.logger.Printf("fetchSplusAudiencePhonesByBundle resolve score constraint failed: campaign_id=%d err=%v", c.ID, err)
+		return nil, err
+	}
+
 	// Load the cumulative set of audience IDs already used by earlier campaigns in this bundle.
 	var exclude map[int64]struct{}
 	bundleSel, err := s.bundleAudienceCache.Latest(ctx, c.CustomerID, bundleID)
@@ -832,7 +877,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 		s.logger.Printf("fetchSplusAudiencePhonesByBundle bundle selection miss: campaign_id=%d bundle_id=%d", c.ID, bundleID)
 	}
 
-	phones, ids, uids, err := s.selectSplusTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude)
+	phones, ids, uids, err := s.selectSplusTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, scoreConstraint)
 	if err != nil {
 		return nil, err
 	}
