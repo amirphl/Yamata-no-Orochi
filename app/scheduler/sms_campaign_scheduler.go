@@ -31,15 +31,16 @@ const (
 )
 
 type SMSCampaignScheduler struct {
-	audRepo  repository.AudienceProfileRepository
-	tagRepo  repository.TagRepository
-	sentRepo repository.SentSMSRepository
-	pcRepo   repository.ProcessedCampaignRepository
-	jobRepo  repository.CampaignStatusJobRepository
-	resRepo  repository.SMSStatusResultRepository
-	notifier NotificationSender
-	logger   *log.Logger
-	interval time.Duration
+	audRepo   repository.AudienceProfileRepository
+	tagRepo   repository.TagRepository
+	sentRepo  repository.SentSMSRepository
+	pcRepo    repository.ProcessedCampaignRepository
+	jobRepo   repository.CampaignStatusJobRepository
+	resRepo   repository.SMSStatusResultRepository
+	statsRepo repository.SrcLayerAllStatsRepository
+	notifier  NotificationSender
+	logger    *log.Logger
+	interval  time.Duration
 
 	db       *gorm.DB
 	adminCfg config.AdminConfig
@@ -52,7 +53,7 @@ type SMSCampaignScheduler struct {
 
 	schedulerName string
 
-	audienceCache      *AudienceCache
+	audienceCache       *AudienceCache
 	bundleAudienceCache *BundleAudienceCache
 }
 
@@ -70,6 +71,7 @@ func NewCampaignScheduler(
 	pcRepo repository.ProcessedCampaignRepository,
 	jobRepo repository.CampaignStatusJobRepository,
 	resRepo repository.SMSStatusResultRepository,
+	statsRepo repository.SrcLayerAllStatsRepository,
 	notifier NotificationSender,
 	db *gorm.DB,
 	logger *log.Logger,
@@ -87,18 +89,19 @@ func NewCampaignScheduler(
 	}
 
 	s := &SMSCampaignScheduler{
-		audRepo:       audRepo,
-		tagRepo:       tagRepo,
-		sentRepo:      sentRepo,
-		pcRepo:        pcRepo,
-		jobRepo:       jobRepo,
-		resRepo:       resRepo,
-		notifier:      notifier,
-		logger:        logger,
-		db:            db,
-		interval:      interval,
-		adminCfg:      adminCfg,
-		botCfg:        botCfg,
+		audRepo:             audRepo,
+		tagRepo:             tagRepo,
+		sentRepo:            sentRepo,
+		pcRepo:              pcRepo,
+		jobRepo:             jobRepo,
+		resRepo:             resRepo,
+		statsRepo:           statsRepo,
+		notifier:            notifier,
+		logger:              logger,
+		db:                  db,
+		interval:            interval,
+		adminCfg:            adminCfg,
+		botCfg:              botCfg,
 		botClient:           newHTTPBotClient(botCfg),
 		smsClient:           newHTTPPayamSMSClient(payamSMSCfg),
 		audienceCache:       NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
@@ -460,6 +463,15 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 	}
 	s.logger.Printf("SMS scheduler: campaign id=%d moved to executed", c.ID)
 
+	go func(campaignID uint, uids, codes []string) {
+		pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+		if err := s.botClient.PushCampaignAudienceUIDs(pushCtx, campaignID, uids, codes); err != nil {
+			s.logger.Printf("SMS scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err)
+			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err))
+		}
+	}(c.ID, uids, codes)
+
 	return nil
 }
 
@@ -484,6 +496,30 @@ func (s *SMSCampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse)
 		return fmt.Errorf("campaign platform is not sms")
 	}
 	return nil
+}
+
+// resolveScoreConstraint looks up the percentile thresholds from src_layer_all_stats
+// for the campaign's levels and converts AudienceGrades into a score filter.
+// Returns nil when no filter is needed (grades are empty or [A,B,C]) or when no
+// matching stats row exists (score filtering is skipped with a log warning).
+func (s *SMSCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error) {
+	if !gradesNeedScoreFilter(c.AudienceGrades) {
+		return nil, nil
+	}
+	if s.statsRepo == nil {
+		s.logger.Printf("resolveScoreConstraint: statsRepo not configured, skipping score filter for campaign id=%d", c.ID)
+		return nil, nil
+	}
+	percentiles, err := s.statsRepo.FetchPercentiles(ctx, c.Level1, c.Level2s, c.Level3s)
+	if err != nil {
+		return nil, fmt.Errorf("fetch percentiles for campaign id=%d: %w", c.ID, err)
+	}
+	if percentiles == nil {
+		s.logger.Printf("resolveScoreConstraint: no stats row found for campaign id=%d levels, skipping score filter", c.ID)
+		return nil, nil
+	}
+	s.logger.Printf("resolveScoreConstraint: campaign id=%d grades=%v p33=%.4f p66=%.4f", c.ID, c.AudienceGrades, percentiles.P33, percentiles.P66)
+	return gradesToScoreConstraint(c.AudienceGrades, percentiles.P33, percentiles.P66), nil
 }
 
 func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
@@ -525,6 +561,12 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 
 	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
 
+	scoreConstraint, err := s.resolveScoreConstraint(ctx, c)
+	if err != nil {
+		s.logger.Printf("fetchSMSAudiencePhones resolve score constraint failed: campaign_id=%d err=%v", c.ID, err)
+		return nil, err
+	}
+
 	const limit = 10000000
 
 	tagsHash := hashTags(c.Tags)
@@ -545,8 +587,9 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 		uids := make([]string, 0, numAudiences)
 
 		filter := models.AudienceProfileFilter{
-			Tags:  &tagIDs,
-			Color: utils.ToPtr("white"),
+			Tags:            &tagIDs,
+			Color:           utils.ToPtr("white"),
+			NormalizedScore: scoreConstraint,
 		}
 		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 		if err != nil {
@@ -578,8 +621,9 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 
 		if int64(len(phones)) < numAudiences {
 			filter := models.AudienceProfileFilter{
-				Tags:  &tagIDs,
-				Color: utils.ToPtr("pink"),
+				Tags:            &tagIDs,
+				Color:           utils.ToPtr("pink"),
+				NormalizedScore: scoreConstraint,
 			}
 			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
 			if err != nil {
@@ -700,6 +744,7 @@ func (s *SMSCampaignScheduler) selectTagAudiences(
 	tagIDs pq.Int32Array,
 	numAudiences int64,
 	exclude map[int64]struct{},
+	scoreConstraint *models.NormalizedScoreConstraint,
 ) (phones []string, ids []int64, uids []string, err error) {
 	const limit = 10000000
 
@@ -722,8 +767,9 @@ func (s *SMSCampaignScheduler) selectTagAudiences(
 	}
 
 	whites, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{
-		Tags:  &tagIDs,
-		Color: utils.ToPtr("white"),
+		Tags:            &tagIDs,
+		Color:           utils.ToPtr("white"),
+		NormalizedScore: scoreConstraint,
 	}, "id DESC", limit, 0)
 	if err != nil {
 		s.logger.Printf("selectTagAudiences fetch white failed: campaign_id=%d err=%v", campaignID, err)
@@ -740,8 +786,9 @@ func (s *SMSCampaignScheduler) selectTagAudiences(
 
 	if int64(len(phones)) < numAudiences {
 		pinks, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{
-			Tags:  &tagIDs,
-			Color: utils.ToPtr("pink"),
+			Tags:            &tagIDs,
+			Color:           utils.ToPtr("pink"),
+			NormalizedScore: scoreConstraint,
 		}, "id DESC", limit, 0)
 		if err != nil {
 			s.logger.Printf("selectTagAudiences fetch pink failed: campaign_id=%d err=%v", campaignID, err)
@@ -802,6 +849,12 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
 	}
 	s.logger.Printf("fetchSMSAudiencePhonesByBundle tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
 
+	scoreConstraint, err := s.resolveScoreConstraint(ctx, c)
+	if err != nil {
+		s.logger.Printf("fetchSMSAudiencePhonesByBundle resolve score constraint failed: campaign_id=%d err=%v", c.ID, err)
+		return nil, err
+	}
+
 	// Load the cumulative set of audience IDs already used by earlier campaigns in this bundle.
 	var exclude map[int64]struct{}
 	bundleSel, err := s.bundleAudienceCache.Latest(ctx, c.CustomerID, bundleID)
@@ -816,7 +869,7 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
 		s.logger.Printf("fetchSMSAudiencePhonesByBundle bundle selection miss: campaign_id=%d bundle_id=%d", c.ID, bundleID)
 	}
 
-	phones, ids, uids, err := s.selectTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude)
+	phones, ids, uids, err := s.selectTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, scoreConstraint)
 	if err != nil {
 		return nil, err
 	}
