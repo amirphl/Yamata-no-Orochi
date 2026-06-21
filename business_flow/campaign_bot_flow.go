@@ -29,6 +29,7 @@ type BotCampaignFlow interface {
 	UpdateAudienceSpec(ctx context.Context, req *dto.BotUpdateAudienceSpecRequest) (*dto.BotUpdateAudienceSpecResponse, error)
 	ResetAudienceSpec(ctx context.Context, req *dto.BotResetAudienceSpecRequest) (*dto.BotResetAudienceSpecResponse, error)
 	UpdateCampaignStatistics(ctx context.Context, campaignID uint, statistics map[string]any) (*dto.BotUpdateCampaignStatisticsResponse, error)
+	PushCampaignAudienceUIDs(ctx context.Context, campaignID uint, items []dto.BotAudienceUIDItem) error
 }
 
 type BotCampaignFlowImpl struct {
@@ -522,6 +523,25 @@ func (s *BotCampaignFlowImpl) ResetAudienceSpec(ctx context.Context, req *dto.Bo
 	}
 
 	return &dto.BotResetAudienceSpecResponse{Message: "Audience spec reset successfully"}, nil
+}
+
+const audienceUIDsTTL = 900 * 24 * time.Hour
+
+// PushCampaignAudienceUIDs appends a batch of audience uid/code pairs to the campaign's
+// file-backed store. Called repeatedly for large campaigns (one call per scheduler chunk).
+// The export flow de-duplicates by UID and treats files older than 900 days as expired.
+func (s *BotCampaignFlowImpl) PushCampaignAudienceUIDs(ctx context.Context, campaignID uint, items []dto.BotAudienceUIDItem) error {
+	if campaignID == 0 {
+		return NewBusinessError("VALIDATION_ERROR", "campaign_id must be greater than 0", nil)
+	}
+	if len(items) == 0 {
+		return nil
+	}
+
+	if err := appendCampaignAudienceUIDs(campaignID, items); err != nil {
+		return NewBusinessError("AUDIENCE_UIDS_STORE_FAILED", "Failed to store audience UIDs", err)
+	}
+	return nil
 }
 
 func readAudienceSpecFileByPlatform(path string) (audienceSpecByPlatformFile, error) {
