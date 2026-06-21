@@ -2,7 +2,9 @@
 package businessflow
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -41,6 +44,7 @@ type CampaignFlow interface {
 	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
 	CloneCampaign(ctx context.Context, req *dto.CloneCampaignRequest, metadata *ClientMetadata) (*dto.CloneCampaignResponse, error)
 	ExportCampaignReport(ctx context.Context, campaignID string) ([]byte, error)
+	ExportCampaignClickReport(ctx context.Context, campaignUUID string) ([]byte, error)
 	SendCampaignTestMessage(ctx context.Context, req *dto.SendCampaignTestMessageRequest, metadata *ClientMetadata) (*dto.SendCampaignTestMessageResponse, error)
 }
 
@@ -62,6 +66,7 @@ type CampaignFlowImpl struct {
 	pagePriceRepo         repository.PagePriceRepository
 	processedCampaignRepo repository.ProcessedCampaignRepository
 	smsStatusResultRepo   repository.SMSStatusResultRepository
+	shortLinkClickRepo    repository.ShortLinkClickRepository
 	notifier              services.NotificationService
 	adminConfig           config.AdminConfig
 	cacheConfig           config.CacheConfig
@@ -104,6 +109,7 @@ func NewCampaignFlow(
 	pagePriceRepo repository.PagePriceRepository,
 	processedCampaignRepo repository.ProcessedCampaignRepository,
 	smsStatusResultRepo repository.SMSStatusResultRepository,
+	shortLinkClickRepo repository.ShortLinkClickRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -132,6 +138,7 @@ func NewCampaignFlow(
 		pagePriceRepo:         pagePriceRepo,
 		processedCampaignRepo: processedCampaignRepo,
 		smsStatusResultRepo:   smsStatusResultRepo,
+		shortLinkClickRepo:    shortLinkClickRepo,
 		notifier:              notifier,
 		adminConfig:           adminConfig,
 		cacheConfig:           cacheConfig,
@@ -3717,4 +3724,75 @@ func stringValue(v *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*v)
+}
+
+// ExportCampaignClickReport builds a CSV with two columns - uid and clicked (true/false) -
+// for all audience members targeted by the campaign. UIDs are fetched from the campaign's
+// file-backed audience store, and click status is derived from short_link_clicks.
+func (s *CampaignFlowImpl) ExportCampaignClickReport(ctx context.Context, campaignUUID string) ([]byte, error) {
+	campaignUUID = strings.TrimSpace(campaignUUID)
+	if campaignUUID == "" {
+		return nil, NewBusinessError("CAMPAIGN_UUID_REQUIRED", "campaign uuid is required", ErrCampaignUUIDRequired)
+	}
+	parsed, err := uuid.Parse(campaignUUID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_UUID_INVALID", "campaign uuid is invalid", ErrCampaignUUIDRequired)
+	}
+
+	customerID, ok := ctx.Value(utils.CustomerIDKey).(uint)
+	if !ok || customerID == 0 {
+		return nil, NewBusinessError("MISSING_CUSTOMER_ID", "customer id is required", ErrCustomerNotFound)
+	}
+
+	campaign, err := getCampaign(ctx, s.campaignRepo, parsed.String(), customerID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "failed to lookup campaign", err)
+	}
+
+	allUIDs, uidToCode, err := readCampaignAudienceUIDs(campaign.ID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, NewBusinessError("AUDIENCE_REPORT_NOT_AVAILABLE", "audience report data is not available (may have expired or not yet pushed)", nil)
+		}
+		return nil, NewBusinessError("AUDIENCE_UIDS_FETCH_FAILED", "failed to fetch audience UIDs", err)
+	}
+	if len(allUIDs) == 0 {
+		return nil, NewBusinessError("AUDIENCE_REPORT_NOT_AVAILABLE", "audience report data is not available (may have expired or not yet pushed)", nil)
+	}
+
+	clickedCodes := make(map[string]struct{})
+	if len(uidToCode) > 0 {
+		codes, err := s.shortLinkClickRepo.DistinctShortLinkUIDsByCampaignID(ctx, campaign.ID)
+		if err != nil {
+			return nil, NewBusinessError("CLICKED_CODES_FETCH_FAILED", "failed to fetch clicked short-link codes", err)
+		}
+		for _, code := range codes {
+			clickedCodes[code] = struct{}{}
+		}
+	}
+
+	sort.Strings(allUIDs)
+
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
+	if err := w.Write([]string{"uid", "clicked"}); err != nil {
+		return nil, NewBusinessError("CSV_WRITE_FAILED", "failed to write csv header", err)
+	}
+	for _, uid := range allUIDs {
+		clicked := "false"
+		if code, ok := uidToCode[uid]; ok && code != "" {
+			if _, wasClicked := clickedCodes[code]; wasClicked {
+				clicked = "true"
+			}
+		}
+		if err := w.Write([]string{uid, clicked}); err != nil {
+			return nil, NewBusinessError("CSV_WRITE_FAILED", "failed to write csv row", err)
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, NewBusinessError("CSV_FLUSH_FAILED", "failed to flush csv", err)
+	}
+
+	return buf.Bytes(), nil
 }
