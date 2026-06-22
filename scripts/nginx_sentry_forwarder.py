@@ -100,7 +100,8 @@ class Tailer:
 
     def open(self) -> None:
         self.handle = open(self.path, "r", encoding="utf-8", errors="replace")
-        self.handle.seek(0, os.SEEK_END)
+        if self.handle.seekable():
+            self.handle.seek(0, os.SEEK_END)
         self._inode = os.fstat(self.handle.fileno()).st_ino
 
     def _rotated(self) -> bool:
