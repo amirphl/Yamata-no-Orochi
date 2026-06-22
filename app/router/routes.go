@@ -277,6 +277,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/summary", r.campaignHandler.GetApprovedRunningSummary)
 	campaigns.Get("/initiated/last", r.campaignHandler.GetLastInitiatedCampaign)
 	campaigns.Get("/:id/export", r.campaignHandler.ExportCampaignReport)
+	campaigns.Get("/:uuid/click-report", r.campaignHandler.ExportCampaignClickReport)
 	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
 
 	// Bundle routes (protected with authentication)
@@ -334,6 +335,7 @@ func (r *FiberRouter) SetupRoutes() {
 	botCampaigns.Post("/:id/running", r.campaignBotHandler.MoveCampaignToRunning)
 	botCampaigns.Post("/:id/statistics", r.campaignBotHandler.UpdateCampaignStatistics)
 	botCampaigns.Get("/:id/target-audience-excel-file", r.campaignBotHandler.DownloadTargetAudienceExcelFile)
+	botCampaigns.Post("/:id/audience-uids", r.campaignBotHandler.PushAudienceUIDs)
 
 	// Bot short-links routes (protected)
 	botShortLinks := api.Group("/bot/short-links")
