@@ -383,6 +383,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	botRepo := repository.NewBotRepository(db)
 	audienceProfileRepo := repository.NewAudienceProfileRepository(db)
 	tagRepo := repository.NewTagRepository(db)
+	srcLayerAllStatsRepo := repository.NewSrcLayerAllStatsRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
 	sentRubikaMessageRepo := repository.NewSentRubikaMessageRepository(db)
@@ -483,6 +484,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		pagePriceRepo,
 		processedCampaignRepo,
 		smsStatusResultRepo,
+		shortLinkClickRepo,
 		db,
 		rc,
 		notificationService,
@@ -724,6 +726,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			processedCampaignRepo,
 			campaignStatusJobRepo,
 			smsStatusResultRepo,
+			srcLayerAllStatsRepo,
 			notificationService,
 			db,
 			log.Default(),
@@ -743,6 +746,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			processedCampaignRepo,
 			campaignStatusJobRepo,
 			baleStatusResultRepo,
+			srcLayerAllStatsRepo,
 			notificationService,
 			db,
 			log.Default(),
@@ -763,6 +767,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			processedCampaignRepo,
 			campaignStatusJobRepo,
 			rubikaStatusResultRepo,
+			srcLayerAllStatsRepo,
 			notificationService,
 			db,
 			log.Default(),
@@ -783,6 +788,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			processedCampaignRepo,
 			campaignStatusJobRepo,
 			splusStatusResultRepo,
+			srcLayerAllStatsRepo,
 			notificationService,
 			db,
 			log.Default(),
