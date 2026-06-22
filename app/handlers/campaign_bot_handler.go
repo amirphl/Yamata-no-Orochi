@@ -23,6 +23,7 @@ type CampaignBotHandlerInterface interface {
 	MoveCampaignToRunning(c fiber.Ctx) error
 	DownloadTargetAudienceExcelFile(c fiber.Ctx) error
 	UpdateCampaignStatistics(c fiber.Ctx) error
+	PushAudienceUIDs(c fiber.Ctx) error
 }
 
 // CampaignBotHandler handles bot campaign-related HTTP requests
@@ -325,6 +326,46 @@ func (h *CampaignBotHandler) UpdateCampaignStatistics(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update campaign statistics", "UPDATE_CAMPAIGN_STATISTICS_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign statistics updated", res)
+}
+
+// PushAudienceUIDs stores a batch of audience uid/code pairs for a campaign.
+// @Summary Bot Push Campaign Audience UIDs
+// @Tags Bot Campaigns
+// @Accept json
+// @Produce json
+// @Param id path int true "Campaign ID"
+// @Param request body dto.BotPushAudienceUIDsRequest true "Audience UIDs batch"
+// @Success 200 {object} dto.APIResponse{data=dto.BotPushAudienceUIDsResponse}
+// @Failure 400 {object} dto.APIResponse
+// @Router /api/v1/bot/campaigns/{id}/audience-uids [post]
+func (h *CampaignBotHandler) PushAudienceUIDs(c fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.ParseUint(idStr, 10, 64)
+	if err != nil || id == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid campaign id", "INVALID_CAMPAIGN_ID", nil)
+	}
+	var req dto.BotPushAudienceUIDsRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+	if len(req.Items) == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "items must not be empty", "VALIDATION_ERROR", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/"+idStr+"/audience-uids", 60*time.Second)
+	defer cancel()
+	if err := h.campaignFlow.PushCampaignAudienceUIDs(ctx, uint(id), req.Items); err != nil {
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "VALIDATION_ERROR":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, be.Message, be.Code, nil)
+			case "AUDIENCE_UIDS_STORE_FAILED":
+				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to store audience UIDs", be.Code, nil)
+			}
+		}
+		log.Println("Push audience UIDs failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to push audience UIDs", "PUSH_AUDIENCE_UIDS_FAILED", nil)
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Audience UIDs stored", dto.BotPushAudienceUIDsResponse{Message: "Audience UIDs stored"})
 }
 
 func (h *CampaignBotHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint string, timeout time.Duration) (context.Context, context.CancelFunc) {
