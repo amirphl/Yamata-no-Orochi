@@ -32,6 +32,7 @@ type CampaignHandlerInterface interface {
 	CancelCampaign(c fiber.Ctx) error
 	CloneCampaign(c fiber.Ctx) error
 	ExportCampaignReport(c fiber.Ctx) error
+	ExportCampaignClickReport(c fiber.Ctx) error
 	SendCampaignTestMessage(c fiber.Ctx) error
 }
 
@@ -332,6 +333,56 @@ func (h *CampaignHandler) ExportCampaignReport(c fiber.Ctx) error {
 
 	filename := "campaign_report_" + campaignUUID + ".xlsx"
 	c.Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	c.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	return c.Send(data)
+}
+
+// ExportCampaignClickReport exports a CSV with uid,clicked columns for all audience members.
+// @Summary Export Campaign Click Report
+// @Description Export a CSV showing which targeted audience members clicked the campaign short link
+// @Tags Campaigns
+// @Produce text/csv
+// @Param uuid path string true "Campaign UUID"
+// @Success 200 {string} string "CSV file"
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 404 {object} dto.APIResponse "Campaign not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/{uuid}/click-report [get]
+func (h *CampaignHandler) ExportCampaignClickReport(c fiber.Ctx) error {
+	campaignUUID := strings.TrimSpace(c.Params("uuid"))
+	if campaignUUID == "" {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is required", "MISSING_CAMPAIGN_UUID", nil)
+	}
+	parsed, err := uuid.Parse(campaignUUID)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is invalid", "INVALID_CAMPAIGN_UUID", nil)
+	}
+	campaignUUID = parsed.String()
+
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+campaignUUID+"/click-report", 60*time.Second)
+	defer cancel()
+	data, err := h.campaignFlow.ExportCampaignClickReport(ctx, campaignUUID)
+	if err != nil {
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			switch be.Code {
+			case "AUDIENCE_REPORT_NOT_AVAILABLE":
+				return h.ErrorResponse(c, fiber.StatusNotFound, be.Message, be.Code, nil)
+			case "CAMPAIGN_UUID_REQUIRED", "CAMPAIGN_UUID_INVALID":
+				return h.ErrorResponse(c, fiber.StatusBadRequest, be.Message, be.Code, nil)
+			case "MISSING_CUSTOMER_ID":
+				return h.ErrorResponse(c, fiber.StatusUnauthorized, be.Message, be.Code, nil)
+			}
+		}
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		log.Println("Export campaign click report failed", err)
+		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to export campaign click report", "CAMPAIGN_CLICK_REPORT_EXPORT_FAILED", nil)
+	}
+
+	filename := "campaign_click_report_" + campaignUUID + ".csv"
+	c.Set("Content-Type", "text/csv; charset=utf-8")
 	c.Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	return c.Send(data)
 }
