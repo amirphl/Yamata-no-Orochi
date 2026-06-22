@@ -224,9 +224,12 @@ type CacheConfig struct {
 
 type DeploymentConfig struct {
 	// Domain Configuration
-	Domain           string `json:"domain"`
-	APIDomain        string `json:"api_domain"`
-	MonitoringDomain string `json:"monitoring_domain"`
+	Domain             string   `json:"domain"`
+	APIDomain          string   `json:"api_domain"`
+	MonitoringDomain   string   `json:"monitoring_domain"`
+	SentryUIDomain     string   `json:"sentry_ui_domain"`
+	SentryURLPrefix    string   `json:"sentry_url_prefix"`
+	SentryAllowedHosts []string `json:"sentry_allowed_hosts"`
 
 	// SSL/TLS Configuration
 	CertbotEmail string `json:"certbot_email"`
@@ -549,6 +552,9 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Domain:               getEnvString("DOMAIN", "your-domain.com"),
 			APIDomain:            getEnvString("API_DOMAIN", "api.your-domain.com"),
 			MonitoringDomain:     getEnvString("MONITORING_DOMAIN", "monitoring.your-domain.com"),
+			SentryUIDomain:       getEnvString("SENTRY_UI_DOMAIN", "sentry.your-domain.com"),
+			SentryURLPrefix:      getEnvString("SENTRY_URL_PREFIX", "https://sentry.your-domain.com"),
+			SentryAllowedHosts:   getEnvStringSlice("SENTRY_ALLOWED_HOSTS", []string{"sentry.your-domain.com"}),
 			CertbotEmail:         getEnvString("CERTBOT_EMAIL", "admin@your-domain.com"),
 			GrafanaAdminPassword: getEnvString("GRAFANA_ADMIN_PASSWORD", ""),
 			RedisPassword:        getEnvString("REDIS_PASSWORD", ""),
