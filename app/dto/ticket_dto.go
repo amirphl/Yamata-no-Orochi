@@ -29,11 +29,11 @@ type CreateTicketResponse struct {
 
 // TicketItem represents a ticket row in listings
 type TicketItem struct {
-	ID             uint   `json:"id"`
-	Title          string `json:"title"`
-	Content        string `json:"content"`
-	CreatedAt      string `json:"created_at"`
-	RepliedByAdmin *bool  `json:"replied_by_admin"`
+	ID             uint               `json:"id"`
+	Title          string             `json:"title"`
+	Content        string             `json:"content"`
+	CreatedAt      string             `json:"created_at"`
+	RepliedByAdmin *bool              `json:"replied_by_admin"`
 	Attachments    []TicketAttachment `json:"attachments,omitempty"`
 	// Admin-only fields (populated in admin listings only)
 	CustomerFirstName *string `json:"customer_first_name,omitempty"`
