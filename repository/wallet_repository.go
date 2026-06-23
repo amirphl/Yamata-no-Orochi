@@ -89,22 +89,22 @@ func (r *WalletRepositoryImpl) SaveWithInitialSnapshot(ctx context.Context, wall
 	}
 
 	initialSnapshot := &models.BalanceSnapshot{
-		UUID:          uuid.New(),
-		CorrelationID: uuid.New(),
-		WalletID:      wallet.ID,
-		CustomerID:    wallet.CustomerID,
-		FreeBalance:   0,
-		FrozenBalance: 0,
-		LockedBalance: 0,
-		CreditBalance: 0,
-		SpentOnCampaign: 0,
+		UUID:               uuid.New(),
+		CorrelationID:      uuid.New(),
+		WalletID:           wallet.ID,
+		CustomerID:         wallet.CustomerID,
+		FreeBalance:        0,
+		FrozenBalance:      0,
+		LockedBalance:      0,
+		CreditBalance:      0,
+		SpentOnCampaign:    0,
 		AgencyShareWithTax: 0,
-		TotalBalance:  0,
-		Reason:        "initial_snapshot",
-		Description:   "Initial balance snapshot",
-		Metadata:      json.RawMessage(`{}`),
-		CreatedAt:     utils.UTCNow(),
-		UpdatedAt:     utils.UTCNow(),
+		TotalBalance:       0,
+		Reason:             "initial_snapshot",
+		Description:        "Initial balance snapshot",
+		Metadata:           json.RawMessage(`{}`),
+		CreatedAt:          utils.UTCNow(),
+		UpdatedAt:          utils.UTCNow(),
 	}
 
 	// Create initial balance snapshot
