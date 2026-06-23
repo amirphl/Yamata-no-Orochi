@@ -17,16 +17,8 @@ BEGIN
     END IF;
 END $$;
 
--- Create the target database if it doesn't exist
--- Note: This runs in the postgres database context
-DO $$
-BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DB_NAME:-yamata_no_orochi}') THEN
-        CREATE DATABASE "${DB_NAME:-yamata_no_orochi}";
-    END IF;
-END $$;
-
 -- Grant necessary permissions to the main application user
+-- (Database is created by POSTGRES_DB env var in docker-compose; never create it here)
 GRANT CONNECT ON DATABASE "${DB_NAME:-yamata_no_orochi}" TO "${DB_USER:-yamata_user}";
 
 -- Database settings for production
