@@ -91,24 +91,11 @@ check_postgres_container() {
 
 # Function to check if database exists
 check_database_exists() {
-    if docker exec yamata-postgres-beta psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = :'check_name'" -v "check_name=$DB_NAME" | grep -q 1; then
+    if docker exec yamata-postgres-beta psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
         print_status "Database '$DB_NAME' already exists"
         return 0
     else
         print_status "Database '$DB_NAME' does not exist"
-        return 1
-    fi
-}
-
-# Function to create database
-create_database() {
-    print_status "Creating database '$DB_NAME'..."
-    
-    if docker exec yamata-postgres-beta createdb -U "$DB_USER" "$DB_NAME" 2>/dev/null; then
-        print_success "Database '$DB_NAME' created successfully"
-        return 0
-    else
-        print_warning "Database '$DB_NAME' might already exist, already in use or creation failed"
         return 1
     fi
 }
@@ -318,11 +305,10 @@ main() {
     # Check if PostgreSQL container is running
     check_postgres_container
     
-    # Check if database exists
-    if check_database_exists; then
-        print_status "Database '$DB_NAME' already exists; skipping drop and creation"
-    else
-        create_database || true
+    # Check if database exists — never create it; a missing DB is a fatal error
+    if ! check_database_exists; then
+        print_error "Database '$DB_NAME' does not exist. Create it manually before running this script."
+        exit 1
     fi
     
     # Show migration status before asking for confirmation
