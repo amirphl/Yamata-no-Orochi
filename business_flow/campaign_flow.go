@@ -3401,9 +3401,7 @@ func (s *CampaignFlowImpl) countCharacters(text string, adLink *string, shortLin
 	switch {
 	case hasAdLink && hasShortLinkDomain:
 		shortLinkText := strings.TrimSpace(*shortLinkDomain)
-		if !strings.HasPrefix(shortLinkText, "https://") {
-			shortLinkText = "https://" + shortLinkText
-		}
+		shortLinkText = shortLinkText + "/123456"
 		textToCount = strings.ReplaceAll(textToCount, "{YOUR_LINK}", shortLinkText)
 	case hasAdLink:
 		resolvedAdLink := strings.TrimSpace(*adLink)
