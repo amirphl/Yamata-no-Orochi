@@ -39,6 +39,7 @@ All diagrams use [Mermaid](https://mermaid.js.org/) and render natively in GitHu
 | 11 | [11-short-links-utm.md](11-short-links-utm.md) | Short link system, UTM click tracking, privacy design |
 | 12 | [12-roadmap.md](12-roadmap.md) | Completed deliverables (1404) and planned work (1405) |
 | 13 | [13-pentest-handoff.md](13-pentest-handoff.md) | Pentest scope, exposed surfaces, trust boundaries, prerequisites |
+| 14 | [14-bundles-and-scoring.md](14-bundles-and-scoring.md) | Bundle audience uniqueness, test-vs-execution selection, scoring behavior |
 
 ---
 
