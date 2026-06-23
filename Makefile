@@ -1,6 +1,6 @@
 # Yamata no Orochi - Makefile for testing and development
 
-.PHONY: help test test-models test-repository test-coverage test-clean test-db-check build lint fmt vet clean run run-dev run-debug run-watch swag swag-init swag-clean run-dev-simple migrate migrate-create swagger-ui
+.PHONY: help test test-models test-repository test-coverage test-clean test-db-check build lint fmt vet clean run run-dev run-debug run-watch swag swag-init swag-clean run-dev-simple migrate migrate-create swagger-ui ci-fmt-check ci-test ci-build
 
 # Set the shell to bash for consistent behavior
 SHELL := /bin/bash
@@ -114,6 +114,11 @@ build:
 	go build -o bin/yamata-no-orochi .
 	@echo "Build complete: bin/yamata-no-orochi"
 
+ci-build:
+	@echo "Building CI binary..."
+	go build -o bin/yamata-no-orochi-ci .
+	@echo "CI build complete: bin/yamata-no-orochi-ci"
+
 lint:
 	@echo "Running linter..."
 	golangci-lint run
@@ -122,6 +127,16 @@ fmt:
 	@echo "Formatting code..."
 	go fmt ./...
 	@echo "Code formatted"
+
+ci-fmt-check:
+	@echo "Checking Go formatting..."
+	@unformatted=$$(find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l); \
+	if [ -n "$$unformatted" ]; then \
+		echo "The following files are not gofmt-formatted:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+	@echo "Formatting OK"
 
 vet:
 	@echo "Running go vet..."
@@ -158,6 +173,10 @@ test-pattern: test-db-check
 test-quick:
 	@echo "Running quick tests..."
 	go test ./tests
+
+ci-test:
+	@echo "Running maintained CI test subset..."
+	go test ./app/scheduler
 
 # Test with timeout
 test-timeout: test-db-check
