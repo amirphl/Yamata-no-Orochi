@@ -1,6 +1,6 @@
 # Yamata no Orochi - Makefile for testing and development
 
-.PHONY: help test test-models test-repository test-coverage test-clean test-db-check build lint fmt vet clean run run-dev run-debug run-watch swag swag-init swag-clean run-dev-simple migrate migrate-create swagger-ui ci-fmt-check ci-test ci-build
+.PHONY: help test test-models test-repository test-coverage test-clean test-db-check build lint fmt vet clean run run-dev run-debug run-watch swag swag-init swag-clean run-dev-simple migrate migrate-create swagger-ui ci-fmt-check ci-test ci-test-unit ci-build
 
 # Set the shell to bash for consistent behavior
 SHELL := /bin/bash
@@ -30,6 +30,7 @@ help:
 	@echo "  migrate        - Run database migrations"
 	@echo "  migrate-create - Create database and run migrations"
 	@echo "  swagger-ui     - Open standalone Swagger UI in browser"
+	@echo "  ci-test-unit   - Run unit tests that need no database or Redis (CI-safe)"
 
 # Load environment variables from .env if it exists
 LOAD_ENV := if [ -f .env ]; then \
@@ -177,6 +178,10 @@ test-quick:
 ci-test:
 	@echo "Running maintained CI test subset..."
 	go test ./app/scheduler
+
+ci-test-unit:
+	@echo "Running unit tests (no database or Redis required)..."
+	go test -race ./app/dto/... ./app/middleware/... ./app/scheduler/... ./business_flow/...
 
 # Test with timeout
 test-timeout: test-db-check
