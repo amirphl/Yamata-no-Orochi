@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/amirphl/Yamata-no-Orochi/app/observability"
 	"github.com/amirphl/Yamata-no-Orochi/config"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
@@ -51,6 +52,10 @@ func setupLogging(cfg config.LoggingConfig) (io.Closer, error) {
 	// Fallback to stdout when configuration leaves us with no target
 	if len(writers) == 0 {
 		writers = append(writers, os.Stdout)
+	}
+
+	if sentryWriter := observability.SentryLogWriter(cfg.Level); sentryWriter != nil {
+		writers = append(writers, sentryWriter)
 	}
 
 	log.SetOutput(io.MultiWriter(writers...))
