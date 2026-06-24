@@ -1,21 +1,19 @@
 package observability
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log"
+	"io"
 	"net/http"
-	"net/url"
 	"os"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/getsentry/sentry-go"
 	"github.com/gofiber/fiber/v3"
 )
 
@@ -30,33 +28,25 @@ type SentryConfig struct {
 }
 
 type sentryClient struct {
-	storeURL    string
-	authHeader  string
-	environment string
-	release     string
-	serverName  string
-	timeout     time.Duration
-	capture4xx  bool
-	capture5xx  bool
-	httpClient  *http.Client
-	events      chan []byte
-	wg          sync.WaitGroup
+	logger     sentry.Logger
+	timeout    time.Duration
+	capture4xx bool
+	capture5xx bool
 }
 
 var (
-	clientMu     sync.RWMutex
-	activeClient *sentryClient
+	clientMu       sync.RWMutex
+	activeClient   *sentryClient
+	stdLogPrefixRE = regexp.MustCompile(`^\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{6})?(?: [^:]+:\d+:)? `)
 )
 
 func InitSentry(cfg SentryConfig) error {
 	dsn := strings.TrimSpace(cfg.DSN)
 	if dsn == "" {
+		clientMu.Lock()
+		activeClient = nil
+		clientMu.Unlock()
 		return nil
-	}
-
-	storeURL, authHeader, err := parseDSN(dsn)
-	if err != nil {
-		return err
 	}
 
 	serverName := strings.TrimSpace(cfg.ServerName)
@@ -66,37 +56,32 @@ func InitSentry(cfg SentryConfig) error {
 
 	timeout := cfg.Timeout
 	if timeout <= 0 {
-		timeout = 2 * time.Second
+		timeout = 5 * time.Second
 	}
 
-	sc := &sentryClient{
-		storeURL:    storeURL,
-		authHeader:  authHeader,
-		environment: cfg.Environment,
-		release:     cfg.Release,
-		serverName:  serverName,
-		timeout:     timeout,
-		capture4xx:  cfg.Capture4xx,
-		capture5xx:  cfg.Capture5xx,
-		httpClient: &http.Client{
-			Timeout: timeout,
-		},
-		events: make(chan []byte, 512),
-	}
+	transport := sentry.NewHTTPTransport()
+	transport.Timeout = timeout
 
-	sc.wg.Add(1)
-	go sc.loop()
+	if err := sentry.Init(sentry.ClientOptions{
+		Dsn:              dsn,
+		Environment:      cfg.Environment,
+		Release:          cfg.Release,
+		ServerName:       serverName,
+		AttachStacktrace: true,
+		Transport:        transport,
+	}); err != nil {
+		return err
+	}
 
 	clientMu.Lock()
-	prev := activeClient
-	activeClient = sc
+	activeClient = &sentryClient{
+		logger:     sentry.NewLogger(context.Background()),
+		timeout:    timeout,
+		capture4xx: cfg.Capture4xx,
+		capture5xx: cfg.Capture5xx,
+	}
 	clientMu.Unlock()
 
-	if prev != nil {
-		prev.shutdown(context.Background())
-	}
-
-	log.Printf("sentry transport enabled for %s", storeURL)
 	return nil
 }
 
@@ -105,9 +90,34 @@ func ShutdownSentry(ctx context.Context) {
 	sc := activeClient
 	activeClient = nil
 	clientMu.Unlock()
+	if sc == nil {
+		return
+	}
 
-	if sc != nil {
-		sc.shutdown(ctx)
+	timeout := sc.timeout
+	if deadline, ok := ctx.Deadline(); ok {
+		if remaining := time.Until(deadline); remaining > 0 {
+			timeout = remaining
+		}
+	}
+	if timeout <= 0 {
+		timeout = 2 * time.Second
+	}
+
+	sentry.Flush(timeout)
+}
+
+func SentryLogWriter(minLevel string) io.Writer {
+	clientMu.RLock()
+	sc := activeClient
+	clientMu.RUnlock()
+	if sc == nil || sc.logger == nil {
+		return nil
+	}
+
+	return &sentryLogWriter{
+		logger:   sc.logger,
+		minLevel: normalizeLogLevel(minLevel),
 	}
 }
 
@@ -117,7 +127,7 @@ func HTTPStatusCaptureMiddleware() fiber.Handler {
 		if err == nil {
 			status := c.Response().StatusCode()
 			if status >= fiber.StatusBadRequest {
-				captureHTTPStatus(c, status, "fiber_response", "")
+				captureHTTPStatus(c, status, "fiber_response", "", nil)
 			}
 		}
 		return err
@@ -128,7 +138,7 @@ func CaptureError(c fiber.Ctx, status int, err error, source string) {
 	if err == nil {
 		return
 	}
-	captureHTTPStatus(c, status, source, err.Error())
+	captureHTTPStatus(c, status, source, err.Error(), err)
 }
 
 func CapturePanic(c fiber.Ctx, recovered any) {
@@ -136,15 +146,27 @@ func CapturePanic(c fiber.Ctx, recovered any) {
 		return
 	}
 
-	message := fmt.Sprintf("panic recovered: %v", recovered)
-	extra := map[string]any{
-		"panic": string(debug.Stack()),
-	}
+	// Capture the stack here, as close to the recovery point as possible.
+	// By the time any sub-function runs, additional internal frames will have
+	// been added and the panic-origin frames are already gone post-recover().
+	stack := debug.Stack()
 
-	enqueueEvent(buildEvent(c, fiber.StatusInternalServerError, "fatal", "fiber_panic", message, extra))
+	event := buildHTTPEvent(
+		c,
+		fiber.StatusInternalServerError,
+		sentry.LevelFatal,
+		"fiber_panic",
+		fmt.Sprintf("panic recovered: %v", recovered),
+		fmt.Errorf("panic recovered: %v", recovered),
+		recovered,
+		stack,
+	)
+	if event != nil {
+		sentry.CaptureEvent(event)
+	}
 }
 
-func captureHTTPStatus(c fiber.Ctx, status int, source string, message string) {
+func captureHTTPStatus(c fiber.Ctx, status int, source string, message string, capturedErr error) {
 	clientMu.RLock()
 	sc := activeClient
 	clientMu.RUnlock()
@@ -163,31 +185,22 @@ func captureHTTPStatus(c fiber.Ctx, status int, source string, message string) {
 		message = extractResponseMessage(c, status)
 	}
 
-	extra := map[string]any{
-		"request_id":    fmt.Sprintf("%v", c.Locals("requestid")),
-		"response_body": truncate(string(c.Response().Body()), 4096),
-		"source":        source,
-	}
-
-	enqueueEvent(buildEvent(c, status, statusLevel(status), source, message, extra))
-}
-
-func enqueueEvent(payload []byte) {
-	clientMu.RLock()
-	sc := activeClient
-	clientMu.RUnlock()
-	if sc == nil || len(payload) == 0 {
-		return
-	}
-
-	select {
-	case sc.events <- payload:
-	default:
-		log.Printf("sentry event dropped because the buffer is full")
+	event := buildHTTPEvent(c, status, statusLevel(status), source, message, capturedErr, nil, nil)
+	if event != nil {
+		sentry.CaptureEvent(event)
 	}
 }
 
-func buildEvent(c fiber.Ctx, status int, level, source, message string, extra map[string]any) []byte {
+func buildHTTPEvent(
+	c fiber.Ctx,
+	status int,
+	level sentry.Level,
+	source string,
+	message string,
+	capturedErr error,
+	recovered any,
+	panicStack []byte,
+) *sentry.Event {
 	clientMu.RLock()
 	sc := activeClient
 	clientMu.RUnlock()
@@ -195,113 +208,218 @@ func buildEvent(c fiber.Ctx, status int, level, source, message string, extra ma
 		return nil
 	}
 
-	event := map[string]any{
-		"event_id":    randomEventID(),
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"platform":    "go",
-		"logger":      "yamata-no-orochi",
-		"level":       level,
-		"server_name": sc.serverName,
-		"environment": sc.environment,
-		"release":     sc.release,
-		"message":     truncate(message, 2048),
-		"tags": map[string]string{
-			"http.status_code": fmt.Sprintf("%d", status),
-			"http.method":      c.Method(),
-			"error.source":     source,
-		},
-		"request": map[string]any{
-			"url":          requestURL(c),
-			"method":       c.Method(),
-			"headers":      filteredHeaders(c),
-			"query_string": string(c.Request().URI().QueryString()),
-		},
-		"extra": extra,
+	event := sentry.NewEvent()
+	event.Timestamp = time.Now().UTC()
+	event.Level = level
+	event.Logger = "yamata-no-orochi"
+	event.Message = truncate(message, 2048)
+	event.Platform = "go"
+	event.Tags["http.status_code"] = fmt.Sprintf("%d", status)
+	event.Tags["http.method"] = c.Method()
+	event.Tags["error.source"] = source
+	event.Request = &sentry.Request{
+		URL:         requestURL(c),
+		Method:      c.Method(),
+		QueryString: string(c.Request().URI().QueryString()),
+		Headers:     filteredHeaders(c),
+		Data:        truncate(string(c.Body()), 4096),
+	}
+	event.Contexts["response"] = sentry.Context{
+		"body":        truncate(string(c.Response().Body()), 4096),
+		"request_id":  fmt.Sprintf("%v", c.Locals("requestid")),
+		"source":      source,
+		"status_code": status,
 	}
 
 	if route := c.Route(); route != nil && route.Path != "" {
-		event["transaction"] = route.Path
+		event.Transaction = route.Path
 	}
 
-	body, err := json.Marshal(event)
-	if err != nil {
-		log.Printf("failed to marshal sentry event: %v", err)
-		return nil
+	if capturedErr != nil {
+		event.SetException(capturedErr, 10)
 	}
-	return body
+
+	if recovered != nil {
+		event.Contexts["panic"] = sentry.Context{
+			"value": fmt.Sprintf("%v", recovered),
+			"stack": truncate(string(panicStack), 8192),
+		}
+		event.Threads = []sentry.Thread{{
+			Crashed: true,
+			Current: true,
+		}}
+	}
+
+	return event
 }
 
-func (sc *sentryClient) loop() {
-	defer sc.wg.Done()
-	for payload := range sc.events {
-		if err := sc.send(payload); err != nil {
-			log.Printf("failed to send sentry event: %v", err)
+type sentryLogWriter struct {
+	logger   sentry.Logger
+	minLevel sentry.LogLevel
+}
+
+func (w *sentryLogWriter) Write(p []byte) (int, error) {
+	lines := strings.Split(string(p), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		w.emit(line)
+	}
+	return len(p), nil
+}
+
+func (w *sentryLogWriter) emit(line string) {
+	message := stripStdLogPrefix(line)
+	if message == "" {
+		return
+	}
+
+	level, attrs, body := parseLogLine(message)
+	if compareLogLevels(level, w.minLevel) < 0 {
+		return
+	}
+
+	entry := logEntryForLevel(w.logger, level).String("sentry.origin", "stdlib.log")
+	for key, value := range attrs {
+		entry = addLogAttribute(entry, key, value)
+	}
+	entry.Emit(body)
+}
+
+func parseLogLine(message string) (sentry.LogLevel, map[string]any, string) {
+	attrs := map[string]any{}
+
+	var payload map[string]any
+	if json.Unmarshal([]byte(message), &payload) == nil {
+		body := jsonBody(payload, message)
+		var level sentry.LogLevel
+		if raw, ok := payload["level"]; ok {
+			level = normalizeLogLevel(asString(raw))
+		} else {
+			level = inferLogLevel(body)
+		}
+		for key, value := range payload {
+			switch key {
+			case "level", "message", "msg", "time", "timestamp":
+				continue
+			default:
+				attrs[key] = value
+			}
+		}
+		return level, attrs, body
+	}
+
+	return inferLogLevel(message), attrs, message
+}
+
+func jsonBody(payload map[string]any, fallback string) string {
+	for _, key := range []string{"message", "msg", "error", "event"} {
+		if value := asString(payload[key]); value != "" {
+			return value
 		}
 	}
+	return fallback
 }
 
-func (sc *sentryClient) send(payload []byte) error {
-	req, err := http.NewRequest(http.MethodPost, sc.storeURL, bytes.NewReader(payload))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Sentry-Auth", sc.authHeader)
-
-	resp, err := sc.httpClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= http.StatusBadRequest {
-		return fmt.Errorf("upstream returned status %d", resp.StatusCode)
-	}
-	return nil
-}
-
-func (sc *sentryClient) shutdown(ctx context.Context) {
-	done := make(chan struct{})
-	go func() {
-		close(sc.events)
-		sc.wg.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-ctx.Done():
-	case <-done:
+func addLogAttribute(entry sentry.LogEntry, key string, value any) sentry.LogEntry {
+	switch v := value.(type) {
+	case string:
+		return entry.String(key, truncate(v, 2048))
+	case bool:
+		return entry.Bool(key, v)
+	case float64:
+		if float64(int64(v)) == v {
+			return entry.Int64(key, int64(v))
+		}
+		return entry.Float64(key, v)
+	case int:
+		return entry.Int(key, v)
+	case int64:
+		return entry.Int64(key, v)
+	default:
+		return entry.String(key, truncate(fmt.Sprintf("%v", v), 2048))
 	}
 }
 
-func parseDSN(dsn string) (string, string, error) {
-	parsed, err := url.Parse(dsn)
-	if err != nil {
-		return "", "", fmt.Errorf("invalid sentry DSN: %w", err)
+func logEntryForLevel(logger sentry.Logger, level sentry.LogLevel) sentry.LogEntry {
+	switch level {
+	case sentry.LogLevelTrace:
+		return logger.Trace()
+	case sentry.LogLevelDebug:
+		return logger.Debug()
+	case sentry.LogLevelWarn:
+		return logger.Warn()
+	case sentry.LogLevelError:
+		return logger.Error()
+	case sentry.LogLevelFatal:
+		return logger.LFatal()
+	default:
+		return logger.Info()
 	}
-	if parsed.Scheme == "" || parsed.Host == "" {
-		return "", "", fmt.Errorf("invalid sentry DSN: missing scheme or host")
+}
+
+func inferLogLevel(message string) sentry.LogLevel {
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "fatal"):
+		return sentry.LogLevelFatal
+	case strings.Contains(lower, "panic"),
+		strings.Contains(lower, "error"),
+		strings.Contains(lower, "failed"):
+		return sentry.LogLevelError
+	case strings.Contains(lower, "warn"):
+		return sentry.LogLevelWarn
+	case strings.Contains(lower, "debug"):
+		return sentry.LogLevelDebug
+	default:
+		return sentry.LogLevelInfo
 	}
+}
 
-	projectID := strings.Trim(parsed.Path, "/")
-	if projectID == "" {
-		return "", "", fmt.Errorf("invalid sentry DSN: missing project ID")
+func normalizeLogLevel(level string) sentry.LogLevel {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "trace":
+		return sentry.LogLevelTrace
+	case "debug":
+		return sentry.LogLevelDebug
+	case "warn", "warning":
+		return sentry.LogLevelWarn
+	case "error":
+		return sentry.LogLevelError
+	case "fatal":
+		return sentry.LogLevelFatal
+	default:
+		return sentry.LogLevelInfo
 	}
+}
 
-	publicKey := parsed.User.Username()
-	if publicKey == "" {
-		return "", "", fmt.Errorf("invalid sentry DSN: missing public key")
+func compareLogLevels(a, b sentry.LogLevel) int {
+	return logLevelRank(a) - logLevelRank(b)
+}
+
+func logLevelRank(level sentry.LogLevel) int {
+	switch level {
+	case sentry.LogLevelTrace:
+		return 0
+	case sentry.LogLevelDebug:
+		return 1
+	case sentry.LogLevelInfo:
+		return 2
+	case sentry.LogLevelWarn:
+		return 3
+	case sentry.LogLevelError:
+		return 4
+	case sentry.LogLevelFatal:
+		return 5
+	default:
+		return 2
 	}
+}
 
-	secret, _ := parsed.User.Password()
-	storeURL := fmt.Sprintf("%s://%s/api/%s/store/", parsed.Scheme, parsed.Host, projectID)
-	authHeader := fmt.Sprintf(
-		"Sentry sentry_version=7, sentry_client=yamata-no-orochi/1.0, sentry_key=%s, sentry_secret=%s",
-		publicKey,
-		secret,
-	)
-
-	return storeURL, authHeader, nil
+func stripStdLogPrefix(message string) string {
+	return strings.TrimSpace(stdLogPrefixRE.ReplaceAllString(message, ""))
 }
 
 func requestURL(c fiber.Ctx) string {
@@ -333,11 +451,11 @@ func extractResponseMessage(c fiber.Ctx, status int) string {
 	return fmt.Sprintf("HTTP %d %s", status, http.StatusText(status))
 }
 
-func statusLevel(status int) string {
+func statusLevel(status int) sentry.Level {
 	if status >= 500 {
-		return "error"
+		return sentry.LevelError
 	}
-	return "warning"
+	return sentry.LevelWarning
 }
 
 func truncate(value string, limit int) string {
@@ -347,10 +465,12 @@ func truncate(value string, limit int) string {
 	return value[:limit]
 }
 
-func randomEventID() string {
-	buf := make([]byte, 16)
-	if _, err := rand.Read(buf); err != nil {
-		return strings.ReplaceAll(fmt.Sprintf("%d", time.Now().UnixNano()), "-", "")
+func asString(value any) string {
+	if value == nil {
+		return ""
 	}
-	return hex.EncodeToString(buf)
+	if s, ok := value.(string); ok {
+		return s
+	}
+	return fmt.Sprintf("%v", value)
 }
