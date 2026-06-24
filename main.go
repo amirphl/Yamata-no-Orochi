@@ -161,16 +161,6 @@ func main() {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Configure logging to persist across container restarts with rotation
-	logCloser, err := setupLogging(cfg.Logging)
-	if err != nil {
-		log.Printf("Failed to initialize file logger, falling back to default: %v", err)
-	} else if logCloser != nil {
-		defer logCloser.Close()
-	}
-
-	log.Println("Starting Yamata no Orochi application...")
-
 	if err := observability.InitSentry(observability.SentryConfig{
 		DSN:         cfg.Sentry.DSN,
 		Environment: cfg.Sentry.Environment,
@@ -182,6 +172,16 @@ func main() {
 	}); err != nil {
 		log.Fatalf("Failed to initialize sentry transport: %v", err)
 	}
+
+	// Configure logging to persist across container restarts with rotation
+	logCloser, err := setupLogging(cfg.Logging)
+	if err != nil {
+		log.Printf("Failed to initialize file logger, falling back to default: %v", err)
+	} else if logCloser != nil {
+		defer logCloser.Close()
+	}
+
+	log.Println("Starting Yamata no Orochi application...")
 
 	// Initialize application
 	app, err := initializeApplication(cfg)
