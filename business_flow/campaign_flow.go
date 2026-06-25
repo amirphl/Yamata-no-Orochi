@@ -525,14 +525,19 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	// Send admin notifications after the transaction commits so network
 	// latency does not extend the transaction lifetime.
 	if s.notifier != nil {
-		subject := campaign.UUID.String()
-		if campaign.Spec.Title != nil {
-			subject = *campaign.Spec.Title
-		}
-		msg := fmt.Sprintf("New campaign pending approval:\n%s", subject)
-		for _, mobile := range s.adminConfig.ActiveMobiles() {
-			_ = s.notifier.SendSMS(ctx, mobile, msg, nil)
-		}
+		go func() {
+			notifyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			subject := campaign.UUID.String()
+			if campaign.Spec.Title != nil {
+				subject = *campaign.Spec.Title
+			}
+			msg := fmt.Sprintf("New campaign pending approval:\n%s", subject)
+			for _, mobile := range s.adminConfig.ActiveMobiles() {
+				_ = s.notifier.SendSMS(notifyCtx, mobile, msg, nil)
+			}
+		}()
 	}
 
 	// Log successful update
