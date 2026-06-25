@@ -38,6 +38,9 @@ jobs:
       - name: Run maintained test subset
         run: make ci-test
 
+      - name: Run unit tests (no database or Redis required)
+        run: make ci-test-unit
+
       - name: Build application binary
         run: make ci-build
 
