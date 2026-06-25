@@ -14,6 +14,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/app/services"
 	"github.com/amirphl/Yamata-no-Orochi/config"
+	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/redis/go-redis/v9"
@@ -128,6 +129,22 @@ func (af *AdminAuthFlowImpl) Verify(ctx context.Context, req *dto.AdminCaptchaVe
 		return nil, NewBusinessError("ADMIN_LOGIN_FAILED", "Admin login failed", ErrAuthenticationFailed)
 	}
 
+	if af.adminConfig.AllowsOTPBypass(af.adminConfig.TwoFAMobile(admin.Username)) {
+		resp, err := af.issueAdminSession(admin)
+		if err != nil {
+			return nil, NewBusinessError("TOKEN_GENERATION_FAILED", "Failed to generate tokens", err)
+		}
+		_ = af.clearAdminLoginFailures(ctx, req.Username, metadata)
+		return &dto.AdminLoginInitResponse{
+			Message:           "Login successful",
+			OTPSent:           false,
+			AlreadySent:       false,
+			RequiresTwoFactor: false,
+			Admin:             &resp.Admin,
+			Session:           &resp.Session,
+		}, nil
+	}
+
 	resp, err := af.issueOrReuseOTP(ctx, admin.ID, admin.Username)
 	if err != nil {
 		return nil, NewBusinessError("ADMIN_LOGIN_OTP_FAILED", "Failed to start admin login verification", err)
@@ -196,15 +213,11 @@ func (af *AdminAuthFlowImpl) VerifyOTP(ctx context.Context, req *dto.AdminLoginV
 	if !consumed {
 		return nil, NewBusinessError("ADMIN_LOGIN_OTP_INVALID", "Admin OTP verification failed", ErrInvalidOTPCode)
 	}
-	accessToken, refreshToken, err := af.tokenService.GenerateAdminTokens(admin.ID)
+	resp, err := af.issueAdminSession(admin)
 	if err != nil {
 		return nil, NewBusinessError("TOKEN_GENERATION_FAILED", "Failed to generate tokens", err)
 	}
-
-	return &dto.AdminLoginResponse{
-		Admin:   ToAdminDTOModel(*admin),
-		Session: ToAdminSessionDTO(accessToken, refreshToken),
-	}, nil
+	return resp, nil
 }
 
 func (af *AdminAuthFlowImpl) issueOrReuseOTP(ctx context.Context, adminID uint, username string) (*dto.AdminLoginInitResponse, error) {
@@ -388,6 +401,20 @@ func generateAdminLoginChallengeID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+func (af *AdminAuthFlowImpl) issueAdminSession(admin *models.Admin) (*dto.AdminLoginResponse, error) {
+	if admin == nil {
+		return nil, ErrAdminNotFound
+	}
+	accessToken, refreshToken, err := af.tokenService.GenerateAdminTokens(admin.ID)
+	if err != nil {
+		return nil, err
+	}
+	return &dto.AdminLoginResponse{
+		Admin:   ToAdminDTOModel(*admin),
+		Session: ToAdminSessionDTO(accessToken, refreshToken),
+	}, nil
 }
 
 func (af *AdminAuthFlowImpl) enforceAdminLoginRateLimit(ctx context.Context, username string, metadata *ClientMetadata) error {
