@@ -182,7 +182,7 @@ func (h *CampaignHandler) UpdateCampaign(c fiber.Ctx) error {
 	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 
 	// Call business logic with proper context
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+campaignUUID, 30*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/"+campaignUUID, 60*time.Second)
 	defer cancel()
 	result, err := h.campaignFlow.UpdateCampaign(ctx, &req, metadata)
 	if err != nil {
