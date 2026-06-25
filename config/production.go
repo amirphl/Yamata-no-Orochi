@@ -261,6 +261,7 @@ type AdminConfig struct {
 	Mobiles          []string          `json:"admin_mobile"`
 	DepositReviewers []string          `json:"admin_deposit_reviewer"`
 	TwoFAMobiles     map[string]string `json:"admin_2fa_mobiles"`
+	OTPBypassMobiles []string          `json:"admin_otp_bypass_mobiles"`
 }
 
 func (c AdminConfig) ActiveMobiles() []string {
@@ -277,6 +278,23 @@ func (c AdminConfig) TwoFAMobile(username string) string {
 		return ""
 	}
 	return strings.TrimSpace(c.TwoFAMobiles[trimmedUsername])
+}
+
+func (c AdminConfig) ActiveOTPBypassMobiles() []string {
+	return normalizeMobileList(c.OTPBypassMobiles)
+}
+
+func (c AdminConfig) AllowsOTPBypass(mobile string) bool {
+	trimmed := strings.TrimSpace(mobile)
+	if trimmed == "" {
+		return false
+	}
+	for _, allowedMobile := range c.ActiveOTPBypassMobiles() {
+		if allowedMobile == trimmed {
+			return true
+		}
+	}
+	return false
 }
 
 func (c AdminConfig) HasMobile(mobile string) bool {
@@ -574,6 +592,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Mobiles:          getEnvStringSlice("ADMIN_MOBILE", []string{}),
 			DepositReviewers: getEnvStringSlice("ADMIN_DEPOSIT_REVIEWER", []string{}),
 			TwoFAMobiles:     getEnvStringMap("ADMIN_2FA_MOBILES", map[string]string{}),
+			OTPBypassMobiles: getEnvStringSlice("ADMIN_OTP_BYPASS_MOBILES", []string{}),
 		},
 		System: SystemConfig{
 			SystemUserUUID:    getEnvString("SYSTEM_USER_UUID", ""),
