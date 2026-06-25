@@ -33,7 +33,7 @@ func (s *stubTokenService) ValidateToken(token string) (*services.TokenClaims, e
 func (s *stubTokenService) RefreshToken(refreshToken string) (string, string, error) {
 	return "", "", nil
 }
-func (s *stubTokenService) RevokeToken(token string) error        { return nil }
+func (s *stubTokenService) RevokeToken(token string) error { return nil }
 func (s *stubTokenService) GetTokenClaims(token string) (*services.TokenClaims, error) {
 	return nil, nil
 }
