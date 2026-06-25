@@ -321,214 +321,218 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	// Line number: validate exist in database and is available for the campaign schedule time (not reserved by another campaign)
 	// * Move line number and segment price factor queries to ensureCreateCampaignRefs function
 
-	// Use transaction for atomicity
+	// Phase 1: persist spec changes in a short transaction.
 	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
-		// Update campaign
-		if err := s.updateCampaign(txCtx, req, &campaign); err != nil {
+		return s.updateCampaign(txCtx, req, &campaign)
+	})
+	if err != nil {
+		errMsg := fmt.Sprintf("Campaign update failed for campaign %d: %s", campaign.ID, err.Error())
+		_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignUpdateFailed, errMsg, false, &errMsg, metadata)
+		return nil, NewBusinessError("CAMPAIGN_UPDATE_FAILED", "Campaign update failed", err)
+	}
+
+	// Re-read the committed campaign so subsequent logic sees the updated spec.
+	campaign, err = getCampaign(ctx, s.campaignRepo, req.UUID, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign after update", err)
+	}
+
+	// Capacity check outside any transaction: avoids holding a DB connection
+	// while doing Redis/file I/O and in-memory computation.
+	usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
+	capacity, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
+		CampaignID: campaign.ID,
+		CustomerID: campaign.CustomerID,
+	}, metadata)
+	if err != nil {
+		return nil, NewBusinessError("CAPACITY_CALCULATION_FAILED", "Failed to calculate campaign capacity", err)
+	}
+	if !usingTargetAudienceExcelFile && capacity.Capacity < utils.MinAcceptableCampaignCapacity {
+		return nil, NewBusinessError("INSUFFICIENT_CAPACITY", "Insufficient campaign capacity", ErrInsufficientCampaignCapacity)
+	}
+
+	// Early return when the caller only wants to save the draft (not finalize).
+	if !finalize {
+		msg := fmt.Sprintf("Campaign updated successfully: %d", campaign.ID)
+		_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignUpdated, msg, true, nil, metadata)
+		return &dto.UpdateCampaignResponse{Message: "Campaign updated successfully"}, nil
+	}
+
+	// --- Finalize path ---
+	// Pre-compute all pricing inputs outside the DB transaction so the
+	// transaction that touches money is as short as possible.
+	if err := s.canFinalizeCampaign(ctx, campaign, customer); err != nil {
+		return nil, NewBusinessError("CAMPAIGN_FINALIZE_NOT_ALLOWED", "Campaign cannot be finalized", err)
+	}
+
+	lineNumberPriceFactor := defaultLineNumberPriceFactor
+	if campaign.Spec.Platform == models.CampaignPlatformSMS {
+		lineNumberPriceFactor, err = s.fetchLineNumberPriceFactor(ctx, campaign.Spec.LineNumber)
+		if err != nil {
+			return nil, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
+		}
+	}
+
+	segmentPriceFactor := defaultSegmentPriceFactor
+	if !usingTargetAudienceExcelFile {
+		segmentPriceFactor, err = s.fetchSegmentPriceFactor(ctx, campaign.Spec.Level3s, sanitizedPlatform)
+		if err != nil {
+			return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch segment price factor", err)
+		}
+	}
+
+	pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, campaign.Spec.Platform)
+	if err != nil {
+		return nil, NewBusinessError("PLATFORM_BASE_PRICE_FETCH_FAILED", "Failed to fetch platform base price", err)
+	}
+	if pbp == nil {
+		return nil, NewBusinessError("PLATFORM_BASE_PRICE_NOT_FOUND", "Platform base price not found", ErrPlatformBasePriceNotFound)
+	}
+	pp, err := s.pagePriceRepo.LatestByPlatform(ctx, campaign.Spec.Platform)
+	if err != nil {
+		return nil, NewBusinessError("PAGE_PRICE_FETCH_FAILED", "Failed to fetch page price", err)
+	}
+	if pp == nil {
+		return nil, NewBusinessError("PAGE_PRICE_NOT_FOUND", "Page price not found", ErrPagePriceNotFound)
+	}
+
+	cost, err := s.CalculateCampaignCost(ctx, &dto.CalculateCampaignCostRequest{
+		CampaignID: campaign.ID,
+		CustomerID: campaign.CustomerID,
+	}, metadata)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_COST_CALCULATION_FAILED", "Failed to calculate campaign cost", err)
+	}
+
+	numPages := s.calculateParts(
+		campaign.Spec.Content,
+		campaign.Spec.AdLink,
+		campaign.Spec.ShortLinkDomain,
+		sanitizedPlatform,
+	)
+
+	// Phase 2: atomic financial operations only — keep this transaction as
+	// short as possible (no network calls, no heavy computation).
+	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		campaign.Status = models.CampaignStatusWaitingForApproval
+		campaign.NumAudience = utils.ToPtr(cost.NumTargetAudience)
+		campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+		if err := s.campaignRepo.Update(txCtx, campaign); err != nil {
 			return err
 		}
 
-		// retrieve campaign again (last state)
-		campaign, err := getCampaign(txCtx, s.campaignRepo, req.UUID, req.CustomerID)
+		wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
+		if err != nil {
+			return err
+		}
+		customer.Wallet = &wallet
+
+		latestBalance, err := getLatestBalanceSnapshot(txCtx, s.walletRepo, wallet.ID)
 		if err != nil {
 			return err
 		}
 
-		capacity, err := s.CalculateCampaignCapacity(txCtx, &dto.CalculateCampaignCapacityRequest{
-			CampaignID: campaign.ID,
-			CustomerID: campaign.CustomerID,
-		}, metadata)
+		availableBalance := latestBalance.FreeBalance + latestBalance.CreditBalance
+		if availableBalance < cost.TotalCost {
+			return ErrInsufficientFunds
+		}
+
+		newFreeBalance := latestBalance.FreeBalance
+		newCreditBalance := latestBalance.CreditBalance
+		remaining := cost.TotalCost
+		if remaining <= newFreeBalance {
+			newFreeBalance -= remaining
+		} else {
+			remaining -= newFreeBalance
+			newFreeBalance = 0
+			newCreditBalance -= remaining
+		}
+		newFrozenBalance := latestBalance.FrozenBalance + cost.TotalCost
+
+		meta := map[string]any{
+			"source":                   "campaign_update",
+			"operation":                "reserve_budget",
+			"campaign_id":              campaign.ID,
+			"amount":                   cost.TotalCost,
+			"currency":                 utils.TomanCurrency,
+			"campaign_spec":            campaign.Spec,
+			"base_price":               pbp.Price,
+			"page_price":               pp.Price,
+			"num_pages":                numPages,
+			"line_number_price_factor": lineNumberPriceFactor,
+			"segment_price_factor":     segmentPriceFactor,
+		}
+		metaBytes, _ := json.Marshal(meta)
+
+		corrID := uuid.New()
+
+		newSnapshot := &models.BalanceSnapshot{
+			UUID:               uuid.New(),
+			CorrelationID:      corrID,
+			WalletID:           wallet.ID,
+			CustomerID:         customer.ID,
+			FreeBalance:        newFreeBalance,
+			FrozenBalance:      newFrozenBalance,
+			CreditBalance:      newCreditBalance,
+			LockedBalance:      latestBalance.LockedBalance,
+			SpentOnCampaign:    latestBalance.SpentOnCampaign,
+			AgencyShareWithTax: latestBalance.AgencyShareWithTax,
+			TotalBalance:       newFreeBalance + newFrozenBalance + newCreditBalance + latestBalance.LockedBalance + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
+			Reason:             "campaign_budget_reserved_waiting_for_approval",
+			Description:        fmt.Sprintf("Budget reserved for campaign %d", campaign.ID),
+			Metadata:           metaBytes,
+			CreatedAt:          utils.UTCNow(),
+			UpdatedAt:          utils.UTCNow(),
+		}
+		if err := s.balanceSnapshotRepo.Save(txCtx, newSnapshot); err != nil {
+			return err
+		}
+
+		beforeMap, err := latestBalance.GetBalanceMap()
 		if err != nil {
 			return err
 		}
-		usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
-		if !usingTargetAudienceExcelFile && capacity.Capacity < utils.MinAcceptableCampaignCapacity {
-			return ErrInsufficientCampaignCapacity
+		afterMap, err := newSnapshot.GetBalanceMap()
+		if err != nil {
+			return err
 		}
 
-		if req.Finalize != nil && *req.Finalize {
-			if err := s.canFinalizeCampaign(txCtx, campaign, customer); err != nil {
-				return err
-			}
-
-			lineNumberPriceFactor := defaultLineNumberPriceFactor
-			if campaign.Spec.Platform == models.CampaignPlatformSMS {
-				lineNumberPriceFactor, err = s.fetchLineNumberPriceFactor(txCtx, campaign.Spec.LineNumber)
-				if err != nil {
-					return err
-				}
-			}
-
-			segmentPriceFactor := defaultSegmentPriceFactor
-			usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && *campaign.Spec.TargetAudienceExcelFileUUID != ""
-			if usingTargetAudienceExcelFile {
-				segmentPriceFactor = defaultSegmentPriceFactor
-			} else {
-				segmentPriceFactor, err = s.fetchSegmentPriceFactor(txCtx, campaign.Spec.Level3s, sanitizedPlatform)
-				if err != nil {
-					return err
-				}
-			}
-
-			pbp, err := s.platformBaseRepo.LatestByPlatform(txCtx, campaign.Spec.Platform)
-			if err != nil {
-				return err
-			}
-			if pbp == nil {
-				return ErrPlatformBasePriceNotFound
-			}
-			pp, err := s.pagePriceRepo.LatestByPlatform(txCtx, campaign.Spec.Platform)
-			if err != nil {
-				return err
-			}
-			if pp == nil {
-				return ErrPagePriceNotFound
-			}
-
-			cost, err := s.CalculateCampaignCost(txCtx, &dto.CalculateCampaignCostRequest{
-				CampaignID: campaign.ID,
-				CustomerID: campaign.CustomerID,
-			}, metadata)
-			if err != nil {
-				return err
-			}
-
-			campaign.Status = models.CampaignStatusWaitingForApproval
-			campaign.NumAudience = utils.ToPtr(cost.NumTargetAudience)
-			campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
-			if err := s.campaignRepo.Update(txCtx, campaign); err != nil {
-				return err
-			}
-
-			// Fetch wallet free balance
-			wallet, err := getWallet(txCtx, s.walletRepo, campaign.CustomerID)
-			if err != nil {
-				return err
-			}
-			// Update customer with wallet reference
-			customer.Wallet = &wallet
-
-			latestBalance, err := getLatestBalanceSnapshot(txCtx, s.walletRepo, wallet.ID)
-			if err != nil {
-				return err
-			}
-
-			availableBalance := latestBalance.FreeBalance + latestBalance.CreditBalance
-			if availableBalance < cost.TotalCost {
-				return ErrInsufficientFunds
-			}
-
-			newFreeBalance := latestBalance.FreeBalance
-			newCreditBalance := latestBalance.CreditBalance
-			remaining := cost.TotalCost
-
-			if remaining <= newFreeBalance {
-				newFreeBalance -= remaining
-			} else {
-				remaining -= newFreeBalance
-				newFreeBalance = 0
-				newCreditBalance -= remaining
-			}
-			newFrozenBalance := latestBalance.FrozenBalance + cost.TotalCost
-
-			numPages := s.calculateParts(
-				campaign.Spec.Content,
-				campaign.Spec.AdLink,
-				campaign.Spec.ShortLinkDomain,
-				sanitizedPlatform,
-			)
-
-			// Build metadata with full campaign spec
-			meta := map[string]any{
-				"source":                   "campaign_update",
-				"operation":                "reserve_budget",
-				"campaign_id":              campaign.ID,
-				"amount":                   cost.TotalCost,
-				"currency":                 utils.TomanCurrency,
-				"campaign_spec":            campaign.Spec,
-				"base_price":               pbp.Price,
-				"page_price":               pp.Price,
-				"num_pages":                numPages,
-				"line_number_price_factor": lineNumberPriceFactor,
-				"segment_price_factor":     segmentPriceFactor,
-			}
-			metaBytes, _ := json.Marshal(meta)
-
-			corrID := uuid.New()
-
-			newSnapshot := &models.BalanceSnapshot{
-				UUID:               uuid.New(),
-				CorrelationID:      corrID,
-				WalletID:           wallet.ID,
-				CustomerID:         customer.ID,
-				FreeBalance:        newFreeBalance,
-				FrozenBalance:      newFrozenBalance,
-				CreditBalance:      newCreditBalance,
-				LockedBalance:      latestBalance.LockedBalance,
-				SpentOnCampaign:    latestBalance.SpentOnCampaign,
-				AgencyShareWithTax: latestBalance.AgencyShareWithTax,
-				TotalBalance:       newFreeBalance + newFrozenBalance + newCreditBalance + latestBalance.LockedBalance + latestBalance.SpentOnCampaign + latestBalance.AgencyShareWithTax,
-				Reason:             "campaign_budget_reserved_waiting_for_approval",
-				Description:        fmt.Sprintf("Budget reserved for campaign %d", campaign.ID),
-				Metadata:           metaBytes,
-				CreatedAt:          utils.UTCNow(),
-				UpdatedAt:          utils.UTCNow(),
-			}
-			if err := s.balanceSnapshotRepo.Save(txCtx, newSnapshot); err != nil {
-				return err
-			}
-
-			beforeMap, err := latestBalance.GetBalanceMap()
-			if err != nil {
-				return err
-			}
-			afterMap, err := newSnapshot.GetBalanceMap()
-			if err != nil {
-				return err
-			}
-
-			freezeTx := &models.Transaction{
-				UUID:          uuid.New(),
-				CorrelationID: corrID,
-				Type:          models.TransactionTypeFreeze,
-				Status:        models.TransactionStatusCompleted,
-				Amount:        cost.TotalCost,
-				Currency:      utils.TomanCurrency,
-				WalletID:      wallet.ID,
-				CustomerID:    customer.ID,
-				BalanceBefore: beforeMap,
-				BalanceAfter:  afterMap,
-				Description:   fmt.Sprintf("Campaign budget reserved: %d Tomans for campaign %d", cost.TotalCost, campaign.ID),
-				Metadata:      metaBytes,
-				CreatedAt:     utils.UTCNow(),
-				UpdatedAt:     utils.UTCNow(),
-			}
-			if err := s.transactionRepo.Save(txCtx, freezeTx); err != nil {
-				return err
-			}
-
-			// Notify admins about new campaign awaiting approval
-			if s.notifier != nil {
-				subject := campaign.UUID.String()
-				if campaign.Spec.Title != nil {
-					subject = *campaign.Spec.Title
-				}
-				msg := fmt.Sprintf("New campaign pending approval:\n%s", subject)
-				for _, mobile := range s.adminConfig.ActiveMobiles() {
-					_ = s.notifier.SendSMS(txCtx, mobile, msg, nil)
-				}
-				// TODO: Resend?
-			}
+		freezeTx := &models.Transaction{
+			UUID:          uuid.New(),
+			CorrelationID: corrID,
+			Type:          models.TransactionTypeFreeze,
+			Status:        models.TransactionStatusCompleted,
+			Amount:        cost.TotalCost,
+			Currency:      utils.TomanCurrency,
+			WalletID:      wallet.ID,
+			CustomerID:    customer.ID,
+			BalanceBefore: beforeMap,
+			BalanceAfter:  afterMap,
+			Description:   fmt.Sprintf("Campaign budget reserved: %d Tomans for campaign %d", cost.TotalCost, campaign.ID),
+			Metadata:      metaBytes,
+			CreatedAt:     utils.UTCNow(),
+			UpdatedAt:     utils.UTCNow(),
 		}
-
-		return nil
+		return s.transactionRepo.Save(txCtx, freezeTx)
 	})
 
 	if err != nil {
 		errMsg := fmt.Sprintf("Campaign update failed for campaign %d: %s", campaign.ID, err.Error())
 		_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignUpdateFailed, errMsg, false, &errMsg, metadata)
-
 		return nil, NewBusinessError("CAMPAIGN_UPDATE_FAILED", "Campaign update failed", err)
+	}
+
+	// Send admin notifications after the transaction commits so network
+	// latency does not extend the transaction lifetime.
+	if s.notifier != nil {
+		subject := campaign.UUID.String()
+		if campaign.Spec.Title != nil {
+			subject = *campaign.Spec.Title
+		}
+		msg := fmt.Sprintf("New campaign pending approval:\n%s", subject)
+		for _, mobile := range s.adminConfig.ActiveMobiles() {
+			_ = s.notifier.SendSMS(ctx, mobile, msg, nil)
+		}
 	}
 
 	// Log successful update
