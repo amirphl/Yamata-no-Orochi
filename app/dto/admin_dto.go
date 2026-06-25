@@ -33,13 +33,15 @@ type AdminCaptchaVerifyRequest struct {
 }
 
 type AdminLoginInitResponse struct {
-	Message           string    `json:"message"`
-	ChallengeID       string    `json:"challenge_id"`
-	MaskedPhone       string    `json:"masked_phone"`
-	OTPSent           bool      `json:"otp_sent"`
-	AlreadySent       bool      `json:"already_sent"`
-	OTPExpiresAt      time.Time `json:"otp_expires_at"`
-	RequiresTwoFactor bool      `json:"requires_two_factor"`
+	Message           string           `json:"message"`
+	ChallengeID       string           `json:"challenge_id"`
+	MaskedPhone       string           `json:"masked_phone"`
+	OTPSent           bool             `json:"otp_sent"`
+	AlreadySent       bool             `json:"already_sent"`
+	OTPExpiresAt      time.Time        `json:"otp_expires_at"`
+	RequiresTwoFactor bool             `json:"requires_two_factor"`
+	Admin             *AdminDTO        `json:"admin,omitempty"`
+	Session           *AdminSessionDTO `json:"session,omitempty"`
 }
 
 type AdminLoginVerifyOTPRequest struct {
