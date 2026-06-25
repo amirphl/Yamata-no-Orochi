@@ -119,6 +119,16 @@ func (h *AuthAdminHandler) VerifyLogin(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Login failed", "INTERNAL_ERROR", nil)
 	}
 
+	if !result.RequiresTwoFactor && result.Session != nil && result.Admin != nil {
+		return h.SuccessResponse(c, fiber.StatusOK, "Login successful", fiber.Map{
+			"access_token":  result.Session.AccessToken,
+			"refresh_token": result.Session.RefreshToken,
+			"token_type":    result.Session.TokenType,
+			"expires_in":    result.Session.ExpiresIn,
+			"admin":         result.Admin,
+		})
+	}
+
 	return h.SuccessResponse(c, fiber.StatusOK, "OTP sent", result)
 }
 
