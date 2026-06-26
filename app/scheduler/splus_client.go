@@ -97,17 +97,22 @@ type httpSplusClient struct {
 }
 
 func newHTTPSplusClient(cfg config.SplusConfig) *httpSplusClient {
+	return newHTTPSplusClientWithClient(cfg, newHTTPClient(60*time.Second))
+}
+
+func newHTTPSplusClientWithClient(cfg config.SplusConfig, client *http.Client) *httpSplusClient {
 	baseURL := strings.TrimSpace(cfg.BaseURL)
 	if baseURL == "" {
 		baseURL = defaultSplusBaseURL
 	}
 	cfg.BaseURL = strings.TrimRight(baseURL, "/")
+	if client == nil {
+		client = newHTTPClient(60 * time.Second)
+	}
 
 	return &httpSplusClient{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		cfg:    cfg,
+		client: client,
 	}
 }
 
