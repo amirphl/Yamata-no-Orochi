@@ -172,6 +172,13 @@ type httpBaleClient struct {
 }
 
 func newHTTPBaleClient(cfg config.BaleConfig) *httpBaleClient {
+	return newHTTPBaleClientWithClient(cfg, newHTTPClient(60*time.Second))
+}
+
+func newHTTPBaleClientWithClient(cfg config.BaleConfig, client *http.Client) *httpBaleClient {
+	if client == nil {
+		client = newHTTPClient(60 * time.Second)
+	}
 	provider := normalizeBaleProvider(cfg.Provider)
 	legacyURL := strings.TrimSpace(cfg.LegacyDomain)
 	if legacyURL == "" {
@@ -187,9 +194,7 @@ func newHTTPBaleClient(cfg config.BaleConfig) *httpBaleClient {
 		provider:  provider,
 		legacyURL: strings.TrimRight(legacyURL, "/"),
 		najvaURL:  strings.TrimRight(najvaURL, "/"),
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		client:    client,
 	}
 }
 
