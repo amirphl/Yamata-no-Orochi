@@ -124,16 +124,21 @@ type httpRubikaClient struct {
 }
 
 func newHTTPRubikaClient(cfg config.RubikaConfig) *httpRubikaClient {
+	return newHTTPRubikaClientWithClient(cfg, newHTTPClient(60*time.Second))
+}
+
+func newHTTPRubikaClientWithClient(cfg config.RubikaConfig, client *http.Client) *httpRubikaClient {
 	baseURL := strings.TrimSpace(cfg.BaseURL)
 	if baseURL == "" {
 		baseURL = defaultRubikaBaseURL
 	}
 	cfg.BaseURL = baseURL
+	if client == nil {
+		client = newHTTPClient(60 * time.Second)
+	}
 	return &httpRubikaClient{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		cfg:    cfg,
+		client: client,
 	}
 }
 
