@@ -81,11 +81,16 @@ type httpPayamSMSClient struct {
 }
 
 func newHTTPPayamSMSClient(cfg config.PayamSMSConfig) *httpPayamSMSClient {
+	return newHTTPPayamSMSClientWithClient(cfg, newHTTPClient(60*time.Second))
+}
+
+func newHTTPPayamSMSClientWithClient(cfg config.PayamSMSConfig, client *http.Client) *httpPayamSMSClient {
+	if client == nil {
+		client = newHTTPClient(60 * time.Second)
+	}
 	return &httpPayamSMSClient{
-		cfg: cfg,
-		client: &http.Client{
-			Timeout: 60 * time.Second,
-		},
+		cfg:    cfg,
+		client: client,
 	}
 }
 
