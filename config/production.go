@@ -15,28 +15,29 @@ import (
 
 // ProductionConfig holds all configuration for production environment
 type ProductionConfig struct {
-	Database   DatabaseConfig   `json:"database"`
-	Server     ServerConfig     `json:"server"`
-	Security   SecurityConfig   `json:"security"`
-	JWT        JWTConfig        `json:"jwt"`
-	Sentry     SentryConfig     `json:"sentry"`
-	SMS        SMSConfig        `json:"sms"`
-	Email      EmailConfig      `json:"email"`
-	Logging    LoggingConfig    `json:"logging"`
-	Metrics    MetricsConfig    `json:"metrics"`
-	Cache      CacheConfig      `json:"cache"`
-	Deployment DeploymentConfig `json:"deployment"`
-	Atipay     AtipayConfig     `json:"atipay"`
-	Admin      AdminConfig      `json:"admin"`
-	System     SystemConfig     `json:"system"`
-	PayamSMS   PayamSMSConfig   `json:"payam_sms"`
-	Bale       BaleConfig       `json:"bale"`
-	Rubika     RubikaConfig     `json:"rubika"`
-	Splus      SplusConfig      `json:"splus"`
-	Bot        BotConfig        `json:"bot"`
-	Scheduler  SchedulerConfig  `json:"scheduler"`
-	Crypto     CryptoConfig     `json:"crypto"`
-	Message    MessageConfig    `json:"message"`
+	Database     DatabaseConfig   `json:"database"`
+	Server       ServerConfig     `json:"server"`
+	Security     SecurityConfig   `json:"security"`
+	JWT          JWTConfig        `json:"jwt"`
+	Sentry       SentryConfig     `json:"sentry"`
+	SMS          SMSConfig        `json:"sms"`
+	Email        EmailConfig      `json:"email"`
+	Logging      LoggingConfig    `json:"logging"`
+	Metrics      MetricsConfig    `json:"metrics"`
+	Cache        CacheConfig      `json:"cache"`
+	Deployment   DeploymentConfig `json:"deployment"`
+	Atipay       AtipayConfig     `json:"atipay"`
+	Admin        AdminConfig      `json:"admin"`
+	System       SystemConfig     `json:"system"`
+	PayamSMS     PayamSMSConfig   `json:"payam_sms"`
+	Bale         BaleConfig       `json:"bale"`
+	Rubika       RubikaConfig     `json:"rubika"`
+	Splus        SplusConfig      `json:"splus"`
+	Bot          BotConfig        `json:"bot"`
+	Scheduler    SchedulerConfig  `json:"scheduler"`
+	Crypto       CryptoConfig     `json:"crypto"`
+	Message      MessageConfig    `json:"message"`
+	IRHTTPSProxy string           `json:"ir_https_proxy"`
 }
 
 type DatabaseConfig struct {
@@ -656,6 +657,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			DepositReceiptSubmittedTemplate:       getEnvString("MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE", "سلام شارژی در سامانه جاذبه انجام شده است. لطفا از پنل ادمین فاکتور مربوطه را صادر و آپلود نمایید"),
 			InvoiceIssueRequestTemplate:           getEnvString("MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE", "درخواست صدور فاکتور ثبت شد. مشتری: %s، شرکت: %s"),
 		},
+		IRHTTPSProxy: getEnvString("IR_HTTPS_PROXY", ""),
 	}
 
 	// Validate the loaded configuration
