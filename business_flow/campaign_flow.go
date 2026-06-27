@@ -75,6 +75,7 @@ type CampaignFlowImpl struct {
 	baleConfig            config.BaleConfig
 	rubikaConfig          config.RubikaConfig
 	splusConfig           config.SplusConfig
+	irHTTPSProxy          string
 	rc                    *redis.Client
 	db                    *gorm.DB
 }
@@ -120,6 +121,7 @@ func NewCampaignFlow(
 	baleConfig config.BaleConfig,
 	rubikaConfig config.RubikaConfig,
 	splusConfig config.SplusConfig,
+	irHTTPSProxy string,
 ) CampaignFlow {
 	return &CampaignFlowImpl{
 		campaignRepo:          campaignRepo,
@@ -147,6 +149,7 @@ func NewCampaignFlow(
 		baleConfig:            baleConfig,
 		rubikaConfig:          rubikaConfig,
 		splusConfig:           splusConfig,
+		irHTTPSProxy:          irHTTPSProxy,
 		rc:                    rc,
 		db:                    db,
 	}
