@@ -495,6 +495,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cfg.Bale,
 		cfg.Rubika,
 		cfg.Splus,
+		cfg.IRHTTPSProxy,
 	)
 
 	// Initialize PaymentFlow
