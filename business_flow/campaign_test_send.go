@@ -493,6 +493,11 @@ func (s *CampaignFlowImpl) newTestSplusClient() (scheduler.SplusClient, error) {
 func (s *CampaignFlowImpl) logTestSendProxyUsage(platform string, recipient string) {
 	proxyURL := strings.TrimSpace(s.irHTTPSProxy)
 	if proxyURL == "" {
+		log.Printf(
+			"sendCampaignTestMessageBestEffort: using direct connection for %s test send to %s",
+			platform,
+			maskPhoneNumber(recipient),
+		)
 		return
 	}
 	log.Printf(
