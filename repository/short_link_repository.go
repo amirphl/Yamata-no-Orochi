@@ -389,7 +389,7 @@ func (r *ShortLinkRepositoryImpl) GetMaxUIDSince(ctx context.Context, since time
 	var uids []string
 	q := db.Model(&models.ShortLink{}).
 		Where("created_at > ?", since).
-		Order("char_length(uid) DESC, uid DESC").
+		Order("id DESC").
 		Limit(1)
 	if err := q.Pluck("uid", &uids).Error; err != nil {
 		return "", err
