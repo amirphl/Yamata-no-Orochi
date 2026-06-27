@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -275,6 +276,7 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			return nil, err
 		}
 		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			s.logTestSendProxyUsage(platform, recipient)
 			resp, err := client.SendBatch(sendCtx, lineNumber, []scheduler.PayamSMSItem{{
 				Recipient:  recipient,
 				Body:       body,
@@ -314,6 +316,7 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		}
 
 		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			s.logTestSendProxyUsage(platform, recipient)
 			var fileID *string
 			if mediaPath != "" {
 				up, err := baleClient.UploadFile(sendCtx, mediaPath)
@@ -371,6 +374,7 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		}
 
 		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			s.logTestSendProxyUsage(platform, recipient)
 			var fileID *string
 			if mediaPath != "" {
 				up, err := rubikaClient.UploadFile(sendCtx, mediaPath)
@@ -420,6 +424,7 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		}
 
 		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+			s.logTestSendProxyUsage(platform, recipient)
 			var fileID *string
 			if mediaPath != "" {
 				up, err := splusClient.UploadFile(sendCtx, botID, mediaPath)
@@ -432,11 +437,19 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 				}
 			}
 
-			resp, err := splusClient.SendMessage(sendCtx, botID, &scheduler.SplusSendMessageRequest{
+			req := &scheduler.SplusSendMessageRequest{
 				PhoneNumber: recipient,
 				Text:        body,
 				FileID:      fileID,
-			})
+			}
+			log.Printf(
+				"sendCampaignTestMessageBestEffort: sending splus test message to %s (bot_id_len=%d text_len=%d has_file=%t)",
+				maskPhoneNumber(recipient),
+				len(strings.TrimSpace(botID)),
+				len(strings.TrimSpace(body)),
+				fileID != nil && strings.TrimSpace(*fileID) != "",
+			)
+			resp, err := splusClient.SendMessage(sendCtx, botID, req)
 			if err == nil && resp != nil {
 				log.Printf("sendCampaignTestMessageBestEffort: Response from SPlus provider: %+v", resp)
 			}
@@ -475,6 +488,19 @@ func (s *CampaignFlowImpl) newTestSplusClient() (scheduler.SplusClient, error) {
 		return scheduler.NewSplusClient(s.splusConfig), nil
 	}
 	return scheduler.NewSplusClientWithHTTPSProxy(s.splusConfig, s.irHTTPSProxy)
+}
+
+func (s *CampaignFlowImpl) logTestSendProxyUsage(platform string, recipient string) {
+	proxyURL := strings.TrimSpace(s.irHTTPSProxy)
+	if proxyURL == "" {
+		return
+	}
+	log.Printf(
+		"sendCampaignTestMessageBestEffort: using IR HTTPS proxy for %s test send to %s via %s",
+		platform,
+		maskPhoneNumber(recipient),
+		maskProxyURL(proxyURL),
+	)
 }
 
 func (s *CampaignFlowImpl) runAsyncCampaignTestSend(
@@ -663,6 +689,38 @@ func maskPhoneNumber(phone string) string {
 		return "****"
 	}
 	return strings.Repeat("*", len(trimmed)-4) + trimmed[len(trimmed)-4:]
+}
+
+func maskProxyURL(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return "[invalid proxy url]"
+	}
+
+	host := parsed.Hostname()
+	if host == "" {
+		host = "[unknown-host]"
+	}
+
+	if port := parsed.Port(); port != "" {
+		host = host + ":" + port
+	}
+
+	scheme := parsed.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+
+	if parsed.User != nil {
+		return fmt.Sprintf("%s://[redacted]@%s", scheme, host)
+	}
+
+	return fmt.Sprintf("%s://%s", scheme, host)
 }
 
 func buildProviderTestID(prefix string, customerID uint) string {
