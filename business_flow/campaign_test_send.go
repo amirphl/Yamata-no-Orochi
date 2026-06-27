@@ -270,7 +270,10 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		if _, err := s.fetchLineNumberPriceFactor(ctx, &lineNumber); err != nil {
 			return nil, err
 		}
-		client := scheduler.NewPayamSMSClient(s.payamSMSConfig)
+		client, err := s.newTestPayamSMSClient()
+		if err != nil {
+			return nil, err
+		}
 		s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
 			resp, err := client.SendBatch(sendCtx, lineNumber, []scheduler.PayamSMSItem{{
 				Recipient:  recipient,
@@ -297,7 +300,10 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			return nil, err
 		}
 
-		baleClient := scheduler.NewBaleClient(s.baleConfig)
+		baleClient, err := s.newTestBaleClient()
+		if err != nil {
+			return nil, err
+		}
 		var mediaPath string
 		if campaign.Spec.MediaUUID != nil {
 			path, err := s.resolveCampaignMediaPath(ctx, campaign)
@@ -351,7 +357,10 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			return nil, err
 		}
 
-		rubikaClient := scheduler.NewRubikaClient(s.rubikaConfig)
+		rubikaClient, err := s.newTestRubikaClient()
+		if err != nil {
+			return nil, err
+		}
 		var mediaPath string
 		if campaign.Spec.MediaUUID != nil {
 			path, err := s.resolveCampaignMediaPath(ctx, campaign)
@@ -397,7 +406,10 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 			return nil, err
 		}
 
-		splusClient := scheduler.NewSplusClient(s.splusConfig)
+		splusClient, err := s.newTestSplusClient()
+		if err != nil {
+			return nil, err
+		}
 		var mediaPath string
 		if campaign.Spec.MediaUUID != nil {
 			path, err := s.resolveCampaignMediaPath(ctx, campaign)
@@ -435,6 +447,34 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 	default:
 		return nil, ErrCampaignPlatformInvalid
 	}
+}
+
+func (s *CampaignFlowImpl) newTestPayamSMSClient() (scheduler.PayamSMSClient, error) {
+	if strings.TrimSpace(s.irHTTPSProxy) == "" {
+		return scheduler.NewPayamSMSClient(s.payamSMSConfig), nil
+	}
+	return scheduler.NewPayamSMSClientWithHTTPSProxy(s.payamSMSConfig, s.irHTTPSProxy)
+}
+
+func (s *CampaignFlowImpl) newTestBaleClient() (scheduler.BaleClient, error) {
+	if strings.TrimSpace(s.irHTTPSProxy) == "" {
+		return scheduler.NewBaleClient(s.baleConfig), nil
+	}
+	return scheduler.NewBaleClientWithHTTPSProxy(s.baleConfig, s.irHTTPSProxy)
+}
+
+func (s *CampaignFlowImpl) newTestRubikaClient() (scheduler.RubikaClient, error) {
+	if strings.TrimSpace(s.irHTTPSProxy) == "" {
+		return scheduler.NewRubikaClient(s.rubikaConfig), nil
+	}
+	return scheduler.NewRubikaClientWithHTTPSProxy(s.rubikaConfig, s.irHTTPSProxy)
+}
+
+func (s *CampaignFlowImpl) newTestSplusClient() (scheduler.SplusClient, error) {
+	if strings.TrimSpace(s.irHTTPSProxy) == "" {
+		return scheduler.NewSplusClient(s.splusConfig), nil
+	}
+	return scheduler.NewSplusClientWithHTTPSProxy(s.splusConfig, s.irHTTPSProxy)
 }
 
 func (s *CampaignFlowImpl) runAsyncCampaignTestSend(
