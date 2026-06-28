@@ -63,6 +63,8 @@ const (
 	AuditActionCampaignReportExportFailed    = "campaign_report_export_failed"
 	AuditActionBundleCreated                 = "bundle_created"
 	AuditActionBundleCreationFailed          = "bundle_creation_failed"
+	AuditActionBundleUpdated                 = "bundle_updated"
+	AuditActionBundleUpdateFailed            = "bundle_update_failed"
 
 	// Payment actions
 	AuditActionWalletChargeInitiated                   = "wallet_charge_initiated"
