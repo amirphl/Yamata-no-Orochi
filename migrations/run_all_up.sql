@@ -350,5 +350,11 @@
 \echo 'Running 0114_add_normalized_score_to_audience_profiles.sql...'
 \i migrations/0114_add_normalized_score_to_audience_profiles.sql
 
+\echo 'Running 0115_add_hidden_to_campaigns.sql...'
+\i migrations/0115_add_hidden_to_campaigns.sql
+
+\echo 'Running 0116_add_bundle_update_audit_actions.sql...'
+\i migrations/0116_add_bundle_update_audit_actions.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
