@@ -193,6 +193,7 @@ type Campaign struct {
 	ID         uint            `gorm:"primaryKey" json:"id"`
 	UUID       uuid.UUID       `gorm:"type:uuid;not null;uniqueIndex:uk_campaigns_uuid;index:idx_campaigns_uuid" json:"uuid"`
 	CustomerID uint            `gorm:"not null;index:idx_campaigns_customer_id" json:"customer_id"`
+	Hidden     bool            `gorm:"not null;default:false" json:"hidden"`
 	Status     CampaignStatus  `gorm:"type:sms_campaign_status;not null;default:'initiated';index:idx_campaigns_status" json:"status"`
 	CreatedAt  time.Time       `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_campaigns_created_at" json:"created_at"`
 	UpdatedAt  *time.Time      `gorm:"index:idx_campaigns_updated_at" json:"updated_at,omitempty"`
@@ -272,8 +273,11 @@ type CampaignFilter struct {
 	ID                 *uint           `json:"id,omitempty"`
 	UUID               *uuid.UUID      `json:"uuid,omitempty"`
 	CustomerID         *uint           `json:"customer_id,omitempty"`
+	Hidden             *bool           `json:"hidden,omitempty"`
 	Status             *CampaignStatus `json:"status,omitempty"`
-	Title              *string         `json:"title,omitempty"`
+	CampaignTitle      *string         `json:"campaign_title,omitempty"`
+	BundleTitle        *string         `json:"bundle_title,omitempty"`
+	CustomerName       *string         `json:"customer_name,omitempty"`
 	Level1             *string         `json:"level1,omitempty"`
 	Sex                *string         `json:"sex,omitempty"`
 	City               *string         `json:"city,omitempty"`
