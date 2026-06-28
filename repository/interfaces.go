@@ -131,12 +131,14 @@ type CampaignRepository interface {
 	ByID(ctx context.Context, id uint) (*models.Campaign, error)
 	ByUUID(ctx context.Context, uuid string) (*models.Campaign, error)
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Campaign, error)
+	ByCustomerIDAndIDs(ctx context.Context, customerID uint, campaignIDs []uint) ([]*models.Campaign, error)
 	ByCustomerIDAndBundleIDs(ctx context.Context, customerID uint, bundleIDs []uint) ([]*models.Campaign, error)
 	ByStatus(ctx context.Context, status models.CampaignStatus, limit, offset int) ([]*models.Campaign, error)
 	Update(ctx context.Context, campaign models.Campaign) error
 	UpdateStatistics(ctx context.Context, id uint, stats json.RawMessage) error
 	AppendTrackingResults(ctx context.Context, id uint, items json.RawMessage) error
 	UpdateStatus(ctx context.Context, id uint, status models.CampaignStatus) error
+	MarkHidden(ctx context.Context, customerID uint, campaignIDs []uint) (int64, error)
 	CountByCustomerID(ctx context.Context, customerID uint) (int, error)
 	CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error)
 	GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.Campaign, error)
