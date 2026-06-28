@@ -3,6 +3,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0116_add_bundle_update_audit_actions_down.sql...'
+\i migrations/0116_add_bundle_update_audit_actions_down.sql
+
+\echo 'Running 0115_add_hidden_to_campaigns_down.sql...'
+\i migrations/0115_add_hidden_to_campaigns_down.sql
+
 \echo 'Running 0114_add_normalized_score_to_audience_profiles_down.sql...'
 \i migrations/0114_add_normalized_score_to_audience_profiles_down.sql
 
