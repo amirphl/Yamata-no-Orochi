@@ -133,6 +133,7 @@ type GetCampaignRequest struct {
 type GetCampaignResponse struct {
 	ID                   uint           `json:"id"`
 	UUID                 string         `json:"uuid"`
+	Hidden               bool           `json:"hidden"`
 	Status               string         `json:"status"`
 	CreatedAt            time.Time      `json:"created_at"`
 	UpdatedAt            *time.Time     `json:"updated_at,omitempty"`
@@ -154,6 +155,7 @@ type GetCampaignResponse struct {
 	PlatformSettingsID   *uint          `json:"platform_settings_id,omitempty"`
 	PlatformSettingsName *string        `json:"platform_settings_name,omitempty"`
 	Platform             string         `json:"platform"`
+	PlatformBasePrice    *uint64        `json:"platform_base_price,omitempty"`
 	LinePriceFactor      *float64       `json:"line_price_factor,omitempty"`
 	SegmentPriceFactor   *float64       `json:"segment_price_factor,omitempty"`
 	Budget               *uint64        `json:"budget,omitempty" validate:"omitempty"`
@@ -210,10 +212,15 @@ type CalculateCampaignCostResponse struct {
 
 // ListCampaignsFilter represents filter criteria for listing campaigns in request layer
 type ListCampaignsFilter struct {
-	Title    *string `json:"title,omitempty" validate:"omitempty,max=255"`
-	Status   *string `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in_progress waiting_for_approval approved rejected cancelled running executed expired"`
-	BundleID *uint   `json:"bundle_id,omitempty" validate:"omitempty,min=1"`
-	Phase    *string `json:"phase,omitempty" validate:"omitempty,oneof=test execution"`
+	CampaignTitle *string    `json:"campaign_title,omitempty" validate:"omitempty,max=255"`
+	BundleTitle   *string    `json:"bundle_title,omitempty" validate:"omitempty,max=255"`
+	CustomerName  *string    `json:"customer_name,omitempty" validate:"omitempty,max=255"`
+	Status        *string    `json:"status,omitempty" validate:"omitempty,max=255,oneof=initiated in-progress waiting-for-approval approved rejected cancelled running executed expired cancelled-by-admin"`
+	BundleID      *uint      `json:"bundle_id,omitempty" validate:"omitempty,min=1"`
+	Platform      *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	StartDate     *time.Time `json:"start_date,omitempty" validate:"omitempty"`
+	EndDate       *time.Time `json:"end_date,omitempty" validate:"omitempty"`
+	Phase         *string    `json:"phase,omitempty" validate:"omitempty,oneof=test execution"`
 }
 
 // ListCampaignsRequest represents a paginated list request for user's campaigns
@@ -221,7 +228,7 @@ type ListCampaignsRequest struct {
 	CustomerID uint                 `json:"-"`
 	Page       int                  `json:"page" validate:"omitempty,min=1,max=100"`
 	Limit      int                  `json:"limit" validate:"omitempty,min=1,max=100"`
-	OrderBy    string               `json:"orderby" validate:"oneof=newest oldest"` // newest, oldest
+	OrderBy    string               `json:"orderby" validate:"omitempty,oneof=newest oldest phase_test_first phase_execution_first highest_click_rate lowest_click_rate"`
 	Filter     *ListCampaignsFilter `json:"filter,omitempty" validate:"omitempty"`
 }
 
@@ -245,20 +252,33 @@ type GetLastInitiatedCampaignResponse struct {
 	Item    *GetCampaignResponse `json:"item,omitempty"`
 }
 
+type HideCampaignsRequest struct {
+	CustomerID  uint   `json:"-"`
+	CampaignIDs []uint `json:"campaign_ids" validate:"required,min=1,dive,min=1"`
+}
+
+type HideCampaignsResponse struct {
+	Message      string `json:"message"`
+	UpdatedCount int64  `json:"updated_count"`
+}
+
 // AdminListCampaignsFilter holds filters for admin campaign listing
 type AdminListCampaignsFilter struct {
-	Title     *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Status    *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in-progress waiting-for-approval approved rejected expired cancelled running executed cancelled-by-admin"`
-	StartDate *time.Time `json:"start_date,omitempty" validate:"omitempty"`
-	EndDate   *time.Time `json:"end_date,omitempty" validate:"omitempty"`
-	Page      int        `json:"page" validate:"omitempty,min=1,max=1000000"`
-	Limit     int        `json:"limit" validate:"omitempty,min=1,max=100"`
+	CampaignTitle *string    `json:"campaign_title,omitempty" validate:"omitempty,max=255"`
+	BundleTitle   *string    `json:"bundle_title,omitempty" validate:"omitempty,max=255"`
+	CustomerName  *string    `json:"customer_name,omitempty" validate:"omitempty,max=255"`
+	Status        *string    `json:"status,omitempty" validate:"omitempty,oneof=initiated in-progress waiting-for-approval approved rejected expired cancelled running executed cancelled-by-admin"`
+	StartDate     *time.Time `json:"start_date,omitempty" validate:"omitempty"`
+	EndDate       *time.Time `json:"end_date,omitempty" validate:"omitempty"`
+	Page          int        `json:"page" validate:"omitempty,min=1,max=1000000"`
+	Limit         int        `json:"limit" validate:"omitempty,min=1,max=100"`
 }
 
 // AdminGetCampaignResponse represents the campaign specification in responses
 type AdminGetCampaignResponse struct {
 	ID                    uint           `json:"id"`
 	UUID                  string         `json:"uuid"`
+	Hidden                bool           `json:"hidden"`
 	Status                string         `json:"status"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             *time.Time     `json:"updated_at,omitempty"`
@@ -279,6 +299,7 @@ type AdminGetCampaignResponse struct {
 	MediaUUID             *uuid.UUID     `json:"media_uuid,omitempty"`
 	PlatformSettingsID    *uint          `json:"platform_settings_id,omitempty"`
 	Platform              string         `json:"platform"`
+	PlatformBasePrice     *uint64        `json:"platform_base_price,omitempty"`
 	Budget                *uint64        `json:"budget,omitempty" validate:"omitempty"`
 	Comment               *string        `json:"comment,omitempty" validate:"omitempty"`
 	SegmentPriceFactor    float64        `json:"segment_price_factor,omitempty"`
@@ -393,6 +414,7 @@ type GetPagePricesResponse struct {
 type BotGetCampaignResponse struct {
 	ID                 uint                             `json:"id"`
 	CustomerID         uint                             `json:"customer_id"`
+	Hidden             bool                             `json:"hidden"`
 	Status             string                           `json:"status"`
 	CreatedAt          time.Time                        `json:"created_at"`
 	UpdatedAt          *time.Time                       `json:"updated_at,omitempty"`
@@ -414,6 +436,7 @@ type BotGetCampaignResponse struct {
 	PlatformSettingsID *uint                            `json:"platform_settings_id,omitempty"`
 	PlatformSettings   *BotCampaignPlatformSettingsSpec `json:"platform_settings,omitempty"`
 	Platform           string                           `json:"platform"`
+	PlatformBasePrice  *uint64                          `json:"platform_base_price,omitempty"`
 	Budget             *uint64                          `json:"budget,omitempty" validate:"omitempty"`
 	Comment            *string                          `json:"comment,omitempty" validate:"omitempty"`
 	NumAudiences       *uint64                          `json:"num_audiences"`
