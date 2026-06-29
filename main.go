@@ -340,7 +340,14 @@ func initializeOTPSMSService(cfg *config.ProductionConfig) services.SMSService {
 	if cfg.SMS.ProviderDomain == "mock" {
 		return services.NewMockSMSService()
 	}
-	return services.NewPayamSMSService(&cfg.SMS, &cfg.PayamSMS)
+
+	svc, err := services.NewPayamSMSServiceWithHTTPSProxy(&cfg.SMS, &cfg.PayamSMS, cfg.IRHTTPSProxy)
+	if err != nil {
+		log.Printf("Failed to initialize proxy-enabled OTP SMS service, falling back to direct connection: %v", err)
+		return services.NewPayamSMSService(&cfg.SMS, &cfg.PayamSMS)
+	}
+
+	return svc
 }
 
 // initializeApplication initializes the main application components
@@ -593,6 +600,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		transactionRepo,
 		auditRepo,
 		platformSettingsRepo,
+		platformBasePriceRepo,
 		lineNumberRepo,
 		segmentPriceFactorRepo,
 		pagePriceRepo,
@@ -617,7 +625,16 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		segmentPriceFactorRepo,
 	)
 
-	botCampaignFlow := businessflow.NewBotCampaignFlow(campaignRepo, multimediaRepo, platformSettingsRepo, cfg.Cache, db, rc)
+	botCampaignFlow := businessflow.NewBotCampaignFlow(
+		campaignRepo,
+		multimediaRepo,
+		platformSettingsRepo,
+		transactionRepo,
+		platformBasePriceRepo,
+		cfg.Cache,
+		db,
+		rc,
+	)
 	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
