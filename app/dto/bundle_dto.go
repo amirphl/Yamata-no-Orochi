@@ -21,6 +21,26 @@ type CreateBundleResponse struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type UpdateBundleRequest struct {
+	CustomerID            uint    `json:"-"`
+	ID                    uint    `json:"-"`
+	Title                 string  `json:"title" validate:"required,max=255"`
+	Objective             string  `json:"objective" validate:"required,max=1023"`
+	TargetAudiencePersona string  `json:"target_audience_persona" validate:"required,max=1023"`
+	AdLink                *string `json:"adlink,omitempty" validate:"omitempty,max=2047"`
+	ShortLinkDomain       *string `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Description           *string `json:"description,omitempty" validate:"omitempty,max=2047"`
+	TargetCustomerName    *string `json:"target_customer_name,omitempty" validate:"omitempty,max=255"`
+	Category              *string `json:"category,omitempty" validate:"omitempty,max=255"`
+	Job                   *string `json:"job,omitempty" validate:"omitempty,max=255"`
+}
+
+type UpdateBundleResponse struct {
+	Message   string    `json:"message"`
+	ID        uint      `json:"id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type GetBundleRequest struct {
 	CustomerID uint `json:"-"`
 	ID         uint `json:"id" validate:"required,min=1"`
