@@ -63,6 +63,30 @@ func NewPayamSMSService(smsCfg *config.SMSConfig, payamCfg *config.PayamSMSConfi
 	}
 }
 
+func NewPayamSMSServiceWithHTTPSProxy(smsCfg *config.SMSConfig, payamCfg *config.PayamSMSConfig, proxyURL string) (SMSService, error) {
+	proxyURL = strings.TrimSpace(proxyURL)
+	if proxyURL == "" {
+		return NewPayamSMSService(smsCfg, payamCfg), nil
+	}
+
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, err
+	}
+
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyURL(parsed)
+
+	return &PayamSMSSMSService{
+		smsConfig:   smsCfg,
+		payamConfig: payamCfg,
+		client: &http.Client{
+			Timeout:   smsCfg.Timeout,
+			Transport: transport,
+		},
+	}, nil
+}
+
 func (s *PayamSMSSMSService) SendOTP(ctx context.Context, recipient, message string, customerID *int64) error {
 	return s.SendSMS(ctx, recipient, message, customerID)
 }
