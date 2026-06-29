@@ -279,6 +279,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/:id/export", r.campaignHandler.ExportCampaignReport)
 	campaigns.Get("/:uuid/click-report", r.campaignHandler.ExportCampaignClickReport)
 	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
+	campaigns.Post("/hide", r.campaignHandler.HideCampaigns)
 
 	// Bundle routes (protected with authentication)
 	bundles := api.Group("/bundles")
@@ -286,6 +287,7 @@ func (r *FiberRouter) SetupRoutes() {
 	bundles.Post("/", r.bundleHandler.Create)
 	bundles.Get("/", r.bundleHandler.List)
 	bundles.Get("/:id", r.bundleHandler.Get)
+	bundles.Put("/:id", r.bundleHandler.Update)
 
 	// Admin campaigns listing and actions
 	adminCampaigns := api.Group("/admin/campaigns")
