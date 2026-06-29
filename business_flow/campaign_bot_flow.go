@@ -36,6 +36,8 @@ type BotCampaignFlowImpl struct {
 	campaignRepo         repository.CampaignRepository
 	multimediaRepo       repository.MultimediaAssetRepository
 	platformSettingsRepo repository.PlatformSettingsRepository
+	transactionRepo      repository.TransactionRepository
+	platformBaseRepo     repository.PlatformBasePriceRepository
 	cacheConfig          config.CacheConfig
 	db                   *gorm.DB
 	rc                   *redis.Client
@@ -45,6 +47,8 @@ func NewBotCampaignFlow(
 	campaignRepo repository.CampaignRepository,
 	multimediaRepo repository.MultimediaAssetRepository,
 	platformSettingsRepo repository.PlatformSettingsRepository,
+	transactionRepo repository.TransactionRepository,
+	platformBaseRepo repository.PlatformBasePriceRepository,
 	cacheConfig config.CacheConfig,
 	db *gorm.DB,
 	rc *redis.Client,
@@ -53,6 +57,8 @@ func NewBotCampaignFlow(
 		campaignRepo:         campaignRepo,
 		multimediaRepo:       multimediaRepo,
 		platformSettingsRepo: platformSettingsRepo,
+		transactionRepo:      transactionRepo,
+		platformBaseRepo:     platformBaseRepo,
 		cacheConfig:          cacheConfig,
 		db:                   db,
 		rc:                   rc,
@@ -90,6 +96,12 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 	for _, c := range readyCampaigns {
 		ensureCampaignSpecDefaults(&c.Spec)
 
+		// ISSUE: N+1 queries.
+		platformBasePrice, err := s.resolvePlatformBasePrice(ctx, c.ID, c.Spec.Platform)
+		if err != nil {
+			return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to list ready campaigns", err)
+		}
+
 		var platformSettings *dto.BotCampaignPlatformSettingsSpec
 		if c.Spec.PlatformSettingsID != nil && *c.Spec.PlatformSettingsID != 0 {
 			platformSettings = platformSettingsByID[*c.Spec.PlatformSettingsID]
@@ -98,6 +110,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 		items = append(items, dto.BotGetCampaignResponse{
 			ID:                 c.ID,
 			CustomerID:         c.CustomerID,
+			Hidden:             c.Hidden,
 			Status:             c.Status.String(),
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
@@ -119,6 +132,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 			PlatformSettingsID: c.Spec.PlatformSettingsID,
 			PlatformSettings:   platformSettings,
 			Platform:           c.Spec.Platform,
+			PlatformBasePrice:  platformBasePrice,
 			Budget:             c.Spec.Budget,
 			Comment:            c.Comment,
 			NumAudiences:       c.NumAudience,
@@ -136,6 +150,52 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 		Message: "Ready campaigns retrieved successfully",
 		Items:   items,
 	}, nil
+}
+
+func (s *BotCampaignFlowImpl) resolvePlatformBasePrice(ctx context.Context, campaignID uint, platform string) (*uint64, error) {
+	basePrice, err := s.readPlatformBasePriceFromMetadata(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if basePrice != nil {
+		return basePrice, nil
+	}
+
+	pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, platform)
+	if err != nil {
+		return nil, err
+	}
+	if pbp == nil {
+		return nil, nil
+	}
+	return &pbp.Price, nil
+}
+
+func (s *BotCampaignFlowImpl) readPlatformBasePriceFromMetadata(ctx context.Context, campaignID uint) (*uint64, error) {
+	source := "campaign_update"
+	operation := "reserve_budget"
+	txs, err := s.transactionRepo.ByFilter(ctx, models.TransactionFilter{
+		CampaignID: &campaignID,
+		Source:     &source,
+		Operation:  &operation,
+	}, "id DESC", 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 || len(txs[0].Metadata) == 0 {
+		return nil, nil
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
+		return nil, nil
+	}
+
+	basePrice, ok := parseMetadataUint64(meta["base_price"])
+	if !ok {
+		return nil, nil
+	}
+	return &basePrice, nil
 }
 
 func (s *BotCampaignFlowImpl) loadPlatformSettingsSpecs(ctx context.Context, campaigns []*models.Campaign) (map[uint]*dto.BotCampaignPlatformSettingsSpec, error) {
