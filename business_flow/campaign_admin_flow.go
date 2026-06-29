@@ -44,6 +44,7 @@ type AdminCampaignFlowImpl struct {
 	transactionRepo      repository.TransactionRepository
 	auditRepo            repository.AuditLogRepository
 	platformSettingsRepo repository.PlatformSettingsRepository
+	platformBaseRepo     repository.PlatformBasePriceRepository
 	lineNumberRepo       repository.LineNumberRepository
 	segmentPriceRepo     repository.SegmentPriceFactorRepository
 	pagePriceRepo        repository.PagePriceRepository
@@ -71,6 +72,7 @@ func NewAdminCampaignFlow(
 	transactionRepo repository.TransactionRepository,
 	auditRepo repository.AuditLogRepository,
 	platformSettingsRepo repository.PlatformSettingsRepository,
+	platformBaseRepo repository.PlatformBasePriceRepository,
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	pagePriceRepo repository.PagePriceRepository,
@@ -89,6 +91,7 @@ func NewAdminCampaignFlow(
 		transactionRepo:      transactionRepo,
 		auditRepo:            auditRepo,
 		platformSettingsRepo: platformSettingsRepo,
+		platformBaseRepo:     platformBaseRepo,
 		lineNumberRepo:       lineNumberRepo,
 		segmentPriceRepo:     segmentPriceRepo,
 		pagePriceRepo:        pagePriceRepo,
@@ -114,8 +117,14 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 	offset := (page - 1) * limit
 
 	cf := models.CampaignFilter{}
-	if filter.Title != nil && *filter.Title != "" {
-		cf.Title = filter.Title
+	if filter.CampaignTitle != nil && *filter.CampaignTitle != "" {
+		cf.CampaignTitle = filter.CampaignTitle
+	}
+	if filter.BundleTitle != nil && *filter.BundleTitle != "" {
+		cf.BundleTitle = filter.BundleTitle
+	}
+	if filter.CustomerName != nil && *filter.CustomerName != "" {
+		cf.CustomerName = filter.CustomerName
 	}
 	if filter.Status != nil && *filter.Status != "" {
 		st := models.CampaignStatus(*filter.Status)
@@ -177,6 +186,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 	}
 
 	items := make([]dto.AdminGetCampaignResponse, 0, len(rows))
+	platformBasePrices := make(map[string]*uint64)
 	for _, c := range rows {
 		ensureCampaignSpecDefaults(&c.Spec)
 
@@ -191,10 +201,18 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 		clicks := clickCounts[c.ID]
 		totalClicks := clicks
 		clickRate := computeClickRate(clicks, parseAggregatedTotalSentFromMap(stats))
+		platformBasePrice, err := s.resolvePlatformBasePriceForAdminList(ctx, c.Spec.Platform, platformBasePrices)
+		if err != nil {
+			logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignList, "Admin listed campaigns", false, nil, map[string]any{
+				"status": filter.Status,
+			}, err)
+			return nil, NewBusinessError("ADMIN_LIST_CAMPAIGNS_FAILED", "Failed to fetch platform base price", err)
+		}
 
 		items = append(items, dto.AdminGetCampaignResponse{
 			ID:                 c.ID,
 			UUID:               c.UUID.String(),
+			Hidden:             c.Hidden,
 			Status:             c.Status.String(),
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
@@ -215,6 +233,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			MediaUUID:          c.Spec.MediaUUID,
 			PlatformSettingsID: c.Spec.PlatformSettingsID,
 			Platform:           c.Spec.Platform,
+			PlatformBasePrice:  platformBasePrice,
 			Budget:             c.Spec.Budget,
 			Comment:            c.Comment,
 			Statistics:         stats,
@@ -277,9 +296,13 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	clicks := clickCounts[id]
 	totalClicks := clicks
 	clickRate := computeClickRate(clicks, parseAggregatedTotalSentFromMap(stats))
-	metaSegment, metaLine, err := s.readCampaignPriceFactorsFromMetadata(ctx, c.ID)
+	metaPlatform, metaSegment, metaLine, err := s.readCampaignPriceFactorsFromMetadata(ctx, c.ID)
 	if err != nil {
 		return nil, err
+	}
+	platformBasePrice := uint64(0) // TODO: Should return -1 to indicate an issue.
+	if metaPlatform != nil {
+		platformBasePrice = *metaPlatform
 	}
 	segmentPriceFactor := float64(-1)
 	if metaSegment != nil {
@@ -321,6 +344,7 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 	resp := &dto.AdminGetCampaignResponse{
 		ID:                    c.ID,
 		UUID:                  c.UUID.String(),
+		Hidden:                c.Hidden,
 		Status:                c.Status.String(),
 		CreatedAt:             c.CreatedAt,
 		UpdatedAt:             c.UpdatedAt,
@@ -341,6 +365,7 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		MediaUUID:             c.Spec.MediaUUID,
 		PlatformSettingsID:    c.Spec.PlatformSettingsID,
 		Platform:              c.Spec.Platform,
+		PlatformBasePrice:     &platformBasePrice,
 		Budget:                c.Spec.Budget,
 		Comment:               c.Comment,
 		SegmentPriceFactor:    segmentPriceFactor,
@@ -364,6 +389,24 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		"campaign_id": c.ID,
 	}, nil)
 	return resp, nil
+}
+
+func (s *AdminCampaignFlowImpl) resolvePlatformBasePriceForAdminList(ctx context.Context, platform string, cache map[string]*uint64) (*uint64, error) {
+	if value, ok := cache[platform]; ok {
+		return value, nil
+	}
+
+	pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, platform)
+	if err != nil {
+		return nil, err
+	}
+	if pbp == nil {
+		cache[platform] = nil
+		return nil, nil
+	}
+
+	cache[platform] = &pbp.Price
+	return cache[platform], nil
 }
 
 func formatCampaignPartyFullName(customer *models.Customer) *string {
@@ -397,7 +440,7 @@ func formatCampaignAgencyFullName(customer *models.Customer) *string {
 	return formatCampaignPartyFullName(customer.ReferrerAgency)
 }
 
-func (s *AdminCampaignFlowImpl) readCampaignPriceFactorsFromMetadata(ctx context.Context, campaignID uint) (*float64, *float64, error) {
+func (s *AdminCampaignFlowImpl) readCampaignPriceFactorsFromMetadata(ctx context.Context, campaignID uint) (*uint64, *float64, *float64, error) {
 	source := "campaign_update"
 	operation := "reserve_budget"
 	txs, err := s.transactionRepo.ByFilter(ctx, models.TransactionFilter{
@@ -406,20 +449,24 @@ func (s *AdminCampaignFlowImpl) readCampaignPriceFactorsFromMetadata(ctx context
 		Operation:  &operation,
 	}, "id DESC", 1, 0)
 	if err != nil {
-		return nil, nil, NewBusinessError("ADMIN_GET_CAMPAIGN_FAILED", "Failed to get campaign metadata", err)
+		return nil, nil, nil, NewBusinessError("ADMIN_GET_CAMPAIGN_FAILED", "Failed to get campaign metadata", err)
 	}
 	if len(txs) == 0 || len(txs[0].Metadata) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
 	var meta map[string]any
 	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
+	basePrice, _ := parseMetadataUint64(meta["base_price"])
 	segmentPriceFactor := parseMetadataFloat(meta["segment_price_factor"])
 	lineNumberPriceFactor := parseMetadataFloat(meta["line_number_price_factor"])
-	return segmentPriceFactor, lineNumberPriceFactor, nil
+	if basePrice == 0 {
+		return nil, segmentPriceFactor, lineNumberPriceFactor, nil
+	}
+	return &basePrice, segmentPriceFactor, lineNumberPriceFactor, nil
 }
 
 func parseMetadataFloat(value any) *float64 {
