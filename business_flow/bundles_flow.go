@@ -15,6 +15,7 @@ import (
 
 type BundleFlow interface {
 	CreateBundle(ctx context.Context, req *dto.CreateBundleRequest, metadata *ClientMetadata) (*dto.CreateBundleResponse, error)
+	UpdateBundle(ctx context.Context, req *dto.UpdateBundleRequest, metadata *ClientMetadata) (*dto.UpdateBundleResponse, error)
 	GetBundle(ctx context.Context, req *dto.GetBundleRequest, metadata *ClientMetadata) (*dto.GetBundleResponse, error)
 	ListBundles(ctx context.Context, req *dto.ListBundlesRequest, metadata *ClientMetadata) (*dto.ListBundlesResponse, error)
 }
@@ -129,6 +130,95 @@ func (f *BundleFlowImpl) CreateBundle(ctx context.Context, req *dto.CreateBundle
 		Message:   "Bundle created successfully",
 		ID:        row.ID,
 		CreatedAt: row.CreatedAt,
+	}, nil
+}
+
+func (f *BundleFlowImpl) UpdateBundle(ctx context.Context, req *dto.UpdateBundleRequest, metadata *ClientMetadata) (*dto.UpdateBundleResponse, error) {
+	if req == nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_FAILED", "Failed to update bundle", ErrInvalidState)
+	}
+
+	customer, err := getCustomer(ctx, f.customerRepo, req.CustomerID)
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_FAILED", "Failed to update bundle", err)
+	}
+
+	title, err := validateRequiredBundleField(req.Title, 255, "title")
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+	objective, err := validateRequiredBundleField(req.Objective, 1023, "objective")
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+	targetAudiencePersona, err := validateRequiredBundleField(req.TargetAudiencePersona, 1023, "target audience persona")
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+	shortLinkDomain, err := sanitizeShortLinkDomain(req.ShortLinkDomain)
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+	description, err := sanitizeOptionalBundleField(req.Description, 2047, "description")
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+	adLink, err := sanitizeOptionalBundleField(req.AdLink, 2047, "adlink")
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+	targetCustomerName, err := sanitizeOptionalBundleField(req.TargetCustomerName, 255, "target customer name")
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+	category, job, err := sanitizeCategoryAndJob(customer.AccountType.TypeName, req.Category, req.Job, false)
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_VALIDATION_FAILED", "Bundle validation failed", err)
+	}
+
+	row, err := f.bundleRepo.ByID(ctx, req.ID)
+	if err != nil {
+		return nil, NewBusinessError("UPDATE_BUNDLE_FAILED", "Failed to update bundle", err)
+	}
+	if row == nil {
+		return nil, NewBusinessError("BUNDLE_NOT_FOUND", "Bundle not found", ErrBundleNotFound)
+	}
+	if row.CustomerID != req.CustomerID {
+		return nil, NewBusinessError("BUNDLE_ACCESS_DENIED", "Bundle access denied", ErrBundleAccessDenied)
+	}
+
+	row.Title = title
+	row.Objective = objective
+	row.TargetAudiencePersona = targetAudiencePersona
+	row.Adlink = adLink
+	row.Description = description
+	row.ShortLinkDomain = shortLinkDomain
+	row.TargetCustomerName = targetCustomerName
+	row.Category = category
+	row.Job = job
+	row.UpdatedAt = utils.UTCNow()
+
+	if err := repository.WithTransaction(ctx, f.db, func(txCtx context.Context) error {
+		if err := f.bundleRepo.Save(txCtx, row); err != nil {
+			return err
+		}
+
+		msg := fmt.Sprintf("Bundle updated successfully: id=%d title=%q", row.ID, row.Title)
+		if err := createAuditLog(txCtx, f.auditRepo, &customer, models.AuditActionBundleUpdated, msg, true, nil, metadata); err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		errMsg := fmt.Sprintf("Bundle update failed for customer %d bundle %d title=%q: %s", customer.ID, req.ID, title, err.Error())
+		_ = createAuditLog(ctx, f.auditRepo, &customer, models.AuditActionBundleUpdateFailed, errMsg, false, &errMsg, metadata)
+		return nil, NewBusinessError("UPDATE_BUNDLE_FAILED", "Failed to update bundle", err)
+	}
+
+	return &dto.UpdateBundleResponse{
+		Message:   "Bundle updated successfully",
+		ID:        row.ID,
+		UpdatedAt: row.UpdatedAt,
 	}, nil
 }
 
