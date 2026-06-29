@@ -42,6 +42,7 @@ type CampaignFlow interface {
 	ListAudienceSpec(ctx context.Context, platform *string) (*dto.ListAudienceSpecResponse, error)
 	GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error)
 	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
+	HideCampaigns(ctx context.Context, req *dto.HideCampaignsRequest, metadata *ClientMetadata) (*dto.HideCampaignsResponse, error)
 	CloneCampaign(ctx context.Context, req *dto.CloneCampaignRequest, metadata *ClientMetadata) (*dto.CloneCampaignResponse, error)
 	ExportCampaignReport(ctx context.Context, campaignID string) ([]byte, error)
 	ExportCampaignClickReport(ctx context.Context, campaignUUID string) ([]byte, error)
@@ -460,6 +461,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			"currency":                 utils.TomanCurrency,
 			"campaign_spec":            campaign.Spec,
 			"base_price":               pbp.Price,
+			"platform_base_price":      pbp.Price, // TODO: Later replace all "base_price" with "platform_base_price"
 			"page_price":               pp.Price,
 			"num_pages":                numPages,
 			"line_number_price_factor": lineNumberPriceFactor,
@@ -911,6 +913,44 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 	}, nil
 }
 
+func (s *CampaignFlowImpl) HideCampaigns(ctx context.Context, req *dto.HideCampaignsRequest, metadata *ClientMetadata) (*dto.HideCampaignsResponse, error) {
+	_ = metadata
+
+	if req == nil {
+		return nil, NewBusinessError("HIDE_CAMPAIGNS_FAILED", "request is required", ErrInvalidState)
+	}
+	if req.CustomerID == 0 {
+		return nil, NewBusinessError("HIDE_CAMPAIGNS_FAILED", "customer id is required", ErrCustomerNotFound)
+	}
+
+	campaignIDs := normalizeCampaignIDs(req.CampaignIDs)
+	if len(campaignIDs) == 0 {
+		return nil, NewBusinessError("HIDE_CAMPAIGNS_FAILED", "at least one campaign id is required", ErrCampaignNotFound)
+	}
+
+	if _, err := getCustomer(ctx, s.customerRepo, req.CustomerID); err != nil {
+		return nil, NewBusinessError("HIDE_CAMPAIGNS_FAILED", "failed to lookup customer", err)
+	}
+
+	ownedCampaigns, err := s.campaignRepo.ByCustomerIDAndIDs(ctx, req.CustomerID, campaignIDs)
+	if err != nil {
+		return nil, NewBusinessError("HIDE_CAMPAIGNS_FAILED", "failed to fetch campaigns", err)
+	}
+	if len(ownedCampaigns) != len(campaignIDs) {
+		return nil, NewBusinessError("HIDE_CAMPAIGNS_FAILED", "one or more campaigns were not found", ErrCampaignNotFound)
+	}
+
+	updatedCount, err := s.campaignRepo.MarkHidden(ctx, req.CustomerID, campaignIDs)
+	if err != nil {
+		return nil, NewBusinessError("HIDE_CAMPAIGNS_FAILED", "failed to hide campaigns", err)
+	}
+
+	return &dto.HideCampaignsResponse{
+		Message:      "Campaigns hidden successfully",
+		UpdatedCount: updatedCount,
+	}, nil
+}
+
 type campaignReportRow struct {
 	AudienceProfileUID string
 	Status             string
@@ -1358,14 +1398,21 @@ func (s *CampaignFlowImpl) notifyMissingSegmentPriceFactor(level3s []string) {
 
 // campaignDisplayEnrichments holds computed pricing and settings data for building a GetCampaignResponse.
 type campaignDisplayEnrichments struct {
+	platformBasePrice    *uint64
 	linePriceFactor      *float64
 	segmentPriceFactor   *float64
 	platformSettingsName *string
 }
 
-// fetchCampaignDisplayEnrichments computes linePriceFactor, segmentPriceFactor, and platformSettingsName for a campaign.
+// fetchCampaignDisplayEnrichments computes display pricing and settings data for a campaign.
 func (s *CampaignFlowImpl) fetchCampaignDisplayEnrichments(ctx context.Context, c *models.Campaign) (campaignDisplayEnrichments, error) {
 	var e campaignDisplayEnrichments
+
+	pbp, err := s.resolvePlatformBasePrice(ctx, c.ID, c.Spec.Platform)
+	if err != nil {
+		return e, err
+	}
+	e.platformBasePrice = pbp
 
 	lpf, err := s.resolveLinePriceFactor(ctx, c.ID, c.Spec.LineNumber)
 	if err != nil {
@@ -1386,6 +1433,56 @@ func (s *CampaignFlowImpl) fetchCampaignDisplayEnrichments(ctx context.Context, 
 	e.platformSettingsName = name
 
 	return e, nil
+}
+
+// resolvePlatformBasePrice reads base price from transaction metadata,
+// falling back to the platform base price repo if not found.
+func (s *CampaignFlowImpl) resolvePlatformBasePrice(ctx context.Context, campaignID uint, platform string) (*uint64, error) {
+	basePrice, err := s.readPlatformBasePriceFromMetadata(ctx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if basePrice != nil {
+		return basePrice, nil
+	}
+
+	pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, platform)
+	if err != nil {
+		return nil, err
+	}
+	if pbp == nil {
+		return nil, nil
+	}
+	return &pbp.Price, nil
+}
+
+// readPlatformBasePriceFromMetadata reads the base_price from the latest
+// campaign finalization transaction metadata.
+func (s *CampaignFlowImpl) readPlatformBasePriceFromMetadata(ctx context.Context, campaignID uint) (*uint64, error) {
+	source := "campaign_update"
+	operation := "reserve_budget"
+	txs, err := s.transactionRepo.ByFilter(ctx, models.TransactionFilter{
+		CampaignID: &campaignID,
+		Source:     &source,
+		Operation:  &operation,
+	}, "id DESC", 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(txs) == 0 || len(txs[0].Metadata) == 0 {
+		return nil, nil
+	}
+
+	var meta map[string]any
+	if err := json.Unmarshal(txs[0].Metadata, &meta); err != nil {
+		return nil, nil
+	}
+
+	basePrice, ok := parseMetadataUint64(meta["base_price"])
+	if !ok {
+		return nil, nil
+	}
+	return &basePrice, nil
 }
 
 // resolveSegmentPriceFactor reads segment price factor from transaction metadata,
@@ -1538,6 +1635,25 @@ func validateCampaignPhaseInput(phase *string, required bool) error {
 	return nil
 }
 
+func normalizeCampaignIDs(ids []uint) []uint {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	normalized := make([]uint, 0, len(ids))
+	for _, id := range ids {
+		if id > 0 {
+			normalized = append(normalized, id)
+		}
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+
+	slices.Sort(normalized)
+	return slices.Compact(normalized)
+}
+
 // buildCampaignResponse constructs a GetCampaignResponse from a campaign model and its display enrichments.
 func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto.GetCampaignResponse {
 	ensureCampaignSpecDefaults(&c.Spec)
@@ -1550,6 +1666,7 @@ func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto
 	return dto.GetCampaignResponse{
 		ID:                          c.ID,
 		UUID:                        c.UUID.String(),
+		Hidden:                      c.Hidden,
 		Status:                      c.Status.String(),
 		CreatedAt:                   c.CreatedAt,
 		UpdatedAt:                   c.UpdatedAt,
@@ -1570,6 +1687,7 @@ func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto
 		MediaUUID:                   c.Spec.MediaUUID,
 		PlatformSettingsID:          c.Spec.PlatformSettingsID,
 		Platform:                    c.Spec.Platform,
+		PlatformBasePrice:           e.platformBasePrice,
 		LinePriceFactor:             e.linePriceFactor,
 		SegmentPriceFactor:          e.segmentPriceFactor,
 		PlatformSettingsName:        e.platformSettingsName,
@@ -1623,12 +1741,26 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 	offset := (page - 1) * limit
 
 	// Build filter
-	filter := models.CampaignFilter{CustomerID: &req.CustomerID}
+	filter := models.CampaignFilter{
+		CustomerID: &req.CustomerID,
+	}
 	if req.Filter != nil {
-		if req.Filter.Title != nil {
-			title := strings.TrimSpace(*req.Filter.Title)
+		if req.Filter.CampaignTitle != nil {
+			title := strings.TrimSpace(*req.Filter.CampaignTitle)
 			if title != "" {
-				filter.Title = &title
+				filter.CampaignTitle = &title
+			}
+		}
+		if req.Filter.BundleTitle != nil {
+			bundleTitle := strings.TrimSpace(*req.Filter.BundleTitle)
+			if bundleTitle != "" {
+				filter.BundleTitle = &bundleTitle
+			}
+		}
+		if req.Filter.CustomerName != nil {
+			customerName := strings.TrimSpace(*req.Filter.CustomerName)
+			if customerName != "" {
+				filter.CustomerName = &customerName
 			}
 		}
 		if req.Filter.Status != nil {
@@ -1641,6 +1773,18 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 		if req.Filter.BundleID != nil && *req.Filter.BundleID > 0 {
 			filter.BundleID = req.Filter.BundleID
 		}
+		if req.Filter.Platform != nil {
+			platform := strings.ToLower(strings.TrimSpace(*req.Filter.Platform))
+			if models.IsValidCampaignPlatform(platform) {
+				filter.Platform = &platform
+			}
+		}
+		if req.Filter.StartDate != nil {
+			filter.CreatedAfter = req.Filter.StartDate
+		}
+		if req.Filter.EndDate != nil {
+			filter.CreatedBefore = req.Filter.EndDate
+		}
 		if req.Filter.Phase != nil {
 			phaseValue := strings.TrimSpace(*req.Filter.Phase)
 			phase := models.CampaignPhase(phaseValue)
@@ -1648,15 +1792,21 @@ func (s *CampaignFlowImpl) ListCampaigns(ctx context.Context, req *dto.ListCampa
 				filter.Phase = &phase
 			}
 		}
+		if req.Filter.StartDate != nil && req.Filter.EndDate != nil && req.Filter.EndDate.Before(*req.Filter.StartDate) {
+			return nil, ErrStartDateAfterEndDate
+		}
 	}
 
-	// Order by
-	orderBy := "updated_at DESC"
+	// Order by. Default order mirrors admin campaign listing:
+	// initiated and in-progress campaigns at the end, then campaigns without a
+	// schedule first, upcoming schedules before past ones, upcoming sorted
+	// soonest-first and past sorted most-recent-first.
+	// Named sentinel values are resolved inside applyOrder in the repository,
+	// which appends the schedule_at secondary ordering to each of them.
+	orderBy := "default_schedule_at"
 	switch req.OrderBy {
-	case "oldest":
-		orderBy = "updated_at ASC"
-	case "newest":
-		orderBy = "updated_at DESC"
+	case "oldest", "newest", "phase_test_first", "phase_execution_first", "highest_click_rate", "lowest_click_rate":
+		orderBy = req.OrderBy
 	}
 
 	// Count total
