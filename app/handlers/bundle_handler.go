@@ -15,6 +15,7 @@ import (
 
 type BundleHandlerInterface interface {
 	Create(c fiber.Ctx) error
+	Update(c fiber.Ctx) error
 	Get(c fiber.Ctx) error
 	List(c fiber.Ctx) error
 }
@@ -93,6 +94,61 @@ func (h *BundleHandler) Create(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusCreated, "Bundle created successfully", res)
+}
+
+// Update updates a bundle for the authenticated customer.
+// @Summary Update bundle
+// @Description Update an existing bundle for the authenticated customer
+// @Tags Bundles
+// @Accept json
+// @Produce json
+// @Param id path int true "Bundle ID"
+// @Param request body dto.UpdateBundleRequest true "Bundle payload"
+// @Success 200 {object} dto.APIResponse{data=dto.UpdateBundleResponse} "Updated"
+// @Failure 400 {object} dto.APIResponse "Validation error"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 403 {object} dto.APIResponse "Forbidden"
+// @Failure 404 {object} dto.APIResponse "Not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/bundles/{id} [put]
+func (h *BundleHandler) Update(c fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid bundle ID", "INVALID_BUNDLE_ID", nil)
+	}
+
+	var req dto.UpdateBundleRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID = customerID
+	req.ID = uint(id)
+
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, e := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(e))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bundles/:id", 30*time.Second)
+	defer cancel()
+
+	res, err := h.flow.UpdateBundle(ctx, &req, metadata)
+	if err != nil {
+		log.Println("Update bundle failed", err)
+		return h.handleBundleFlowError(c, err, fiber.StatusInternalServerError, "Failed to update bundle", "UPDATE_BUNDLE_FAILED")
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Bundle updated successfully", res)
 }
 
 // Get retrieves one bundle for the authenticated customer.
@@ -214,13 +270,13 @@ func (h *BundleHandler) List(c fiber.Ctx) error {
 func (h *BundleHandler) handleBundleFlowError(c fiber.Ctx, err error, defaultStatus int, defaultMessage, defaultCode string) error {
 	if be, ok := err.(*businessflow.BusinessError); ok {
 		switch be.Code {
-		case "CREATE_BUNDLE_VALIDATION_FAILED":
+		case "CREATE_BUNDLE_VALIDATION_FAILED", "UPDATE_BUNDLE_VALIDATION_FAILED":
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Bundle validation failed", be.Code, be.Error())
 		case "BUNDLE_NOT_FOUND":
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Bundle not found", be.Code, nil)
 		case "BUNDLE_ACCESS_DENIED":
 			return h.ErrorResponse(c, fiber.StatusForbidden, "Bundle access denied", be.Code, nil)
-		case "GET_BUNDLE_FAILED", "LIST_BUNDLES_FAILED", "CREATE_BUNDLE_FAILED":
+		case "GET_BUNDLE_FAILED", "LIST_BUNDLES_FAILED", "CREATE_BUNDLE_FAILED", "UPDATE_BUNDLE_FAILED":
 			return h.ErrorResponse(c, defaultStatus, defaultMessage, be.Code, nil)
 		case "MISSING_CUSTOMER_ID":
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found", be.Code, nil)
