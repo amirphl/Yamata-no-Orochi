@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -65,11 +66,13 @@ func (h *CampaignAdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, mess
 
 // ListCampaigns returns campaigns filtered for admin
 // @Summary Admin List Campaigns
-// @Description Retrieve campaigns by title, status, start date, and end date
+// @Description Retrieve campaigns by campaign title, bundle title, customer name, status, start date, and end date
 // @Tags Admin Campaigns
 // @Produce json
-// @Param title query string false "Filter by title (contains)"
-// @Param status query string false "Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected|expired)"
+// @Param campaign_title query string false "Filter by campaign title (contains)"
+// @Param bundle_title query string false "Filter by bundle title (contains)"
+// @Param customer_name query string false "Filter by customer name (contains, matches first/last name or company)"
+// @Param status query string false "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|expired)"
 // @Param start_date query string false "Filter created_at >= start_date (RFC3339)"
 // @Param end_date query string false "Filter created_at <= end_date (RFC3339)"
 // @Param page query int false "Page number" default(1)
@@ -81,7 +84,9 @@ func (h *CampaignAdminHandler) SuccessResponse(c fiber.Ctx, statusCode int, mess
 func (h *CampaignAdminHandler) ListCampaigns(c fiber.Ctx) error {
 	pageStr := c.Query("page", "1")
 	limitStr := c.Query("limit", "10")
-	title := c.Query("title")
+	campaignTitle := strings.TrimSpace(c.Query("campaign_title"))
+	bundleTitle := strings.TrimSpace(c.Query("bundle_title"))
+	customerName := strings.TrimSpace(c.Query("customer_name"))
 	status := c.Query("status")
 	startStr := c.Query("start_date")
 	endStr := c.Query("end_date")
@@ -100,8 +105,14 @@ func (h *CampaignAdminHandler) ListCampaigns(c fiber.Ctx) error {
 		Page:  page,
 		Limit: limit,
 	}
-	if title != "" {
-		filter.Title = &title
+	if campaignTitle != "" {
+		filter.CampaignTitle = &campaignTitle
+	}
+	if bundleTitle != "" {
+		filter.BundleTitle = &bundleTitle
+	}
+	if customerName != "" {
+		filter.CustomerName = &customerName
 	}
 	if status != "" {
 		filter.Status = &status
