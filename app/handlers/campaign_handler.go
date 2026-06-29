@@ -34,6 +34,7 @@ type CampaignHandlerInterface interface {
 	ExportCampaignReport(c fiber.Ctx) error
 	ExportCampaignClickReport(c fiber.Ctx) error
 	SendCampaignTestMessage(c fiber.Ctx) error
+	HideCampaigns(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -575,9 +576,17 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 		limit = 100
 	}
 	orderby := c.Query("orderby", "newest")
-	title := c.Query("title")
+	campaignTitle := strings.TrimSpace(c.Query("title"))
+	if campaignTitle == "" {
+		campaignTitle = strings.TrimSpace(c.Query("campaign_title"))
+	}
+	bundleTitle := c.Query("bundle_title")
+	customerName := c.Query("customer_name")
 	status := c.Query("status")
 	bundleIDStr := c.Query("bundle_id")
+	platform := c.Query("platform")
+	startDateStr := c.Query("start_date")
+	endDateStr := c.Query("end_date")
 	phase := c.Query("phase")
 
 	// Get authenticated customer ID
@@ -588,10 +597,16 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 
 	// Build request DTO
 	var filter *dto.ListCampaignsFilter
-	if title != "" || status != "" || bundleIDStr != "" || phase != "" {
+	if campaignTitle != "" || bundleTitle != "" || customerName != "" || status != "" || bundleIDStr != "" || platform != "" || startDateStr != "" || endDateStr != "" || phase != "" {
 		filter = &dto.ListCampaignsFilter{}
-		if title != "" {
-			filter.Title = &title
+		if campaignTitle != "" {
+			filter.CampaignTitle = &campaignTitle
+		}
+		if bundleTitle != "" {
+			filter.BundleTitle = &bundleTitle
+		}
+		if customerName != "" {
+			filter.CustomerName = &customerName
 		}
 		if status != "" {
 			filter.Status = &status
@@ -603,6 +618,25 @@ func (h *CampaignHandler) ListCampaigns(c fiber.Ctx) error {
 			}
 			parsedBundleID := uint(bundleID)
 			filter.BundleID = &parsedBundleID
+		}
+		if platform != "" {
+			filter.Platform = &platform
+		}
+		if startDateStr != "" {
+			t, err := time.Parse(time.RFC3339, startDateStr)
+			if err != nil {
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid start_date format", "INVALID_DATE", nil)
+			}
+			startUTC := t.UTC()
+			filter.StartDate = &startUTC
+		}
+		if endDateStr != "" {
+			t, err := time.Parse(time.RFC3339, endDateStr)
+			if err != nil {
+				return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid end_date format", "INVALID_DATE", nil)
+			}
+			endUTC := t.UTC()
+			filter.EndDate = &endUTC
 		}
 		if phase != "" {
 			filter.Phase = &phase
@@ -800,6 +834,55 @@ func (h *CampaignHandler) SendCampaignTestMessage(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign test message attempted", res)
+}
+
+// HideCampaigns marks campaigns so they no longer appear in caller-facing list responses.
+// @Summary Hide Campaigns
+// @Description Mark campaigns as hidden from the authenticated caller's campaign list
+// @Tags Campaigns
+// @Accept json
+// @Produce json
+// @Param request body dto.HideCampaignsRequest true "Campaign IDs to hide"
+// @Success 200 {object} dto.APIResponse{data=dto.HideCampaignsResponse} "Campaigns hidden successfully"
+// @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 404 {object} dto.APIResponse "One or more campaigns not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/hide [post]
+func (h *CampaignHandler) HideCampaigns(c fiber.Ctx) error {
+	var req dto.HideCampaignsRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID = customerID
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/hide", 30*time.Second)
+	defer cancel()
+
+	result, err := h.campaignFlow.HideCampaigns(ctx, &req, metadata)
+	if err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "One or more campaigns not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		log.Println("Hide campaigns failed", err)
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to hide campaigns", "HIDE_CAMPAIGNS_FAILED")
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaigns hidden successfully", result)
 }
 
 // createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
