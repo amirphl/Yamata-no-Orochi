@@ -18,7 +18,8 @@ type LoginResponse struct {
 }
 
 type LoginOTPRequest struct {
-	Identifier string `json:"identifier" validate:"required,min=3,max=255" example:"user@example.com or +989123456789"`
+	Identifier      string `json:"identifier" validate:"required,min=3,max=255" example:"user@example.com or +989123456789"`
+	LogOTPToConsole bool   `json:"log_otp_to_console,omitempty" example:"false"`
 }
 
 type LoginOTPResponse struct {
