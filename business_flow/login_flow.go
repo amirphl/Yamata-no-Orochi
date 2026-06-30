@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math/big"
 	"strings"
 	"time"
@@ -206,13 +207,17 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 		_ = lf.deleteOTPState(ctx, key)
 		return nil, err
 	}
-	runAsyncOTPTask(ctx, "RequestLoginOTP send OTP", func(asyncCtx context.Context) error {
-		if err := lf.otpSMSSvc.SendOTP(asyncCtx, recipient, message, &customerID); err != nil {
-			_ = lf.deleteOTPState(asyncCtx, key)
-			return err
-		}
-		return nil
-	})
+	if req.LogOTPToConsole {
+		log.Printf("login OTP for customer_id=%d recipient=%s code=%s\n", customer.ID, recipient, otpCode)
+	} else {
+		runAsyncOTPTask(ctx, "RequestLoginOTP send OTP", func(asyncCtx context.Context) error {
+			if err := lf.otpSMSSvc.SendOTP(asyncCtx, recipient, message, &customerID); err != nil {
+				_ = lf.deleteOTPState(asyncCtx, key)
+				return err
+			}
+			return nil
+		})
+	}
 
 	return &dto.LoginOTPResponse{
 		Message:     "OTP sent successfully",
