@@ -250,6 +250,41 @@ func (r *CampaignRepositoryImpl) MarkHidden(ctx context.Context, customerID uint
 	return result.RowsAffected, nil
 }
 
+func (r *CampaignRepositoryImpl) MarkVisible(ctx context.Context, customerID uint, campaignIDs []uint) (int64, error) {
+	if len(campaignIDs) == 0 {
+		return 0, nil
+	}
+
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	result := db.Model(&models.Campaign{}).
+		Where("customer_id = ?", customerID).
+		Where("id IN ?", campaignIDs).
+		Updates(map[string]any{
+			"hidden":     false,
+			"updated_at": utils.UTCNow(),
+		})
+	err = result.Error
+	if err != nil {
+		return 0, err
+	}
+
+	return result.RowsAffected, nil
+}
+
 // CountByCustomerID counts campaigns by customer ID
 func (r *CampaignRepositoryImpl) CountByCustomerID(ctx context.Context, customerID uint) (int, error) {
 	filter := models.CampaignFilter{CustomerID: &customerID}
