@@ -262,6 +262,16 @@ type HideCampaignsResponse struct {
 	UpdatedCount int64  `json:"updated_count"`
 }
 
+type UnhideCampaignsRequest struct {
+	CustomerID  uint   `json:"-"`
+	CampaignIDs []uint `json:"campaign_ids" validate:"required,min=1,dive,min=1"`
+}
+
+type UnhideCampaignsResponse struct {
+	Message      string `json:"message"`
+	UpdatedCount int64  `json:"updated_count"`
+}
+
 // AdminListCampaignsFilter holds filters for admin campaign listing
 type AdminListCampaignsFilter struct {
 	CampaignTitle *string    `json:"campaign_title,omitempty" validate:"omitempty,max=255"`
