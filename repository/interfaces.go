@@ -123,6 +123,7 @@ type BundleRepository interface {
 	Repository[models.Bundle, models.BundleFilter]
 	ByID(ctx context.Context, id uint) (*models.Bundle, error)
 	ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Bundle, error)
+	Update(ctx context.Context, bundle *models.Bundle) error
 }
 
 // CampaignRepository defines the interface for campaign data access
