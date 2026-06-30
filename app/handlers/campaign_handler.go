@@ -35,6 +35,7 @@ type CampaignHandlerInterface interface {
 	ExportCampaignClickReport(c fiber.Ctx) error
 	SendCampaignTestMessage(c fiber.Ctx) error
 	HideCampaigns(c fiber.Ctx) error
+	UnhideCampaigns(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -883,6 +884,55 @@ func (h *CampaignHandler) HideCampaigns(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaigns hidden successfully", result)
+}
+
+// UnhideCampaigns marks campaigns so they appear again in caller-facing list responses.
+// @Summary Unhide Campaigns
+// @Description Mark campaigns as visible in the authenticated caller's campaign list
+// @Tags Campaigns
+// @Accept json
+// @Produce json
+// @Param request body dto.UnhideCampaignsRequest true "Campaign IDs to unhide"
+// @Success 200 {object} dto.APIResponse{data=dto.UnhideCampaignsResponse} "Campaigns unhidden successfully"
+// @Failure 400 {object} dto.APIResponse "Validation error or invalid request"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 404 {object} dto.APIResponse "One or more campaigns not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/campaigns/unhide [post]
+func (h *CampaignHandler) UnhideCampaigns(c fiber.Ctx) error {
+	var req dto.UnhideCampaignsRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
+	}
+
+	if err := h.validator.Struct(&req); err != nil {
+		var validationErrors []string
+		for _, err := range err.(validator.ValidationErrors) {
+			validationErrors = append(validationErrors, getValidationErrorMessage(err))
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID = customerID
+
+	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/unhide", 30*time.Second)
+	defer cancel()
+
+	result, err := h.campaignFlow.UnhideCampaigns(ctx, &req, metadata)
+	if err != nil {
+		if businessflow.IsCampaignNotFound(err) {
+			return h.ErrorResponse(c, fiber.StatusNotFound, "One or more campaigns not found", "CAMPAIGN_NOT_FOUND", nil)
+		}
+		log.Println("Unhide campaigns failed", err)
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to unhide campaigns", "UNHIDE_CAMPAIGNS_FAILED")
+	}
+
+	return h.SuccessResponse(c, fiber.StatusOK, "Campaigns unhidden successfully", result)
 }
 
 // createRequestContextWithTimeout creates a context with custom timeout and request-scoped values
