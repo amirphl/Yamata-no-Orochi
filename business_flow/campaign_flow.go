@@ -43,6 +43,7 @@ type CampaignFlow interface {
 	GetApprovedRunningSummary(ctx context.Context, customerID uint) (*dto.CampaignsSummaryResponse, error)
 	CancelCampaign(ctx context.Context, req *dto.CancelCampaignRequest, metadata *ClientMetadata) (*dto.CancelCampaignResponse, error)
 	HideCampaigns(ctx context.Context, req *dto.HideCampaignsRequest, metadata *ClientMetadata) (*dto.HideCampaignsResponse, error)
+	UnhideCampaigns(ctx context.Context, req *dto.UnhideCampaignsRequest, metadata *ClientMetadata) (*dto.UnhideCampaignsResponse, error)
 	CloneCampaign(ctx context.Context, req *dto.CloneCampaignRequest, metadata *ClientMetadata) (*dto.CloneCampaignResponse, error)
 	ExportCampaignReport(ctx context.Context, campaignID string) ([]byte, error)
 	ExportCampaignClickReport(ctx context.Context, campaignUUID string) ([]byte, error)
@@ -947,6 +948,44 @@ func (s *CampaignFlowImpl) HideCampaigns(ctx context.Context, req *dto.HideCampa
 
 	return &dto.HideCampaignsResponse{
 		Message:      "Campaigns hidden successfully",
+		UpdatedCount: updatedCount,
+	}, nil
+}
+
+func (s *CampaignFlowImpl) UnhideCampaigns(ctx context.Context, req *dto.UnhideCampaignsRequest, metadata *ClientMetadata) (*dto.UnhideCampaignsResponse, error) {
+	_ = metadata
+
+	if req == nil {
+		return nil, NewBusinessError("UNHIDE_CAMPAIGNS_FAILED", "request is required", ErrInvalidState)
+	}
+	if req.CustomerID == 0 {
+		return nil, NewBusinessError("UNHIDE_CAMPAIGNS_FAILED", "customer id is required", ErrCustomerNotFound)
+	}
+
+	campaignIDs := normalizeCampaignIDs(req.CampaignIDs)
+	if len(campaignIDs) == 0 {
+		return nil, NewBusinessError("UNHIDE_CAMPAIGNS_FAILED", "at least one campaign id is required", ErrCampaignNotFound)
+	}
+
+	if _, err := getCustomer(ctx, s.customerRepo, req.CustomerID); err != nil {
+		return nil, NewBusinessError("UNHIDE_CAMPAIGNS_FAILED", "failed to lookup customer", err)
+	}
+
+	ownedCampaigns, err := s.campaignRepo.ByCustomerIDAndIDs(ctx, req.CustomerID, campaignIDs)
+	if err != nil {
+		return nil, NewBusinessError("UNHIDE_CAMPAIGNS_FAILED", "failed to fetch campaigns", err)
+	}
+	if len(ownedCampaigns) != len(campaignIDs) {
+		return nil, NewBusinessError("UNHIDE_CAMPAIGNS_FAILED", "one or more campaigns were not found", ErrCampaignNotFound)
+	}
+
+	updatedCount, err := s.campaignRepo.MarkVisible(ctx, req.CustomerID, campaignIDs)
+	if err != nil {
+		return nil, NewBusinessError("UNHIDE_CAMPAIGNS_FAILED", "failed to unhide campaigns", err)
+	}
+
+	return &dto.UnhideCampaignsResponse{
+		Message:      "Campaigns unhidden successfully",
 		UpdatedCount: updatedCount,
 	}, nil
 }
