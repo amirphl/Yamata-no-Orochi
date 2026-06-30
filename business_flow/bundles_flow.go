@@ -196,10 +196,9 @@ func (f *BundleFlowImpl) UpdateBundle(ctx context.Context, req *dto.UpdateBundle
 	row.TargetCustomerName = targetCustomerName
 	row.Category = category
 	row.Job = job
-	row.UpdatedAt = utils.UTCNow()
 
 	if err := repository.WithTransaction(ctx, f.db, func(txCtx context.Context) error {
-		if err := f.bundleRepo.Save(txCtx, row); err != nil {
+		if err := f.bundleRepo.Update(txCtx, row); err != nil {
 			return err
 		}
 
