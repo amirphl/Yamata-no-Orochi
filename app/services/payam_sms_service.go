@@ -42,7 +42,6 @@ type payamSMSBulkItemBody struct {
 	Recipient  string `json:"recipient"`
 	Body       string `json:"body"`
 	CustomerID string `json:"customerId"`
-	SendDate   string `json:"sendDate"`
 }
 
 type payamSMSBulkResponseItem struct {
@@ -105,12 +104,6 @@ func (s *PayamSMSSMSService) SendBulk(ctx context.Context, recipients []string, 
 		return fmt.Errorf("failed to get PayamSMS access token: %w", err)
 	}
 
-	sendDate, err := utils.TehranNow()
-	if err != nil {
-		return fmt.Errorf("failed to resolve Tehran time: %w", err)
-	}
-	sendDate = sendDate.Add(30 * time.Second) // Add a small delay to ensure the sendDate is in the future
-
 	payload := payamSMSBulkPayload{
 		Sender:   s.smsConfig.SourceNumber,
 		SMSItems: make([]payamSMSBulkItemBody, 0, len(recipients)),
@@ -120,7 +113,6 @@ func (s *PayamSMSSMSService) SendBulk(ctx context.Context, recipients []string, 
 			Recipient:  recipient,
 			Body:       message,
 			CustomerID: buildPayamSMSCustomerID(nil, idx),
-			SendDate:   sendDate.Format("2006-01-02 15:04:05"),
 		})
 	}
 

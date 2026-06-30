@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/config"
-	"github.com/amirphl/Yamata-no-Orochi/utils"
 )
 
 const (
@@ -129,18 +128,18 @@ func (c *httpPayamSMSClient) sendBatchOnce(ctx context.Context, sender string, i
 		Sender:   sender,
 		SMSItems: make([]any, 0, len(items)),
 	}
-	sendDate, err := utils.TehranNow()
-	if err != nil {
-		return nil, err
-	}
-	sendDate = sendDate.Add(time.Minute)
+	// sendDate, err := utils.TehranNow()
+	// if err != nil {
+	// 	return nil, err
+	// }
+	// sendDate = sendDate.Add(time.Minute)
 
 	for _, it := range items {
 		payload.SMSItems = append(payload.SMSItems, map[string]any{
 			"recipient":  it.Recipient,
 			"body":       it.Body,
 			"customerId": it.TrackingID,
-			"sendDate":   sendDate.Format("2006-01-02 15:04:05"),
+			// "sendDate":   sendDate.Format("2006-01-02 15:04:05"),
 		})
 	}
 
