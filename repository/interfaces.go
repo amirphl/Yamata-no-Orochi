@@ -140,6 +140,7 @@ type CampaignRepository interface {
 	AppendTrackingResults(ctx context.Context, id uint, items json.RawMessage) error
 	UpdateStatus(ctx context.Context, id uint, status models.CampaignStatus) error
 	MarkHidden(ctx context.Context, customerID uint, campaignIDs []uint) (int64, error)
+	MarkVisible(ctx context.Context, customerID uint, campaignIDs []uint) (int64, error)
 	CountByCustomerID(ctx context.Context, customerID uint) (int, error)
 	CountByStatus(ctx context.Context, status models.CampaignStatus) (int, error)
 	GetPendingApproval(ctx context.Context, limit, offset int) ([]*models.Campaign, error)
