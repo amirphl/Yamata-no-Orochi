@@ -1268,9 +1268,9 @@ func (s *SplusCampaignScheduler) updateProcessedCampaignStats(ctx context.Contex
 	// Fallback before any status jobs land.
 	// if agg.AggregatedTotalRecords == 0 && len(trackingResults) == 0 {
 	if agg.AggregatedTotalRecords == 0 {
-		// s.logger.Printf("updateProcessedCampaignStats: no status results yet for processed_campaign_id=%d, falling back to sent rows", processedCampaignID)
-		// return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
-		return nil, nil
+		s.logger.Printf("updateProcessedCampaignStats: no status results yet for processed_campaign_id=%d, falling back to sent rows", processedCampaignID)
+		return s.updateProcessedCampaignStatsFromSentRows(ctx, pc)
+		// return nil, nil
 	}
 
 	stats := map[string]any{
