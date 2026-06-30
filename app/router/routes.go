@@ -280,6 +280,7 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/:uuid/click-report", r.campaignHandler.ExportCampaignClickReport)
 	campaigns.Post("/:id/cancel", r.campaignHandler.CancelCampaign)
 	campaigns.Post("/hide", r.campaignHandler.HideCampaigns)
+	campaigns.Post("/unhide", r.campaignHandler.UnhideCampaigns)
 
 	// Bundle routes (protected with authentication)
 	bundles := api.Group("/bundles")
