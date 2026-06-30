@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"gorm.io/gorm"
 )
 
@@ -37,6 +38,32 @@ func (r *BundleRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Bundl
 func (r *BundleRepositoryImpl) ByCustomerID(ctx context.Context, customerID uint, limit, offset int) ([]*models.Bundle, error) {
 	filter := models.BundleFilter{CustomerID: &customerID}
 	return r.ByFilter(ctx, filter, "id DESC", limit, offset)
+}
+
+func (r *BundleRepositoryImpl) Update(ctx context.Context, bundle *models.Bundle) error {
+	db, shouldCommit, err := r.getDBForWrite(ctx)
+	if err != nil {
+		return err
+	}
+
+	if shouldCommit {
+		defer func() {
+			if err != nil {
+				db.Rollback()
+			} else {
+				db.Commit()
+			}
+		}()
+	}
+
+	bundle.UpdatedAt = utils.UTCNow()
+
+	err = db.Save(bundle).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *BundleRepositoryImpl) applyFilter(query *gorm.DB, filter models.BundleFilter) *gorm.DB {
