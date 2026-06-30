@@ -11,7 +11,7 @@ type CreateBundleRequest struct {
 	ShortLinkDomain       *string `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
 	Description           *string `json:"description,omitempty" validate:"omitempty,max=2047"`
 	TargetCustomerName    *string `json:"target_customer_name,omitempty" validate:"omitempty,max=255"`
-	Category              *string `json:"category,omitempty" validate:"omitempty,max=255"`
+	Category              *string `json:"job_category,omitempty" validate:"omitempty,max=255"`
 	Job                   *string `json:"job,omitempty" validate:"omitempty,max=255"`
 }
 
@@ -31,7 +31,7 @@ type UpdateBundleRequest struct {
 	ShortLinkDomain       *string `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
 	Description           *string `json:"description,omitempty" validate:"omitempty,max=2047"`
 	TargetCustomerName    *string `json:"target_customer_name,omitempty" validate:"omitempty,max=255"`
-	Category              *string `json:"category,omitempty" validate:"omitempty,max=255"`
+	Category              *string `json:"job_category,omitempty" validate:"omitempty,max=255"`
 	Job                   *string `json:"job,omitempty" validate:"omitempty,max=255"`
 }
 
