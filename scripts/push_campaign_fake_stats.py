@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""
+Push fake "all-failed" statistics to Jazebeh for a list of campaigns.
+
+For each campaign ID the script:
+  1. Fetches the latest processed_campaign row and reads len(audience_ids)
+     as the total number of records.
+  2. Builds fake statistics where every message is considered failed:
+       aggregatedTotalRecords          = len(audience_ids)
+       aggregatedTotalSent             = 0
+       aggregatedTotalParts            = len(audience_ids)
+       aggregatedTotalDeliveredParts   = 0
+       aggregatedTotalUnDeliveredParts = len(audience_ids)
+       aggregatedTotalUnKnownParts     = 0
+  3. POSTs to POST /api/v1/bot/campaigns/{id}/statistics.
+
+Usage:
+  python push_campaign_fake_stats.py \\
+      --campaign-ids 101 102 103 \\
+      --db-host 127.0.0.1 --db-port 5432 --db-name yamata \\
+      --db-user postgres --db-password secret \\
+      --jazebeh-domain https://jazebeh.ir \\
+      --bot-username botuser --bot-password botpass
+"""
+
+import argparse
+import json
+import sys
+from datetime import datetime, timezone
+
+import psycopg2
+import requests
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Push fake all-failed statistics to Jazebeh."
+    )
+    parser.add_argument(
+        "--campaign-ids",
+        required=True,
+        nargs="+",
+        type=int,
+        metavar="ID",
+        help="One or more campaign IDs",
+    )
+    # DB args
+    parser.add_argument("--db-host", default="127.0.0.1", help="PostgreSQL host")
+    parser.add_argument("--db-port", type=int, default=5432, help="PostgreSQL port")
+    parser.add_argument("--db-name", required=True, help="Database name")
+    parser.add_argument("--db-user", required=True, help="Database user")
+    parser.add_argument("--db-password", required=True, help="Database password")
+    # Jazebeh args
+    parser.add_argument(
+        "--jazebeh-domain",
+        default="https://jazebeh.ir",
+        help="Jazebeh API domain (no trailing slash)",
+    )
+    parser.add_argument("--bot-username", required=True, help="Jazebeh bot username")
+    parser.add_argument("--bot-password", required=True, help="Jazebeh bot password")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute fake stats but do not push to Jazebeh",
+    )
+    return parser.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Jazebeh helpers
+# ---------------------------------------------------------------------------
+
+
+def jazebeh_login(domain: str, username: str, password: str) -> str:
+    url = domain.rstrip("/") + "/api/v1/bot/auth/login"
+    resp = requests.post(
+        url,
+        json={"username": username, "password": password},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if not body.get("success"):
+        raise RuntimeError(f"Jazebeh login failed: {body.get('message')}")
+    token = body["data"]["session"]["access_token"]
+    if not token:
+        raise RuntimeError("Jazebeh login returned empty access token")
+    return token
+
+
+def jazebeh_push_statistics(
+    domain: str, token: str, campaign_id: int, stats: dict
+) -> None:
+    url = domain.rstrip("/") + f"/api/v1/bot/campaigns/{campaign_id}/statistics"
+    resp = requests.post(
+        url,
+        json={"statistics": stats},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if not body.get("success"):
+        raise RuntimeError(
+            f"Push statistics failed for campaign {campaign_id}: {body.get('message')}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# DB helpers
+# ---------------------------------------------------------------------------
+
+
+def connect_db(args: argparse.Namespace):
+    return psycopg2.connect(
+        host=args.db_host,
+        port=args.db_port,
+        dbname=args.db_name,
+        user=args.db_user,
+        password=args.db_password,
+    )
+
+
+def fetch_audience_count(cur, campaign_id: int) -> tuple[int, int] | None:
+    """
+    Returns (processed_campaign_id, audience_count) for the latest processed_campaign
+    row matching campaign_id, or None if not found.
+    audience_count is cardinality(audience_ids) — the number of targeted audiences.
+    """
+    cur.execute(
+        """
+        SELECT id, COALESCE(array_length(audience_ids, 1), 0)
+        FROM processed_campaigns
+        WHERE campaign_id = %s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (campaign_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return row[0], row[1]
+
+
+def build_fake_stats(total: int) -> dict:
+    """All-failed stats: every record is undelivered, none sent."""
+    return {
+        "aggregatedTotalRecords": total,
+        "aggregatedTotalSent": 0,
+        "aggregatedTotalParts": total,
+        "aggregatedTotalDeliveredParts": 0,
+        "aggregatedTotalUnDeliveredParts": total,
+        "aggregatedTotalUnKnownParts": 0,
+        "updatedAt": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    args = parse_args()
+
+    print(f"Campaigns: {args.campaign_ids}")
+    print(f"Dry-run  : {args.dry_run}")
+
+    conn = connect_db(args)
+    conn.autocommit = True
+    cur = conn.cursor()
+
+    token: str | None = None
+    if not args.dry_run:
+        print("Logging in to Jazebeh...")
+        token = jazebeh_login(args.jazebeh_domain, args.bot_username, args.bot_password)
+        print("Login successful.")
+    if token is None and not args.dry_run:
+        print("Jazebeh Access Token is empty. Exiting ...")
+        return
+
+    success_count = 0
+    skip_count = 0
+    error_count = 0
+
+    for campaign_id in args.campaign_ids:
+        print(f"\n--- campaign_id={campaign_id} ---")
+
+        result = fetch_audience_count(cur, campaign_id)
+        if result is None:
+            print(f"  SKIP: no processed_campaign found for campaign_id={campaign_id}")
+            skip_count += 1
+            continue
+
+        pc_id, audience_count = result
+        print(f"  processed_campaign_id={pc_id} audience_count={audience_count}")
+
+        if audience_count == 0:
+            print(f"  SKIP: audience_ids is empty for processed_campaign_id={pc_id}")
+            skip_count += 1
+            continue
+
+        stats = build_fake_stats(audience_count)
+        print(f"  fake stats: {json.dumps(stats, indent=4)}")
+
+        if args.dry_run:
+            print("  DRY-RUN: skipping push to Jazebeh")
+            success_count += 1
+            continue
+
+        try:
+            assert token is not None
+            jazebeh_push_statistics(args.jazebeh_domain, token, campaign_id, stats)
+            print(f"  OK: fake statistics pushed for campaign_id={campaign_id}")
+            success_count += 1
+        except Exception as exc:
+            print(f"  ERROR: {exc}", file=sys.stderr)
+            error_count += 1
+
+    cur.close()
+    conn.close()
+
+    print(f"\nDone. success={success_count} skipped={skip_count} errors={error_count}")
+    if error_count > 0:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
