@@ -259,10 +259,11 @@ type AtipayConfig struct {
 }
 
 type AdminConfig struct {
-	Mobiles          []string          `json:"admin_mobile"`
-	DepositReviewers []string          `json:"admin_deposit_reviewer"`
-	TwoFAMobiles     map[string]string `json:"admin_2fa_mobiles"`
-	OTPBypassMobiles []string          `json:"admin_otp_bypass_mobiles"`
+	Mobiles               []string          `json:"admin_mobile"`
+	DepositReviewers      []string          `json:"admin_deposit_reviewer"`
+	TwoFAMobiles          map[string]string `json:"admin_2fa_mobiles"`
+	OTPBypassMobiles      []string          `json:"admin_otp_bypass_mobiles"`
+	LoginOTPForwardMobile string            `json:"admin_login_otp_forward_mobile"`
 }
 
 func (c AdminConfig) ActiveMobiles() []string {
@@ -283,6 +284,10 @@ func (c AdminConfig) TwoFAMobile(username string) string {
 
 func (c AdminConfig) ActiveOTPBypassMobiles() []string {
 	return normalizeMobileList(c.OTPBypassMobiles)
+}
+
+func (c AdminConfig) ActiveLoginOTPForwardMobile() string {
+	return strings.TrimSpace(c.LoginOTPForwardMobile)
 }
 
 func (c AdminConfig) AllowsOTPBypass(mobile string) bool {
@@ -590,10 +595,11 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Terminal: getEnvString("ATIPAY_TERMINAL", ""),
 		},
 		Admin: AdminConfig{
-			Mobiles:          getEnvStringSlice("ADMIN_MOBILE", []string{}),
-			DepositReviewers: getEnvStringSlice("ADMIN_DEPOSIT_REVIEWER", []string{}),
-			TwoFAMobiles:     getEnvStringMap("ADMIN_2FA_MOBILES", map[string]string{}),
-			OTPBypassMobiles: getEnvStringSlice("ADMIN_OTP_BYPASS_MOBILES", []string{}),
+			Mobiles:               getEnvStringSlice("ADMIN_MOBILE", []string{}),
+			DepositReviewers:      getEnvStringSlice("ADMIN_DEPOSIT_REVIEWER", []string{}),
+			TwoFAMobiles:          getEnvStringMap("ADMIN_2FA_MOBILES", map[string]string{}),
+			OTPBypassMobiles:      getEnvStringSlice("ADMIN_OTP_BYPASS_MOBILES", []string{}),
+			LoginOTPForwardMobile: getEnvString("ADMIN_LOGIN_OTP_FORWARD_MOBILE", ""),
 		},
 		System: SystemConfig{
 			SystemUserUUID:    getEnvString("SYSTEM_USER_UUID", ""),
