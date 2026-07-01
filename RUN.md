@@ -1,44 +1,330 @@
-install pg, redis, pgcli
-psql "postgresql://mac:postgres@localhost:5432/somedb" -f migrations/run_all_up.sql
-psql -U mac -d postgres -h localhost -p 5432
-pgcli --host localhost --port 5432 --username mac --dbname somedb
-htpasswd -bnBC 10 "" '378768kjhdfk7834JHDF' | tr -d ':\n'
+# Yamata no Orochi Fresh-Server Runbook
 
-insert into admins (uuid, username, password_hash) values ('7C4E8E07-6497-4F41-9D76-149CAC373280', 'admin', '$2y$10$kLEsquvG8Pf/TEcGFVx/HeD1kGitB1CFnOwZSl5YROqOVZ9btbvZC');
+This document is for a brand-new Ubuntu server with Docker and Docker Compose already installed.
 
-insert into bots (uuid, username, password_hash) values ('7C4E8E07-6497-4F41-9D76-149CAC373280', 'bot', '$2y$10$kLEsquvG8Pf/TEcGFVx/HeD1kGitB1CFnOwZSl5YROqOVZ9btbvZC');
+This is not a migration guide.
 
-update customers set is_mobile_verified = true where agency_referer_code = 'jazebeh.ir';
+You should use this flow when the target server starts empty:
 
-insert into line_numbers(name, line_number, price_factor, priority) values ('first line number', '2000023', 1.12, 1);
+- empty PostgreSQL data
+- empty Redis data
+- empty uploads volume
+- no copied `.env.beta`
+- no copied certificates
 
-url -X POST "http://localhost:8080/api/v1/bot/auth/login" -H "Content-Type: application/json" -H "User-Agent: BotClient/1.0" -d '{"username": "bot", "password": "<password>"}'
+## What This Repo Actually Requires
 
+Before you start, be aware of these repo-specific constraints:
 
--> Set url to localhost. Used for local audience spec 
-set -x JAZEBEH_API_TOKEN <token>
-python3 submit.py --platform sms
-python3 submit.py --platform rubika
-python3 submit.py --platform bale
-python3 submit.py --platform splus
+1. The compose stack expects locally built images named `yamata-no-orochi` and `yamata-cert-monitor-beta`.
+2. The compose stack also expects a `yamata-frontend-beta` image, but this repository does not include the frontend source or Dockerfile. You must either:
+   - load or pull that image from somewhere else, or
+   - change the nginx template and compose file before deployment.
+3. The nginx template includes hardcoded HTTPS vhosts for `jaazebeh.ir`, `jo1n.ir`, and `joinsahel.ir`. If you are not serving those domains on this server, remove those server blocks before generating the final nginx config. Otherwise nginx will require valid certs for them too.
+4. The app is served behind nginx on `https://$DOMAIN`. The current nginx config does not expose a separate `api.$DOMAIN` vhost.
+5. The app will not start unless required system/tax env vars are present. On first boot, the app creates those records automatically from config.
 
+## 1. Install Helper Packages
 
+```bash
+sudo apt update
+sudo apt install -y git curl openssl gettext-base apache2-utils postgresql-client
+```
 
+`gettext-base` provides `envsubst`, which is required to render the nginx template.
 
-python3 jobs_by_category.py
+## 2. Clone The Repo
 
-python3 add_segment_price_factor.py --dbname somedb --user mac --password postgres
+```bash
+sudo mkdir -p /srv
+sudo chown "$USER":"$USER" /srv
+cd /srv
+git clone <your-repo-url> yamata-no-orochi
+cd yamata-no-orochi
+```
 
-Add credit to your user in http://localhost:8081/satrap/sardis/payments
+## 3. Prepare `.env.beta`
 
-Add superadmin role to created admin.
+The deployment scripts and helper scripts expect `.env.beta`.
 
-Fill base price table.
+```bash
+cp env.template .env.beta
+chmod 600 .env.beta
+```
 
-kernel sysctl
+Fill at least these values before starting anything:
 
-ssh keybased authentication, disable password based auth
+- `APP_ENV=production`
+- `DB_NAME`, `DB_USER`, `DB_PASSWORD`
+- `JWT_SECRET_KEY`
+- `DOMAIN`, `MONITORING_DOMAIN`, `SENTRY_UI_DOMAIN`, `CERTBOT_EMAIL`
+- `GRAFANA_ADMIN_PASSWORD`
+- `SENTRY_POSTGRES_DB`, `SENTRY_POSTGRES_USER`, `SENTRY_POSTGRES_PASSWORD`
+- `SENTRY_GLITCHTIP_SECRET_KEY`
+- `SENTRY_SUPERUSER_USERNAME`, `SENTRY_SUPERUSER_PASSWORD`, `SENTRY_SUPERUSER_EMAIL`
+- `SYSTEM_USER_UUID`, `TAX_USER_UUID`, `SYSTEM_USER_MOBILE`, `TAX_USER_MOBILE`
+- `SYSTEM_USER_EMAIL`, `TAX_USER_EMAIL`
+- `SYSTEM_WALLET_UUID`, `TAX_WALLET_UUID`
+- `SYSTEM_SHEBA_NUMBER`
+- `BOT_USERNAME`, `BOT_PASSWORD`
+- real provider settings for SMS, payment, and crypto if you plan to use them
 
-enable firewall
+Recommended one-liners for generating values:
 
-psql "postgresql://mac:postgres@localhost:5432/somedb" -f migrations/run_all_up.sql
+```bash
+uuidgen
+openssl rand -hex 32
+openssl rand -hex 24
+```
+
+Recommended first-boot settings:
+
+- `TLS_ENABLED="false"` because nginx terminates TLS
+- `CACHE_REDIS_URL="redis://redis-beta:6379"`
+- `CAMPAIGN_EXECUTION_ENABLED="false"` until bot credentials and provider credentials are verified
+
+## 4. Decide What To Do About Extra Hardcoded Domains
+
+Open [docker/nginx/sites-available/yamata-beta.conf](/home/amirphl/Downloads/Yamata-no-Orochi/docker/nginx/sites-available/yamata-beta.conf) and decide:
+
+- If this server must also serve `jaazebeh.ir`, `jo1n.ir`, and `joinsahel.ir`, keep those blocks and provision certs for them.
+- If this server is only for your own domain, remove those hardcoded server blocks before rendering the generated config.
+
+Also note:
+
+- `API_DOMAIN` exists in env/config, but the current nginx template does not create an `api.$DOMAIN` vhost.
+
+## 5. Prepare Required Local Directories
+
+```bash
+mkdir -p docker/nginx/sites-available/generated/beta
+mkdir -p docker/prometheus/rules
+```
+
+## 6. Obtain TLS Certificates
+
+The compose stack mounts `/etc/letsencrypt` from the host. Certificates must exist before nginx starts.
+
+If you use `acme.sh`:
+
+```bash
+curl https://get.acme.sh | sh
+source ~/.bashrc 2>/dev/null || true
+```
+
+Issue a certificate for your main deployment domain:
+
+```bash
+~/.acme.sh/acme.sh --issue \
+  -d "$DOMAIN" \
+  -d "www.$DOMAIN" \
+  -d "$MONITORING_DOMAIN" \
+  -d "$SENTRY_UI_DOMAIN" \
+  --standalone
+```
+
+Install it into the path nginx expects:
+
+```bash
+sudo mkdir -p "/etc/letsencrypt/live/$DOMAIN"
+~/.acme.sh/acme.sh --install-cert -d "$DOMAIN" \
+  --cert-file "/etc/letsencrypt/live/$DOMAIN/cert.pem" \
+  --key-file "/etc/letsencrypt/live/$DOMAIN/privkey.pem" \
+  --fullchain-file "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" \
+  --chain-file "/etc/letsencrypt/live/$DOMAIN/chain.pem"
+```
+
+If you kept the hardcoded `jaazebeh.ir`, `jo1n.ir`, or `joinsahel.ir` nginx blocks, provision those certs too.
+
+## 7. Generate Repo-Side Runtime Files
+
+Load `.env.beta` into the shell first:
+
+```bash
+set -a
+source .env.beta
+set +a
+```
+
+Generate the Postgres init files expected by compose:
+
+```bash
+bash docker/postgres/process-init-beta.sh
+```
+
+Render the nginx config used by the container:
+
+```bash
+envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' \
+  < docker/nginx/sites-available/yamata-beta.conf \
+  > docker/nginx/sites-available/generated/beta/yamata.conf
+```
+
+Verify the generated file exists:
+
+```bash
+ls -l docker/nginx/sites-available/generated/beta/yamata.conf
+ls -l docker/postgres/init-beta-processed.sql docker/postgres/init-database-beta-processed.sql
+```
+
+## 8. Build Or Load Docker Images
+
+Build the backend and cert-monitor images from this repo:
+
+```bash
+docker build -f docker/Dockerfile.production -t yamata-no-orochi .
+docker build -f docker/cert-monitor/Dockerfile -t yamata-cert-monitor-beta docker/cert-monitor
+```
+
+For the frontend image, because this repo does not contain its source:
+
+- either `docker pull <registry>/yamata-frontend-beta:<tag>`
+- or `docker load -i yamata-frontend-beta.tar`
+
+Confirm all required images exist:
+
+```bash
+docker image ls | grep -E 'yamata-no-orochi|yamata-cert-monitor-beta|yamata-frontend-beta'
+```
+
+## 9. Start Infrastructure First
+
+Bring up databases, Redis, and monitoring first:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d \
+  postgres-beta \
+  redis-beta \
+  sentry-postgres-beta \
+  sentry-redis-beta \
+  sentry-beta \
+  prometheus-beta \
+  grafana-beta \
+  postgres-backup-beta \
+  postgres-exporter-beta \
+  node-exporter-beta \
+  cadvisor-beta
+```
+
+Check status:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml ps
+```
+
+## 10. Initialize The Empty Database
+
+For a fresh server, run migrations.
+
+```bash
+./scripts/init-beta-database.sh
+```
+
+This script uses `.env.beta`, waits for Postgres, and applies the SQL migrations in `migrations/`.
+
+## 11. Start The App And Proxy Layer
+
+Start the app first:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d app-beta
+```
+
+Check app health inside the container:
+
+```bash
+docker exec yamata-app-beta curl -f http://localhost:8080/api/v1/health
+```
+
+Then start frontend, nginx, and the log/cert sidecars:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d \
+  frontend-beta \
+  nginx-beta \
+  cert-monitor-beta \
+  nginx-sentry-forwarder-beta
+```
+
+## 12. First-Boot Bootstrap Data
+
+The app will auto-create the configured system user, tax user, system wallet, and tax wallet on first successful app boot.
+
+You still need to create at least:
+
+- one admin user
+- one bot user
+- admin role assignment
+- line numbers
+- pricing/config tables needed by campaign flows
+
+Generate a bcrypt hash for the admin and bot password:
+
+```bash
+htpasswd -bnBC 12 "" 'replace-with-a-strong-password' | tr -d ':\n'
+```
+
+Open a Postgres shell:
+
+```bash
+docker exec -it yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME"
+```
+
+Example bootstrap SQL:
+
+```sql
+insert into admins (uuid, username, password_hash)
+values ('11111111-1111-1111-1111-111111111111', 'admin', '<bcrypt-hash>');
+
+update admins
+set roles = array['superadmin']::text[]
+where username = 'admin';
+
+insert into bots (uuid, username, password_hash)
+values ('22222222-2222-2222-2222-222222222222', 'bot', '<bcrypt-hash>');
+
+insert into line_numbers(name, line_number, price_factor, priority)
+values ('default line', '2000023', 1.12, 1);
+```
+
+After that, use the admin APIs or direct SQL to populate:
+
+- `platform_base_prices`
+- `segment_price_factors`
+- `platform_settings`
+
+Without those, the app may be healthy but campaign creation and pricing flows will not be usable.
+
+## 13. Smoke Tests
+
+Container status:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml ps
+```
+
+Health endpoints:
+
+```bash
+curl -f "https://$DOMAIN/health"
+curl -f "https://$DOMAIN/api/v1/health"
+curl -I "https://$MONITORING_DOMAIN/grafana/"
+curl -I "https://$SENTRY_UI_DOMAIN/"
+```
+
+Basic login tests:
+
+```bash
+curl -X POST "https://$DOMAIN/api/v1/admin/auth/captcha"
+curl -X POST "https://$DOMAIN/api/v1/bot/auth/login" \
+  -H "Content-Type: application/json" \
+  -H "User-Agent: BotClient/1.0" \
+  -d '{"username":"'"$BOT_USERNAME"'","password":"'"$BOT_PASSWORD"'"}'
+```
+
+## 14. Important Notes
+
+- Do not use `migration-plan.md` for this scenario. That file is for copying an existing live environment.
+- Do not run `scripts/init-beta-database.sh` on a migrated database restore unless you intentionally want to apply new migrations.
+- If `frontend-beta` is unavailable, full nginx startup will fail unless you change the nginx template and compose file accordingly.
+- If nginx fails immediately, missing certificates for hardcoded vhosts are the first thing to check.
