@@ -64,6 +64,8 @@ sed -e "s/\${DB_NAME:-yamata_no_orochi}/$DB_NAME/g" \
     -e "s/\${DB_USER:-yamata_user}/$DB_USER/g" \
     "$SCRIPT_DIR/init-database.sql" > "$PROCESSED_DB_INIT"
 
+chmod 644 "$PROCESSED_INIT" "$PROCESSED_DB_INIT"
+
 print_success "Created processed init file for BETA: $PROCESSED_INIT"
 print_success "Created processed database init file for BETA: $PROCESSED_DB_INIT"
-print_status "Ready for Docker Compose beta environment" 
+print_status "Ready for Docker Compose beta environment"
