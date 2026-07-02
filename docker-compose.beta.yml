@@ -45,6 +45,7 @@ services:
       - ./docker/postgres/init-beta-processed.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./docker/postgres/init-database-beta-processed.sql:/docker-entrypoint-initdb.d/02-init-database.sql:ro
       - ./docker/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./docker/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
       - ./migrations:/migrations:ro
     networks:
       yamata-network-beta:
