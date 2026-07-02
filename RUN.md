@@ -160,12 +160,23 @@ envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE
   > docker/nginx/sites-available/generated/beta/yamata.conf
 ```
 
+Normalize permissions for Docker bind-mounted configs. Keep `.env.beta` private, but files and directories under `docker/` must be readable/traversable by container users such as `postgres`, `nginx`, `nobody`, and `grafana`.
+
+```bash
+find docker -type d -exec chmod 755 {} +
+find docker -type f -exec chmod 644 {} +
+chmod 755 docker/postgres/process-init-beta.sh docker/redis/start-redis.sh
+```
+
 Verify the generated file exists:
 
 ```bash
 ls -l docker/nginx/sites-available/generated/beta/yamata.conf
+ls -l docker/postgres/postgresql.conf docker/postgres/pg_hba.conf
 ls -l docker/postgres/init-beta-processed.sql docker/postgres/init-database-beta-processed.sql
 ```
+
+Postgres is configured for non-SSL traffic only on the private Docker bridge network. Keep `DB_SSL_MODE="disable"` in `.env.beta`; `docker/postgres/pg_hba.conf` allows the `172.30.0.0/24` compose subnet with SCRAM authentication.
 
 ## 8. Build Or Load Docker Images
 
@@ -212,6 +223,15 @@ Check status:
 docker compose --env-file .env.beta -f docker-compose.beta.yml ps
 ```
 
+Optional Postgres auth sanity check:
+
+```bash
+docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "show hba_file;"
+docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "show ssl;"
+```
+
+The first command should point at `/etc/postgresql/pg_hba.conf`; the second should print `off`.
+
 ## 10. Initialize The Empty Database
 
 For a fresh server, run migrations.
@@ -221,6 +241,25 @@ For a fresh server, run migrations.
 ```
 
 This script uses `.env.beta`, waits for Postgres, and applies the SQL migrations in `migrations/`.
+
+If it fails with `Database '$DB_NAME' does not exist`, the Postgres data volume was probably initialized before the final `.env.beta` values or processed init files were ready. Create the configured database inside the running Postgres container, apply the database-specific bootstrap SQL once, then rerun the initializer:
+
+```bash
+set -a
+source .env.beta
+set +a
+
+docker exec -e PGPASSWORD="$DB_PASSWORD" yamata-postgres-beta \
+  createdb -U "$DB_USER" -O "$DB_USER" "$DB_NAME"
+
+docker exec -i -e PGPASSWORD="$DB_PASSWORD" yamata-postgres-beta \
+  psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" \
+  < docker/postgres/init-database-beta-processed.sql
+
+./scripts/init-beta-database.sh
+```
+
+For a truly disposable fresh server, recreating the Postgres data volume also works, but that deletes all existing beta database data. Prefer the manual `createdb` path above unless you are certain the volume contains nothing you need.
 
 ## 11. Start The App And Proxy Layer
 
@@ -322,9 +361,46 @@ curl -X POST "https://$DOMAIN/api/v1/bot/auth/login" \
   -d '{"username":"'"$BOT_USERNAME"'","password":"'"$BOT_PASSWORD"'"}'
 ```
 
-## 14. Important Notes
+## 14. Recreate A Container With `.env.beta`
+
+Always include `--env-file .env.beta` when recreating beta services. A plain `docker compose -f docker-compose.beta.yml ...` may start containers with blank or shell-default values instead of the deployment env file.
+
+For most config or env changes, use Compose to recreate the service in place:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d --force-recreate <service-name>
+```
+
+Examples:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d --force-recreate app-beta
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d --force-recreate postgres-beta app-beta
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d --force-recreate nginx-beta
+```
+
+If you specifically need to remove the old container object first, stop and remove only that service container, then start it again through Compose with `.env.beta`:
+
+```bash
+docker compose --env-file .env.beta -f docker-compose.beta.yml stop <service-name>
+docker compose --env-file .env.beta -f docker-compose.beta.yml rm -f <service-name>
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d <service-name>
+```
+
+For container-name commands, use the explicit container name:
+
+```bash
+docker stop yamata-app-beta
+docker rm yamata-app-beta
+docker compose --env-file .env.beta -f docker-compose.beta.yml up -d app-beta
+```
+
+Do not remove volumes unless you intentionally want to delete persisted data. For example, removing `postgres_data_beta` deletes the beta database.
+
+## 15. Important Notes
 
 - Do not use `migration-plan.md` for this scenario. That file is for copying an existing live environment.
 - Do not run `scripts/init-beta-database.sh` on a migrated database restore unless you intentionally want to apply new migrations.
 - If `frontend-beta` is unavailable, full nginx startup will fail unless you change the nginx template and compose file accordingly.
 - If nginx fails immediately, missing certificates for hardcoded vhosts are the first thing to check.
+- If the app logs `no pg_hba.conf entry ... no encryption`, make sure the current compose file mounts `docker/postgres/pg_hba.conf`, then recreate or restart `postgres-beta` and `app-beta`.
