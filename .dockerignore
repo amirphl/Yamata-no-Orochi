@@ -3,6 +3,10 @@
 .env.*
 config.env.template
 
+# Runtime-mounted smart-tag prompts
+SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT
+SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT
+
 # Git directory (contains commit history)
 .git/
 .gitignore
