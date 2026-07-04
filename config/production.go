@@ -15,29 +15,30 @@ import (
 
 // ProductionConfig holds all configuration for production environment
 type ProductionConfig struct {
-	Database     DatabaseConfig   `json:"database"`
-	Server       ServerConfig     `json:"server"`
-	Security     SecurityConfig   `json:"security"`
-	JWT          JWTConfig        `json:"jwt"`
-	Sentry       SentryConfig     `json:"sentry"`
-	SMS          SMSConfig        `json:"sms"`
-	Email        EmailConfig      `json:"email"`
-	Logging      LoggingConfig    `json:"logging"`
-	Metrics      MetricsConfig    `json:"metrics"`
-	Cache        CacheConfig      `json:"cache"`
-	Deployment   DeploymentConfig `json:"deployment"`
-	Atipay       AtipayConfig     `json:"atipay"`
-	Admin        AdminConfig      `json:"admin"`
-	System       SystemConfig     `json:"system"`
-	PayamSMS     PayamSMSConfig   `json:"payam_sms"`
-	Bale         BaleConfig       `json:"bale"`
-	Rubika       RubikaConfig     `json:"rubika"`
-	Splus        SplusConfig      `json:"splus"`
-	Bot          BotConfig        `json:"bot"`
-	Scheduler    SchedulerConfig  `json:"scheduler"`
-	Crypto       CryptoConfig     `json:"crypto"`
-	Message      MessageConfig    `json:"message"`
-	IRHTTPSProxy string           `json:"ir_https_proxy"`
+	Database           DatabaseConfig           `json:"database"`
+	Server             ServerConfig             `json:"server"`
+	Security           SecurityConfig           `json:"security"`
+	JWT                JWTConfig                `json:"jwt"`
+	Sentry             SentryConfig             `json:"sentry"`
+	SMS                SMSConfig                `json:"sms"`
+	Email              EmailConfig              `json:"email"`
+	Logging            LoggingConfig            `json:"logging"`
+	Metrics            MetricsConfig            `json:"metrics"`
+	Cache              CacheConfig              `json:"cache"`
+	Deployment         DeploymentConfig         `json:"deployment"`
+	Atipay             AtipayConfig             `json:"atipay"`
+	Admin              AdminConfig              `json:"admin"`
+	System             SystemConfig             `json:"system"`
+	PayamSMS           PayamSMSConfig           `json:"payam_sms"`
+	Bale               BaleConfig               `json:"bale"`
+	Rubika             RubikaConfig             `json:"rubika"`
+	Splus              SplusConfig              `json:"splus"`
+	Bot                BotConfig                `json:"bot"`
+	Scheduler          SchedulerConfig          `json:"scheduler"`
+	Crypto             CryptoConfig             `json:"crypto"`
+	Message            MessageConfig            `json:"message"`
+	SmartTagEvaluation SmartTagEvaluationConfig `json:"smart_tag_evaluation"`
+	IRHTTPSProxy       string                   `json:"ir_https_proxy"`
 }
 
 type DatabaseConfig struct {
@@ -414,11 +415,73 @@ type MessageConfig struct {
 	InvoiceIssueRequestTemplate           string `json:"invoice_issue_request_template"`
 }
 
+type SmartTagEvaluationConfig struct {
+	Enabled         bool                              `json:"enabled"`
+	Scheduler       SmartTagEvaluationSchedulerConfig `json:"scheduler"`
+	PersonaAnalysis SmartTagPromptConfig              `json:"persona_analysis"`
+	TagScoring      SmartTagPromptConfig              `json:"tag_scoring"`
+	OpenAI          SmartTagOpenAIConfig              `json:"openai"`
+	Batching        SmartTagBatchingConfig            `json:"batching"`
+	Validation      SmartTagValidationConfig          `json:"validation"`
+}
+
+type SmartTagEvaluationSchedulerConfig struct {
+	Enabled         bool          `json:"enabled"`
+	PollInterval    time.Duration `json:"poll_interval"`
+	MaxParallelRuns int           `json:"max_parallel_runs"`
+}
+
+type SmartTagPromptConfig struct {
+	SystemPrompt string `json:"system_prompt"`
+}
+
+type SmartTagOpenAIConfig struct {
+	APIKeyEnv       string        `json:"api_key_env"`
+	BaseURL         string        `json:"base_url"`
+	Model           string        `json:"model"`
+	ReasoningEffort *string       `json:"reasoning_effort,omitempty"`
+	MaxOutputTokens int           `json:"max_output_tokens"`
+	Temperature     *float64      `json:"temperature,omitempty"`
+	Timeout         time.Duration `json:"timeout"`
+	MaxRetries      int           `json:"max_retries"`
+	HTTPProxy       *string       `json:"http_proxy,omitempty"`
+}
+
+type SmartTagBatchingConfig struct {
+	TagBatchSize int `json:"tag_batch_size"`
+}
+
+type SmartTagValidationConfig struct {
+	RequireExactTagCount bool `json:"require_exact_tag_count"`
+	RequireExactTagIDs   bool `json:"require_exact_tag_ids"`
+}
+
+const (
+	smartTagPersonaAnalysisSystemPromptFile = "SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT"
+	smartTagTagScoringSystemPromptFile      = "SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT"
+)
+
 // LoadProductionConfig loads and validates configuration from environment variables
 func LoadProductionConfig() (*ProductionConfig, error) {
 	// Load environment variables from .env file
 	if err := loadEnvFile(); err != nil {
 		return nil, fmt.Errorf("failed to load .env file: %w", err)
+	}
+
+	smartTagEvaluationEnabled := getEnvBool("SMART_TAG_EVALUATION_ENABLED", false)
+	personaAnalysisSystemPrompt, err := readConfigTextFile(
+		smartTagPersonaAnalysisSystemPromptFile,
+		smartTagEvaluationEnabled,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load smart tag persona analysis system prompt: %w", err)
+	}
+	tagScoringSystemPrompt, err := readConfigTextFile(
+		smartTagTagScoringSystemPromptFile,
+		smartTagEvaluationEnabled,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load smart tag scoring system prompt: %w", err)
 	}
 
 	cfg := &ProductionConfig{
@@ -663,6 +726,38 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			DepositReceiptSubmittedTemplate:       getEnvString("MESSAGE_DEPOSIT_RECEIPT_SUBMITTED_TEMPLATE", "سلام شارژی در سامانه جاذبه انجام شده است. لطفا از پنل ادمین فاکتور مربوطه را صادر و آپلود نمایید"),
 			InvoiceIssueRequestTemplate:           getEnvString("MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE", "درخواست صدور فاکتور ثبت شد. مشتری: %s، شرکت: %s"),
 		},
+		SmartTagEvaluation: SmartTagEvaluationConfig{
+			Enabled: smartTagEvaluationEnabled,
+			Scheduler: SmartTagEvaluationSchedulerConfig{
+				Enabled:         getEnvBool("SMART_TAG_EVALUATION_SCHEDULER_ENABLED", false),
+				PollInterval:    getEnvDuration("SMART_TAG_EVALUATION_SCHEDULER_POLL_INTERVAL", 30*time.Second),
+				MaxParallelRuns: getEnvInt("SMART_TAG_EVALUATION_SCHEDULER_MAX_PARALLEL_RUNS", 2),
+			},
+			PersonaAnalysis: SmartTagPromptConfig{
+				SystemPrompt: personaAnalysisSystemPrompt,
+			},
+			TagScoring: SmartTagPromptConfig{
+				SystemPrompt: tagScoringSystemPrompt,
+			},
+			OpenAI: SmartTagOpenAIConfig{
+				APIKeyEnv:       getEnvString("SMART_TAG_EVALUATION_OPENAI_API_KEY_ENV", "OPENAI_API_KEY"),
+				BaseURL:         getEnvString("SMART_TAG_EVALUATION_OPENAI_BASE_URL", "https://api.openai.com/v1"),
+				Model:           getEnvString("SMART_TAG_EVALUATION_OPENAI_MODEL", ""),
+				ReasoningEffort: getOptionalEnvString("SMART_TAG_EVALUATION_OPENAI_REASONING_EFFORT"),
+				MaxOutputTokens: getEnvInt("SMART_TAG_EVALUATION_OPENAI_MAX_OUTPUT_TOKENS", 8000),
+				Temperature:     getOptionalEnvFloat64("SMART_TAG_EVALUATION_OPENAI_TEMPERATURE"),
+				Timeout:         getEnvDuration("SMART_TAG_EVALUATION_OPENAI_TIMEOUT", 120*time.Second),
+				MaxRetries:      getEnvInt("SMART_TAG_EVALUATION_OPENAI_MAX_RETRIES", 3),
+				HTTPProxy:       getOptionalEnvString("SMART_TAG_EVALUATION_OPENAI_HTTP_PROXY"),
+			},
+			Batching: SmartTagBatchingConfig{
+				TagBatchSize: getEnvInt("SMART_TAG_EVALUATION_BATCHING_TAG_BATCH_SIZE", 50),
+			},
+			Validation: SmartTagValidationConfig{
+				RequireExactTagCount: getEnvBool("SMART_TAG_EVALUATION_VALIDATION_REQUIRE_EXACT_TAG_COUNT", true),
+				RequireExactTagIDs:   getEnvBool("SMART_TAG_EVALUATION_VALIDATION_REQUIRE_EXACT_TAG_IDS", true),
+			},
+		},
 		IRHTTPSProxy: getEnvString("IR_HTTPS_PROXY", ""),
 	}
 
@@ -737,6 +832,26 @@ func getEnvString(key, defaultValue string) string {
 	return defaultValue
 }
 
+func getOptionalEnvString(key string) *string {
+	value := os.Getenv(key)
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
+}
+
+func readConfigTextFile(path string, required bool) (string, error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if !required && os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %q: %w", path, err)
+	}
+
+	return string(content), nil
+}
+
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if parsed, err := strconv.Atoi(value); err == nil {
@@ -762,6 +877,15 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 		}
 	}
 	return defaultValue
+}
+
+func getOptionalEnvFloat64(key string) *float64 {
+	if value := os.Getenv(key); value != "" {
+		if parsed, err := strconv.ParseFloat(value, 64); err == nil {
+			return &parsed
+		}
+	}
+	return nil
 }
 
 func getEnvStringSlice(key string, defaultValue []string) []string {
@@ -937,6 +1061,27 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 	if cfg.Cache.Enabled {
 		if cfg.Cache.Provider == "redis" && cfg.Cache.RedisURL == "" {
 			errors = append(errors, "CACHE_REDIS_URL is required when cache is enabled with redis provider")
+		}
+	}
+
+	if cfg.SmartTagEvaluation.Enabled {
+		if cfg.SmartTagEvaluation.OpenAI.Model == "" {
+			errors = append(errors, "SMART_TAG_EVALUATION_OPENAI_MODEL is required when smart tag evaluation is enabled")
+		}
+		if cfg.SmartTagEvaluation.OpenAI.Timeout <= 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_OPENAI_TIMEOUT must be positive")
+		}
+		if cfg.SmartTagEvaluation.OpenAI.MaxRetries < 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_OPENAI_MAX_RETRIES must be zero or greater")
+		}
+		if cfg.SmartTagEvaluation.Batching.TagBatchSize <= 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_BATCHING_TAG_BATCH_SIZE must be positive")
+		}
+		if cfg.SmartTagEvaluation.Scheduler.PollInterval <= 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_SCHEDULER_POLL_INTERVAL must be positive")
+		}
+		if cfg.SmartTagEvaluation.Scheduler.MaxParallelRuns <= 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_SCHEDULER_MAX_PARALLEL_RUNS must be positive")
 		}
 	}
 
