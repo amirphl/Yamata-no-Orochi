@@ -235,7 +235,6 @@ func (r *FiberRouter) SetupRoutes() {
 	auth.Post("/resend-otp", r.authHandler.ResendOTP)
 	auth.Post("/login", r.authHandler.Login)
 	auth.Post("/login/otp", r.authHandler.RequestLoginOTP)
-	auth.Post("/login/otp/verify", r.authHandler.VerifyLoginOTP)
 	auth.Post("/forgot-password", r.authHandler.ForgotPassword)
 	auth.Post("/reset", r.authHandler.ResetPassword)
 
@@ -289,6 +288,9 @@ func (r *FiberRouter) SetupRoutes() {
 	bundles.Get("/", r.bundleHandler.List)
 	bundles.Get("/:id", r.bundleHandler.Get)
 	bundles.Put("/:id", r.bundleHandler.Update)
+	bundles.Post("/:id/tag-evaluations", r.bundleHandler.RequestTagEvaluation)
+	bundles.Get("/:id/tag-evaluation", r.bundleHandler.GetTagEvaluationStatus)
+	bundles.Get("/:id/tag-scores", r.bundleHandler.ListTagScores)
 
 	// Admin campaigns listing and actions
 	adminCampaigns := api.Group("/admin/campaigns")
