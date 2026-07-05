@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log"
 	"strconv"
 	"time"
@@ -18,17 +20,22 @@ type BundleHandlerInterface interface {
 	Update(c fiber.Ctx) error
 	Get(c fiber.Ctx) error
 	List(c fiber.Ctx) error
+	RequestTagEvaluation(c fiber.Ctx) error
+	GetTagEvaluationStatus(c fiber.Ctx) error
+	ListTagScores(c fiber.Ctx) error
 }
 
 type BundleHandler struct {
-	flow      businessflow.BundleFlow
-	validator *validator.Validate
+	flow           businessflow.BundleFlow
+	evaluationFlow businessflow.BundleTagEvaluationFlow
+	validator      *validator.Validate
 }
 
-func NewBundleHandler(flow businessflow.BundleFlow) *BundleHandler {
+func NewBundleHandler(flow businessflow.BundleFlow, evaluationFlow businessflow.BundleTagEvaluationFlow) *BundleHandler {
 	return &BundleHandler{
-		flow:      flow,
-		validator: validator.New(),
+		flow:           flow,
+		evaluationFlow: evaluationFlow,
+		validator:      validator.New(),
 	}
 }
 
@@ -267,6 +274,151 @@ func (h *BundleHandler) List(c fiber.Ctx) error {
 	})
 }
 
+// RequestTagEvaluation queues a smart tag evaluation for the authenticated customer's bundle.
+// @Summary Request bundle tag evaluation
+// @Description Start an async smart tag evaluation run for the authenticated customer's bundle
+// @Tags Bundles
+// @Produce json
+// @Param id path int true "Bundle ID"
+// @Success 202 {object} dto.APIResponse{data=dto.RequestBundleTagEvaluationResponse} "Accepted"
+// @Failure 400 {object} dto.APIResponse "Invalid bundle ID"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 403 {object} dto.APIResponse "Forbidden"
+// @Failure 404 {object} dto.APIResponse "Not found"
+// @Failure 409 {object} dto.APIResponse "Evaluation already active or feature disabled"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/bundles/{id}/tag-evaluations [post]
+func (h *BundleHandler) RequestTagEvaluation(c fiber.Ctx) error {
+	id, err := parsePositiveUintParam(c.Params("id"))
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid bundle ID", "INVALID_BUNDLE_ID", nil)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bundles/:id/tag-evaluations", 30*time.Second)
+	defer cancel()
+
+	res, err := h.evaluationFlow.RequestBundleTagEvaluation(ctx, &dto.RequestBundleTagEvaluationRequest{
+		CustomerID: customerID,
+		BundleID:   id,
+	}, businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent")))
+	if err != nil {
+		var conflictErr *businessflow.BundleTagEvaluationConflictError
+		if errors.As(err, &conflictErr) {
+			return c.Status(fiber.StatusConflict).JSON(dto.APIResponse{
+				Success: false,
+				Message: "Bundle tag evaluation is already active",
+				Error: dto.ErrorDetail{
+					Code:    "BUNDLE_TAG_EVALUATION_ACTIVE",
+					Details: conflictErr.Response,
+				},
+			})
+		}
+		return h.handleBundleFlowError(c, err, fiber.StatusInternalServerError, "Failed to request bundle tag evaluation", "REQUEST_BUNDLE_TAG_EVALUATION_FAILED")
+	}
+
+	return h.SuccessResponse(c, fiber.StatusAccepted, "Bundle tag evaluation requested successfully", res)
+}
+
+// GetTagEvaluationStatus returns the current derived smart tag evaluation status for the bundle.
+// @Summary Get bundle tag evaluation status
+// @Description Retrieve the current smart tag evaluation status for the authenticated customer's bundle
+// @Tags Bundles
+// @Produce json
+// @Param id path int true "Bundle ID"
+// @Success 200 {object} dto.APIResponse{data=dto.GetBundleTagEvaluationStatusResponse} "Retrieved"
+// @Failure 400 {object} dto.APIResponse "Invalid bundle ID"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 403 {object} dto.APIResponse "Forbidden"
+// @Failure 404 {object} dto.APIResponse "Not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/bundles/{id}/tag-evaluation [get]
+func (h *BundleHandler) GetTagEvaluationStatus(c fiber.Ctx) error {
+	id, err := parsePositiveUintParam(c.Params("id"))
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid bundle ID", "INVALID_BUNDLE_ID", nil)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bundles/:id/tag-evaluation", 30*time.Second)
+	defer cancel()
+
+	res, err := h.evaluationFlow.GetBundleTagEvaluationStatus(ctx, &dto.GetBundleTagEvaluationStatusRequest{
+		CustomerID: customerID,
+		BundleID:   id,
+	}, businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent")))
+	if err != nil {
+		return h.handleBundleFlowError(c, err, fiber.StatusInternalServerError, "Failed to get bundle tag evaluation status", "GET_BUNDLE_TAG_EVALUATION_STATUS_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Bundle tag evaluation status retrieved successfully", res)
+}
+
+// ListTagScores returns the current smart tag scores for the authenticated customer's bundle.
+// @Summary List bundle tag scores
+// @Description Retrieve paginated current smart tag scores for the authenticated customer's bundle
+// @Tags Bundles
+// @Produce json
+// @Param id path int true "Bundle ID"
+// @Param page query int false "Page number" default(1)
+// @Param limit query int false "Items per page" default(20)
+// @Success 200 {object} dto.APIResponse{data=dto.ListBundleTagScoresResponse} "Retrieved"
+// @Failure 400 {object} dto.APIResponse "Invalid bundle ID or pagination"
+// @Failure 401 {object} dto.APIResponse "Unauthorized"
+// @Failure 403 {object} dto.APIResponse "Forbidden"
+// @Failure 404 {object} dto.APIResponse "Not found"
+// @Failure 500 {object} dto.APIResponse "Internal server error"
+// @Router /api/v1/bundles/{id}/tag-scores [get]
+func (h *BundleHandler) ListTagScores(c fiber.Ctx) error {
+	id, err := parsePositiveUintParam(c.Params("id"))
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid bundle ID", "INVALID_BUNDLE_ID", nil)
+	}
+
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+
+	page := 1
+	if pageStr := c.Query("page"); pageStr != "" {
+		parsed, parseErr := strconv.Atoi(pageStr)
+		if parseErr != nil || parsed <= 0 {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page", "INVALID_PAGE", nil)
+		}
+		page = parsed
+	}
+	limit := 20
+	if limitStr := c.Query("limit"); limitStr != "" {
+		parsed, parseErr := strconv.Atoi(limitStr)
+		if parseErr != nil || parsed <= 0 {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid limit", "INVALID_LIMIT", nil)
+		}
+		limit = parsed
+	}
+
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bundles/:id/tag-scores", 30*time.Second)
+	defer cancel()
+
+	res, err := h.evaluationFlow.ListBundleTagScores(ctx, &dto.ListBundleTagScoresRequest{
+		CustomerID: customerID,
+		BundleID:   id,
+		Page:       page,
+		Limit:      limit,
+	}, businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent")))
+	if err != nil {
+		return h.handleBundleFlowError(c, err, fiber.StatusInternalServerError, "Failed to list bundle tag scores", "LIST_BUNDLE_TAG_SCORES_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Bundle tag scores retrieved successfully", res)
+}
+
 func (h *BundleHandler) handleBundleFlowError(c fiber.Ctx, err error, defaultStatus int, defaultMessage, defaultCode string) error {
 	if be, ok := err.(*businessflow.BusinessError); ok {
 		switch be.Code {
@@ -276,7 +428,9 @@ func (h *BundleHandler) handleBundleFlowError(c fiber.Ctx, err error, defaultSta
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Bundle not found", be.Code, nil)
 		case "BUNDLE_ACCESS_DENIED":
 			return h.ErrorResponse(c, fiber.StatusForbidden, "Bundle access denied", be.Code, nil)
-		case "GET_BUNDLE_FAILED", "LIST_BUNDLES_FAILED", "CREATE_BUNDLE_FAILED", "UPDATE_BUNDLE_FAILED":
+		case "SMART_TAG_EVALUATION_DISABLED":
+			return h.ErrorResponse(c, fiber.StatusConflict, "Smart tag evaluation is disabled", be.Code, nil)
+		case "GET_BUNDLE_FAILED", "LIST_BUNDLES_FAILED", "CREATE_BUNDLE_FAILED", "UPDATE_BUNDLE_FAILED", "GET_BUNDLE_TAG_EVALUATION_STATUS_FAILED", "LIST_BUNDLE_TAG_SCORES_FAILED", "REQUEST_BUNDLE_TAG_EVALUATION_FAILED":
 			return h.ErrorResponse(c, defaultStatus, defaultMessage, be.Code, nil)
 		case "MISSING_CUSTOMER_ID":
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found", be.Code, nil)
@@ -297,4 +451,12 @@ func (h *BundleHandler) createRequestContextWithTimeout(c fiber.Ctx, endpoint st
 	ctx = context.WithValue(ctx, utils.TimeoutKey, timeout)
 	ctx = context.WithValue(ctx, utils.CancelFuncKey, cancel)
 	return ctx, cancel
+}
+
+func parsePositiveUintParam(raw string) (uint, error) {
+	id, err := strconv.Atoi(raw)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("invalid id")
+	}
+	return uint(id), nil
 }
