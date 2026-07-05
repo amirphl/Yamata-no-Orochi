@@ -21,11 +21,12 @@ type BundleFlow interface {
 }
 
 type BundleFlowImpl struct {
-	bundleRepo   repository.BundleRepository
-	campaignRepo repository.CampaignRepository
-	customerRepo repository.CustomerRepository
-	auditRepo    repository.AuditLogRepository
-	db           *gorm.DB
+	bundleRepo         repository.BundleRepository
+	campaignRepo       repository.CampaignRepository
+	customerRepo       repository.CustomerRepository
+	auditRepo          repository.AuditLogRepository
+	evaluationReadRepo repository.BundleTagEvaluationReadRepository
+	db                 *gorm.DB
 }
 
 func NewBundleFlow(
@@ -33,14 +34,16 @@ func NewBundleFlow(
 	campaignRepo repository.CampaignRepository,
 	customerRepo repository.CustomerRepository,
 	auditRepo repository.AuditLogRepository,
+	evaluationReadRepo repository.BundleTagEvaluationReadRepository,
 	db *gorm.DB,
 ) BundleFlow {
 	return &BundleFlowImpl{
-		bundleRepo:   bundleRepo,
-		campaignRepo: campaignRepo,
-		customerRepo: customerRepo,
-		auditRepo:    auditRepo,
-		db:           db,
+		bundleRepo:         bundleRepo,
+		campaignRepo:       campaignRepo,
+		customerRepo:       customerRepo,
+		auditRepo:          auditRepo,
+		evaluationReadRepo: evaluationReadRepo,
+		db:                 db,
 	}
 }
 
@@ -266,6 +269,9 @@ func (f *BundleFlowImpl) GetBundle(ctx context.Context, req *dto.GetBundleReques
 	if err := f.injectBundleStatistics(ctx, req.CustomerID, []*dto.BundleItem{item}); err != nil {
 		return nil, NewBusinessError("GET_BUNDLE_FAILED", "Failed to get bundle", err)
 	}
+	if err := f.injectBundleEvaluationStatus(ctx, []*dto.BundleItem{item}); err != nil {
+		return nil, NewBusinessError("GET_BUNDLE_FAILED", "Failed to get bundle", err)
+	}
 
 	return &dto.GetBundleResponse{
 		Message: "Bundle retrieved successfully",
@@ -348,6 +354,9 @@ func (f *BundleFlowImpl) ListBundles(ctx context.Context, req *dto.ListBundlesRe
 		items = append(items, item)
 	}
 	if err := f.injectBundleStatistics(ctx, req.CustomerID, bundleItemsToPointers(items)); err != nil {
+		return nil, NewBusinessError("LIST_BUNDLES_FAILED", "Failed to list bundles", err)
+	}
+	if err := f.injectBundleEvaluationStatus(ctx, bundleItemsToPointers(items)); err != nil {
 		return nil, NewBusinessError("LIST_BUNDLES_FAILED", "Failed to list bundles", err)
 	}
 
@@ -493,6 +502,49 @@ func (f *BundleFlowImpl) aggregateBundleStatistics(ctx context.Context, campaign
 	}
 
 	return out, nil
+}
+
+func (f *BundleFlowImpl) injectBundleEvaluationStatus(ctx context.Context, items []*dto.BundleItem) error {
+	if f.evaluationReadRepo == nil || len(items) == 0 {
+		return nil
+	}
+
+	bundleIDs := make([]uint, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			bundleIDs = append(bundleIDs, item.ID)
+		}
+	}
+	if len(bundleIDs) == 0 {
+		return nil
+	}
+
+	rows, err := f.evaluationReadRepo.ListByBundleIDs(ctx, bundleIDs)
+	if err != nil {
+		return err
+	}
+	byBundleID := make(map[uint]*models.CurrentBundleTagEvaluationStatus, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			byBundleID[row.BundleID] = row
+		}
+	}
+
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if row, ok := byBundleID[item.ID]; ok {
+			status := row.Status
+			item.TagEvaluationStatus = &status
+			item.TagEvaluatedAt = row.LatestCompletedAt
+		} else {
+			status := models.BundleTagEvaluationStatusNotEvaluated
+			item.TagEvaluationStatus = &status
+		}
+	}
+
+	return nil
 }
 
 func unmarshalStatisticsMap(raw json.RawMessage) map[string]any {
