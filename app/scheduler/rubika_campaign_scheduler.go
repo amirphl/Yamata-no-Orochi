@@ -1331,6 +1331,7 @@ func (s *RubikaCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, p
 		jobs = append(jobs, &models.CampaignStatusJob{
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       corrID,
+			Platform:            models.CampaignPlatformRubika,
 			TrackingIDs:         pq.StringArray(filteredTrackingIDs),
 			RetryCount:          0,
 			ScheduledAt:         now.Add(off),
@@ -1355,7 +1356,7 @@ func (s *RubikaCampaignScheduler) startStatusJobWorker(parent context.Context) {
 			}
 
 			listCtx, listCancel := context.WithTimeout(parent, 30*time.Second)
-			jobs, err := s.jobRepo.ListDue(listCtx, utils.UTCNow(), numJobsPerTick)
+			jobs, err := s.jobRepo.ListDue(listCtx, models.CampaignPlatformRubika, utils.UTCNow(), numJobsPerTick)
 			listCancel()
 			if err != nil {
 				s.logger.Printf("Rubika scheduler: list status jobs failed: %v", err)
