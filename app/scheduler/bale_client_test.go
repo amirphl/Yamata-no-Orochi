@@ -735,16 +735,44 @@ func TestFetchStatusChunkUsesMessageIDsPayloadAndEntriesResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchStatusChunkOnce failed: %v", err)
 	}
-	if len(out) != 3 {
-		t.Fatalf("unexpected response size: %d", len(out))
+	if len(out.Items) != 3 {
+		t.Fatalf("unexpected response size: %d", len(out.Items))
 	}
-	if out[0].MessageID != "1" || out[0].Status != 10 {
-		t.Fatalf("unexpected first item: %+v", out[0])
+	if out.Items[0].MessageID != "1" || out.Items[0].Status != 10 {
+		t.Fatalf("unexpected first item: %+v", out.Items[0])
 	}
-	if out[1].MessageID != "2" || out[1].Status != 4 {
-		t.Fatalf("unexpected second item: %+v", out[1])
+	if out.Items[1].MessageID != "2" || out.Items[1].Status != 4 {
+		t.Fatalf("unexpected second item: %+v", out.Items[1])
 	}
-	if out[2].MessageID != "3" || out[2].Status != 100 {
-		t.Fatalf("unexpected third item: %+v", out[2])
+	if out.Items[2].MessageID != "3" || out.Items[2].Status != 100 {
+		t.Fatalf("unexpected third item: %+v", out.Items[2])
+	}
+	if out.RawResponse == nil || !strings.Contains(*out.RawResponse, `"messageid":1`) {
+		t.Fatalf("expected raw Najva response, got=%v", out.RawResponse)
+	}
+}
+
+func TestFetchStatusChunkRetainsRawErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	const rawResponse = `{"error":"invalid message id"}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(rawResponse))
+	}))
+	defer srv.Close()
+
+	client := newHTTPBaleClient(config.BaleConfig{
+		APIAccessKey: "k",
+		Provider:     baleProviderNajvaV2,
+		NajvaDomain:  srv.URL,
+	})
+
+	result, err := client.fetchStatusChunkOnce(context.Background(), []int64{1})
+	if err == nil {
+		t.Fatalf("expected status request to fail")
+	}
+	if result.RawResponse == nil || *result.RawResponse != rawResponse {
+		t.Fatalf("raw response mismatch: got=%v want=%q", result.RawResponse, rawResponse)
 	}
 }
