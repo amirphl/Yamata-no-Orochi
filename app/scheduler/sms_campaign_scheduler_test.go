@@ -11,7 +11,7 @@ import (
 )
 
 type stubSMSClient struct {
-	fetchStatusFn func(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error)
+	fetchStatusFn func(ctx context.Context, token string, ids []string) (PayamStatusFetchResult, error)
 }
 
 func (s *stubSMSClient) SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error) {
@@ -22,11 +22,11 @@ func (s *stubSMSClient) GetToken(ctx context.Context) (string, error) {
 	return "", nil
 }
 
-func (s *stubSMSClient) FetchStatus(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error) {
+func (s *stubSMSClient) FetchStatus(ctx context.Context, token string, ids []string) (PayamStatusFetchResult, error) {
 	if s.fetchStatusFn != nil {
 		return s.fetchStatusFn(ctx, token, ids)
 	}
-	return nil, nil
+	return PayamStatusFetchResult{}, nil
 }
 
 type stubSMSCampaignStatusJobRepo struct {
@@ -57,7 +57,7 @@ func (s *stubSMSCampaignStatusJobRepo) ByID(ctx context.Context, id uint) (*mode
 	return nil, nil
 }
 
-func (s *stubSMSCampaignStatusJobRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.CampaignStatusJob, error) {
+func (s *stubSMSCampaignStatusJobRepo) ListDue(ctx context.Context, platform string, now time.Time, limit int) ([]*models.CampaignStatusJob, error) {
 	return nil, nil
 }
 
@@ -75,14 +75,15 @@ func TestSMSHandleStatusJobFetchFailureKeepsJobRetryable(t *testing.T) {
 	s := &SMSCampaignScheduler{
 		jobRepo: jobRepo,
 		smsClient: &stubSMSClient{
-			fetchStatusFn: func(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error) {
+			fetchStatusFn: func(ctx context.Context, token string, ids []string) (PayamStatusFetchResult, error) {
 				if token != "token-1" {
 					t.Fatalf("unexpected token: %q", token)
 				}
 				if len(ids) != 1 || ids[0] != "trk-1" {
 					t.Fatalf("unexpected ids: %#v", ids)
 				}
-				return nil, clientErr
+				raw := `{"error":"temporarily unavailable"}`
+				return PayamStatusFetchResult{RawResponse: &raw}, clientErr
 			},
 		},
 	}
@@ -110,6 +111,9 @@ func TestSMSHandleStatusJobFetchFailureKeepsJobRetryable(t *testing.T) {
 	if len(jobRepo.updated) != 1 {
 		t.Fatalf("expected one job update, got=%d", len(jobRepo.updated))
 	}
+	if job.RawProviderResponse == nil || *job.RawProviderResponse != `{"error":"temporarily unavailable"}` {
+		t.Fatalf("expected raw provider response to be retained, got=%v", job.RawProviderResponse)
+	}
 }
 
 func TestSMSHandleStatusJobFetchFailureMarksExecutedAtOnMaxRetry(t *testing.T) {
@@ -119,8 +123,8 @@ func TestSMSHandleStatusJobFetchFailureMarksExecutedAtOnMaxRetry(t *testing.T) {
 	s := &SMSCampaignScheduler{
 		jobRepo: jobRepo,
 		smsClient: &stubSMSClient{
-			fetchStatusFn: func(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error) {
-				return nil, errors.New("provider still down")
+			fetchStatusFn: func(ctx context.Context, token string, ids []string) (PayamStatusFetchResult, error) {
+				return PayamStatusFetchResult{}, errors.New("provider still down")
 			},
 		},
 	}
