@@ -383,8 +383,8 @@ func TestBaleClientIntegrationMainFlows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FetchStatus failed: %v", err)
 		}
-		if len(resp) == 0 || len(resp) != len(numericIDs) {
-			t.Fatalf("FetchStatus response length mismatch: got=%d want=%d", len(resp), len(numericIDs))
+		if len(resp.Items) == 0 || len(resp.Items) != len(numericIDs) {
+			t.Fatalf("FetchStatus response length mismatch: got=%d want=%d", len(resp.Items), len(numericIDs))
 		}
 
 		expected := make(map[string]struct{}, len(numericIDs))
@@ -392,8 +392,8 @@ func TestBaleClientIntegrationMainFlows(t *testing.T) {
 			expected[id] = struct{}{}
 		}
 
-		seen := make(map[string]struct{}, len(resp))
-		for _, item := range resp {
+		seen := make(map[string]struct{}, len(resp.Items))
+		for _, item := range resp.Items {
 			id := strings.TrimSpace(item.MessageID)
 			if id == "" {
 				t.Fatalf("FetchStatus returned empty message_id item: %+v", item)
@@ -427,8 +427,8 @@ func TestBaleClientIntegrationMainFlows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("empty-input FetchStatus should not fail: %v", err)
 		}
-		if len(resp) != 0 {
-			t.Fatalf("expected empty response for empty ids, got=%d", len(resp))
+		if len(resp.Items) != 0 {
+			t.Fatalf("expected empty response for empty ids, got=%d", len(resp.Items))
 		}
 
 		resp, err = client.FetchStatus(ctx, []string{"bad-id"})
