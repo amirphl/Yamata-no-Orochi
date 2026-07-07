@@ -12,7 +12,7 @@ import (
 )
 
 type stubBaleClient struct {
-	fetchStatusFn func(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error)
+	fetchStatusFn func(ctx context.Context, messageIDs []string) (BaleStatusFetchResult, error)
 }
 
 func (s *stubBaleClient) SendMessage(ctx context.Context, req *BaleSendMessageRequest) (*BaleSendMessageResponse, error) {
@@ -27,11 +27,11 @@ func (s *stubBaleClient) UploadFile(ctx context.Context, path string) (*BaleUplo
 	return nil, nil
 }
 
-func (s *stubBaleClient) FetchStatus(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error) {
+func (s *stubBaleClient) FetchStatus(ctx context.Context, messageIDs []string) (BaleStatusFetchResult, error) {
 	if s.fetchStatusFn != nil {
 		return s.fetchStatusFn(ctx, messageIDs)
 	}
-	return nil, nil
+	return BaleStatusFetchResult{}, nil
 }
 
 func (s *stubBaleClient) SupportsStatusTracking() bool { return true }
@@ -111,7 +111,7 @@ func (s *stubCampaignStatusJobRepo) ByID(ctx context.Context, id uint) (*models.
 	return nil, nil
 }
 
-func (s *stubCampaignStatusJobRepo) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.CampaignStatusJob, error) {
+func (s *stubCampaignStatusJobRepo) ListDue(ctx context.Context, platform string, now time.Time, limit int) ([]*models.CampaignStatusJob, error) {
 	return nil, nil
 }
 
@@ -137,11 +137,12 @@ func TestHandleStatusJobFetchFailureKeepsJobRetryable(t *testing.T) {
 		sentRepo: repo,
 		jobRepo:  jobRepo,
 		baleClient: &stubBaleClient{
-			fetchStatusFn: func(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error) {
+			fetchStatusFn: func(ctx context.Context, messageIDs []string) (BaleStatusFetchResult, error) {
 				if len(messageIDs) != 1 || messageIDs[0] != "1001" {
 					t.Fatalf("unexpected messageIDs: %#v", messageIDs)
 				}
-				return nil, clientErr
+				raw := `{"error":"temporarily unavailable"}`
+				return BaleStatusFetchResult{RawResponse: &raw}, clientErr
 			},
 		},
 	}
@@ -169,6 +170,9 @@ func TestHandleStatusJobFetchFailureKeepsJobRetryable(t *testing.T) {
 	if len(jobRepo.updated) != 1 {
 		t.Fatalf("expected one job update, got=%d", len(jobRepo.updated))
 	}
+	if job.RawProviderResponse == nil || *job.RawProviderResponse != `{"error":"temporarily unavailable"}` {
+		t.Fatalf("expected raw provider response to be retained, got=%v", job.RawProviderResponse)
+	}
 }
 
 func TestHandleStatusJobFetchFailureMarksExecutedAtOnMaxRetry(t *testing.T) {
@@ -186,8 +190,8 @@ func TestHandleStatusJobFetchFailureMarksExecutedAtOnMaxRetry(t *testing.T) {
 		sentRepo: repo,
 		jobRepo:  jobRepo,
 		baleClient: &stubBaleClient{
-			fetchStatusFn: func(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error) {
-				return nil, errors.New("provider still down")
+			fetchStatusFn: func(ctx context.Context, messageIDs []string) (BaleStatusFetchResult, error) {
+				return BaleStatusFetchResult{}, errors.New("provider still down")
 			},
 		},
 	}
