@@ -155,11 +155,19 @@ type BaleStatusResponse struct {
 	Provider   string          `json:"-"`
 }
 
+// BaleStatusFetchResult keeps the provider payload alongside its parsed items.
+// RawResponse is set whenever one or more HTTP response bodies were received,
+// including non-2xx and undecodable responses.
+type BaleStatusFetchResult struct {
+	Items       []BaleStatusResponse
+	RawResponse *string
+}
+
 type BaleClient interface {
 	SendMessage(ctx context.Context, req *BaleSendMessageRequest) (*BaleSendMessageResponse, error)
 	SendBatch(ctx context.Context, reqs []BaleSendMessageRequest) ([]BaleSendMessageResponse, error)
 	UploadFile(ctx context.Context, path string) (*BaleUploadFileResponse, error)
-	FetchStatus(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error)
+	FetchStatus(ctx context.Context, messageIDs []string) (BaleStatusFetchResult, error)
 	SupportsStatusTracking() bool
 }
 
@@ -673,17 +681,17 @@ func (c *httpBaleClient) UploadFile(ctx context.Context, path string) (*BaleUplo
 	}
 }
 
-func (c *httpBaleClient) FetchStatus(ctx context.Context, messageIDs []string) ([]BaleStatusResponse, error) {
+func (c *httpBaleClient) FetchStatus(ctx context.Context, messageIDs []string) (BaleStatusFetchResult, error) {
 	if strings.TrimSpace(c.cfg.APIAccessKey) == "" {
-		return nil, fmt.Errorf("bale api access key is not configured")
+		return BaleStatusFetchResult{}, fmt.Errorf("bale api access key is not configured")
 	}
 	if len(messageIDs) == 0 {
-		return []BaleStatusResponse{}, nil
+		return BaleStatusFetchResult{}, nil
 	}
 
 	// Najva is currently the only provider with the documented status API in this codebase.
 	if c.provider == baleProviderLegacy {
-		return nil, fmt.Errorf("status tracking is not supported for provider %s", baleProviderLegacy)
+		return BaleStatusFetchResult{}, fmt.Errorf("status tracking is not supported for provider %s", baleProviderLegacy)
 	}
 
 	cleanIDs := make([]int64, 0, len(messageIDs))
@@ -694,35 +702,36 @@ func (c *httpBaleClient) FetchStatus(ctx context.Context, messageIDs []string) (
 		}
 		parsed, err := strconv.ParseInt(trimmed, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid message id %q: %w", trimmed, err)
+			return BaleStatusFetchResult{}, fmt.Errorf("invalid message id %q: %w", trimmed, err)
 		}
 		cleanIDs = append(cleanIDs, parsed)
 	}
 	if len(cleanIDs) == 0 {
-		return []BaleStatusResponse{}, nil
+		return BaleStatusFetchResult{}, nil
 	}
 
-	out := make([]BaleStatusResponse, 0, len(cleanIDs))
+	out := BaleStatusFetchResult{Items: make([]BaleStatusResponse, 0, len(cleanIDs))}
 	for start := 0; start < len(cleanIDs); start += najvaMaxStatusIDs {
 		end := min(start+najvaMaxStatusIDs, len(cleanIDs))
 		chunk := cleanIDs[start:end]
 
 		chunkOut, err := c.fetchStatusChunkWithRetry(ctx, chunk)
+		out.RawResponse = appendBaleRawResponse(out.RawResponse, chunkOut.RawResponse)
 		if err != nil {
 			if c.provider == baleProviderAuto && isEndpointNotSupported(err) {
-				return nil, fmt.Errorf("status tracking is not supported for provider %s", baleProviderLegacy)
+				return out, fmt.Errorf("status tracking is not supported for provider %s", baleProviderLegacy)
 			}
-			return nil, err
+			return out, err
 		}
-		out = append(out, chunkOut...)
+		out.Items = append(out.Items, chunkOut.Items...)
 	}
 
 	return out, nil
 }
 
-func (c *httpBaleClient) fetchStatusChunkWithRetry(ctx context.Context, ids []int64) ([]BaleStatusResponse, error) {
+func (c *httpBaleClient) fetchStatusChunkWithRetry(ctx context.Context, ids []int64) (BaleStatusFetchResult, error) {
 	var (
-		out []BaleStatusResponse
+		out BaleStatusFetchResult
 		err error
 	)
 	for attempt := 0; ; attempt++ {
@@ -740,20 +749,25 @@ func (c *httpBaleClient) fetchStatusChunkWithRetry(ctx context.Context, ids []in
 	return out, err
 }
 
-func (c *httpBaleClient) fetchStatusChunkOnce(ctx context.Context, ids []int64) ([]BaleStatusResponse, error) {
+func (c *httpBaleClient) fetchStatusChunkOnce(ctx context.Context, ids []int64) (BaleStatusFetchResult, error) {
 
 	type najvaStatusRequest struct {
 		MessageIDs []int64 `json:"messageids"`
 	}
 	payload := najvaStatusRequest{MessageIDs: ids}
-	body, err := c.doJSONPost(ctx, c.najvaURL+"/v2/sms/status", payload, "najva status")
-	if err != nil {
-		return nil, err
+	body, requestErr := c.doJSONPost(ctx, c.najvaURL+"/v2/sms/status", payload, "najva status")
+	result := BaleStatusFetchResult{}
+	if body != nil {
+		rawResponse := string(body)
+		result.RawResponse = &rawResponse
+	}
+	if requestErr != nil {
+		return result, requestErr
 	}
 
 	items, err := decodeNajvaStatusItems(body)
 	if err != nil {
-		return nil, fmt.Errorf("decode najva status response: %w", err)
+		return result, fmt.Errorf("decode najva status response: %w", err)
 	}
 
 	out := make([]BaleStatusResponse, 0, len(items))
@@ -786,7 +800,20 @@ func (c *httpBaleClient) fetchStatusChunkOnce(ctx context.Context, ids []int64) 
 			Provider:   baleProviderNajvaV2,
 		})
 	}
-	return out, nil
+	result.Items = out
+	return result, nil
+}
+
+func appendBaleRawResponse(current, next *string) *string {
+	if next == nil {
+		return current
+	}
+	if current == nil {
+		value := *next
+		return &value
+	}
+	value := *current + "\n" + *next
+	return &value
 }
 
 func (c *httpBaleClient) sendSafir(ctx context.Context, reqBody *BaleSendMessageRequest) (*BaleSendMessageResponse, error) {
@@ -1064,7 +1091,7 @@ func (c *httpBaleClient) doJSONPost(ctx context.Context, url string, payload any
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, newBaleHTTPError(op, resp.StatusCode, body)
+		return body, newBaleHTTPError(op, resp.StatusCode, body)
 	}
 	return body, nil
 }
