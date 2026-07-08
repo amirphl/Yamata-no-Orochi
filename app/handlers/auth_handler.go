@@ -20,7 +20,6 @@ type AuthHandlerInterface interface {
 	ResendOTP(c fiber.Ctx) error
 	Login(c fiber.Ctx) error
 	RequestLoginOTP(c fiber.Ctx) error
-	VerifyLoginOTP(c fiber.Ctx) error
 	ForgotPassword(c fiber.Ctx) error
 	ResetPassword(c fiber.Ctx) error
 }
@@ -288,7 +287,7 @@ func (h *AuthHandler) ResendOTP(c fiber.Ctx) error {
 
 // Login handles user authentication
 // @Summary User Login
-// @Description Authenticate user with email/mobile and password
+// @Description Authenticate user with a mobile number, password, and OTP. Both credentials must be valid.
 // @Tags Authentication
 // @Accept json
 // @Produce json
@@ -326,6 +325,12 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		}
 		if businessflow.IsAuthenticationFailed(err) {
 			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid credentials", "AUTHENTICATION_FAILED", nil)
+		}
+		if businessflow.IsNoValidOTPFound(err) || businessflow.IsInvalidOTPCode(err) {
+			return h.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid credentials", "AUTHENTICATION_FAILED", nil)
+		}
+		if businessflow.IsCacheNotAvailable(err) {
+			return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Cache not available", "CACHE_NOT_AVAILABLE", nil)
 		}
 		if businessflow.IsAccountTypeNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusBadRequest, "Account type not found", "ACCOUNT_TYPE_NOT_FOUND", nil)
@@ -394,68 +399,6 @@ func (h *AuthHandler) RequestLoginOTP(c fiber.Ctx) error {
 	}
 
 	return h.SuccessResponse(c, fiber.StatusOK, res.Message, res)
-}
-
-// VerifyLoginOTP handles login OTP verification
-// @Summary Verify Login OTP
-// @Description Verify a one-time password for login and issue tokens
-// @Tags Authentication
-// @Accept json
-// @Produce json
-// @Param request body dto.LoginOTPVerifyRequest true "Login OTP verification request"
-// @Success 200 {object} dto.APIResponse{data=object{access_token=string,refresh_token=string,token_type=string,expires_in=int,customer=dto.AuthCustomerDTO}} "Login successful"
-// @Failure 400 {object} dto.APIResponse "Invalid OTP or request"
-// @Failure 404 {object} dto.APIResponse "User not found"
-// @Failure 503 {object} dto.APIResponse "Cache not available"
-// @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /api/v1/auth/login/otp/verify [post]
-func (h *AuthHandler) VerifyLoginOTP(c fiber.Ctx) error {
-	var req dto.LoginOTPVerifyRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
-	}
-
-	if err := h.validator.Struct(&req); err != nil {
-		var validationErrors []string
-		for _, err := range err.(validator.ValidationErrors) {
-			validationErrors = append(validationErrors, getValidationErrorMessage(err))
-		}
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
-	}
-
-	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/auth/login/otp/verify", 30*time.Second)
-	defer cancel()
-
-	res, err := h.loginFlow.VerifyLoginOTP(ctx, &req, metadata)
-	if err != nil {
-		if businessflow.IsRateLimitExceeded(err) {
-			return h.ErrorResponse(c, fiber.StatusTooManyRequests, "Too many attempts", "RATE_LIMITED", nil)
-		}
-		if businessflow.IsCustomerNotFound(err) {
-			return h.ErrorResponse(c, fiber.StatusNotFound, "User not found", "CUSTOMER_NOT_FOUND", nil)
-		}
-		if businessflow.IsNoValidOTPFound(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "No valid OTP found", "NO_VALID_OTP", nil)
-		}
-		if businessflow.IsInvalidOTPCode(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid OTP code", "INVALID_OTP_CODE", nil)
-		}
-		if businessflow.IsCacheNotAvailable(err) {
-			return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Cache not available", "CACHE_NOT_AVAILABLE", nil)
-		}
-
-		log.Println("Login OTP verification failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Login OTP verification failed", "LOGIN_OTP_VERIFY_FAILED", nil)
-	}
-
-	return h.SuccessResponse(c, fiber.StatusOK, "Login successful", fiber.Map{
-		"access_token":  res.Session.SessionToken,
-		"refresh_token": res.Session.RefreshToken,
-		"token_type":    "Bearer",
-		"expires_in":    utils.AccessTokenTTLSeconds,
-		"customer":      res.Customer,
-	})
 }
 
 // ForgotPassword handles password reset initiation
