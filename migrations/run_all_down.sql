@@ -3,6 +3,15 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0119_convert_bundle_tag_evaluation_ids_to_bigserial_down.sql...'
+\i migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial_down.sql
+
+\echo 'Running 0118_scope_campaign_status_jobs_by_platform_down.sql...'
+\i migrations/0118_scope_campaign_status_jobs_by_platform_down.sql
+
+\echo 'Running 0117_create_smart_tag_evaluation_down.sql...'
+\i migrations/0117_create_smart_tag_evaluation_down.sql
+
 \echo 'Running 0116_add_bundle_update_audit_actions_down.sql...'
 \i migrations/0116_add_bundle_update_audit_actions_down.sql
 
