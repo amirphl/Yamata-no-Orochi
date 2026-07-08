@@ -548,8 +548,16 @@ definitions:
         type: string
       agency_full_name:
         type: string
+      audience_grades:
+        items:
+          type: string
+        type: array
       budget:
         type: integer
+      bundle_id:
+        type: integer
+      bundle_title:
+        type: string
       city:
         items:
           type: string
@@ -564,6 +572,8 @@ definitions:
         type: string
       customer_full_name:
         type: string
+      hidden:
+        type: boolean
       id:
         type: integer
       job:
@@ -588,8 +598,12 @@ definitions:
         type: string
       num_audience:
         type: integer
+      phase:
+        type: string
       platform:
         type: string
+      platform_base_price:
+        type: integer
       platform_settings_id:
         type: integer
       scheduleat:
@@ -745,6 +759,8 @@ definitions:
     type: object
   dto.AdminLoginInitResponse:
     properties:
+      admin:
+        $ref: '#/definitions/dto.AdminDTO'
       already_sent:
         type: boolean
       challenge_id:
@@ -759,6 +775,8 @@ definitions:
         type: boolean
       requires_two_factor:
         type: boolean
+      session:
+        $ref: '#/definitions/dto.AdminSessionDTO'
     type: object
   dto.AdminLoginVerifyOTPRequest:
     properties:
@@ -906,6 +924,24 @@ definitions:
         type: string
       price_factor:
         type: number
+    type: object
+  dto.AdminSessionDTO:
+    properties:
+      access_token:
+        example: jwt
+        type: string
+      created_at:
+        example: "2024-01-15T10:30:00Z"
+        type: string
+      expires_in:
+        example: 3600
+        type: integer
+      refresh_token:
+        example: jwt
+        type: string
+      token_type:
+        example: Bearer
+        type: string
     type: object
   dto.AdminSetCustomerActiveStatusRequest:
     properties:
@@ -1264,6 +1300,13 @@ definitions:
       message:
         type: string
     type: object
+  dto.BotAudienceUIDItem:
+    properties:
+      code:
+        type: string
+      uid:
+        type: string
+    type: object
   dto.BotCampaignPlatformSettingsSpec:
     properties:
       description:
@@ -1346,7 +1389,13 @@ definitions:
     properties:
       adlink:
         type: string
+      audience_grades:
+        items:
+          type: string
+        type: array
       budget:
+        type: integer
+      bundle_id:
         type: integer
       city:
         items:
@@ -1360,6 +1409,8 @@ definitions:
         type: string
       customer_id:
         type: integer
+      hidden:
+        type: boolean
       id:
         type: integer
       job:
@@ -1382,8 +1433,12 @@ definitions:
         type: string
       num_audiences:
         type: integer
+      phase:
+        type: string
       platform:
         type: string
+      platform_base_price:
+        type: integer
       platform_settings:
         $ref: '#/definitions/dto.BotCampaignPlatformSettingsSpec'
       platform_settings_id:
@@ -1436,6 +1491,21 @@ definitions:
         $ref: '#/definitions/dto.BotDTO'
       session:
         $ref: '#/definitions/dto.BotSessionDTO'
+    type: object
+  dto.BotPushAudienceUIDsRequest:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.BotAudienceUIDItem'
+        minItems: 1
+        type: array
+    required:
+    - items
+    type: object
+  dto.BotPushAudienceUIDsResponse:
+    properties:
+      message:
+        type: string
     type: object
   dto.BotResetAudienceSpecRequest:
     properties:
@@ -1534,77 +1604,102 @@ definitions:
       message:
         type: string
     type: object
-  dto.CalculateCampaignCapacityRequest:
+  dto.BundleItem:
     properties:
       adlink:
-        maxLength: 10000
         type: string
-      budget:
+      created_at:
+        type: string
+      customer_id:
         type: integer
-      city:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      content:
-        maxLength: 4096
-        minLength: 1
+      description:
         type: string
+      id:
+        type: integer
       job:
-        maxLength: 255
         type: string
       job_category:
-        maxLength: 255
         type: string
-      level1:
-        maxLength: 255
-        type: string
-      level2s:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      level3s:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      line_number:
-        maxLength: 255
-        type: string
-      media_uuid:
-        type: string
-      platform:
-        enum:
-        - sms
-        - rubika
-        - bale
-        - splus
-        type: string
-      platform_settings_id:
-        minimum: 1
-        type: integer
-      scheduleat:
-        type: string
-      sex:
-        maxLength: 255
+      metadata:
+        additionalProperties: {}
+        type: object
+      objective:
         type: string
       short_link_domain:
-        maxLength: 255
         type: string
-      tags:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      target_audience_excel_file_uuid:
+      statistics:
+        additionalProperties: {}
+        type: object
+      tag_evaluated_at:
+        type: string
+      tag_evaluation_status:
+        type: string
+      target_audience_persona:
+        type: string
+      target_customer_name:
         type: string
       title:
-        maxLength: 255
         type: string
+      updated_at:
+        type: string
+    type: object
+  dto.BundleTagEvaluationStatusItem:
+    properties:
+      bundle_id:
+        type: integer
+      latest_completed_at:
+        type: string
+      latest_error_at:
+        type: string
+      latest_error_message:
+        type: string
+      latest_run_created_at:
+        type: string
+      latest_run_id:
+        type: integer
+      latest_successful_run_id:
+        type: integer
+      status:
+        type: string
+    type: object
+  dto.BundleTagScoreItem:
+    properties:
+      bundle_fit_score:
+        type: number
+      evaluation_run_id:
+        type: integer
+      fit_level:
+        type: string
+      reason:
+        type: string
+      relation_type:
+        type: string
+      tag_audience_count_snapshot:
+        type: integer
+      tag_display_title_snapshot:
+        type: string
+      tag_id:
+        type: integer
+      tag_name_snapshot:
+        type: string
+      tag_persona_snapshot:
+        type: string
+    type: object
+  dto.CalculateCampaignCapacityRequest:
+    properties:
+      campaign_id:
+        minimum: 1
+        type: integer
+    required:
+    - campaign_id
     type: object
   dto.CalculateCampaignCapacityResponse:
     properties:
+      audience_grade_capacity:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
       capacity:
         type: integer
       message:
@@ -1612,71 +1707,13 @@ definitions:
     type: object
   dto.CalculateCampaignCostRequest:
     properties:
-      adlink:
-        maxLength: 10000
-        type: string
       budget:
         type: integer
-      city:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      content:
-        maxLength: 4096
-        minLength: 1
-        type: string
-      job:
-        maxLength: 255
-        type: string
-      job_category:
-        maxLength: 255
-        type: string
-      level1:
-        maxLength: 255
-        type: string
-      level2s:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      level3s:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      line_number:
-        maxLength: 255
-        type: string
-      media_uuid:
-        type: string
-      platform:
-        enum:
-        - sms
-        - rubika
-        - bale
-        - splus
-        type: string
-      platform_settings_id:
+      campaign_id:
         minimum: 1
         type: integer
-      scheduleat:
-        type: string
-      sex:
-        maxLength: 255
-        type: string
-      short_link_domain:
-        maxLength: 255
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      target_audience_excel_file_uuid:
-        type: string
-      title:
-        maxLength: 255
-        type: string
+    required:
+    - campaign_id
     type: object
   dto.CalculateCampaignCostResponse:
     properties:
@@ -1691,72 +1728,13 @@ definitions:
     type: object
   dto.CalculateCampaignCostV2Request:
     properties:
-      adlink:
-        maxLength: 10000
-        type: string
-      city:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      content:
-        maxLength: 4096
-        minLength: 1
-        type: string
-      job:
-        maxLength: 255
-        type: string
-      job_category:
-        maxLength: 255
-        type: string
-      level1:
-        maxLength: 255
-        type: string
-      level2s:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      level3s:
-        items:
-          type: string
-        maxItems: 255
-        type: array
-      line_number:
-        maxLength: 255
-        type: string
-      media_uuid:
-        type: string
-      num_messages:
-        type: integer
-      platform:
-        enum:
-        - sms
-        - rubika
-        - bale
-        - splus
-        type: string
-      platform_settings_id:
+      campaign_id:
         minimum: 1
         type: integer
-      scheduleat:
-        type: string
-      sex:
-        maxLength: 255
-        type: string
-      short_link_domain:
-        maxLength: 255
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      target_audience_excel_file_uuid:
-        type: string
-      title:
-        maxLength: 255
-        type: string
+      num_messages:
+        type: integer
     required:
+    - campaign_id
     - num_messages
     type: object
   dto.CancelCampaignRequest:
@@ -1837,12 +1815,62 @@ definitions:
       message:
         type: string
     type: object
+  dto.CreateBundleRequest:
+    properties:
+      adlink:
+        maxLength: 2047
+        type: string
+      description:
+        maxLength: 2047
+        type: string
+      job:
+        maxLength: 255
+        type: string
+      job_category:
+        maxLength: 255
+        type: string
+      objective:
+        maxLength: 1023
+        type: string
+      short_link_domain:
+        maxLength: 255
+        type: string
+      target_audience_persona:
+        maxLength: 1023
+        type: string
+      target_customer_name:
+        maxLength: 255
+        type: string
+      title:
+        maxLength: 255
+        type: string
+    required:
+    - objective
+    - target_audience_persona
+    - title
+    type: object
+  dto.CreateBundleResponse:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: integer
+      message:
+        type: string
+    type: object
   dto.CreateCampaignRequest:
     properties:
       adlink:
         maxLength: 10000
         type: string
+      audience_grades:
+        items:
+          type: string
+        type: array
       budget:
+        type: integer
+      bundle_id:
+        minimum: 1
         type: integer
       city:
         items:
@@ -1877,6 +1905,9 @@ definitions:
         type: string
       media_uuid:
         type: string
+      phase:
+        maxLength: 255
+        type: string
       platform:
         enum:
         - sms
@@ -1905,6 +1936,9 @@ definitions:
       title:
         maxLength: 255
         type: string
+    required:
+    - bundle_id
+    - phase
     type: object
   dto.CreateCampaignResponse:
     properties:
@@ -2131,12 +2165,34 @@ definitions:
     required:
     - identifier
     type: object
+  dto.GetBundleResponse:
+    properties:
+      item:
+        $ref: '#/definitions/dto.BundleItem'
+      message:
+        type: string
+    type: object
+  dto.GetBundleTagEvaluationStatusResponse:
+    properties:
+      item:
+        $ref: '#/definitions/dto.BundleTagEvaluationStatusItem'
+      message:
+        type: string
+    type: object
   dto.GetCampaignResponse:
     properties:
       adlink:
         type: string
+      audience_grades:
+        items:
+          type: string
+        type: array
       budget:
         type: integer
+      bundle_id:
+        type: integer
+      bundle_title:
+        type: string
       city:
         items:
           type: string
@@ -2149,6 +2205,8 @@ definitions:
         type: string
       created_at:
         type: string
+      hidden:
+        type: boolean
       id:
         type: integer
       job:
@@ -2173,8 +2231,12 @@ definitions:
         type: string
       num_audience:
         type: integer
+      phase:
+        type: string
       platform:
         type: string
+      platform_base_price:
+        type: integer
       platform_settings_id:
         type: integer
       platform_settings_name:
@@ -2282,6 +2344,23 @@ definitions:
       total:
         type: integer
     type: object
+  dto.HideCampaignsRequest:
+    properties:
+      campaign_ids:
+        items:
+          type: integer
+        minItems: 1
+        type: array
+    required:
+    - campaign_ids
+    type: object
+  dto.HideCampaignsResponse:
+    properties:
+      message:
+        type: string
+      updated_count:
+        type: integer
+    type: object
   dto.ListActiveLineNumbersResponse:
     properties:
       items:
@@ -2317,6 +2396,28 @@ definitions:
         type: array
       message:
         type: string
+    type: object
+  dto.ListBundleTagScoresResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.BundleTagScoreItem'
+        type: array
+      message:
+        type: string
+      pagination:
+        $ref: '#/definitions/dto.PaginationInfo'
+    type: object
+  dto.ListBundlesResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dto.BundleItem'
+        type: array
+      message:
+        type: string
+      pagination:
+        $ref: '#/definitions/dto.PaginationInfo'
     type: object
   dto.ListCampaignsResponse:
     properties:
@@ -2375,10 +2476,11 @@ definitions:
   dto.LoginOTPRequest:
     properties:
       identifier:
-        example: user@example.com or +989123456789
-        maxLength: 255
-        minLength: 3
+        example: "+989123456789"
         type: string
+      log_otp_to_console:
+        example: false
+        type: boolean
     required:
     - identifier
     type: object
@@ -2397,24 +2499,13 @@ definitions:
       otp_sent:
         type: boolean
     type: object
-  dto.LoginOTPVerifyRequest:
-    properties:
-      customer_id:
-        example: 1
-        type: integer
-      otp_code:
-        example: "123456"
-        type: string
-    required:
-    - customer_id
-    - otp_code
-    type: object
   dto.LoginRequest:
     properties:
       identifier:
-        example: user@example.com or +989123456789
-        maxLength: 255
-        minLength: 3
+        example: "+989123456789"
+        type: string
+      otp_code:
+        example: "123456"
         type: string
       password:
         example: SecurePass123!
@@ -2423,6 +2514,7 @@ definitions:
         type: string
     required:
     - identifier
+    - otp_code
     - password
     type: object
   dto.ManualVerifyCryptoDepositRequest:
@@ -2611,6 +2703,17 @@ definitions:
         type: object
       success:
         type: boolean
+    type: object
+  dto.RequestBundleTagEvaluationResponse:
+    properties:
+      created_at:
+        type: string
+      evaluation_run_id:
+        type: integer
+      message:
+        type: string
+      status:
+        type: string
     type: object
   dto.ResetPasswordRequest:
     properties:
@@ -2942,12 +3045,79 @@ definitions:
         - $ref: '#/definitions/dto.TransactionHistoryPaginationInfo'
         description: Pagination information
     type: object
+  dto.UnhideCampaignsRequest:
+    properties:
+      campaign_ids:
+        items:
+          type: integer
+        minItems: 1
+        type: array
+    required:
+    - campaign_ids
+    type: object
+  dto.UnhideCampaignsResponse:
+    properties:
+      message:
+        type: string
+      updated_count:
+        type: integer
+    type: object
+  dto.UpdateBundleRequest:
+    properties:
+      adlink:
+        maxLength: 2047
+        type: string
+      description:
+        maxLength: 2047
+        type: string
+      job:
+        maxLength: 255
+        type: string
+      job_category:
+        maxLength: 255
+        type: string
+      objective:
+        maxLength: 1023
+        type: string
+      short_link_domain:
+        maxLength: 255
+        type: string
+      target_audience_persona:
+        maxLength: 1023
+        type: string
+      target_customer_name:
+        maxLength: 255
+        type: string
+      title:
+        maxLength: 255
+        type: string
+    required:
+    - objective
+    - target_audience_persona
+    - title
+    type: object
+  dto.UpdateBundleResponse:
+    properties:
+      id:
+        type: integer
+      message:
+        type: string
+      updated_at:
+        type: string
+    type: object
   dto.UpdateCampaignRequest:
     properties:
       adlink:
         maxLength: 10000
         type: string
+      audience_grades:
+        items:
+          type: string
+        type: array
       budget:
+        type: integer
+      bundle_id:
+        minimum: 1
         type: integer
       city:
         items:
@@ -2983,6 +3153,9 @@ definitions:
         maxLength: 255
         type: string
       media_uuid:
+        type: string
+      phase:
+        maxLength: 255
         type: string
       platform:
         enum:
@@ -3286,13 +3459,23 @@ paths:
       - Admin Authentication
   /api/v1/admin/campaigns:
     get:
-      description: Retrieve campaigns by title, status, start date, and end date
+      description: Retrieve campaigns by campaign title, bundle title, customer name,
+        status, start date, and end date
       parameters:
-      - description: Filter by title (contains)
+      - description: Filter by campaign title (contains)
         in: query
-        name: title
+        name: campaign_title
         type: string
-      - description: Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected|expired)
+      - description: Filter by bundle title (contains)
+        in: query
+        name: bundle_title
+        type: string
+      - description: Filter by customer name (contains, matches first/last name or
+          company)
+        in: query
+        name: customer_name
+        type: string
+      - description: Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|expired)
         in: query
         name: status
         type: string
@@ -4967,7 +5150,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Authenticate user with email/mobile and password
+      description: Authenticate user with a mobile number, password, and OTP. Both
+        credentials must be valid.
       parameters:
       - description: Login credentials
         in: body
@@ -5054,60 +5238,6 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Request Login OTP
-      tags:
-      - Authentication
-  /api/v1/auth/login/otp/verify:
-    post:
-      consumes:
-      - application/json
-      description: Verify a one-time password for login and issue tokens
-      parameters:
-      - description: Login OTP verification request
-        in: body
-        name: request
-        required: true
-        schema:
-          $ref: '#/definitions/dto.LoginOTPVerifyRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Login successful
-          schema:
-            allOf:
-            - $ref: '#/definitions/dto.APIResponse'
-            - properties:
-                data:
-                  properties:
-                    access_token:
-                      type: string
-                    customer:
-                      $ref: '#/definitions/dto.AuthCustomerDTO'
-                    expires_in:
-                      type: integer
-                    refresh_token:
-                      type: string
-                    token_type:
-                      type: string
-                  type: object
-              type: object
-        "400":
-          description: Invalid OTP or request
-          schema:
-            $ref: '#/definitions/dto.APIResponse'
-        "404":
-          description: User not found
-          schema:
-            $ref: '#/definitions/dto.APIResponse'
-        "500":
-          description: Internal server error
-          schema:
-            $ref: '#/definitions/dto.APIResponse'
-        "503":
-          description: Cache not available
-          schema:
-            $ref: '#/definitions/dto.APIResponse'
-      summary: Verify Login OTP
       tags:
       - Authentication
   /api/v1/auth/resend-otp:
@@ -5331,6 +5461,41 @@ paths:
       summary: Bot Login
       tags:
       - Bot Authentication
+  /api/v1/bot/campaigns/{id}/audience-uids:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Campaign ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Audience UIDs batch
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.BotPushAudienceUIDsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.BotPushAudienceUIDsResponse'
+              type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Bot Push Campaign Audience UIDs
+      tags:
+      - Bot Campaigns
   /api/v1/bot/campaigns/{id}/executed:
     post:
       parameters:
@@ -5659,6 +5824,330 @@ paths:
       summary: Bot Create Short Link
       tags:
       - Bot ShortLinks
+  /api/v1/bundles:
+    get:
+      description: List bundles for the authenticated customer with optional filters
+        and pagination
+      parameters:
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 10
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      - description: Title filter
+        in: query
+        name: title
+        type: string
+      - description: Target customer name filter
+        in: query
+        name: target_customer_name
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListBundlesResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List bundles
+      tags:
+      - Bundles
+    post:
+      consumes:
+      - application/json
+      description: Create a new bundle for the authenticated customer
+      parameters:
+      - description: Bundle payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.CreateBundleRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.CreateBundleResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Create bundle
+      tags:
+      - Bundles
+  /api/v1/bundles/{id}:
+    get:
+      description: Get a single bundle by ID for the authenticated customer
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.GetBundleResponse'
+              type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get bundle
+      tags:
+      - Bundles
+    put:
+      consumes:
+      - application/json
+      description: Update an existing bundle for the authenticated customer
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Bundle payload
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UpdateBundleRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UpdateBundleResponse'
+              type: object
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Update bundle
+      tags:
+      - Bundles
+  /api/v1/bundles/{id}/tag-evaluation:
+    get:
+      description: Retrieve the current smart tag evaluation status for the authenticated
+        customer's bundle
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.GetBundleTagEvaluationStatusResponse'
+              type: object
+        "400":
+          description: Invalid bundle ID
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Get bundle tag evaluation status
+      tags:
+      - Bundles
+  /api/v1/bundles/{id}/tag-evaluations:
+    post:
+      description: Start an async smart tag evaluation run for the authenticated customer's
+        bundle
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.RequestBundleTagEvaluationResponse'
+              type: object
+        "400":
+          description: Invalid bundle ID
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "409":
+          description: Evaluation already active or feature disabled
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Request bundle tag evaluation
+      tags:
+      - Bundles
+  /api/v1/bundles/{id}/tag-scores:
+    get:
+      description: Retrieve paginated current smart tag scores for the authenticated
+        customer's bundle
+      parameters:
+      - description: Bundle ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - default: 1
+        description: Page number
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Retrieved
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListBundleTagScoresResponse'
+              type: object
+        "400":
+          description: Invalid bundle ID or pagination
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: List bundle tag scores
+      tags:
+      - Bundles
   /api/v1/campaigns:
     get:
       consumes:
@@ -5854,6 +6343,42 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Update Campaign
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/click-report:
+    get:
+      description: Export a CSV showing which targeted audience members clicked the
+        campaign short link
+      parameters:
+      - description: Campaign UUID
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - text/csv
+      responses:
+        "200":
+          description: CSV file
+          schema:
+            type: string
+        "400":
+          description: Validation error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Export Campaign Click Report
       tags:
       - Campaigns
   /api/v1/campaigns/{uuid}/clone:
@@ -6144,6 +6669,50 @@ paths:
       summary: Calculate Campaign Cost V2
       tags:
       - Campaigns
+  /api/v1/campaigns/hide:
+    post:
+      consumes:
+      - application/json
+      description: Mark campaigns as hidden from the authenticated caller's campaign
+        list
+      parameters:
+      - description: Campaign IDs to hide
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.HideCampaignsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Campaigns hidden successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.HideCampaignsResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: One or more campaigns not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Hide Campaigns
+      tags:
+      - Campaigns
   /api/v1/campaigns/initiated/last:
     get:
       description: Retrieve the most recent campaign with status initiated for the
@@ -6217,6 +6786,50 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Get campaigns summary
+      tags:
+      - Campaigns
+  /api/v1/campaigns/unhide:
+    post:
+      consumes:
+      - application/json
+      description: Mark campaigns as visible in the authenticated caller's campaign
+        list
+      parameters:
+      - description: Campaign IDs to unhide
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.UnhideCampaignsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Campaigns unhidden successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.UnhideCampaignsResponse'
+              type: object
+        "400":
+          description: Validation error or invalid request
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: One or more campaigns not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      summary: Unhide Campaigns
       tags:
       - Campaigns
   /api/v1/crypto/payments/{uuid}/status:
