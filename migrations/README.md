@@ -1,235 +1,132 @@
-# Database Migrations for Yamata no Orochi
+# Database Migrations
 
-This directory contains database migrations for the customer signup and authentication system.
+This directory contains the ordered PostgreSQL schema history for Yamata no Orochi. The current schema head is:
 
-## Migration Structure
+```text
+0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql
+```
 
-Each migration is numbered sequentially starting with `0001` and includes both up and down migration files:
+There are currently 121 numbered up files and 120 numbered down files. The difference is `0050_remove_short_links_indexes.sql`, which has no matching down migration.
 
-- `000X_migration_name.sql` - Up migration (applies changes)
-- `000X_migration_name_down.sql` - Down migration (rollback changes)
+## Naming and Ordering
 
-## Migration Order
+Most changes use a matching pair:
 
-1. **0001_create_account_types** - Creates account type enum and reference table
-2. **0002_create_customers** - Creates main customers table with all user types
-3. **0003_create_otp_verifications** - Creates OTP verification system for signup
-4. **0004_create_customer_sessions** - Creates session management for authentication
-5. **0005_create_audit_log** - Creates audit logging for security tracking
-6. **0006_update_customer_fields** - Updates customer field sizes and mobile format
-7. **0007_add_missing_audit_actions** - Adds missing audit action enum values
-8. **0008_update_audit_log_success_field** - Updates audit log success field type
-9. **0009_add_correlation_ids** - Adds correlation ID fields for request tracking
-10. **0010_add_customer_uuid_and_agency_id** - Adds UUID and agency ID fields
-11. **0011_add_new_audit_actions** - Adds new audit action enum values
-12. **0012_update_timestamp_defaults_to_utc** - Updates timestamp defaults to UTC
-13. **0013_relax_name_validation** - Removes name format constraints to allow any characters
-14. **0014_create_sms_campaigns** - Creates SMS campaign management system
-15. **0015_add_sms_campaign_audit_actions** - Adds audit actions for SMS campaign operations
-16. **0016_add_comment_to_sms_campaigns** - Adds comment field for admin rejection notes
-17. **0017_create_wallet_models** - Creates immutable accounting system for wallet, transactions, and payments
-18. **0018_create_agency_commission_models** - Creates agency commission tracking and distribution system
-19. **0019_add_payment_audit_actions** - Adds audit actions for payment operations
-20. **0020_create_tax_wallet_down.sql** - 
+```text
+NNNN_description.sql
+NNNN_description_down.sql
+```
 
-## Database Schema Overview
+The history has two duplicate ordinals, so filename—not just the number—is the migration identity:
 
-### Account Types
-- `individual` - Personal accounts
-- `independent_company` - Business accounts
-- `marketing_agency` - Agency accounts that can manage other companies
+- `0024_create_sheba_number_on_customers`
+- `0024_create_system_company_and_wallet`
+- `0104_create_sent_rubika_messages`
+- `0104_create_splus_status_results`
 
-### Key Features
+New changes should use the next unused ordinal (`0120` after the current head), include a down file whenever rollback is safe, and update both aggregate manifests.
 
-#### Customers Table
-- Unified table for all user types (individuals, companies, agencies)
-- Conditional field requirements based on account type
-- Built-in validation constraints for Iranian phone numbers, national IDs, etc.
-- Agency referral system support
-- Email and mobile verification tracking
+## Current Aggregate-Manifest Issues
 
-#### OTP Verification
-- Secure 6-digit OTP system
-- Attempt limiting and expiration
-- Support for both email and mobile verification
-- IP and user agent tracking for security
+`run_all_up.sql` and `run_all_down.sql` are intended as convenience manifests, but the checked-in versions are not fully consistent with the files in this directory.
 
-#### Session Management
-- JWT-compatible session tokens
-- Refresh token support
-- Device and location tracking
-- Automatic session expiration
+`run_all_up.sql` currently:
 
-#### Audit Logging
-- Comprehensive action tracking
-- Security event monitoring
-- JSONB metadata for flexible data storage
-- Request correlation support
+- References missing `0052_add_indexes_to_short_links.sql`; the existing file is `0052_rename_segment_to_level1_and_add_level3.sql`.
+- References missing `0054_add_indexes_to_short_link_clicks.sql`; the existing file is `0054_backfill_short_link_clicks_from_short_links.sql`.
+- Omits `0104_create_splus_status_results.sql`.
 
-#### Wallet & Payment System
-- Immutable accounting system with correlation IDs
-- Balance snapshots for audit trail
-- Atipay payment integration
-- Transaction lifecycle tracking
-- Support for freeze/unfreeze, lock/unlock operations
+`run_all_down.sql` currently:
 
-## Field Validation Rules
+- References the corresponding nonexistent `0052_add_indexes_to_short_links_down.sql` and `0054_add_indexes_to_short_link_clicks_down.sql`.
+- Omits `0052_rename_segment_to_level1_and_add_level3_down.sql`, `0054_backfill_short_link_clicks_from_short_links_down.sql`, and `0104_create_splus_status_results_down.sql`.
+- Includes both `0077_drop_audit_log_customer_fk_down.sql` and `0078_drop_agency_commissions_down.sql` twice.
 
-### Common Fields (All Account Types)
-- Representative First Name: Any characters, ≤ 255 characters
-- Representative Last Name: Any characters, ≤ 255 characters  
-- Representative Mobile: Format `+989xxxxxxxxx`, unique
-- Email: RFC-compliant format, unique
-- Password: ≥ 8 characters, 1 uppercase + 1 number
-
-### Company Fields (Independent Company & Marketing Agency)
-- Company Name: Max 60 characters
-- National ID: Atleast 10 digits
-- Company Phone: Min 10 characters, various formats allowed
-- Company Address: Max 255 characters
-- Postal Code: Exactly 10 digits
-
-### Agency Referral
-- Optional for individuals and independent companies
-- Must reference existing marketing agency
-- Cannot be changed after signup
+Do not treat either aggregate file as validated until these entries are reconciled. With `ON_ERROR_STOP=1`, the up manifest stops at the first nonexistent include; without it, `psql` can continue after an error and leave an unexpectedly partial schema.
 
 ## Running Migrations
 
-### Apply All Migrations (Up)
-```sql
--- Run in order:
-\i migrations/0001_create_account_types.sql
-\i migrations/0002_create_customers.sql
-\i migrations/0003_create_otp_verifications.sql
-\i migrations/0004_create_customer_sessions.sql
-\i migrations/0005_create_audit_log.sql
-\i migrations/0006_update_customer_fields.sql
-\i migrations/0007_add_missing_audit_actions.sql
-\i migrations/0008_update_audit_log_success_field.sql
-\i migrations/0009_add_correlation_ids.sql
-\i migrations/0010_add_customer_uuid_and_agency_id.sql
-\i migrations/0011_add_new_audit_actions.sql
-\i migrations/0012_update_timestamp_defaults_to_utc.sql
-\i migrations/0013_relax_name_validation.sql
-\i migrations/0014_create_sms_campaigns.sql
-\i migrations/0015_add_sms_campaign_audit_actions.sql
-\i migrations/0016_add_comment_to_sms_campaigns.sql
-\i migrations/0017_create_wallet_models.sql
-\i migrations/0018_create_agency_commission_models.sql
-\i migrations/0019_add_payment_audit_actions.sql
-\i migrations/0020_create_tax_wallet_down.sql
+Run commands from the repository root because the manifests use paths such as `migrations/0001_create_account_types.sql`.
+
+After reconciling the aggregate manifest, apply it with fail-fast behavior:
+
+```bash
+psql \
+  -h "$DB_HOST" \
+  -p "$DB_PORT" \
+  -U "$DB_USER" \
+  -d "$DB_NAME" \
+  -v ON_ERROR_STOP=1 \
+  -f migrations/run_all_up.sql
 ```
 
-### Rollback All Migrations (Down)
-```sql
--- Run in reverse order:
-\i migrations/0020_create_tax_wallet_down.sql
-\i migrations/0019_add_payment_audit_actions_down.sql
-\i migrations/0018_create_agency_commission_models_down.sql
-\i migrations/0017_create_wallet_models_down.sql
-\i migrations/0016_add_comment_to_sms_campaigns_down.sql
-\i migrations/0015_add_sms_campaign_audit_actions_down.sql
-\i migrations/0014_create_sms_campaigns_down.sql
-\i migrations/0013_relax_name_validation_down.sql
-\i migrations/0012_update_timestamp_defaults_to_utc_down.sql
-\i migrations/0011_add_new_audit_actions_down.sql
-\i migrations/0010_add_customer_uuid_and_agency_id_down.sql
-\i migrations/0009_add_correlation_ids_down.sql
-\i migrations/0008_update_audit_log_success_field_down.sql
-\i migrations/0007_add_missing_audit_actions_down.sql
-\i migrations/0006_update_customer_fields_down.sql
-\i migrations/0005_create_audit_log_down.sql
-\i migrations/0004_create_customer_sessions_down.sql
-\i migrations/0003_create_otp_verifications_down.sql
-\i migrations/0002_create_customers_down.sql
-\i migrations/0001_create_account_types_down.sql
+`make migrate` invokes the same up manifest after checking PostgreSQL connectivity, but the current target does not pass `ON_ERROR_STOP=1`. Prefer the explicit command above when correctness matters.
+
+Apply one migration directly with:
+
+```bash
+psql \
+  -h "$DB_HOST" \
+  -p "$DB_PORT" \
+  -U "$DB_USER" \
+  -d "$DB_NAME" \
+  -v ON_ERROR_STOP=1 \
+  -f migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql
 ```
 
-### Individual Migration Control
-```sql
--- Apply specific migration
-\i migrations/0003_create_otp_verifications.sql
+These SQL files do not use a migration-state table. Before applying an individual file, verify which predecessors already exist in the target database.
 
--- Rollback specific migration
-\i migrations/0003_create_otp_verifications_down.sql
+## Rollback
+
+Rollback one change with its exact down file:
+
+```bash
+psql \
+  -h "$DB_HOST" \
+  -p "$DB_PORT" \
+  -U "$DB_USER" \
+  -d "$DB_NAME" \
+  -v ON_ERROR_STOP=1 \
+  -f migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial_down.sql
 ```
 
-## Performance Considerations
+`run_all_down.sql` attempts to remove the entire application schema in reverse order. It is destructive, currently has the manifest issues above, and should not be run against a database containing data that must be retained. Take and verify a backup first.
 
-All tables include comprehensive indexing:
+Migration `0050_remove_short_links_indexes.sql` has no checked-in rollback file. Restoring its removed indexes requires a deliberate replacement migration or manual schema repair based on the preceding schema.
 
-- **Primary keys** for fast lookups
-- **Unique constraints** on emails and mobile numbers
-- **Foreign key indexes** for join performance
-- **Composite indexes** for common query patterns
-- **Partial indexes** for conditional fields
-- **GIN indexes** for JSONB metadata queries
+## Migration History by Area
 
-## Security Features
+| Range | Main changes |
+|---|---|
+| `0001`–`0013` | Account types, customers, OTP/session/auth foundations, audit logs, UUIDs, UTC timestamps, and validation changes |
+| `0014`–`0020` | Initial SMS campaigns, wallet/accounting, agency commission, payment audit actions, and tax wallet |
+| `0021`–`0033` | Agency referrals/discounts, balance snapshots, system identities, transaction types/indexes, admins, line numbers, sessions, and bots |
+| `0034`–`0054` | Audience profiles/tags, processed/sent SMS, tickets, short links/clicks/scenarios, crypto payments, job categories, and short-link denormalization |
+| `0055`–`0076` | Status jobs/results, campaign statistics, pricing, cancellation, audience cache, multimedia, platform settings, Bale/Soroush Plus delivery, and the generic `campaigns` rename |
+| `0077`–`0097` | Legacy FK/table cleanup, deposits/invoices, admin audit actions, base/page prices, ACL requests, permissions, expiry, exports, and refund/invoice audit coverage |
+| `0098`–`0106` | Platform-neutral status jobs, tracking IDs, Bale/Soroush Plus/Rubika status data, Rubika sends, campaign test-send auditing, and wallet-charge previews |
+| `0107`–`0116` | Bundles, campaign phases, bundle audience selections, audience scores/statistics, normalized scoring, hidden campaigns, and bundle audit actions |
+| `0117`–`0119` | Smart-tag evaluation persistence, platform-scoped campaign status jobs, and `BIGSERIAL`/`BIGINT` evaluation identifiers |
 
-- Password hashing (application-level)
-- OTP attempt limiting
-- Session token length requirements
-- IP address tracking
-- Audit logging for all critical actions
-- Constraint validation at database level
+## Current Schema Areas
 
-## Sample Usage
+At head, the schema supports:
 
-### Create Individual Account
-```sql
-INSERT INTO customers (
-    account_type_id, 
-    representative_first_name, 
-    representative_last_name, 
-    representative_mobile, 
-    email, 
-    password_hash
-) VALUES (
-    (SELECT id FROM account_types WHERE type_name = 'individual'),
-    'John',
-    'Doe', 
-    '+989123456789',
-    'john.doe@example.com',
-    '$2b$12$...' -- bcrypt hash
-);
-```
+- Customer, admin, and bot identities, sessions, audit logs, roles, permissions, and maker-checker ACL requests.
+- Bundles and multi-platform campaigns with test/execution phases, audience selections, scores, and per-platform sent-message/status data.
+- Bundle smart-tag evaluation runs, events, persona attempts, batches, batch attempts, tag snapshots, and score results.
+- Wallets, immutable transactions, balance snapshots, fiat payment requests, deposit receipts, invoices, crypto payments, taxes, and agency discounts.
+- Audience profiles, tags, segment factors, page/base prices, platform settings, line numbers, short links/clicks, multimedia, and tickets.
 
-### Create Company with Agency Referral
-```sql
-INSERT INTO customers (
-    account_type_id,
-    company_name,
-    national_id,
-    company_phone,
-    company_address,
-    postal_code,
-    representative_first_name,
-    representative_last_name,
-    representative_mobile,
-    email,
-    password_hash,
-    referrer_agency_id
-) VALUES (
-    (SELECT id FROM account_types WHERE type_name = 'independent_company'),
-    'Tech Company Ltd',
-    '12345678901',
-    '02112345678',
-    '123 Business St, Tehran',
-    '1234567890',
-    'Jane',
-    'Smith',
-    '+989987654321', 
-    'jane@techcompany.com',
-    '$2b$12$...',
-    (SELECT id FROM customers WHERE account_type_id = (SELECT id FROM account_types WHERE type_name = 'marketing_agency') LIMIT 1)
-);
-```
+## Adding a Migration
 
-## Notes
+1. Choose the next unused four-digit ordinal.
+2. Add the up file and a safe down file when possible.
+3. Make the preconditions explicit; use schema-qualified names where ambiguity is possible.
+4. Add the up include to the end of `run_all_up.sql`.
+5. Add the down include to the beginning of `run_all_down.sql`.
+6. Test both directions on a disposable database with `ON_ERROR_STOP=1`.
+7. Run the application tests affected by the schema change.
+8. Update this README when the head, execution behavior, or major schema areas change.
 
-- All timestamps use `TIMESTAMP WITH TIME ZONE` for proper timezone handling
-- JSONB fields provide flexibility for future feature expansion
-- Constraints ensure data integrity at the database level
-- Foreign key cascades handle proper cleanup on deletions 
+Avoid editing a migration that has already been deployed. Add a corrective migration so every environment retains the same append-only history.
