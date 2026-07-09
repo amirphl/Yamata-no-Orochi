@@ -84,6 +84,7 @@ func (cm *ClientMetadata) SetSessionID(sessionID string) {
 func ToAuthCustomerDTO(customer models.Customer) dto.AuthCustomerDTO {
 	dto := dto.AuthCustomerDTO{
 		ID:                      customer.ID,
+		UUID:                    customer.UUID.String(),
 		Email:                   customer.Email,
 		RepresentativeFirstName: customer.RepresentativeFirstName,
 		RepresentativeLastName:  customer.RepresentativeLastName,

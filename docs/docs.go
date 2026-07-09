@@ -9812,6 +9812,10 @@ const docTemplate = `{
                 "representative_mobile": {
                     "type": "string",
                     "example": "+989123456789"
+                },
+                "uuid": {
+                    "type": "string",
+                    "example": "550e8400-e29b-41d4-a716-446655440000"
                 }
             }
         },
