@@ -746,7 +746,9 @@ services:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      - /var/cache/nginx:uid=101,gid=101,mode=0750
+      # Nginx creates pid and request temp directories here at startup. Keep it
+      # writable without depending on the frontend image's exact nginx UID.
+      - /var/cache/nginx:mode=1777
       - /tmp
     healthcheck:
       test:
