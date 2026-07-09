@@ -206,17 +206,22 @@ func (s *PayamSMSSMSService) getToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read PayamSMS token response body: %w", err)
+	}
+	trimmedBody := strings.TrimSpace(string(body))
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("PayamSMS token http status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return "", fmt.Errorf("PayamSMS token http status %d: %s", resp.StatusCode, trimmedBody)
 	}
 
 	var tokenResp payamSMSTokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-		return "", fmt.Errorf("failed to decode PayamSMS token response: %w", err)
+	if err := json.Unmarshal(body, &tokenResp); err != nil {
+		return "", fmt.Errorf("failed to decode PayamSMS token response: %w, body: %s", err, trimmedBody)
 	}
 	if strings.TrimSpace(tokenResp.AccessToken) == "" {
-		return "", fmt.Errorf("PayamSMS token response did not contain access_token")
+		return "", fmt.Errorf("PayamSMS token response did not contain access_token, body: %s", trimmedBody)
 	}
 
 	s.token = tokenResp.AccessToken
