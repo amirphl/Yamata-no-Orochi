@@ -1,6 +1,6 @@
 # Yamata no Orochi
 
-Yamata no Orochi is a production-oriented Go backend for the Jazebeh messaging and campaign platform. It exposes customer, admin, and bot APIs for authentication, multi-platform campaign management, wallet and payment operations, audience pricing, short links, support tickets, media uploads, and operational reporting.
+Yamata no Orochi is a production-oriented Go backend for the Jazebeh messaging and campaign platform. It exposes customer, admin, and bot APIs for authentication, multi-platform campaign management, campaign bundles, AI-assisted bundle/tag scoring, wallet and payment operations, audience pricing, short links, support tickets, media uploads, and operational reporting.
 
 The service is built with Fiber v3, GORM, PostgreSQL, Redis, Prometheus metrics, Sentry-compatible error reporting, SQL migrations, and Docker-based beta deployment assets.
 
@@ -11,6 +11,8 @@ The service is built with Fiber v3, GORM, PostgreSQL, Redis, Prometheus metrics,
 - Bot authentication and bot-only campaign, short-link, audience, and media endpoints.
 - Multi-platform campaigns for SMS, Bale, Rubika, and Soroush Plus.
 - Campaign lifecycle operations: create, update, clone, test-send, price/capacity calculation, approval, rejection, rescheduling, cancellation, execution, status polling, and export.
+- Customer-owned bundles that group test and execution campaigns, enforce audience-selection rules, and expose bundle-level statistics.
+- Asynchronous smart-tag evaluation for bundle personas, including OpenAI Responses API calls, immutable configuration snapshots, batched tag scoring, retries, status tracking, and paginated score results.
 - Wallet, transaction history, Atipay payment callbacks, deposit receipts, proforma previews, and invoice attachment workflows.
 - Crypto payment requests and provider callbacks through the configured provider layer.
 - Agency reports, discounts, customer shares, line numbers, platform settings, base prices, segment price factors, and page prices.
@@ -29,8 +31,8 @@ app/
   middleware/          Auth, authorization, metrics, and request middleware
   observability/       Sentry-compatible error reporting
   router/              Route and middleware registration
-  scheduler/           Campaign execution and status workers
-  services/            External service clients and shared application services
+  scheduler/           Campaign execution, status, and smart-tag workers
+  services/            Messaging, payment, token, OpenAI, and shared services
 business_flow/         Use-case orchestration and domain rules
 models/                GORM models
 repository/            Data access layer
@@ -64,6 +66,13 @@ cp env.template .env
 
 Then replace placeholder values such as database credentials, JWT secret or RSA keys, domain names, provider tokens, admin mobile numbers, system wallet UUIDs, and payment provider credentials.
 
+Smart-tag evaluation system prompts are not environment variables. Put their multiline text in these files at the repository root:
+
+- `SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT`
+- `SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT`
+
+The files are read verbatim at startup. Both must exist when `SMART_TAG_EVALUATION_ENABLED=true`.
+
 Common local values:
 
 ```bash
@@ -90,10 +99,11 @@ Important groups:
 - `CORS_*`, `RATE_LIMIT_*`, `REQUIRE_API_KEY`, `ALLOWED_API_KEYS`: API security controls.
 - `CACHE_*`: Redis connection and cache behavior.
 - `METRICS_*`: Prometheus metrics server.
-- `SENTRY_*`: Sentry or GlitchTip reporting.
+- `SENTRY_*`: Sentry or GlitchTip reporting, including the external URL via `SENTRY_URL_PREFIX` and the GlitchTip UI host allowlist via `SENTRY_ALLOWED_HOSTS`.
 - `ATIPAY_*`, `CRYPTO_*`, `OXA_*`: fiat and crypto payment providers.
 - `PAYAM_SMS_*`, `BALE_*`, `RUBIKA_*`, `SPLUS_*`: messaging providers.
 - `BOT_*`, `CAMPAIGN_EXECUTION_*`: internal bot client and scheduler behavior.
+- `SMART_TAG_EVALUATION_*`: smart-tag scheduler, OpenAI client, batching, and validation settings; prompt text remains in the two root files above.
 - `ADMIN_*`, `SYSTEM_*`, `TAX_*`: privileged users and accounting identities.
 
 ## Local Development
@@ -104,12 +114,13 @@ Install dependencies:
 go mod download
 ```
 
-Create and migrate a local database:
+Create a local database:
 
 ```bash
 createdb yamata_no_orochi
-psql "postgresql://postgres:postgres@localhost:5432/yamata_no_orochi?sslmode=disable" -v ON_ERROR_STOP=1 -f migrations/run_all_up.sql
 ```
+
+Then review the [migration README](migrations/README.md) before applying the schema. In this snapshot, `run_all_up.sql` has known stale entries for migrations `0052` and `0054` and omits `0104_create_splus_status_results.sql`; running it unchanged with `ON_ERROR_STOP=1` will fail.
 
 Run the service with environment variables from `.env`:
 
@@ -141,24 +152,24 @@ Note: `make run-dev-simple` currently expects `scripts/run-dev.sh`, which is not
 
 ## Database Migrations
 
-Migrations live in `migrations/` and are numbered with matching down files. The aggregate files are:
+Migrations live in `migrations/` and are numbered up to schema head `0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql`. The intended aggregate files are:
 
 - `migrations/run_all_up.sql`
 - `migrations/run_all_down.sql`
 
-Run all up migrations:
+Before using the aggregate scripts, reconcile the manifest issues listed in [migrations/README.md](migrations/README.md). Once reconciled, run all up migrations with:
 
 ```bash
 psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f migrations/run_all_up.sql
 ```
 
-Or use the Makefile after exporting `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`:
+The Makefile wraps the same aggregate up script after exporting `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`:
 
 ```bash
 make migrate
 ```
 
-The schema includes customers, account types, sessions, audit logs, campaigns, processed campaign rows, sent-message status tables, short links, audience caches, wallets, transactions, payment requests, deposit receipts, crypto payments, tickets, media, admins, bots, line numbers, pricing tables, platform settings, and access-control requests.
+The schema includes customers, account types, sessions, audit logs, bundles, campaigns, bundle audience selections, audience scores, smart-tag evaluation runs/events/attempts/batches/results, processed campaign rows, platform-scoped message status jobs and results, short links, audience caches, wallets, transactions, payment requests, deposit receipts, crypto payments, tickets, media, admins, bots, line numbers, pricing tables, platform settings, and access-control requests.
 
 ## API Overview
 
@@ -192,6 +203,7 @@ Main route groups:
 - `/api/v1/admin/auth/*`: admin captcha and login.
 - `/api/v1/bot/auth/*`: bot login.
 - `/api/v1/campaigns/*`: customer campaign CRUD, clone, test-send, cost/capacity, reports, cancellation, audience spec, and approved/running summary.
+- `/api/v1/bundles/*`: customer bundle CRUD plus asynchronous tag-evaluation requests, current status, and paginated tag scores.
 - `/api/v1/admin/campaigns/*`: campaign moderation and admin reporting.
 - `/api/v1/bot/campaigns/*`: ready campaign feed, audience spec updates, execution state, statistics, and target audience file download.
 - `/api/v1/wallet/*`, `/api/v1/payments/*`, `/api/v1/admin/payments/*`: wallet, fiat payment, receipt, invoice, and transaction flows.
@@ -245,6 +257,8 @@ Schedulers poll ready campaigns through the internal bot API, fetch audience dat
 
 For local API development, set `CAMPAIGN_EXECUTION_ENABLED=false` unless you intentionally want the workers to call provider and bot endpoints.
 
+Smart-tag evaluation is independent of campaign execution. When both `SMART_TAG_EVALUATION_ENABLED=true` and `SMART_TAG_EVALUATION_SCHEDULER_ENABLED=true`, a bounded-concurrency worker claims queued bundle evaluations and processes persona analysis and tag-score batches through the configured OpenAI-compatible Responses API.
+
 ## Observability
 
 - Application HTTP metrics are registered through `app/middleware/metrics.go`.
@@ -295,6 +309,12 @@ Run with the race detector:
 go test -race ./...
 ```
 
+Run the maintained database/Redis-free CI subset:
+
+```bash
+make ci-test-unit
+```
+
 The Makefile has older `./tests` targets that depend on test database variables. Prefer `go test ./...` unless you are specifically maintaining that legacy test flow.
 
 ## Useful Files
@@ -304,7 +324,7 @@ The Makefile has older `./tests` targets that depend on test database variables.
 - `TODO.md`: active project notes.
 - `docs/swagger.yaml` and `docs/swagger.json`: generated OpenAPI output.
 - `docs/bale.md` and `Najva.md`: Bale/Najva integration notes.
-- `migrations/README.md`: older migration background. Treat `run_all_up.sql` as the source of execution order.
+- `migrations/README.md`: current schema head, grouped migration history, execution guidance, and known aggregate-manifest issues.
 - `py-ai/`: Python scripts for audience/persona/tag workflows and load testing.
 
 ## Development Notes
