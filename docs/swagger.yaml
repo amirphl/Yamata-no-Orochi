@@ -1274,6 +1274,9 @@ definitions:
       representative_mobile:
         example: "+989123456789"
         type: string
+      uuid:
+        example: 550e8400-e29b-41d4-a716-446655440000
+        type: string
     type: object
   dto.BotAllocateShortLinksRequest:
     properties:
