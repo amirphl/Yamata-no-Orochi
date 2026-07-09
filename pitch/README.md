@@ -1,6 +1,6 @@
 # Jazebeh Platform — Documentation Index
 
-This directory contains all architecture, design, and operational documentation for the Jazebeh (Yamata-no-Orochi) platform.
+This directory contains board-facing and technical architecture documents for the Jazebeh (Yamata-no-Orochi) platform. The documents explain product intent and system design; runtime code and migration manifests remain authoritative for exact implementation details.
 
 All diagrams use [Mermaid](https://mermaid.js.org/) and render natively in GitHub, GitLab, and most Markdown viewers.
 
@@ -43,12 +43,28 @@ All diagrams use [Mermaid](https://mermaid.js.org/) and render natively in GitHu
 
 ---
 
+## Current Implementation Delta
+
+The current backend schema head is `0119`. In addition to the flows described across these documents, the running code now includes:
+
+- Authenticated bundle create, list, get, and update endpoints.
+- Queued bundle tag-evaluation requests, current evaluation status, and paginated tag-score results.
+- A bounded-concurrency smart-tag scheduler using an OpenAI-compatible Responses API for persona analysis and batched tag scoring.
+- Persisted evaluation configuration/prompt snapshots, events, attempts, raw responses, validation outcomes, and bundle-fit scores.
+- Platform-scoped campaign status jobs for SMS, Bale, Rubika, and Soroush Plus.
+
+For endpoint truth, see [`app/router/routes.go`](../app/router/routes.go). For the current schema and known aggregate-manifest issues, see the [migration README](../migrations/README.md). For smart-tag configuration, see [`env.template`](../env.template) and the [root README](../README.md).
+
+---
+
 ## Quick Reference
 
 **Supported channels**: SMS · Bale · Rubika · Soroush Plus
 
-**User roles**: Customer (Individual / Marketing Agency) · Admin (Back-Office) · Bot (Internal)
+**Customer account types**: Individual · Independent Company · Marketing Agency
 
-**Payment methods**: Online (Atipay) · Manual Deposit Receipt
+**Authenticated principals**: Customer · Admin (Back-Office) · Bot (Internal)
+
+**Payment methods**: Online (Atipay) · Manual Deposit Receipt · Configured Crypto Provider
 
 **Tech stack**: Go 1.26 · Fiber v3 · PostgreSQL 15 · Redis 8 · GORM · JWT · Prometheus · Grafana · GlitchTip · Nginx · Docker
