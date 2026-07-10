@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -16,22 +17,25 @@ type CampaignStatus string
 type CampaignPhase string
 
 const (
-	CampaignPlatformSMS                             = "sms"
-	CampaignPlatformRubika                          = "rubika"
-	CampaignPlatformBale                            = "bale"
-	CampaignPlatformSPlus                           = "splus"
-	CampaignPhaseTest                CampaignPhase  = "test"
-	CampaignPhaseExecution           CampaignPhase  = "execution"
-	CampaignStatusInitiated          CampaignStatus = "initiated"
-	CampaignStatusInProgress         CampaignStatus = "in-progress"
-	CampaignStatusWaitingForApproval CampaignStatus = "waiting-for-approval"
-	CampaignStatusApproved           CampaignStatus = "approved"
-	CampaignStatusRunning            CampaignStatus = "running"
-	CampaignStatusExecuted           CampaignStatus = "executed"
-	CampaignStatusExpired            CampaignStatus = "expired"
-	CampaignStatusRejected           CampaignStatus = "rejected"
-	CampaignStatusCancelled          CampaignStatus = "cancelled"
-	CampaignStatusCancelledByAdmin   CampaignStatus = "cancelled-by-admin"
+	CampaignAudienceTargetingStandard                = "standard"
+	CampaignAudienceTargetingSmart                   = "smart_targeting"
+	CampaignAudienceTargetingExcel                   = "excel"
+	CampaignPlatformSMS                              = "sms"
+	CampaignPlatformRubika                           = "rubika"
+	CampaignPlatformBale                             = "bale"
+	CampaignPlatformSPlus                            = "splus"
+	CampaignPhaseTest                 CampaignPhase  = "test"
+	CampaignPhaseExecution            CampaignPhase  = "execution"
+	CampaignStatusInitiated           CampaignStatus = "initiated"
+	CampaignStatusInProgress          CampaignStatus = "in-progress"
+	CampaignStatusWaitingForApproval  CampaignStatus = "waiting-for-approval"
+	CampaignStatusApproved            CampaignStatus = "approved"
+	CampaignStatusRunning             CampaignStatus = "running"
+	CampaignStatusExecuted            CampaignStatus = "executed"
+	CampaignStatusExpired             CampaignStatus = "expired"
+	CampaignStatusRejected            CampaignStatus = "rejected"
+	CampaignStatusCancelled           CampaignStatus = "cancelled"
+	CampaignStatusCancelledByAdmin    CampaignStatus = "cancelled-by-admin"
 )
 
 func IsValidCampaignPlatform(p string) bool {
@@ -133,13 +137,18 @@ type CampaignSpec struct {
 	Title *string `json:"title,omitempty"`
 
 	// Target audience
-	Level1         *string  `json:"level1,omitempty"`
-	Level2s        []string `json:"level2s,omitempty"`
-	Level3s        []string `json:"level3s,omitempty"`
-	Tags           []string `json:"tags,omitempty"`
-	AudienceGrades []string `json:"audience_grades"`
-	Sex            *string  `json:"sex,omitempty"`
-	City           []string `json:"city,omitempty"`
+	Level1  *string  `json:"level1,omitempty"`
+	Level2s []string `json:"level2s,omitempty"`
+	Level3s []string `json:"level3s,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	// AudienceTargetingMethod is empty for legacy campaigns. Legacy campaigns
+	// with an Excel file are inferred as Excel targeting; all others are
+	// inferred as standard targeting. When present, this is authoritative even
+	// if values for another targeting mode are also retained in the spec.
+	AudienceTargetingMethod *string  `json:"audience_targeting_method,omitempty"`
+	AudienceGrades          []string `json:"audience_grades"`
+	Sex                     *string  `json:"sex,omitempty"`
+	City                    []string `json:"city,omitempty"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty"`
 
@@ -161,6 +170,46 @@ type CampaignSpec struct {
 
 	// Budget
 	Budget *uint64 `json:"budget,omitempty"`
+}
+
+func IsValidCampaignAudienceTargetingMethod(method string) bool {
+	switch method {
+	case CampaignAudienceTargetingStandard, CampaignAudienceTargetingSmart, CampaignAudienceTargetingExcel:
+		return true
+	default:
+		return false
+	}
+}
+
+// EffectiveAudienceTargetingMethod returns the canonical targeting mode while
+// preserving campaigns created before AudienceTargetingMethod existed.
+//
+// An explicit method is authoritative. For legacy specs with no explicit
+// method, an attached Excel audience file takes priority over level-based
+// standard targeting.
+func (s CampaignSpec) EffectiveAudienceTargetingMethod() string {
+	method := ""
+	if s.AudienceTargetingMethod != nil {
+		method = strings.ToLower(strings.TrimSpace(*s.AudienceTargetingMethod))
+	}
+	if IsValidCampaignAudienceTargetingMethod(method) {
+		return method
+	}
+	if s.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*s.TargetAudienceExcelFileUUID) != "" {
+		return CampaignAudienceTargetingExcel
+	}
+	if method == CampaignAudienceTargetingExcel {
+		return CampaignAudienceTargetingExcel
+	}
+	return CampaignAudienceTargetingStandard
+}
+
+func (s CampaignSpec) UsesSmartTargeting() bool {
+	return s.EffectiveAudienceTargetingMethod() == CampaignAudienceTargetingSmart
+}
+
+func (s CampaignSpec) UsesExcelTargeting() bool {
+	return s.EffectiveAudienceTargetingMethod() == CampaignAudienceTargetingExcel
 }
 
 // Value implements the driver.Valuer interface for CampaignSpec
