@@ -289,6 +289,20 @@ type TagRepository interface {
 	ListActiveAfterID(ctx context.Context, afterID *uint, limit int) ([]*models.Tag, error)
 }
 
+// CampaignSelectedTagRepository owns campaign-level smart-targeting tag
+// selections and the read model used by the selection table. Available-tag
+// reads prefer the latest completed evaluation snapshot and fall back to the
+// active tag catalog when a bundle has no current score rows.
+type CampaignSelectedTagRepository interface {
+	ListAvailable(ctx context.Context, bundleID, campaignID uint, search, sortBy, sortDirection string, limit, offset int) ([]*models.SmartTargetingTagRow, int64, error)
+	ListAvailableTagIDs(ctx context.Context, bundleID uint, search, sortBy, sortDirection string, limit int) ([]uint, error)
+	ListSelected(ctx context.Context, campaignID uint) ([]*models.CampaignSelectedTag, error)
+	Summary(ctx context.Context, campaignID uint) (*models.CampaignSelectedTagSummary, error)
+	Validate(ctx context.Context, campaignID, bundleID uint) error
+	Replace(ctx context.Context, campaignID, bundleID, selectedByCustomerID uint, tagIDs []uint) error
+	Clear(ctx context.Context, campaignID uint) error
+}
+
 type BundleTagEvaluationRunRepository interface {
 	Save(ctx context.Context, entity *models.BundleTagEvaluationRun) error
 	ByID(ctx context.Context, id int64) (*models.BundleTagEvaluationRun, error)
