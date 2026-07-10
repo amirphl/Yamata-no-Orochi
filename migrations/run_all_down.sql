@@ -3,6 +3,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0121_backfill_campaign_audience_targeting_method_down.sql...'
+\i migrations/0121_backfill_campaign_audience_targeting_method_down.sql
+
+\echo 'Running 0120_create_campaign_selected_tags_down.sql...'
+\i migrations/0120_create_campaign_selected_tags_down.sql
+
 \echo 'Running 0119_convert_bundle_tag_evaluation_ids_to_bigserial_down.sql...'
 \i migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial_down.sql
 
