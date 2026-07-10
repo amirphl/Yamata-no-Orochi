@@ -106,7 +106,7 @@ Migration `0050_remove_short_links_indexes.sql` has no checked-in rollback file.
 | `0077`–`0097` | Legacy FK/table cleanup, deposits/invoices, admin audit actions, base/page prices, ACL requests, permissions, expiry, exports, and refund/invoice audit coverage |
 | `0098`–`0106` | Platform-neutral status jobs, tracking IDs, Bale/Soroush Plus/Rubika status data, Rubika sends, campaign test-send auditing, and wallet-charge previews |
 | `0107`–`0116` | Bundles, campaign phases, bundle audience selections, audience scores/statistics, normalized scoring, hidden campaigns, and bundle audit actions |
-| `0117`–`0119` | Smart-tag evaluation persistence, platform-scoped campaign status jobs, and `BIGSERIAL`/`BIGINT` evaluation identifiers |
+| `0117`–`0120` | Smart-tag evaluation persistence, platform-scoped campaign status jobs, `BIGSERIAL`/`BIGINT` evaluation identifiers, and campaign-level Smart Targeting selections |
 
 ## Current Schema Areas
 
@@ -114,7 +114,7 @@ At head, the schema supports:
 
 - Customer, admin, and bot identities, sessions, audit logs, roles, permissions, and maker-checker ACL requests.
 - Bundles and multi-platform campaigns with test/execution phases, audience selections, scores, and per-platform sent-message/status data.
-- Bundle smart-tag evaluation runs, events, persona attempts, batches, batch attempts, tag snapshots, and score results.
+- Bundle smart-tag evaluation runs, events, persona attempts, batches, batch attempts, tag snapshots and score results, plus campaign-level Smart Targeting selection snapshots.
 - Wallets, immutable transactions, balance snapshots, fiat payment requests, deposit receipts, invoices, crypto payments, taxes, and agency discounts.
 - Audience profiles, tags, segment factors, page/base prices, platform settings, line numbers, short links/clicks, multimedia, and tickets.
 
