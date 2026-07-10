@@ -365,5 +365,11 @@
 \echo 'Running 0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql...'
 \i migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql
 
+\echo 'Running 0120_create_campaign_selected_tags.sql...'
+\i migrations/0120_create_campaign_selected_tags.sql
+
+\echo 'Running 0121_backfill_campaign_audience_targeting_method.sql...'
+\i migrations/0121_backfill_campaign_audience_targeting_method.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
