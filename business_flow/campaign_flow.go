@@ -69,6 +69,7 @@ type CampaignFlowImpl struct {
 	processedCampaignRepo repository.ProcessedCampaignRepository
 	smsStatusResultRepo   repository.SMSStatusResultRepository
 	shortLinkClickRepo    repository.ShortLinkClickRepository
+	selectedTagRepo       repository.CampaignSelectedTagRepository
 	notifier              services.NotificationService
 	adminConfig           config.AdminConfig
 	cacheConfig           config.CacheConfig
@@ -113,6 +114,7 @@ func NewCampaignFlow(
 	processedCampaignRepo repository.ProcessedCampaignRepository,
 	smsStatusResultRepo repository.SMSStatusResultRepository,
 	shortLinkClickRepo repository.ShortLinkClickRepository,
+	selectedTagRepo repository.CampaignSelectedTagRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -143,6 +145,7 @@ func NewCampaignFlow(
 		processedCampaignRepo: processedCampaignRepo,
 		smsStatusResultRepo:   smsStatusResultRepo,
 		shortLinkClickRepo:    shortLinkClickRepo,
+		selectedTagRepo:       selectedTagRepo,
 		notifier:              notifier,
 		adminConfig:           adminConfig,
 		cacheConfig:           cacheConfig,
@@ -187,6 +190,15 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 		return nil, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
 	}
 	req.Platform = &sanitizedPlatform
+	targetingMethod := *req.AudienceTargetingMethod
+	level3sForValidation := req.Level3s
+	excelFileForValidation := req.TargetAudienceExcelFileUUID
+	if targetingMethod != models.CampaignAudienceTargetingStandard {
+		level3sForValidation = nil
+	}
+	if targetingMethod != models.CampaignAudienceTargetingExcel {
+		excelFileForValidation = nil
+	}
 
 	if err := s.ensureCreateCampaignRefs(
 		ctx,
@@ -194,10 +206,10 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 		req.BundleID,
 		req.Phase,
 		req.LineNumber,
-		req.Level3s,
+		level3sForValidation,
 		sanitizedPlatform,
 		req.MediaUUID,
-		req.TargetAudienceExcelFileUUID,
+		excelFileForValidation,
 		req.PlatformSettingsID,
 	); err != nil {
 		return nil, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
@@ -212,7 +224,9 @@ func (s *CampaignFlowImpl) CreateCampaign(ctx context.Context, req *dto.CreateCa
 		if err != nil {
 			return err
 		}
-
+		if campaign.Spec.UsesSmartTargeting() {
+			return s.selectedTagRepo.Replace(txCtx, campaign.ID, *campaign.BundleID, customer.ID, req.SelectedTagIDs)
+		}
 		return nil
 	})
 
@@ -299,6 +313,21 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	req.Platform = &sanitizedPlatform
 
 	finalize := req.Finalize != nil && *req.Finalize
+	if err := s.prepareAudienceTargetingUpdate(ctx, req, &campaign); err != nil {
+		return nil, NewBusinessError("CAMPAIGN_UPDATE_VALIDATION_FAILED", "Campaign update validation failed", err)
+	}
+	level3sForValidation := req.Level3s
+	finalTargetingMethod := campaignAudienceTargetingMethod(campaign.Spec)
+	if req.AudienceTargetingMethod != nil {
+		finalTargetingMethod = *req.AudienceTargetingMethod
+	}
+	if finalTargetingMethod != models.CampaignAudienceTargetingStandard {
+		level3sForValidation = nil
+	}
+	excelFileForValidation := req.TargetAudienceExcelFileUUID
+	if finalTargetingMethod != models.CampaignAudienceTargetingExcel {
+		excelFileForValidation = nil
+	}
 
 	ensureCampaignSpecDefaults(&campaign.Spec)
 	if err := s.ensureUpdateCampaignRefs(
@@ -307,10 +336,10 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 		req.BundleID,
 		req.Phase,
 		req.LineNumber,
-		req.Level3s,
+		level3sForValidation,
 		*req.Platform,
 		req.MediaUUID,
-		req.TargetAudienceExcelFileUUID,
+		excelFileForValidation,
 		req.PlatformSettingsID,
 		finalize,
 	); err != nil {
@@ -328,7 +357,18 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 	// Phase 1: persist spec changes in a short transaction.
 	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
-		return s.updateCampaign(txCtx, req, &campaign)
+		if err := s.updateCampaign(txCtx, req, &campaign); err != nil {
+			return err
+		}
+		if campaign.Spec.UsesSmartTargeting() {
+			if req.SelectedTagIDs != nil {
+				return s.selectedTagRepo.Replace(txCtx, campaign.ID, *campaign.BundleID, customer.ID, *req.SelectedTagIDs)
+			}
+			return nil
+		}
+		// Keep selections while another method is active. They are inactive now,
+		// but may be reused if the customer switches back to Smart Targeting.
+		return nil
 	})
 	if err != nil {
 		errMsg := fmt.Sprintf("Campaign update failed for campaign %d: %s", campaign.ID, err.Error())
@@ -344,7 +384,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 
 	// Capacity check outside any transaction: avoids holding a DB connection
 	// while doing Redis/file I/O and in-memory computation.
-	usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
+	usingTargetAudienceExcelFile := campaign.Spec.UsesExcelTargeting()
 	capacity, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
 		CampaignID: campaign.ID,
 		CustomerID: campaign.CustomerID,
@@ -366,7 +406,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	// --- Finalize path ---
 	// Pre-compute all pricing inputs outside the DB transaction so the
 	// transaction that touches money is as short as possible.
-	if err := s.canFinalizeCampaign(ctx, campaign, customer); err != nil {
+	if err := s.canFinalizeCampaign(ctx, &campaign, customer); err != nil {
 		return nil, NewBusinessError("CAMPAIGN_FINALIZE_NOT_ALLOWED", "Campaign cannot be finalized", err)
 	}
 
@@ -379,7 +419,7 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 	}
 
 	segmentPriceFactor := defaultSegmentPriceFactor
-	if !usingTargetAudienceExcelFile {
+	if !usingTargetAudienceExcelFile && !campaign.Spec.UsesSmartTargeting() {
 		segmentPriceFactor, err = s.fetchSegmentPriceFactor(ctx, campaign.Spec.Level3s, sanitizedPlatform)
 		if err != nil {
 			return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch segment price factor", err)
@@ -589,7 +629,27 @@ func (s *CampaignFlowImpl) CloneCampaign(ctx context.Context, req *dto.CloneCamp
 		Phase:       src.Phase,
 	}
 
-	if err := s.campaignRepo.Save(ctx, &clone); err != nil {
+	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		if err := s.campaignRepo.Save(txCtx, &clone); err != nil {
+			return err
+		}
+		if !clone.Spec.UsesSmartTargeting() {
+			return nil
+		}
+		selected, err := s.selectedTagRepo.ListSelected(txCtx, src.ID)
+		if err != nil {
+			return err
+		}
+		ids := make([]uint, 0, len(selected))
+		for _, item := range selected {
+			ids = append(ids, item.TagID)
+		}
+		if len(ids) == 0 || clone.BundleID == nil {
+			return ErrSmartTargetingTagsRequired
+		}
+		return s.selectedTagRepo.Replace(txCtx, clone.ID, *clone.BundleID, customer.ID, ids)
+	})
+	if err != nil {
 		errMsg := fmt.Sprintf("Campaign clone failed from %s: %v", src.UUID.String(), err)
 		_ = s.createAuditLog(ctx, &customer, models.AuditActionCampaignCreationFailed, errMsg, false, &errMsg, metadata)
 		return nil, NewBusinessError("CAMPAIGN_CLONE_FAILED", "Campaign clone failed", err)
@@ -1093,7 +1153,32 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 	}
 	ensureCampaignSpecDefaults(&campaign.Spec)
 
-	usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
+	usingTargetAudienceExcelFile := campaign.Spec.UsesExcelTargeting()
+	if campaign.Spec.UsesSmartTargeting() {
+		summary, err := s.selectedTagRepo.Summary(ctx, campaign.ID)
+		if err != nil {
+			return nil, NewBusinessError("SMART_TARGETING_SELECTION_LOOKUP_FAILED", "Failed to load Smart Targeting selection", err)
+		}
+		if summary.SelectedTagCount == 0 {
+			return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", ErrSmartTargetingTagsRequired)
+		}
+		if campaign.BundleID == nil {
+			return nil, NewBusinessError("BUNDLE_NOT_FOUND", "Campaign bundle not found", ErrBundleNotFound)
+		}
+		if err := s.selectedTagRepo.Validate(ctx, campaign.ID, *campaign.BundleID); err != nil {
+			if errors.Is(err, repository.ErrInvalidCampaignSelectedTags) {
+				return nil, NewBusinessError("SMART_TARGETING_SELECTION_INVALID", ErrSmartTargetingTagInvalid.Error(), ErrSmartTargetingTagInvalid)
+			}
+			return nil, NewBusinessError("SMART_TARGETING_SELECTION_LOOKUP_FAILED", "Failed to validate Smart Targeting selection", err)
+		}
+		if summary.SelectedRawCapacity < 0 {
+			return nil, NewBusinessError("SMART_TARGETING_CAPACITY_INVALID", "Selected raw capacity is invalid", ErrInvalidState)
+		}
+		return &dto.CalculateCampaignCapacityResponse{
+			Message: "Campaign capacity calculated successfully", Capacity: uint64(summary.SelectedRawCapacity),
+			AudienceGradeCapacity: map[string]uint64{audienceGradeA: 0, audienceGradeB: 0, audienceGradeC: 0},
+		}, nil
+	}
 	if !usingTargetAudienceExcelFile {
 		if campaign.Spec.Level1 == nil {
 			return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", ErrCampaignLevel1Required)
@@ -1109,6 +1194,10 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 		}
 	}
 	if usingTargetAudienceExcelFile {
+		if campaign.Spec.TargetAudienceExcelFileUUID == nil ||
+			strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) == "" {
+			return nil, NewBusinessError("EXCEL_FILE_REQUIRED", "Excel targeting requires a target audience file", ErrCampaignTargetAudienceExcelFileInvalid)
+		}
 		count, err := s.CountTargetAudienceFromExcelFile(ctx, campaign.CustomerID, strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID))
 		if err != nil {
 			switch {
@@ -1312,8 +1401,8 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		return 0, 0, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required for SMS campaigns", ErrCampaignLineNumberRequired)
 	}
 
-	usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
-	if len(campaign.Spec.Level3s) == 0 && !usingTargetAudienceExcelFile {
+	usingTargetAudienceExcelFile := campaign.Spec.UsesExcelTargeting()
+	if len(campaign.Spec.Level3s) == 0 && !usingTargetAudienceExcelFile && !campaign.Spec.UsesSmartTargeting() {
 		return 0, 0, NewBusinessError("LEVEL3_REQUIRED", "At least one level3 option or target audience Excel file is required for cost calculation", ErrLevel3Required)
 	}
 
@@ -1335,7 +1424,7 @@ func (s *CampaignFlowImpl) computeCostInputs(
 	}
 
 	segmentPriceFactor := defaultSegmentPriceFactor
-	if len(campaign.Spec.Level3s) > 0 && !usingTargetAudienceExcelFile {
+	if len(campaign.Spec.Level3s) > 0 && !usingTargetAudienceExcelFile && !campaign.Spec.UsesSmartTargeting() {
 		maxFactor, err := s.fetchSegmentPriceFactor(ctx, campaign.Spec.Level3s, platform)
 		if err != nil {
 			if errors.Is(err, ErrSegmentPriceFactorNotFound) {
@@ -1631,6 +1720,101 @@ func (s *CampaignFlowImpl) resolvePlatformSettingsName(ctx context.Context, id *
 	return settings.Name, nil
 }
 
+func sanitizeAudienceTargetingMethod(method *string) (string, error) {
+	if method == nil || strings.TrimSpace(*method) == "" {
+		return models.CampaignAudienceTargetingStandard, nil
+	}
+	value := strings.ToLower(strings.TrimSpace(*method))
+	if !models.IsValidCampaignAudienceTargetingMethod(value) {
+		return "", ErrCampaignAudienceTargetingMethodInvalid
+	}
+	return value, nil
+}
+
+// resolveAudienceTargetingMethod preserves the legacy two-field resolver for
+// callers that cannot submit Smart Targeting selections.
+func resolveAudienceTargetingMethod(method *string, targetAudienceExcelFileUUID *string) (string, error) {
+	return resolveAudienceTargetingMethodWithSelectedTags(method, nil, targetAudienceExcelFileUUID)
+}
+
+func resolveAudienceTargetingMethodWithSelectedTags(method *string, selectedTagIDs []uint, targetAudienceExcelFileUUID *string) (string, error) {
+	// An explicit method always wins. The UI intentionally retains values from
+	// previously explored methods, so those values must never override it.
+	if method != nil && strings.TrimSpace(*method) != "" {
+		return sanitizeAudienceTargetingMethod(method)
+	}
+
+	// Older clients do not submit audience_targeting_method. Resolve their
+	// payload deterministically, with Smart Targeting taking precedence over
+	// Excel and standard targeting.
+	if len(selectedTagIDs) > 0 {
+		return models.CampaignAudienceTargetingSmart, nil
+	}
+	if targetAudienceExcelFileUUID != nil && strings.TrimSpace(*targetAudienceExcelFileUUID) != "" {
+		return models.CampaignAudienceTargetingExcel, nil
+	}
+	return models.CampaignAudienceTargetingStandard, nil
+}
+
+func campaignAudienceTargetingMethod(spec models.CampaignSpec) string {
+	return spec.EffectiveAudienceTargetingMethod()
+}
+
+func (s *CampaignFlowImpl) prepareAudienceTargetingUpdate(ctx context.Context, req *dto.UpdateCampaignRequest, campaign *models.Campaign) error {
+	currentMethod := campaignAudienceTargetingMethod(campaign.Spec)
+	finalMethod := currentMethod
+
+	if req.AudienceTargetingMethod != nil {
+		method, err := sanitizeAudienceTargetingMethod(req.AudienceTargetingMethod)
+		if err != nil {
+			return err
+		}
+		finalMethod = method
+	} else if req.SelectedTagIDs != nil && len(*req.SelectedTagIDs) > 0 {
+		// Method-less legacy updates use the same priority as creates. A supplied
+		// non-empty selection is enough to make Smart Targeting active.
+		finalMethod = models.CampaignAudienceTargetingSmart
+	} else if req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != "" {
+		finalMethod = models.CampaignAudienceTargetingExcel
+	}
+	req.AudienceTargetingMethod = &finalMethod
+
+	if finalMethod != models.CampaignAudienceTargetingSmart {
+		if finalMethod == models.CampaignAudienceTargetingExcel {
+			excelFileUUID := campaign.Spec.TargetAudienceExcelFileUUID
+			if req.TargetAudienceExcelFileUUID != nil {
+				excelFileUUID = req.TargetAudienceExcelFileUUID
+			}
+			if excelFileUUID == nil || strings.TrimSpace(*excelFileUUID) == "" {
+				return ErrCampaignTargetAudienceExcelFileInvalid
+			}
+		}
+		return nil
+	}
+
+	if req.SelectedTagIDs != nil {
+		normalized, err := normalizeSelectedTagIDs(*req.SelectedTagIDs)
+		if err != nil {
+			return err
+		}
+		req.SelectedTagIDs = &normalized
+		return nil
+	}
+
+	bundleChanging := req.BundleID != nil && (campaign.BundleID == nil || *req.BundleID != *campaign.BundleID)
+	if currentMethod != models.CampaignAudienceTargetingSmart || bundleChanging {
+		return ErrSmartTargetingTagsRequired
+	}
+	summary, err := s.selectedTagRepo.Summary(ctx, campaign.ID)
+	if err != nil {
+		return err
+	}
+	if summary.SelectedTagCount == 0 {
+		return ErrSmartTargetingTagsRequired
+	}
+	return nil
+}
+
 func campaignPhasePtr(phase models.CampaignPhase) *string {
 	if !phase.Valid() {
 		return nil
@@ -1714,6 +1898,7 @@ func buildCampaignResponse(c *models.Campaign, e campaignDisplayEnrichments) dto
 		Level2s:                     c.Spec.Level2s,
 		Level3s:                     c.Spec.Level3s,
 		Tags:                        c.Spec.Tags,
+		TargetingMethod:             campaignAudienceTargetingMethod(c.Spec),
 		Sex:                         c.Spec.Sex,
 		City:                        c.Spec.City,
 		AdLink:                      c.Spec.AdLink,
@@ -1981,7 +2166,13 @@ func (s *CampaignFlowImpl) GetLastInitiatedCampaign(ctx context.Context, custome
 
 // validateCreateCampaignRequest validates the campaign creation request
 func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, req *dto.CreateCampaignRequest) error {
-	usingTargetAudienceFromExcelFile := req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != ""
+	targetingMethod, err := resolveAudienceTargetingMethodWithSelectedTags(req.AudienceTargetingMethod, req.SelectedTagIDs, req.TargetAudienceExcelFileUUID)
+	if err != nil {
+		return err
+	}
+	req.AudienceTargetingMethod = &targetingMethod
+	usingSmartTargeting := targetingMethod == models.CampaignAudienceTargetingSmart
+	usingExcelTargeting := targetingMethod == models.CampaignAudienceTargetingExcel
 
 	if req.CustomerID == 0 {
 		return ErrCustomerNotFound
@@ -1998,7 +2189,25 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, re
 	if req.Content != nil && *req.Content == "" {
 		return ErrCampaignContentRequired
 	}
-	if !usingTargetAudienceFromExcelFile {
+	if usingSmartTargeting {
+		normalized, err := normalizeSelectedTagIDs(req.SelectedTagIDs)
+		if err != nil {
+			return err
+		}
+		req.SelectedTagIDs = normalized
+	}
+	if usingExcelTargeting {
+		if req.TargetAudienceExcelFileUUID == nil || strings.TrimSpace(*req.TargetAudienceExcelFileUUID) == "" {
+			return ErrCampaignTargetAudienceExcelFileInvalid
+		}
+		media, err := s.multimediaRepo.ByUUID(ctx, strings.TrimSpace(*req.TargetAudienceExcelFileUUID))
+		if err != nil {
+			return err
+		}
+		if media == nil || media.CustomerID != req.CustomerID {
+			return ErrCampaignTargetAudienceExcelMediaNotFound
+		}
+	} else if !usingSmartTargeting {
 		if req.Level1 == nil || (req.Level1 != nil && *req.Level1 == "") {
 			return ErrCampaignLevel1Required
 		}
@@ -2010,14 +2219,6 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, re
 		}
 		if req.Tags == nil || (req.Tags != nil && len(req.Tags) == 0) {
 			return ErrCampaignTagsRequired
-		}
-	} else {
-		media, err := s.multimediaRepo.ByUUID(ctx, strings.TrimSpace(*req.TargetAudienceExcelFileUUID))
-		if err != nil {
-			return err
-		}
-		if media == nil {
-			return ErrCampaignTargetAudienceExcelMediaNotFound
 		}
 	}
 	if req.LineNumber != nil && *req.LineNumber == "" {
@@ -2067,19 +2268,19 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, re
 		}
 	}
 
-	if !usingTargetAudienceFromExcelFile && len(req.Level2s) > 0 {
+	if !usingSmartTargeting && !usingExcelTargeting && len(req.Level2s) > 0 {
 		if slices.Contains(req.Level2s, "") {
 			return ErrCampaignLevel2sRequired
 		}
 	}
 
-	if !usingTargetAudienceFromExcelFile && len(req.Level3s) > 0 {
+	if !usingSmartTargeting && !usingExcelTargeting && len(req.Level3s) > 0 {
 		if slices.Contains(req.Level3s, "") {
 			return ErrCampaignLevel3sRequired
 		}
 	}
 
-	if !usingTargetAudienceFromExcelFile && len(req.Tags) > 0 {
+	if !usingSmartTargeting && !usingExcelTargeting && len(req.Tags) > 0 {
 		if slices.Contains(req.Tags, "") {
 			return ErrCampaignTagsRequired
 		}
@@ -2094,7 +2295,7 @@ func (s *CampaignFlowImpl) validateCreateCampaignRequest(ctx context.Context, re
 		return err
 	}
 
-	_, err := sanitizeCampaignPlatform(req.Platform)
+	_, err = sanitizeCampaignPlatform(req.Platform)
 	if err != nil {
 		return err
 	}
@@ -2133,10 +2334,18 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 
 	// Build campaign spec
 	spec := models.CampaignSpec{}
+	targetingMethod, err := resolveAudienceTargetingMethodWithSelectedTags(req.AudienceTargetingMethod, req.SelectedTagIDs, req.TargetAudienceExcelFileUUID)
+	if err != nil {
+		return nil, err
+	}
+	spec.AudienceTargetingMethod = &targetingMethod
 
 	if req.Title != nil && *req.Title != "" {
 		spec.Title = req.Title
 	}
+	// Preserve values for all targeting methods. Only the resolved method is
+	// used for validation and audience calculation, but retaining the rest lets
+	// users switch methods without losing work.
 	if req.Level1 != nil && *req.Level1 != "" {
 		spec.Level1 = req.Level1
 	}
@@ -2146,12 +2355,12 @@ func (s *CampaignFlowImpl) createCampaign(ctx context.Context, req *dto.CreateCa
 	if len(req.Level3s) > 0 {
 		spec.Level3s = req.Level3s
 	}
+	if len(req.Tags) > 0 {
+		spec.Tags = req.Tags
+	}
 	if req.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*req.TargetAudienceExcelFileUUID) != "" {
 		excelFileUUID := strings.TrimSpace(*req.TargetAudienceExcelFileUUID)
 		spec.TargetAudienceExcelFileUUID = &excelFileUUID
-	}
-	if len(req.Tags) > 0 {
-		spec.Tags = req.Tags
 	}
 	if req.Sex != nil && *req.Sex != "" {
 		spec.Sex = req.Sex
@@ -2448,6 +2657,7 @@ func (s *CampaignFlowImpl) validateUpdateCampaignRequest(req *dto.UpdateCampaign
 	// At least one field should be provided for update
 	hasUpdateFields := req.Title != nil || req.Level1 != nil || len(req.Level2s) > 0 || len(req.Level3s) > 0 ||
 		req.BundleID != nil || req.Phase != nil ||
+		req.AudienceTargetingMethod != nil || req.SelectedTagIDs != nil ||
 		req.TargetAudienceExcelFileUUID != nil || len(req.Tags) > 0 || req.AudienceGrades != nil || req.Sex != nil || len(req.City) > 0 ||
 		req.AdLink != nil || req.Content != nil ||
 		req.ScheduleAt != nil || req.LineNumber != nil || req.Budget != nil || req.ShortLinkDomain != nil ||
@@ -2499,13 +2709,38 @@ func (s *CampaignFlowImpl) validateCalculateCampaignCapacityRequest(req *dto.Cal
 	return nil
 }
 
-func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign models.Campaign, customer models.Customer) error {
-	usingTargetAudienceExcelFile := campaign.Spec.TargetAudienceExcelFileUUID != nil && strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) != ""
+func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign *models.Campaign, customer models.Customer) error {
+	if campaign == nil {
+		return ErrCampaignNotFound
+	}
+	usingTargetAudienceExcelFile := campaign.Spec.UsesExcelTargeting()
 
 	if campaign.Spec.Title == nil || *campaign.Spec.Title == "" {
 		return ErrCampaignTitleRequired
 	}
-	if !usingTargetAudienceExcelFile {
+	if campaign.Spec.UsesSmartTargeting() {
+		summary, err := s.selectedTagRepo.Summary(ctx, campaign.ID)
+		if err != nil {
+			return err
+		}
+		if summary.SelectedTagCount == 0 {
+			return ErrSmartTargetingTagsRequired
+		}
+		if campaign.BundleID == nil {
+			return ErrBundleNotFound
+		}
+		if err := s.selectedTagRepo.Validate(ctx, campaign.ID, *campaign.BundleID); err != nil {
+			if errors.Is(err, repository.ErrInvalidCampaignSelectedTags) {
+				return ErrSmartTargetingTagInvalid
+			}
+			return err
+		}
+	} else if usingTargetAudienceExcelFile {
+		if campaign.Spec.TargetAudienceExcelFileUUID == nil ||
+			strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) == "" {
+			return ErrCampaignTargetAudienceExcelFileInvalid
+		}
+	} else {
 		if campaign.Spec.Level1 == nil || *campaign.Spec.Level1 == "" {
 			return ErrCampaignLevel1Required
 		}
@@ -2556,16 +2791,25 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 	if _, err := sanitizeCampaignPlatform(utils.ToPtr(campaign.Spec.Platform)); err != nil {
 		return err
 	}
+	targetingMethod := campaignAudienceTargetingMethod(campaign.Spec)
+	level3sForValidation := campaign.Spec.Level3s
+	if targetingMethod != models.CampaignAudienceTargetingStandard {
+		level3sForValidation = nil
+	}
+	excelFileForValidation := campaign.Spec.TargetAudienceExcelFileUUID
+	if targetingMethod != models.CampaignAudienceTargetingExcel {
+		excelFileForValidation = nil
+	}
 	if err := s.ensureUpdateCampaignRefs(
 		ctx,
 		campaign.CustomerID,
 		campaign.BundleID,
 		campaignPhasePtr(campaign.Phase),
 		campaign.Spec.LineNumber,
-		campaign.Spec.Level3s,
+		level3sForValidation,
 		campaign.Spec.Platform,
 		campaign.Spec.MediaUUID,
-		campaign.Spec.TargetAudienceExcelFileUUID,
+		excelFileForValidation,
 		campaign.Spec.PlatformSettingsID,
 		true,
 	); err != nil {
@@ -2579,10 +2823,20 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign mod
 func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCampaignRequest, existingCampaign *models.Campaign) error {
 	// Update campaign spec with new values
 	spec := existingCampaign.Spec
+	if req.AudienceTargetingMethod != nil {
+		method, err := sanitizeAudienceTargetingMethod(req.AudienceTargetingMethod)
+		if err != nil {
+			return err
+		}
+		spec.AudienceTargetingMethod = &method
+	}
 
 	if req.Title != nil && *req.Title != "" {
 		spec.Title = req.Title
 	}
+	// Targeting inputs are independently editable. Keep inactive-method data
+	// so a later method switch can reuse it; the resolved method controls which
+	// values are used by validation, capacity, pricing, and finalization.
 	if req.Level1 != nil && *req.Level1 != "" {
 		spec.Level1 = req.Level1
 	}
@@ -2592,6 +2846,9 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 	if len(req.Level3s) > 0 {
 		spec.Level3s = req.Level3s
 	}
+	if len(req.Tags) > 0 {
+		spec.Tags = req.Tags
+	}
 	if req.TargetAudienceExcelFileUUID != nil {
 		excelFileUUID := strings.TrimSpace(*req.TargetAudienceExcelFileUUID)
 		if excelFileUUID != "" {
@@ -2599,11 +2856,6 @@ func (s *CampaignFlowImpl) updateCampaign(ctx context.Context, req *dto.UpdateCa
 		} else {
 			spec.TargetAudienceExcelFileUUID = nil
 		}
-	} else {
-		spec.TargetAudienceExcelFileUUID = nil
-	}
-	if len(req.Tags) > 0 {
-		spec.Tags = req.Tags
 	}
 	if req.Sex != nil && *req.Sex != "" {
 		spec.Sex = req.Sex
