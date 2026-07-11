@@ -306,6 +306,7 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 			Level2s:                     c.Spec.Level2s,
 			Level3s:                     c.Spec.Level3s,
 			Tags:                        c.Spec.Tags,
+			TargetingMethod:             campaignAudienceTargetingMethod(c.Spec),
 			Sex:                         c.Spec.Sex,
 			City:                        c.Spec.City,
 			AdLink:                      c.Spec.AdLink,
