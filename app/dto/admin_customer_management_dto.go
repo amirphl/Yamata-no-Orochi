@@ -80,6 +80,7 @@ type AdminCustomerCampaignItem struct {
 	Level2s                     []string       `json:"level2s,omitempty"`
 	Level3s                     []string       `json:"level3s,omitempty"`
 	Tags                        []string       `json:"tags,omitempty"`
+	TargetingMethod             string         `json:"audience_targeting_method"`
 	Sex                         *string        `json:"sex,omitempty"`
 	City                        []string       `json:"city,omitempty"`
 	AdLink                      *string        `json:"adlink,omitempty"`
