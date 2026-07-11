@@ -38,6 +38,7 @@ type BotCampaignFlowImpl struct {
 	platformSettingsRepo repository.PlatformSettingsRepository
 	transactionRepo      repository.TransactionRepository
 	platformBaseRepo     repository.PlatformBasePriceRepository
+	selectedTagRepo      repository.CampaignSelectedTagRepository
 	cacheConfig          config.CacheConfig
 	db                   *gorm.DB
 	rc                   *redis.Client
@@ -49,6 +50,7 @@ func NewBotCampaignFlow(
 	platformSettingsRepo repository.PlatformSettingsRepository,
 	transactionRepo repository.TransactionRepository,
 	platformBaseRepo repository.PlatformBasePriceRepository,
+	selectedTagRepo repository.CampaignSelectedTagRepository,
 	cacheConfig config.CacheConfig,
 	db *gorm.DB,
 	rc *redis.Client,
@@ -59,6 +61,7 @@ func NewBotCampaignFlow(
 		platformSettingsRepo: platformSettingsRepo,
 		transactionRepo:      transactionRepo,
 		platformBaseRepo:     platformBaseRepo,
+		selectedTagRepo:      selectedTagRepo,
 		cacheConfig:          cacheConfig,
 		db:                   db,
 		rc:                   rc,
@@ -96,6 +99,11 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 	for _, c := range readyCampaigns {
 		ensureCampaignSpecDefaults(&c.Spec)
 
+		selectedTags, err := s.selectedTags(ctx, c)
+		if err != nil {
+			return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to resolve campaign targeting tags", err)
+		}
+
 		// ISSUE: N+1 queries.
 		platformBasePrice, err := s.resolvePlatformBasePrice(ctx, c.ID, c.Spec.Platform)
 		if err != nil {
@@ -119,6 +127,8 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 			Level2s:            c.Spec.Level2s,
 			Level3s:            c.Spec.Level3s,
 			Tags:               c.Spec.Tags,
+			SelectedTags:       selectedTags,
+			TargetingMethod:    campaignAudienceTargetingMethod(c.Spec),
 			Sex:                c.Spec.Sex,
 			City:               c.Spec.City,
 			AdLink:             c.Spec.AdLink,
@@ -142,7 +152,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 
 			AudienceGrades: campaignAudienceGradesOrDefault(c.Spec.AudienceGrades),
 
-			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,
+			TargetAudienceExcelFileUUID: executionExcelFileUUID(c.Spec),
 		})
 	}
 
@@ -150,6 +160,45 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 		Message: "Ready campaigns retrieved successfully",
 		Items:   items,
 	}, nil
+}
+
+func (s *BotCampaignFlowImpl) selectedTags(ctx context.Context, campaign *models.Campaign) ([]string, error) {
+	if campaign == nil {
+		return nil, ErrCampaignNotFound
+	}
+	if !campaign.Spec.UsesSmartTargeting() {
+		return nil, nil
+	}
+	if campaign.BundleID == nil {
+		return nil, ErrBundleNotFound
+	}
+	if err := s.selectedTagRepo.Validate(ctx, campaign.ID, *campaign.BundleID); err != nil {
+		return nil, err
+	}
+	selected, err := s.selectedTagRepo.ListSelected(ctx, campaign.ID)
+	if err != nil {
+		return nil, err
+	}
+	if len(selected) == 0 {
+		return nil, ErrSmartTargetingTagsRequired
+	}
+	tags := make([]string, 0, len(selected))
+	for _, item := range selected {
+		if item != nil && item.TagID > 0 {
+			tags = append(tags, fmt.Sprint(item.TagID))
+		}
+	}
+	if len(tags) == 0 {
+		return nil, ErrSmartTargetingTagsRequired
+	}
+	return tags, nil
+}
+
+func executionExcelFileUUID(spec models.CampaignSpec) *string {
+	if !spec.UsesExcelTargeting() {
+		return nil
+	}
+	return spec.TargetAudienceExcelFileUUID
 }
 
 func (s *BotCampaignFlowImpl) resolvePlatformBasePrice(ctx context.Context, campaignID uint, platform string) (*uint64, error) {
@@ -296,7 +345,9 @@ func (s *BotCampaignFlowImpl) DownloadTargetAudienceExcelFile(ctx context.Contex
 		return "", "", nil, ErrCampaignNotFound
 	}
 
-	if campaign.Spec.TargetAudienceExcelFileUUID == nil || strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) == "" {
+	if !campaign.Spec.UsesExcelTargeting() ||
+		campaign.Spec.TargetAudienceExcelFileUUID == nil ||
+		strings.TrimSpace(*campaign.Spec.TargetAudienceExcelFileUUID) == "" {
 		return "", "", nil, NewBusinessError(
 			"TARGET_AUDIENCE_EXCEL_FILE_NOT_FOUND",
 			"Campaign has no target audience excel file",
