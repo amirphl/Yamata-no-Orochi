@@ -8,25 +8,27 @@ import (
 
 // CreateCampaignRequest represents the request to create a new campaign
 type CreateCampaignRequest struct {
-	CustomerID         uint       `json:"-"`
-	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags               []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content            *string    `json:"content,omitempty" validate:"omitempty,max=4096,min=1"`
-	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	ScheduleAt         *time.Time `json:"scheduleat,omitempty"`
-	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
-	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
-	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
-	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	CustomerID              uint       `json:"-"`
+	Title                   *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1                  *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s                 []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s                 []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags                    []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AudienceTargetingMethod *string    `json:"audience_targeting_method,omitempty" validate:"omitempty,oneof=standard smart_targeting excel"`
+	SelectedTagIDs          []uint     `json:"selected_tag_ids,omitempty" validate:"omitempty,max=10000,dive,min=1"`
+	Sex                     *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City                    []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink                  *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content                 *string    `json:"content,omitempty" validate:"omitempty,max=4096,min=1"`
+	ShortLinkDomain         *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category                *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job                     *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	ScheduleAt              *time.Time `json:"scheduleat,omitempty"`
+	LineNumber              *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	MediaUUID               *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID      *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
+	Platform                *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	Budget                  *uint64    `json:"budget,omitempty" validate:"omitempty"`
 
 	BundleID *uint   `json:"bundle_id" validate:"required,min=1"`
 	Phase    *string `json:"phase" validate:"required,max=255"`
@@ -47,27 +49,29 @@ type CreateCampaignResponse struct {
 
 // UpdateCampaignRequest represents the request to update an existing campaign
 type UpdateCampaignRequest struct {
-	UUID               string     `json:"-"`
-	CustomerID         uint       `json:"-"`
-	Title              *string    `json:"title,omitempty" validate:"omitempty,max=255"`
-	Level1             *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
-	Level2s            []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Level3s            []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Tags               []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	Sex                *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
-	City               []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
-	AdLink             *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
-	Content            *string    `json:"content,omitempty" validate:"omitempty,max=4096,min=1"`
-	ShortLinkDomain    *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
-	Category           *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
-	Job                *string    `json:"job,omitempty" validate:"omitempty,max=255"`
-	ScheduleAt         *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
-	LineNumber         *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
-	MediaUUID          *uuid.UUID `json:"media_uuid,omitempty"`
-	PlatformSettingsID *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
-	Platform           *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
-	Budget             *uint64    `json:"budget,omitempty" validate:"omitempty"`
-	Finalize           *bool      `json:"finalize,omitempty" validate:"omitempty"`
+	UUID                    string     `json:"-"`
+	CustomerID              uint       `json:"-"`
+	Title                   *string    `json:"title,omitempty" validate:"omitempty,max=255"`
+	Level1                  *string    `json:"level1,omitempty" validate:"omitempty,max=255"`
+	Level2s                 []string   `json:"level2s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Level3s                 []string   `json:"level3s,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	Tags                    []string   `json:"tags,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AudienceTargetingMethod *string    `json:"audience_targeting_method,omitempty" validate:"omitempty,oneof=standard smart_targeting excel"`
+	SelectedTagIDs          *[]uint    `json:"selected_tag_ids,omitempty" validate:"omitempty,max=10000,dive,min=1"`
+	Sex                     *string    `json:"sex,omitempty" validate:"omitempty,max=255"`
+	City                    []string   `json:"city,omitempty" validate:"omitempty,max=255,dive,max=255"`
+	AdLink                  *string    `json:"adlink,omitempty" validate:"omitempty,max=10000"`
+	Content                 *string    `json:"content,omitempty" validate:"omitempty,max=4096,min=1"`
+	ShortLinkDomain         *string    `json:"short_link_domain,omitempty" validate:"omitempty,max=255"`
+	Category                *string    `json:"job_category,omitempty" validate:"omitempty,max=255"`
+	Job                     *string    `json:"job,omitempty" validate:"omitempty,max=255"`
+	ScheduleAt              *time.Time `json:"scheduleat,omitempty" validate:"omitempty"`
+	LineNumber              *string    `json:"line_number,omitempty" validate:"omitempty,max=255"`
+	MediaUUID               *uuid.UUID `json:"media_uuid,omitempty"`
+	PlatformSettingsID      *uint      `json:"platform_settings_id,omitempty" validate:"omitempty,min=1"`
+	Platform                *string    `json:"platform,omitempty" validate:"omitempty,oneof=sms rubika bale splus"`
+	Budget                  *uint64    `json:"budget,omitempty" validate:"omitempty"`
+	Finalize                *bool      `json:"finalize,omitempty" validate:"omitempty"`
 
 	BundleID *uint   `json:"bundle_id,omitempty" validate:"omitempty,min=1"`
 	Phase    *string `json:"phase,omitempty" validate:"omitempty,max=255"`
@@ -142,6 +146,7 @@ type GetCampaignResponse struct {
 	Level2s              []string       `json:"level2s,omitempty" validate:"omitempty"`
 	Level3s              []string       `json:"level3s,omitempty" validate:"omitempty"`
 	Tags                 []string       `json:"tags,omitempty" validate:"omitempty"`
+	TargetingMethod      string         `json:"audience_targeting_method"`
 	Sex                  *string        `json:"sex,omitempty" validate:"omitempty"`
 	City                 []string       `json:"city,omitempty" validate:"omitempty"`
 	AdLink               *string        `json:"adlink,omitempty" validate:"omitempty"`
@@ -297,6 +302,7 @@ type AdminGetCampaignResponse struct {
 	Level2s               []string       `json:"level2s,omitempty" validate:"omitempty"`
 	Level3s               []string       `json:"level3s,omitempty" validate:"omitempty"`
 	Tags                  []string       `json:"tags,omitempty" validate:"omitempty"`
+	TargetingMethod       string         `json:"audience_targeting_method"`
 	Sex                   *string        `json:"sex,omitempty" validate:"omitempty"`
 	City                  []string       `json:"city,omitempty" validate:"omitempty"`
 	AdLink                *string        `json:"adlink,omitempty" validate:"omitempty"`
@@ -433,6 +439,8 @@ type BotGetCampaignResponse struct {
 	Level2s            []string                         `json:"level2s,omitempty" validate:"omitempty"`
 	Level3s            []string                         `json:"level3s,omitempty" validate:"omitempty"`
 	Tags               []string                         `json:"tags,omitempty" validate:"omitempty"`
+	SelectedTags       []string                         `json:"selected_tags,omitempty" validate:"omitempty"`
+	TargetingMethod    string                           `json:"audience_targeting_method"`
 	Sex                *string                          `json:"sex,omitempty" validate:"omitempty"`
 	City               []string                         `json:"city,omitempty" validate:"omitempty"`
 	AdLink             *string                          `json:"adlink,omitempty" validate:"omitempty"`
