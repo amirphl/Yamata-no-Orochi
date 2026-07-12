@@ -390,6 +390,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	botRepo := repository.NewBotRepository(db)
 	audienceProfileRepo := repository.NewAudienceProfileRepository(db)
 	tagRepo := repository.NewTagRepository(db)
+	campaignSelectedTagRepo := repository.NewCampaignSelectedTagRepository(db)
 	srcLayerAllStatsRepo := repository.NewSrcLayerAllStatsRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
@@ -499,6 +500,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		processedCampaignRepo,
 		smsStatusResultRepo,
 		shortLinkClickRepo,
+		campaignSelectedTagRepo,
 		db,
 		rc,
 		notificationService,
@@ -510,6 +512,13 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cfg.Rubika,
 		cfg.Splus,
 		cfg.IRHTTPSProxy,
+	)
+	smartTargetingFlow := businessflow.NewSmartTargetingFlow(
+		campaignRepo,
+		bundleRepo,
+		campaignSelectedTagRepo,
+		bundleTagEvaluationReadRepo,
+		db,
 	)
 
 	// Initialize PaymentFlow
@@ -638,6 +647,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		platformSettingsRepo,
 		transactionRepo,
 		platformBasePriceRepo,
+		campaignSelectedTagRepo,
 		cfg.Cache,
 		db,
 		rc,
@@ -685,7 +695,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	bundleHandler := handlers.NewBundleHandler(bundleFlow, bundleTagEvaluationFlow)
-	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
+	campaignHandler := handlers.NewCampaignHandler(campaignFlow, smartTargetingFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 	paymentAdminHandler := handlers.NewPaymentAdminHandler(paymentAdminFlow)
 	cryptoPaymentHandler := handlers.NewCryptoPaymentHandler(cryptoPaymentFlow, cfg)
