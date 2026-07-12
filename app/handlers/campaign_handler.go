@@ -36,12 +36,18 @@ type CampaignHandlerInterface interface {
 	SendCampaignTestMessage(c fiber.Ctx) error
 	HideCampaigns(c fiber.Ctx) error
 	UnhideCampaigns(c fiber.Ctx) error
+	ListSmartTargetingTags(c fiber.Ctx) error
+	ListBundleSmartTargetingTags(c fiber.Ctx) error
+	GetSmartTargetingSelection(c fiber.Ctx) error
+	ReplaceSmartTargetingSelection(c fiber.Ctx) error
+	AutoSelectSmartTargetingTags(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
 type CampaignHandler struct {
-	campaignFlow businessflow.CampaignFlow
-	validator    *validator.Validate
+	campaignFlow       businessflow.CampaignFlow
+	smartTargetingFlow businessflow.SmartTargetingFlow
+	validator          *validator.Validate
 }
 
 func (h *CampaignHandler) ErrorResponse(c fiber.Ctx, statusCode int, message, errorCode string, details any) error {
@@ -64,16 +70,234 @@ func (h *CampaignHandler) SuccessResponse(c fiber.Ctx, statusCode int, message s
 }
 
 // NewCampaignHandler creates a new campaign handler
-func NewCampaignHandler(campaignFlow businessflow.CampaignFlow) *CampaignHandler {
+func NewCampaignHandler(campaignFlow businessflow.CampaignFlow, smartTargetingFlow businessflow.SmartTargetingFlow) *CampaignHandler {
 	handler := &CampaignHandler{
-		campaignFlow: campaignFlow,
-		validator:    validator.New(),
+		campaignFlow:       campaignFlow,
+		smartTargetingFlow: smartTargetingFlow,
+		validator:          validator.New(),
 	}
 
 	// Setup custom validations
 	handler.setupCustomValidations()
 
 	return handler
+}
+
+// ListSmartTargetingTags returns the campaign's searchable, sortable tag table.
+// @Summary List Smart Targeting tags
+// @Description Returns a page of tags for an owned campaign, each row's selected state, the complete selected_tag_ids set across all pages, and the complete selection capacity summary. When the bundle has current score rows, tag names, display titles, personas, capacities, fit scores, and score explanations come from that completed evaluation snapshot. Otherwise active live tags are returned and evaluation fields are null.
+// @Tags Campaigns
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned campaign UUID" format(uuid)
+// @Param search query string false "Case-insensitive tag name or display-title search (maximum 200 characters)"
+// @Param sort_by query string false "Sort field. bundle_persona_fit_score requires a completed bundle evaluation." Enums(tag_capacity,bundle_persona_fit_score,test_phase_avg_ctr,overall_avg_ctr)
+// @Param sort_direction query string false "Sort direction" Enums(asc,desc)
+// @Param page query int false "Page number" default(1) minimum(1)
+// @Param page_size query int false "Items per page; limit is accepted as a backward-compatible alias" default(20) minimum(1) maximum(100)
+// @Param limit query int false "Backward-compatible alias for page_size; ignored when page_size is supplied" minimum(1) maximum(100)
+// @Success 200 {object} dto.APIResponse{data=dto.ListSmartTargetingTagsResponse} "Tag page and complete selection state"
+// @Failure 400 {object} dto.APIResponse "Invalid UUID, pagination, search, or sort; persona score unavailable"
+// @Failure 401 {object} dto.APIResponse "Authentication required"
+// @Failure 403 {object} dto.APIResponse "Campaign belongs to another customer"
+// @Failure 404 {object} dto.APIResponse "Campaign or bundle not found"
+// @Failure 500 {object} dto.APIResponse "Tag, evaluation, or selection lookup failed"
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/tags [get]
+func (h *CampaignHandler) ListSmartTargetingTags(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	page, err := parseBoundedPositiveQuery(c.Query("page"), 1, 0)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page", "INVALID_PAGE", nil)
+	}
+	pageSizeValue := c.Query("page_size")
+	if pageSizeValue == "" {
+		pageSizeValue = c.Query("limit")
+	}
+	pageSize, err := parseBoundedPositiveQuery(pageSizeValue, 20, 100)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page size", "INVALID_PAGE_SIZE", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/tags", 30*time.Second)
+	defer cancel()
+	res, err := h.smartTargetingFlow.ListTags(ctx, &dto.ListSmartTargetingTagsRequest{
+		CustomerID: customerID, CampaignUUID: c.Params("uuid"), Search: c.Query("search"),
+		SortBy: c.Query("sort_by"), SortDirection: c.Query("sort_direction"), Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to list Smart Targeting tags", "SMART_TARGETING_TAG_LIST_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting tags retrieved successfully", res)
+}
+
+// ListBundleSmartTargetingTags returns available tags before campaign creation.
+// @Summary List bundle Smart Targeting tags
+// @Description Returns a page of tags for an owned bundle before a campaign exists. When current score rows exist, their tag and score snapshots are authoritative; otherwise the endpoint falls back to active live tags with null evaluation fields. selected_tag_ids and the selection summary are empty; submit chosen IDs with campaign creation.
+// @Tags Bundles
+// @Produce json
+// @Security BearerAuth
+// @Param id path int true "Owned bundle ID" minimum(1)
+// @Param search query string false "Case-insensitive tag name or display-title search (maximum 200 characters)"
+// @Param sort_by query string false "Sort field. bundle_persona_fit_score requires a completed bundle evaluation." Enums(tag_capacity,bundle_persona_fit_score,test_phase_avg_ctr,overall_avg_ctr)
+// @Param sort_direction query string false "Sort direction" Enums(asc,desc)
+// @Param page query int false "Page number" default(1) minimum(1)
+// @Param page_size query int false "Items per page; limit is accepted as a backward-compatible alias" default(20) minimum(1) maximum(100)
+// @Param limit query int false "Backward-compatible alias for page_size; ignored when page_size is supplied" minimum(1) maximum(100)
+// @Success 200 {object} dto.APIResponse{data=dto.ListSmartTargetingTagsResponse} "Available tag page"
+// @Failure 400 {object} dto.APIResponse "Invalid bundle ID, pagination, search, or sort; persona score unavailable"
+// @Failure 401 {object} dto.APIResponse "Authentication required"
+// @Failure 403 {object} dto.APIResponse "Bundle belongs to another customer"
+// @Failure 404 {object} dto.APIResponse "Bundle not found"
+// @Failure 500 {object} dto.APIResponse "Tag or evaluation lookup failed"
+// @Router /api/v1/bundles/{id}/smart-targeting/tags [get]
+func (h *CampaignHandler) ListBundleSmartTargetingTags(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	bundleID, err := strconv.ParseUint(c.Params("id"), 10, strconv.IntSize)
+	if err != nil || bundleID == 0 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid bundle ID", "INVALID_BUNDLE_ID", nil)
+	}
+	page, err := parseBoundedPositiveQuery(c.Query("page"), 1, 0)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page", "INVALID_PAGE", nil)
+	}
+	pageSizeValue := c.Query("page_size")
+	if pageSizeValue == "" {
+		pageSizeValue = c.Query("limit")
+	}
+	pageSize, err := parseBoundedPositiveQuery(pageSizeValue, 20, 100)
+	if err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid page size", "INVALID_PAGE_SIZE", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bundles/:id/smart-targeting/tags", 30*time.Second)
+	defer cancel()
+	res, err := h.smartTargetingFlow.ListBundleTags(ctx, &dto.ListSmartTargetingTagsRequest{
+		CustomerID: customerID, BundleID: uint(bundleID), Search: c.Query("search"),
+		SortBy: c.Query("sort_by"), SortDirection: c.Query("sort_direction"), Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to list Smart Targeting tags", "SMART_TARGETING_TAG_LIST_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting tags retrieved successfully", res)
+}
+
+func parseBoundedPositiveQuery(value string, defaultValue, max int) (int, error) {
+	if value == "" {
+		return defaultValue, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil || parsed < 1 || (max > 0 && parsed > max) {
+		return 0, errors.New("invalid positive integer")
+	}
+	return parsed, nil
+}
+
+// GetSmartTargetingSelection returns the complete persisted selection, independent of table pagination.
+// @Summary Get Smart Targeting selection
+// @Description Returns every selected tag ID and the raw-capacity summary for an owned campaign. The result is independent of tag-table pagination.
+// @Tags Campaigns
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned campaign UUID" format(uuid)
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingSelectionResponse} "Complete selection"
+// @Failure 400 {object} dto.APIResponse "Invalid campaign UUID"
+// @Failure 401 {object} dto.APIResponse "Authentication required"
+// @Failure 403 {object} dto.APIResponse "Campaign belongs to another customer"
+// @Failure 404 {object} dto.APIResponse "Campaign or bundle not found"
+// @Failure 500 {object} dto.APIResponse "Selection lookup failed"
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/selection [get]
+func (h *CampaignHandler) GetSmartTargetingSelection(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/selection", 30*time.Second)
+	defer cancel()
+	res, err := h.smartTargetingFlow.GetSelection(ctx, customerID, c.Params("uuid"))
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to retrieve Smart Targeting selection", "SMART_TARGETING_SELECTION_LOOKUP_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting selection retrieved successfully", res)
+}
+
+// ReplaceSmartTargetingSelection atomically replaces the complete selected-tag set.
+// @Summary Replace Smart Targeting selection
+// @Description Atomically replaces the complete selected-tag set for an editable Smart Targeting campaign. All IDs must be unique and available in the bundle's current score snapshot, or in active live tags when no score rows exist; at least one ID is required.
+// @Tags Campaigns
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned campaign UUID" format(uuid)
+// @Param request body dto.ReplaceSmartTargetingSelectionRequest true "Complete replacement tag-ID set"
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingSelectionResponse} "Selection replaced"
+// @Failure 400 {object} dto.APIResponse "Invalid UUID, body, targeting mode, or tag IDs"
+// @Failure 401 {object} dto.APIResponse "Authentication required"
+// @Failure 403 {object} dto.APIResponse "Campaign access denied or campaign is not editable"
+// @Failure 404 {object} dto.APIResponse "Campaign or bundle not found"
+// @Failure 500 {object} dto.APIResponse "Selection persistence failed"
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/selection [put]
+func (h *CampaignHandler) ReplaceSmartTargetingSelection(c fiber.Ctx) error {
+	var req dto.ReplaceSmartTargetingSelectionRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", nil)
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "At least one tag must be selected for Smart Targeting.", "SMART_TARGETING_SELECTION_INVALID", nil)
+	}
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID, req.CampaignUUID = customerID, c.Params("uuid")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/selection", 30*time.Second)
+	defer cancel()
+	res, err := h.smartTargetingFlow.ReplaceSelection(ctx, &req)
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to save Smart Targeting selection", "SMART_TARGETING_SELECTION_SAVE_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting selection saved successfully", res)
+}
+
+// AutoSelectSmartTargetingTags replaces the selection with the first count tags from the complete filtered order.
+// @Summary Auto-select Smart Targeting tags
+// @Description Selects up to count available tags from the complete normalized snapshot-first search and sort order—not only the visible page—and atomically replaces the campaign's complete selection.
+// @Tags Campaigns
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned campaign UUID" format(uuid)
+// @Param request body dto.AutoSelectSmartTargetingTagsRequest true "Automatic selection criteria"
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingSelectionResponse} "Tags selected"
+// @Failure 400 {object} dto.APIResponse "Invalid UUID, count, search, sort, targeting mode, or no matching tags"
+// @Failure 401 {object} dto.APIResponse "Authentication required"
+// @Failure 403 {object} dto.APIResponse "Campaign access denied or campaign is not editable"
+// @Failure 404 {object} dto.APIResponse "Campaign or bundle not found"
+// @Failure 500 {object} dto.APIResponse "Evaluation, tag lookup, or selection persistence failed"
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/selection/auto [post]
+func (h *CampaignHandler) AutoSelectSmartTargetingTags(c fiber.Ctx) error {
+	var req dto.AutoSelectSmartTargetingTagsRequest
+	if err := c.Bind().JSON(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", nil)
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid automatic-selection request", "SMART_TARGETING_AUTO_SELECT_INVALID", nil)
+	}
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	req.CustomerID, req.CampaignUUID = customerID, c.Params("uuid")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/selection/auto", 30*time.Second)
+	defer cancel()
+	res, err := h.smartTargetingFlow.AutoSelect(ctx, &req)
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to automatically select Smart Targeting tags", "SMART_TARGETING_AUTO_SELECT_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting tags selected successfully", res)
 }
 
 // CreateCampaign handles the campaign creation process
@@ -971,6 +1195,28 @@ func (h *CampaignHandler) setupCustomValidations() {
 }
 
 func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaultStatus int, defaultMessage, defaultCode string) error {
+	if errors.Is(err, businessflow.ErrCampaignUUIDRequired) || errors.Is(err, businessflow.ErrCampaignUUIDInvalid) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is invalid", "INVALID_CAMPAIGN_UUID", nil)
+	}
+	if errors.Is(err, businessflow.ErrBundleNotFound) {
+		return h.ErrorResponse(c, fiber.StatusNotFound, "Bundle not found", "BUNDLE_NOT_FOUND", nil)
+	}
+	if errors.Is(err, businessflow.ErrBundleAccessDenied) {
+		return h.ErrorResponse(c, fiber.StatusForbidden, "Bundle access denied", "BUNDLE_ACCESS_DENIED", nil)
+	}
+	if errors.Is(err, businessflow.ErrSmartTargetingTagsRequired) ||
+		errors.Is(err, businessflow.ErrSmartTargetingTagInvalid) ||
+		errors.Is(err, businessflow.ErrSmartTargetingSortInvalid) ||
+		errors.Is(err, businessflow.ErrSmartTargetingScoreUnavailable) ||
+		errors.Is(err, businessflow.ErrSmartTargetingSearchTooLong) ||
+		errors.Is(err, businessflow.ErrSmartTargetingCountInvalid) ||
+		errors.Is(err, businessflow.ErrCampaignAudienceTargetingMethodInvalid) {
+		code := defaultCode
+		if be, ok := err.(*businessflow.BusinessError); ok && be.Code != "" {
+			code = be.Code
+		}
+		return h.ErrorResponse(c, fiber.StatusBadRequest, err.Error(), code, nil)
+	}
 	if errors.Is(err, businessflow.ErrInvalidState) {
 		return h.ErrorResponse(c, fiber.StatusConflict, "Another request is already in progress", "INVALID_STATE", nil)
 	}
