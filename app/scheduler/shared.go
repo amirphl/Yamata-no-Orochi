@@ -90,6 +90,31 @@ func hasTargetAudienceExcelFileUUID(fileUUID *string) bool {
 	return fileUUID != nil && strings.TrimSpace(*fileUUID) != ""
 }
 
+// usesExcelAudienceTargeting keeps schedulers compatible with older bot
+// responses that did not include audience_targeting_method. Smart targeting
+// always wins over a stale Excel UUID.
+func usesExcelAudienceTargeting(c dto.BotGetCampaignResponse) bool {
+	method := strings.ToLower(strings.TrimSpace(c.TargetingMethod))
+	if method == models.CampaignAudienceTargetingSmart {
+		return false
+	}
+	if method == models.CampaignAudienceTargetingExcel {
+		return true
+	}
+	return hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID)
+}
+
+func usesSmartAudienceTargeting(c dto.BotGetCampaignResponse) bool {
+	return strings.EqualFold(strings.TrimSpace(c.TargetingMethod), models.CampaignAudienceTargetingSmart)
+}
+
+func campaignExecutionTags(c dto.BotGetCampaignResponse) []string {
+	if usesSmartAudienceTargeting(c) && len(c.SelectedTags) > 0 {
+		return c.SelectedTags
+	}
+	return c.Tags
+}
+
 func fetchTargetAudienceUIDsFromExcel(ctx context.Context, botClient BotClient, jazzToken string, campaignID uint) ([]string, error) {
 	data, err := botClient.DownloadTargetAudienceExcelFile(ctx, jazzToken, campaignID)
 	if err != nil {
