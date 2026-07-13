@@ -4455,6 +4455,136 @@
                 }
             }
         },
+        "/api/v1/bundles/{id}/smart-targeting/tags": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a page of tags for an owned bundle before a campaign exists. When current score rows exist, their tag and score snapshots are authoritative; otherwise the endpoint falls back to active live tags with null evaluation fields. selected_tag_ids and the selection summary are empty; submit chosen IDs with campaign creation.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "List bundle Smart Targeting tags",
+                "parameters": [
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Owned bundle ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive tag name or display-title search (maximum 200 characters)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "tag_capacity",
+                            "bundle_persona_fit_score",
+                            "test_phase_avg_ctr",
+                            "overall_avg_ctr"
+                        ],
+                        "type": "string",
+                        "description": "Sort field. bundle_persona_fit_score requires a completed bundle evaluation.",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "description": "Sort direction",
+                        "name": "sort_direction",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Items per page; limit is accepted as a backward-compatible alias",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Backward-compatible alias for page_size; ignored when page_size is supplied",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Available tag page",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListSmartTargetingTagsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid bundle ID, pagination, search, or sort; persona score unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Bundle belongs to another customer",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Tag or evaluation lookup failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/bundles/{id}/tag-evaluation": {
             "get": {
                 "description": "Retrieve the current smart tag evaluation status for the authenticated customer's bundle",
@@ -5674,6 +5804,389 @@
                     },
                     "500": {
                         "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/smart-targeting/selection": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns every selected tag ID and the raw-capacity summary for an owned campaign. The result is independent of tag-table pagination.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get Smart Targeting selection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Complete selection",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingSelectionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid campaign UUID",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Campaign belongs to another customer",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign or bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Selection lookup failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Atomically replaces the complete selected-tag set for an editable Smart Targeting campaign. All IDs must be unique and available in the bundle's current score snapshot, or in active live tags when no score rows exist; at least one ID is required.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Replace Smart Targeting selection",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Complete replacement tag-ID set",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.ReplaceSmartTargetingSelectionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Selection replaced",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingSelectionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID, body, targeting mode, or tag IDs",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Campaign access denied or campaign is not editable",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign or bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Selection persistence failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/smart-targeting/selection/auto": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Selects up to count available tags from the complete normalized snapshot-first search and sort order—not only the visible page—and atomically replaces the campaign's complete selection.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Auto-select Smart Targeting tags",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Automatic selection criteria",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.AutoSelectSmartTargetingTagsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tags selected",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingSelectionResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID, count, search, sort, targeting mode, or no matching tags",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Campaign access denied or campaign is not editable",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign or bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Evaluation, tag lookup, or selection persistence failed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/smart-targeting/tags": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns a page of tags for an owned campaign, each row's selected state, the complete selected_tag_ids set across all pages, and the complete selection capacity summary. When the bundle has current score rows, tag names, display titles, personas, capacities, fit scores, and score explanations come from that completed evaluation snapshot. Otherwise active live tags are returned and evaluation fields are null.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "List Smart Targeting tags",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Case-insensitive tag name or display-title search (maximum 200 characters)",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "tag_capacity",
+                            "bundle_persona_fit_score",
+                            "test_phase_avg_ctr",
+                            "overall_avg_ctr"
+                        ],
+                        "type": "string",
+                        "description": "Sort field. bundle_persona_fit_score requires a completed bundle evaluation.",
+                        "name": "sort_by",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
+                        "type": "string",
+                        "description": "Sort direction",
+                        "name": "sort_direction",
+                        "in": "query"
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Items per page; limit is accepted as a backward-compatible alias",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Backward-compatible alias for page_size; ignored when page_size is supplied",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tag page and complete selection state",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListSmartTargetingTagsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid UUID, pagination, search, or sort; persona score unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Authentication required",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Campaign belongs to another customer",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign or bundle not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Tag, evaluation, or selection lookup failed",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -8333,6 +8846,9 @@
                 "agency_full_name": {
                     "type": "string"
                 },
+                "audience_targeting_method": {
+                    "type": "string"
+                },
                 "budget": {
                     "type": "integer"
                 },
@@ -8724,6 +9240,9 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "audience_targeting_method": {
+                    "type": "string"
                 },
                 "budget": {
                     "type": "integer"
@@ -9808,6 +10327,29 @@
                 }
             }
         },
+        "dto.AutoSelectSmartTargetingTagsRequest": {
+            "type": "object",
+            "required": [
+                "count"
+            ],
+            "properties": {
+                "count": {
+                    "type": "integer",
+                    "maximum": 10000,
+                    "minimum": 1
+                },
+                "search": {
+                    "type": "string",
+                    "maxLength": 200
+                },
+                "sort_by": {
+                    "type": "string"
+                },
+                "sort_direction": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.BotAllocateShortLinksRequest": {
             "type": "object",
             "required": [
@@ -9985,6 +10527,9 @@
                         "type": "string"
                     }
                 },
+                "audience_targeting_method": {
+                    "type": "string"
+                },
                 "budget": {
                     "type": "integer"
                 },
@@ -10062,6 +10607,12 @@
                 },
                 "scheduleat": {
                     "type": "string"
+                },
+                "selected_tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "sex": {
                     "type": "string"
@@ -10684,6 +11235,14 @@
                         "type": "string"
                     }
                 },
+                "audience_targeting_method": {
+                    "type": "string",
+                    "enum": [
+                        "standard",
+                        "smart_targeting",
+                        "excel"
+                    ]
+                },
                 "budget": {
                     "type": "integer"
                 },
@@ -10755,6 +11314,13 @@
                 },
                 "scheduleat": {
                     "type": "string"
+                },
+                "selected_tag_ids": {
+                    "type": "array",
+                    "maxItems": 10000,
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "sex": {
                     "type": "string",
@@ -11148,6 +11714,9 @@
                     "items": {
                         "type": "string"
                     }
+                },
+                "audience_targeting_method": {
+                    "type": "string"
                 },
                 "budget": {
                     "type": "integer"
@@ -11573,6 +12142,38 @@
                 }
             }
         },
+        "dto.ListSmartTargetingTagsResponse": {
+            "type": "object",
+            "properties": {
+                "effective_sort_by": {
+                    "type": "string"
+                },
+                "effective_sort_direction": {
+                    "type": "string"
+                },
+                "evaluation_available": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.SmartTargetingTagItem"
+                    }
+                },
+                "pagination": {
+                    "$ref": "#/definitions/dto.PaginationInfo"
+                },
+                "selected_tag_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/dto.SmartTargetingSelectionSummary"
+                }
+            }
+        },
         "dto.ListTicketsResponse": {
             "type": "object",
             "properties": {
@@ -11932,6 +12533,22 @@
                 }
             }
         },
+        "dto.ReplaceSmartTargetingSelectionRequest": {
+            "type": "object",
+            "required": [
+                "tag_ids"
+            ],
+            "properties": {
+                "tag_ids": {
+                    "type": "array",
+                    "maxItems": 10000,
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "dto.RequestBundleTagEvaluationResponse": {
             "type": "object",
             "properties": {
@@ -12155,6 +12772,69 @@
                 "otp_target": {
                     "description": "Mobile number (masked for security)",
                     "type": "string"
+                }
+            }
+        },
+        "dto.SmartTargetingSelectionResponse": {
+            "type": "object",
+            "properties": {
+                "selected_tag_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "summary": {
+                    "$ref": "#/definitions/dto.SmartTargetingSelectionSummary"
+                }
+            }
+        },
+        "dto.SmartTargetingSelectionSummary": {
+            "type": "object",
+            "properties": {
+                "selected_raw_capacity": {
+                    "type": "integer"
+                },
+                "selected_tag_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.SmartTargetingTagItem": {
+            "type": "object",
+            "properties": {
+                "bundle_persona_fit_score": {
+                    "type": "number"
+                },
+                "evaluation_run_id": {
+                    "type": "integer"
+                },
+                "fit_level": {
+                    "type": "string"
+                },
+                "overall_avg_ctr": {
+                    "type": "number"
+                },
+                "relation_type": {
+                    "type": "string"
+                },
+                "selected": {
+                    "type": "boolean"
+                },
+                "tag_capacity": {
+                    "description": "TagAudiencePersona    *string  `json:\"tag_audience_persona\"`",
+                    "type": "integer"
+                },
+                "tag_display_title": {
+                    "description": "TagName               string   `json:\"tag_name\"`",
+                    "type": "string"
+                },
+                "tag_id": {
+                    "type": "integer"
+                },
+                "test_phase_avg_ctr": {
+                    "description": "Reason                *string  `json:\"reason\"`",
+                    "type": "number"
                 }
             }
         },
@@ -12511,6 +13191,14 @@
                         "type": "string"
                     }
                 },
+                "audience_targeting_method": {
+                    "type": "string",
+                    "enum": [
+                        "standard",
+                        "smart_targeting",
+                        "excel"
+                    ]
+                },
                 "budget": {
                     "type": "integer"
                 },
@@ -12585,6 +13273,13 @@
                 },
                 "scheduleat": {
                     "type": "string"
+                },
+                "selected_tag_ids": {
+                    "type": "array",
+                    "maxItems": 10000,
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "sex": {
                     "type": "string",
