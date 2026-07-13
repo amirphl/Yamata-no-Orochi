@@ -292,6 +292,8 @@ definitions:
         type: string
       agency_full_name:
         type: string
+      audience_targeting_method:
+        type: string
       budget:
         type: integer
       campaign_id:
@@ -552,6 +554,8 @@ definitions:
         items:
           type: string
         type: array
+      audience_targeting_method:
+        type: string
       budget:
         type: integer
       bundle_id:
@@ -1278,6 +1282,22 @@ definitions:
         example: 550e8400-e29b-41d4-a716-446655440000
         type: string
     type: object
+  dto.AutoSelectSmartTargetingTagsRequest:
+    properties:
+      count:
+        maximum: 10000
+        minimum: 1
+        type: integer
+      search:
+        maxLength: 200
+        type: string
+      sort_by:
+        type: string
+      sort_direction:
+        type: string
+    required:
+    - count
+    type: object
   dto.BotAllocateShortLinksRequest:
     properties:
       campaign_id:
@@ -1396,6 +1416,8 @@ definitions:
         items:
           type: string
         type: array
+      audience_targeting_method:
+        type: string
       budget:
         type: integer
       bundle_id:
@@ -1448,6 +1470,10 @@ definitions:
         type: integer
       scheduleat:
         type: string
+      selected_tags:
+        items:
+          type: string
+        type: array
       sex:
         type: string
       short_link_domain:
@@ -1870,6 +1896,12 @@ definitions:
         items:
           type: string
         type: array
+      audience_targeting_method:
+        enum:
+        - standard
+        - smart_targeting
+        - excel
+        type: string
       budget:
         type: integer
       bundle_id:
@@ -1923,6 +1955,11 @@ definitions:
         type: integer
       scheduleat:
         type: string
+      selected_tag_ids:
+        items:
+          type: integer
+        maxItems: 10000
+        type: array
       sex:
         maxLength: 255
         type: string
@@ -2190,6 +2227,8 @@ definitions:
         items:
           type: string
         type: array
+      audience_targeting_method:
+        type: string
       budget:
         type: integer
       bundle_id:
@@ -2467,6 +2506,27 @@ definitions:
       message:
         type: string
     type: object
+  dto.ListSmartTargetingTagsResponse:
+    properties:
+      effective_sort_by:
+        type: string
+      effective_sort_direction:
+        type: string
+      evaluation_available:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/dto.SmartTargetingTagItem'
+        type: array
+      pagination:
+        $ref: '#/definitions/dto.PaginationInfo'
+      selected_tag_ids:
+        items:
+          type: integer
+        type: array
+      summary:
+        $ref: '#/definitions/dto.SmartTargetingSelectionSummary'
+    type: object
   dto.ListTicketsResponse:
     properties:
       groups:
@@ -2707,6 +2767,17 @@ definitions:
       success:
         type: boolean
     type: object
+  dto.ReplaceSmartTargetingSelectionRequest:
+    properties:
+      tag_ids:
+        items:
+          type: integer
+        maxItems: 10000
+        minItems: 1
+        type: array
+    required:
+    - tag_ids
+    type: object
   dto.RequestBundleTagEvaluationResponse:
     properties:
       created_at:
@@ -2868,6 +2939,48 @@ definitions:
       otp_target:
         description: Mobile number (masked for security)
         type: string
+    type: object
+  dto.SmartTargetingSelectionResponse:
+    properties:
+      selected_tag_ids:
+        items:
+          type: integer
+        type: array
+      summary:
+        $ref: '#/definitions/dto.SmartTargetingSelectionSummary'
+    type: object
+  dto.SmartTargetingSelectionSummary:
+    properties:
+      selected_raw_capacity:
+        type: integer
+      selected_tag_count:
+        type: integer
+    type: object
+  dto.SmartTargetingTagItem:
+    properties:
+      bundle_persona_fit_score:
+        type: number
+      evaluation_run_id:
+        type: integer
+      fit_level:
+        type: string
+      overall_avg_ctr:
+        type: number
+      relation_type:
+        type: string
+      selected:
+        type: boolean
+      tag_capacity:
+        description: TagAudiencePersona    *string  `json:"tag_audience_persona"`
+        type: integer
+      tag_display_title:
+        description: TagName               string   `json:"tag_name"`
+        type: string
+      tag_id:
+        type: integer
+      test_phase_avg_ctr:
+        description: Reason                *string  `json:"reason"`
+        type: number
     type: object
   dto.SubmitDepositReceiptRequest:
     properties:
@@ -3117,6 +3230,12 @@ definitions:
         items:
           type: string
         type: array
+      audience_targeting_method:
+        enum:
+        - standard
+        - smart_targeting
+        - excel
+        type: string
       budget:
         type: integer
       bundle_id:
@@ -3172,6 +3291,11 @@ definitions:
         type: integer
       scheduleat:
         type: string
+      selected_tag_ids:
+        items:
+          type: integer
+        maxItems: 10000
+        type: array
       sex:
         maxLength: 255
         type: string
@@ -6002,6 +6126,100 @@ paths:
       summary: Update bundle
       tags:
       - Bundles
+  /api/v1/bundles/{id}/smart-targeting/tags:
+    get:
+      description: Returns a page of tags for an owned bundle before a campaign exists.
+        When current score rows exist, their tag and score snapshots are authoritative;
+        otherwise the endpoint falls back to active live tags with null evaluation
+        fields. selected_tag_ids and the selection summary are empty; submit chosen
+        IDs with campaign creation.
+      parameters:
+      - description: Owned bundle ID
+        in: path
+        minimum: 1
+        name: id
+        required: true
+        type: integer
+      - description: Case-insensitive tag name or display-title search (maximum 200
+          characters)
+        in: query
+        name: search
+        type: string
+      - description: Sort field. bundle_persona_fit_score requires a completed bundle
+          evaluation.
+        enum:
+        - tag_capacity
+        - bundle_persona_fit_score
+        - test_phase_avg_ctr
+        - overall_avg_ctr
+        in: query
+        name: sort_by
+        type: string
+      - description: Sort direction
+        enum:
+        - asc
+        - desc
+        in: query
+        name: sort_direction
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page; limit is accepted as a backward-compatible alias
+        in: query
+        maximum: 100
+        minimum: 1
+        name: page_size
+        type: integer
+      - description: Backward-compatible alias for page_size; ignored when page_size
+          is supplied
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Available tag page
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListSmartTargetingTagsResponse'
+              type: object
+        "400":
+          description: Invalid bundle ID, pagination, search, or sort; persona score
+            unavailable
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Bundle belongs to another customer
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Bundle not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Tag or evaluation lookup failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: List bundle Smart Targeting tags
+      tags:
+      - Bundles
   /api/v1/bundles/{id}/tag-evaluation:
     get:
       description: Retrieve the current smart tag evaluation status for the authenticated
@@ -6466,6 +6684,263 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Export Campaign Report
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/smart-targeting/selection:
+    get:
+      description: Returns every selected tag ID and the raw-capacity summary for
+        an owned campaign. The result is independent of tag-table pagination.
+      parameters:
+      - description: Owned campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Complete selection
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingSelectionResponse'
+              type: object
+        "400":
+          description: Invalid campaign UUID
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Campaign belongs to another customer
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign or bundle not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Selection lookup failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Get Smart Targeting selection
+      tags:
+      - Campaigns
+    put:
+      consumes:
+      - application/json
+      description: Atomically replaces the complete selected-tag set for an editable
+        Smart Targeting campaign. All IDs must be unique and available in the bundle's
+        current score snapshot, or in active live tags when no score rows exist; at
+        least one ID is required.
+      parameters:
+      - description: Owned campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Complete replacement tag-ID set
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.ReplaceSmartTargetingSelectionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Selection replaced
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingSelectionResponse'
+              type: object
+        "400":
+          description: Invalid UUID, body, targeting mode, or tag IDs
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Campaign access denied or campaign is not editable
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign or bundle not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Selection persistence failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Replace Smart Targeting selection
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/smart-targeting/selection/auto:
+    post:
+      consumes:
+      - application/json
+      description: Selects up to count available tags from the complete normalized
+        snapshot-first search and sort order—not only the visible page—and atomically
+        replaces the campaign's complete selection.
+      parameters:
+      - description: Owned campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Automatic selection criteria
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/dto.AutoSelectSmartTargetingTagsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Tags selected
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingSelectionResponse'
+              type: object
+        "400":
+          description: Invalid UUID, count, search, sort, targeting mode, or no matching
+            tags
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Campaign access denied or campaign is not editable
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign or bundle not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Evaluation, tag lookup, or selection persistence failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: Auto-select Smart Targeting tags
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/smart-targeting/tags:
+    get:
+      description: Returns a page of tags for an owned campaign, each row's selected
+        state, the complete selected_tag_ids set across all pages, and the complete
+        selection capacity summary. When the bundle has current score rows, tag names,
+        display titles, personas, capacities, fit scores, and score explanations come
+        from that completed evaluation snapshot. Otherwise active live tags are returned
+        and evaluation fields are null.
+      parameters:
+      - description: Owned campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Case-insensitive tag name or display-title search (maximum 200
+          characters)
+        in: query
+        name: search
+        type: string
+      - description: Sort field. bundle_persona_fit_score requires a completed bundle
+          evaluation.
+        enum:
+        - tag_capacity
+        - bundle_persona_fit_score
+        - test_phase_avg_ctr
+        - overall_avg_ctr
+        in: query
+        name: sort_by
+        type: string
+      - description: Sort direction
+        enum:
+        - asc
+        - desc
+        in: query
+        name: sort_direction
+        type: string
+      - default: 1
+        description: Page number
+        in: query
+        minimum: 1
+        name: page
+        type: integer
+      - default: 20
+        description: Items per page; limit is accepted as a backward-compatible alias
+        in: query
+        maximum: 100
+        minimum: 1
+        name: page_size
+        type: integer
+      - description: Backward-compatible alias for page_size; ignored when page_size
+          is supplied
+        in: query
+        maximum: 100
+        minimum: 1
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Tag page and complete selection state
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.ListSmartTargetingTagsResponse'
+              type: object
+        "400":
+          description: Invalid UUID, pagination, search, or sort; persona score unavailable
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "401":
+          description: Authentication required
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "403":
+          description: Campaign belongs to another customer
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "404":
+          description: Campaign or bundle not found
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+        "500":
+          description: Tag, evaluation, or selection lookup failed
+          schema:
+            $ref: '#/definitions/dto.APIResponse'
+      security:
+      - BearerAuth: []
+      summary: List Smart Targeting tags
       tags:
       - Campaigns
   /api/v1/campaigns/{uuid}/test-send:
