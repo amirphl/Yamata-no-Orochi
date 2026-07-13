@@ -1,18 +1,15 @@
 #!/bin/bash
 
 # Beta Deployment Script for Yamata no Orochi
-# This script automates the entire beta deployment process including Let's Encrypt certificates via acme.sh
+# This script automates the beta deployment process and validates pre-provisioned certificates
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_ROOT/.env.beta"
-SSL_DIR="$PROJECT_ROOT/docker/nginx/ssl"
 NGINX_CONF_DIR="$PROJECT_ROOT/docker/nginx/sites-available"
 NGINX_TEMPLATE="$NGINX_CONF_DIR/yamata-beta.conf"
-LETSENCRYPT_DIR="/etc/letsencrypt"
-ACME_SH_DIR="$HOME/.acme.sh"
 
 # Colors for output
 RED='\033[0;31m'
@@ -77,39 +74,6 @@ export_beta_nginx_template_vars() {
 	export AUTH_RATE_LIMIT="10"
 }
 
-# Function to check if acme.sh is installed
-check_acme_sh() {
-	if ! command_exists "$ACME_SH_DIR/acme.sh"; then
-		print_error "acme.sh is not installed. Please install it first:"
-		print_status "curl https://get.acme.sh | sh"
-		exit 1
-	fi
-}
-
-# Function to check certificate validity
-check_certificate_validity() {
-	local domain=$1
-	local cert_file="$LETSENCRYPT_DIR/live/$domain/fullchain.pem"
-	
-	if [ ! -f "$cert_file" ]; then
-		return 1
-	fi
-	
-	# Check if certificate is valid and not expired
-	local expiry_date=$(openssl x509 -enddate -noout -in "$cert_file" | cut -d= -f2)
-	local expiry_timestamp=$(date -d "$expiry_date" +%s)
-	local current_timestamp=$(date +%s)
-	local days_until_expiry=$(( (expiry_timestamp - current_timestamp) / 86400 ))
-	
-	if [ $days_until_expiry -gt 30 ]; then
-		print_success "Certificate for $domain is valid and expires in $days_until_expiry days"
-		return 0
-	else
-		print_warning "Certificate for $domain expires in $days_until_expiry days"
-		return 1
-	fi
-}
-
 # Validate that every certificate path referenced in yamata-beta.conf exists and is valid
 validate_nginx_certificates() {
 	local domain=$1
@@ -150,16 +114,24 @@ validate_nginx_certificates() {
 			continue
 		fi
 
-		expiry_date=$(openssl x509 -enddate -noout -in "$cert_path" | cut -d= -f2)
-		expiry_ts=$(date -d "$expiry_date" +%s)
+		if ! expiry_date=$(openssl x509 -enddate -noout -in "$cert_path" 2>/dev/null | cut -d= -f2); then
+			print_error "Invalid certificate file: $cert_path"
+			failed=true
+			continue
+		fi
+		if ! expiry_ts=$(date -d "$expiry_date" +%s 2>/dev/null); then
+			print_error "Invalid certificate expiry date for $cert_path: $expiry_date"
+			failed=true
+			continue
+		fi
 		now_ts=$(date +%s)
 		days_left=$(( (expiry_ts - now_ts) / 86400 ))
 
-		# Ensure certificate is not expired and not expiring within 7 days
-		if openssl x509 -checkend $((7*24*3600)) -noout -in "$cert_path" >/dev/null 2>&1; then
-			print_success "Certificate valid (>=7 days left): $cert_path (expires in ${days_left} days on ${expiry_date})"
+		# Ensure certificate exists and is not expired.
+		if openssl x509 -checkend 0 -noout -in "$cert_path" >/dev/null 2>&1; then
+			print_success "Certificate valid: $cert_path (expires in ${days_left} days on ${expiry_date})"
 		else
-			print_error "Certificate expired or expiring within 7 days: $cert_path (expires in ${days_left} days on ${expiry_date})"
+			print_error "Certificate expired: $cert_path (expires in ${days_left} days on ${expiry_date})"
 			failed=true
 		fi
 		
@@ -173,74 +145,6 @@ validate_nginx_certificates() {
 	fi
 
 	print_success "All referenced certificates exist and are valid"
-}
-
-# Function to obtain Let's Encrypt certificates
-obtain_letsencrypt_certificates() {
-	local domain=$1
-	
-	print_status "Checking/obtaining Let's Encrypt certificates for domain: $domain"
-	
-	# Check if acme.sh is installed
-	check_acme_sh
-	
-	# Create necessary directories
-	sudo mkdir -p "$LETSENCRYPT_DIR/live/$domain"
-	sudo mkdir -p "$LETSENCRYPT_DIR/archive/$domain"
-	
-	# Check if certificate exists and is valid
-	if check_certificate_validity "$domain"; then
-		print_success "Valid certificate already exists for $domain"
-		return 0
-	fi
-	
-	# Certificate doesn't exist or is expired, obtain new one
-	print_status "Obtaining new Let's Encrypt certificate for $domain"
-	
-	# Stop nginx temporarily if running
-	if systemctl is-active --quiet nginx; then
-		print_status "Stopping nginx temporarily for certificate issuance"
-		sudo systemctl stop nginx
-	fi
-	
-	# Obtain certificate using acme.sh with HTTP challenge
-	if "$ACME_SH_DIR/acme.sh" --issue -d "$domain" -d "www.$domain" -d "api.$domain" -d "monitoring.$domain" -d "sentry.$domain" \
-			--webroot /var/www/html --server letsencrypt; then
-		
-		print_success "Certificate obtained successfully for $domain"
-		
-		# Install certificate to Let's Encrypt directory structure
-		"$ACME_SH_DIR/acme.sh" --install-cert -d "$domain" \
-			--cert-file "$LETSENCRYPT_DIR/live/$domain/cert.pem" \
-			--key-file "$LETSENCRYPT_DIR/live/$domain/privkey.pem" \
-			--fullchain-file "$LETSENCRYPT_DIR/live/$domain/fullchain.pem" \
-			--chain-file "$LETSENCRYPT_DIR/live/$domain/chain.pem"
-		
-		# Set proper permissions
-		sudo chmod 644 "$LETSENCRYPT_DIR/live/$domain/cert.pem"
-		sudo chmod 600 "$LETSENCRYPT_DIR/live/$domain/privkey.pem"
-		sudo chmod 644 "$LETSENCRYPT_DIR/live/$domain/fullchain.pem"
-		sudo chmod 644 "$LETSENCRYPT_DIR/live/$domain/chain.pem"
-		
-		# Set ownership
-		sudo chown -R root:root "$LETSENCRYPT_DIR/live/$domain"
-		
-	else
-		print_error "Failed to obtain certificate for $domain"
-		print_warning "Make sure:"
-		print_warning "1. Domain $domain points to this server"
-		print_warning "2. Port 80 is open and accessible"
-		print_warning "3. /var/www/html is writable by acme.sh"
-		return 1
-	fi
-	
-	# Restart nginx if it was running
-	if ! systemctl is-active --quiet nginx; then
-		print_status "Starting nginx"
-		sudo systemctl start nginx
-	fi
-	
-	print_success "Let's Encrypt certificates obtained successfully"
 }
 
 # Function to generate nginx configuration from template
@@ -261,8 +165,7 @@ generate_nginx_config() {
 		# Use envsubst with specific variables to avoid interfering with Nginx variables
 		envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$NGINX_CONF_DIR/generated/beta/yamata.conf"
 		
-		# SSL certificate paths are already correct for Let's Encrypt
-		# No need to replace paths as they already point to /etc/letsencrypt/live/
+		# SSL certificate paths are expected to be present in the rendered template.
 		
 		# Replace upstream server addresses for beta development
 		sed -i "s|server app:8080 max_fails=3 fail_timeout=30s;|server app-beta:8080 max_fails=3 fail_timeout=30s;|g" "$NGINX_CONF_DIR/generated/beta/yamata.conf"
@@ -311,14 +214,6 @@ check_prerequisites() {
 	if ! command_exists openssl; then
 		print_error "OpenSSL is not installed. Please install OpenSSL first."
 		exit 1
-	fi
-	
-	# Check acme.sh
-	if ! command_exists "$ACME_SH_DIR/acme.sh"; then
-		print_warning "acme.sh is not installed. Installing now..."
-		print_status "Installing acme.sh..."
-		curl https://get.acme.sh | sh
-		source "$HOME/.bashrc" 2>/dev/null || source "$HOME/.zshrc" 2>/dev/null || true
 	fi
 	
 	# Check if Docker daemon is running
@@ -510,8 +405,7 @@ show_deployment_info() {
 	echo "  Sentry: https://sentry.$domain"
 	echo ""
 	echo "⚠️  Important Notes:"
-	echo "  - Let's Encrypt certificates are used (browser will show valid SSL)"
-	echo "  - SSL certificates are automatically managed by Let's Encrypt"
+	echo "  - SSL certificates must already exist and be valid"
 	echo "  - All services are running in beta mode"
 	echo ""
 	echo "🚀 Your application is ready at: https://$domain"
@@ -526,7 +420,6 @@ show_help() {
 	echo ""
 	echo "Options:"
 	echo "  --domain            Override the default domain (e.g., yourdomain.com)"
-	echo "  --email             Override the default email for Let's Encrypt (e.g., admin@yourdomain.com)"
 	echo "  --help, -h          Show this help message"
 	echo ""
 	echo "Environment Configuration:"
@@ -535,14 +428,12 @@ show_help() {
 	echo "  - To regenerate .env.beta: rm .env.beta && $0 <domain>"
 	echo ""
 	echo "SSL Certificate Configuration:"
-	echo "  - Uses Let's Encrypt certificates via acme.sh"
-	echo "  - Automatically checks certificate validity and renews if needed"
-	echo "  - Requires domain to point to this server and port 80 to be accessible"
-	echo "  - Certificates are stored in /etc/letsencrypt/live/<domain>/"
+	echo "  - Certificates must be obtained before running this script"
+	echo "  - The script only checks that certificate files referenced by nginx exist and are not expired"
 	echo ""
 	echo "Examples:"
 	echo "  $0 yourdomain.com                    # Use existing .env.beta or create new one"
-	echo "  $0 yourdomain.com --domain=yourdomain.com --email=admin@yourdomain.com"
+	echo "  $0 yourdomain.com --domain=yourdomain.com"
 	echo ""
 }
 
@@ -554,17 +445,12 @@ main() {
 	
 	# Parse command line arguments
 	local domain="" # Default domain, can be overridden by argument
-	local email=""  # Default email, can be overridden by argument
 	
 	# Parse command line arguments
 	while [[ $# -gt 0 ]]; do
 		case $1 in
 			--domain)
 				domain="$2"
-				shift 2
-				;;
-			--email)
-				email="$2"
 				shift 2
 				;;
 			--help|-h)
@@ -588,11 +474,6 @@ main() {
 	if [ -z "$domain" ]; then
 		domain="thewritingonthewall.com"
 	fi
-	# Set default email if not provided
-	if [ -z "$email" ]; then
-		email="admin@thewritingonthewall.com"
-	fi
-	
 	# Validate domain
 	if [ -z "$domain" ]; then
 		print_error "Domain name is required."
@@ -607,7 +488,7 @@ main() {
 		exit 1
 	fi
 	
-	print_status "Starting beta deployment for domain: $domain (Email: $email)"
+	print_status "Starting beta deployment for domain: $domain"
 	
 	# Check and display proxy information
 	echo ""
@@ -618,10 +499,7 @@ main() {
 	# Check prerequisites
 	check_prerequisites
 
-	# Obtain Let's Encrypt certificates
-	obtain_letsencrypt_certificates "$domain"
-
-	# Validate certificate files referenced by nginx config (post-issuance)
+	# Validate certificate files referenced by nginx config
 	validate_nginx_certificates "$domain"
 	
 	# Generate nginx configuration from template
