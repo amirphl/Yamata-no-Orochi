@@ -199,16 +199,59 @@ func (s *BaleCampaignScheduler) runOnce(ctx context.Context, parent context.Cont
 	}
 	s.logger.Printf("Bale scheduler: %d campaigns pending processing...", len(pending))
 
+	s.dispatchPendingBaleCampaigns(parent, jazzAccessToken, pending, s.processBaleCampaign)
+}
+
+type baleCampaignDispatchGroup struct {
+	campaigns []dto.BotGetCampaignResponse
+}
+
+func groupBaleCampaignsForDispatch(pending []dto.BotGetCampaignResponse) []baleCampaignDispatchGroup {
+	groups := make([]baleCampaignDispatchGroup, 0, len(pending))
+	groupByKey := make(map[string]int, len(pending))
+
 	for _, camp := range pending {
-		go func(c dto.BotGetCampaignResponse) {
-			// TODO: Make 4 hours configurable or use a more dynamic approach based on campaign content/size
-			ctx2, cancel2 := context.WithTimeout(parent, 4*time.Hour)
-			defer cancel2()
-			if err := s.processBaleCampaign(ctx2, jazzAccessToken, c); err != nil {
-				s.logger.Printf("Bale scheduler: process campaign id=%d failed: %v", c.ID, err)
-				s.notifyAdmin(fmt.Sprintf("Bale scheduler: process campaign failed for campaign id=%d: %v", c.ID, err))
+		key := fmt.Sprintf("campaign:%d", camp.ID)
+		if camp.BundleID != nil {
+			key = fmt.Sprintf("bundle:%d:%d", camp.CustomerID, *camp.BundleID)
+		}
+
+		if idx, ok := groupByKey[key]; ok {
+			groups[idx].campaigns = append(groups[idx].campaigns, camp)
+			continue
+		}
+
+		groupByKey[key] = len(groups)
+		groups = append(groups, baleCampaignDispatchGroup{
+			campaigns: []dto.BotGetCampaignResponse{camp},
+		})
+	}
+
+	return groups
+}
+
+func (s *BaleCampaignScheduler) dispatchPendingBaleCampaigns(
+	parent context.Context,
+	jazzAccessToken string,
+	pending []dto.BotGetCampaignResponse,
+	process func(context.Context, string, dto.BotGetCampaignResponse) error,
+) {
+	for _, group := range groupBaleCampaignsForDispatch(pending) {
+		go func(g baleCampaignDispatchGroup) {
+			for _, camp := range g.campaigns {
+				if parent.Err() != nil {
+					return
+				}
+
+				// TODO: Make 4 hours configurable or use a more dynamic approach based on campaign content/size
+				ctx2, cancel2 := context.WithTimeout(parent, 4*time.Hour)
+				if err := process(ctx2, jazzAccessToken, camp); err != nil {
+					s.logger.Printf("Bale scheduler: process campaign id=%d failed: %v", camp.ID, err)
+					s.notifyAdmin(fmt.Sprintf("Bale scheduler: process campaign failed for campaign id=%d: %v", camp.ID, err))
+				}
+				cancel2()
 			}
-		}(camp)
+		}(group)
 	}
 }
 
@@ -239,7 +282,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		unmatchedUID []string
 		selectionID  *uint
 	)
-	if hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID) {
+	if usesExcelAudienceTargeting(c) {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("context expired before fetching excel UIDs for campaign id=%d: %w", c.ID, err)
 		}
@@ -529,6 +572,9 @@ func (s *BaleCampaignScheduler) validateBaleCampaign(c dto.BotGetCampaignRespons
 }
 
 func (s *BaleCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error) {
+	if usesSmartAudienceTargeting(c) {
+		return nil, nil
+	}
 	if !gradesNeedScoreFilter(c.AudienceGrades) {
 		return nil, nil
 	}
@@ -558,14 +604,15 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	if c.NumAudiences != nil {
 		numAudiences = int64(*c.NumAudiences)
 	}
-	s.logger.Printf("fetchBaleAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, numAudiences, len(c.Tags), correlationID)
+	executionTags := campaignExecutionTags(c)
+	s.logger.Printf("fetchBaleAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, numAudiences, len(executionTags), correlationID)
 
 	if numAudiences <= 0 {
 		return nil, fmt.Errorf("campaign num_audiences must be positive")
 	}
 
-	toExtract := make([]uint, len(c.Tags))
-	for i, tag := range c.Tags {
+	toExtract := make([]uint, len(executionTags))
+	for i, tag := range executionTags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
 			s.logger.Printf("fetchBaleAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
@@ -583,9 +630,9 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 	for i, tag := range tags {
 		tagIDs[i] = int32(tag.ID)
 	}
-	s.logger.Printf("fetchBaleAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
+	s.logger.Printf("fetchBaleAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(executionTags), len(tagIDs))
 
-	// NOTE: len(tagIDs) <= len(c.Tags) because some tags may not be found or are inactive
+	// NOTE: len(tagIDs) <= len(executionTags) because some tags may not be found or are inactive
 
 	scoreConstraint, err := s.resolveScoreConstraint(ctx, c)
 	if err != nil {
@@ -595,7 +642,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
 
 	const limit = 10000000
 
-	tagsHash := hashTags(c.Tags)
+	tagsHash := hashTags(executionTags)
 	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
 	if err != nil {
 		s.logger.Printf("fetchBaleAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
@@ -804,8 +851,9 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhonesByBundle(
 		return nil, fmt.Errorf("campaign num_audiences must be positive")
 	}
 
-	toExtract := make([]uint, len(c.Tags))
-	for i, tag := range c.Tags {
+	executionTags := campaignExecutionTags(c)
+	toExtract := make([]uint, len(executionTags))
+	for i, tag := range executionTags {
 		tagID, err := strconv.ParseUint(tag, 10, 32)
 		if err != nil {
 			s.logger.Printf("fetchBaleAudiencePhonesByBundle tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
@@ -822,7 +870,7 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhonesByBundle(
 	for i, tag := range tags {
 		tagIDs[i] = int32(tag.ID)
 	}
-	s.logger.Printf("fetchBaleAudiencePhonesByBundle tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(c.Tags), len(tagIDs))
+	s.logger.Printf("fetchBaleAudiencePhonesByBundle tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(executionTags), len(tagIDs))
 
 	scoreConstraint, err := s.resolveScoreConstraint(ctx, c)
 	if err != nil {
