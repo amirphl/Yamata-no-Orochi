@@ -278,12 +278,13 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 	// calls triggers idle_in_transaction_session_timeout, killing the connection with
 	// "driver: bad connection" on the next SQL statement.
 	var (
-		phones       []string
-		ids          []int64
-		uids         []string
-		codes        []string
-		unmatchedUID []string
-		selectionID  *uint
+		phones                    []string
+		ids                       []int64
+		uids                      []string
+		codes                     []string
+		unmatchedUID              []string
+		audienceSelectionID       *uint
+		bundleAudienceSelectionID *uint
 	)
 	if usesExcelAudienceTargeting(c) {
 		if err := ctx.Err(); err != nil {
@@ -308,7 +309,6 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 		uids = audienceResult.UIDs
 		codes = audienceResult.Codes
 		unmatchedUID = audienceResult.UnmatchedUIDs
-		selectionID = nil
 		s.logger.Printf("Splus scheduler: campaign id=%d fetched %d phones via excel (unmatched=%d)", c.ID, len(phones), len(unmatchedUID))
 	} else {
 		if err := ctx.Err(); err != nil {
@@ -332,8 +332,15 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 		ids = audienceResult.IDs
 		uids = audienceResult.UIDs
 		codes = audienceResult.Codes
-		selectionID = utils.ToPtr(audienceResult.SelectionID)
-		s.logger.Printf("Splus scheduler: campaign id=%d fetched %d phones (selection_id=%d)", c.ID, len(phones), audienceResult.SelectionID)
+		audienceSelectionID, bundleAudienceSelectionID, err = selectionIDsForCampaign(c, audienceResult)
+		if err != nil {
+			return fmt.Errorf("resolve selection id for campaign id=%d: %w", c.ID, err)
+		}
+		if audienceSelectionID != nil {
+			s.logger.Printf("Splus scheduler: campaign id=%d fetched %d phones (audience_selection_id=%d)", c.ID, len(phones), *audienceSelectionID)
+		} else {
+			s.logger.Printf("Splus scheduler: campaign id=%d fetched %d phones (bundle_audience_selection_id=%d)", c.ID, len(phones), *bundleAudienceSelectionID)
+		}
 	}
 
 	if len(ids) != len(phones) {
@@ -354,13 +361,14 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 	var pc *models.ProcessedCampaign
 	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		pc = &models.ProcessedCampaign{
-			CampaignID:          c.ID,
-			CampaignJSON:        json.RawMessage(campaignJSON),
-			AudienceIDs:         pq.Int64Array{},
-			AudienceCodes:       []string{},
-			LastAudienceID:      nil,
-			AudienceSelectionID: selectionID,
-			Statistics:          nil,
+			CampaignID:                c.ID,
+			CampaignJSON:              json.RawMessage(campaignJSON),
+			AudienceIDs:               pq.Int64Array{},
+			AudienceCodes:             []string{},
+			LastAudienceID:            nil,
+			AudienceSelectionID:       audienceSelectionID,
+			BundleAudienceSelectionID: bundleAudienceSelectionID,
+			Statistics:                nil,
 		}
 		if err := s.pcRepo.Save(txCtx, pc); err != nil {
 			return fmt.Errorf("save processed campaign: %w", err)
@@ -765,11 +773,11 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 		s.logger.Printf("fetchSplusAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
 		s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
 		return &AudiencePhonesResult{
-			Phones:      phones,
-			IDs:         ids,
-			UIDs:        uids,
-			Codes:       make([]string, len(phones)),
-			SelectionID: sel.ID,
+			Phones:              phones,
+			IDs:                 ids,
+			UIDs:                uids,
+			Codes:               make([]string, len(phones)),
+			AudienceSelectionID: utils.ToPtr(sel.ID),
 		}, nil
 	}
 
@@ -779,11 +787,11 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 		s.logger.Printf("fetchSplusAudiencePhones skipped short links generation: campaign_id=%d short_link_domain=empty", c.ID)
 		s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d short_link_domain=empty", c.ID, len(phones), len(phones), sel.ID)
 		return &AudiencePhonesResult{
-			Phones:      phones,
-			IDs:         ids,
-			UIDs:        uids,
-			Codes:       make([]string, len(phones)),
-			SelectionID: sel.ID,
+			Phones:              phones,
+			IDs:                 ids,
+			UIDs:                uids,
+			Codes:               make([]string, len(phones)),
+			AudienceSelectionID: utils.ToPtr(sel.ID),
 		}, nil
 	}
 
@@ -811,11 +819,11 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 	}
 	s.logger.Printf("fetchSplusAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
 	return &AudiencePhonesResult{
-		Phones:      phones,
-		IDs:         ids,
-		UIDs:        uids,
-		Codes:       codes,
-		SelectionID: sel.ID,
+		Phones:              phones,
+		IDs:                 ids,
+		UIDs:                uids,
+		Codes:               codes,
+		AudienceSelectionID: utils.ToPtr(sel.ID),
 	}, nil
 }
 
@@ -944,22 +952,22 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 	if !hasCampaignAdLink(c.AdLink) {
 		s.logger.Printf("fetchSplusAudiencePhonesByBundle skipped short links: campaign_id=%d ad_link=empty", c.ID)
 		return &AudiencePhonesResult{
-			Phones:      phones,
-			IDs:         ids,
-			UIDs:        uids,
-			Codes:       make([]string, len(phones)),
-			SelectionID: sel.ID,
+			Phones:                    phones,
+			IDs:                       ids,
+			UIDs:                      uids,
+			Codes:                     make([]string, len(phones)),
+			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
 		}, nil
 	}
 
 	if c.ShortLinkDomain == nil || strings.TrimSpace(*c.ShortLinkDomain) == "" {
 		s.logger.Printf("fetchSplusAudiencePhonesByBundle skipped short links: campaign_id=%d short_link_domain=empty", c.ID)
 		return &AudiencePhonesResult{
-			Phones:      phones,
-			IDs:         ids,
-			UIDs:        uids,
-			Codes:       make([]string, len(phones)),
-			SelectionID: sel.ID,
+			Phones:                    phones,
+			IDs:                       ids,
+			UIDs:                      uids,
+			Codes:                     make([]string, len(phones)),
+			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
 		}, nil
 	}
 
@@ -987,11 +995,11 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle success: campaign_id=%d bundle_id=%d selected=%d codes=%d selection_id=%d",
 		c.ID, bundleID, len(phones), len(codes), sel.ID)
 	return &AudiencePhonesResult{
-		Phones:      phones,
-		IDs:         ids,
-		UIDs:        uids,
-		Codes:       codes,
-		SelectionID: sel.ID,
+		Phones:                    phones,
+		IDs:                       ids,
+		UIDs:                      uids,
+		Codes:                     codes,
+		BundleAudienceSelectionID: utils.ToPtr(sel.ID),
 	}, nil
 }
 
