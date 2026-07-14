@@ -46,3 +46,106 @@ func TestCampaignExecutionTagsKeepsSmartTagsSeparate(t *testing.T) {
 		t.Fatalf("standard targeting must keep using tags, got %#v", got)
 	}
 }
+
+func TestSelectionIDsForCampaignEnforcesSelectionScope(t *testing.T) {
+	ptr := func(value uint) *uint { return &value }
+	bundleID := uint(42)
+
+	tests := []struct {
+		name           string
+		campaign       dto.BotGetCampaignResponse
+		result         *AudiencePhonesResult
+		wantAudienceID *uint
+		wantBundleID   *uint
+		wantErr        bool
+	}{
+		{
+			name:           "non-bundle selection",
+			result:         &AudiencePhonesResult{AudienceSelectionID: ptr(11)},
+			wantAudienceID: ptr(11),
+		},
+		{
+			name:         "bundle selection",
+			campaign:     dto.BotGetCampaignResponse{BundleID: &bundleID},
+			result:       &AudiencePhonesResult{BundleAudienceSelectionID: ptr(22)},
+			wantBundleID: ptr(22),
+		},
+		{
+			name:    "nil result",
+			result:  nil,
+			wantErr: true,
+		},
+		{
+			name:    "non-bundle missing selection",
+			result:  &AudiencePhonesResult{},
+			wantErr: true,
+		},
+		{
+			name:    "non-bundle zero selection",
+			result:  &AudiencePhonesResult{AudienceSelectionID: ptr(0)},
+			wantErr: true,
+		},
+		{
+			name:    "non-bundle carrying bundle selection",
+			result:  &AudiencePhonesResult{BundleAudienceSelectionID: ptr(22)},
+			wantErr: true,
+		},
+		{
+			name:    "non-bundle carrying both selections",
+			result:  &AudiencePhonesResult{AudienceSelectionID: ptr(11), BundleAudienceSelectionID: ptr(22)},
+			wantErr: true,
+		},
+		{
+			name:     "bundle missing selection",
+			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
+			result:   &AudiencePhonesResult{},
+			wantErr:  true,
+		},
+		{
+			name:     "bundle zero selection",
+			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
+			result:   &AudiencePhonesResult{BundleAudienceSelectionID: ptr(0)},
+			wantErr:  true,
+		},
+		{
+			name:     "bundle carrying non-bundle selection",
+			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
+			result:   &AudiencePhonesResult{AudienceSelectionID: ptr(11)},
+			wantErr:  true,
+		},
+		{
+			name:     "bundle carrying both selections",
+			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
+			result:   &AudiencePhonesResult{AudienceSelectionID: ptr(11), BundleAudienceSelectionID: ptr(22)},
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			audienceID, bundleSelectionID, err := selectionIDsForCampaign(tt.campaign, tt.result)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected selection scope validation to fail")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("selection scope validation failed: %v", err)
+			}
+			if !equalOptionalUint(audienceID, tt.wantAudienceID) {
+				t.Fatalf("audience selection id = %v, want %v", audienceID, tt.wantAudienceID)
+			}
+			if !equalOptionalUint(bundleSelectionID, tt.wantBundleID) {
+				t.Fatalf("bundle audience selection id = %v, want %v", bundleSelectionID, tt.wantBundleID)
+			}
+		})
+	}
+}
+
+func equalOptionalUint(got, want *uint) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return *got == *want
+}
