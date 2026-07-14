@@ -23,6 +23,8 @@ type ProcessedCampaign struct {
 	Statistics     json.RawMessage `gorm:"type:jsonb;not null;default:'{}'" json:"statistics"`
 	// Reference to the audience selection snapshot used when preparing this campaign
 	AudienceSelectionID *uint `gorm:"index:idx_processed_campaigns_audience_selection_id" json:"audience_selection_id,omitempty"`
+	// Reference to the bundle-scoped audience selection snapshot used when preparing this campaign
+	BundleAudienceSelectionID *uint `gorm:"index:idx_processed_campaigns_bundle_audience_selection_id" json:"bundle_audience_selection_id,omitempty"`
 
 	CreatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"created_at"`
 	UpdatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')" json:"updated_at"`
