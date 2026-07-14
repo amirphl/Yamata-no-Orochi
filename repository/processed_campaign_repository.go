@@ -139,10 +139,11 @@ func (r *ProcessedCampaignRepositoryImpl) UpdateMeta(ctx context.Context, pc *mo
 	}
 
 	updates := map[string]any{
-		"last_audience_id":      pc.LastAudienceID,
-		"statistics":            pc.Statistics,
-		"audience_selection_id": pc.AudienceSelectionID,
-		"updated_at":            pc.UpdatedAt,
+		"last_audience_id":             pc.LastAudienceID,
+		"statistics":                   pc.Statistics,
+		"audience_selection_id":        pc.AudienceSelectionID,
+		"bundle_audience_selection_id": pc.BundleAudienceSelectionID,
+		"updated_at":                   pc.UpdatedAt,
 	}
 	err = db.Model(&models.ProcessedCampaign{}).
 		Where("id = ?", pc.ID).
