@@ -45,13 +45,42 @@ const (
 )
 
 type AudiencePhonesResult struct {
-	Phones        []string
-	IDs           []int64
-	UIDs          []string
-	Codes         []string
-	SelectionID   uint
-	MatchedUIDs   []string
-	UnmatchedUIDs []string
+	Phones                    []string
+	IDs                       []int64
+	UIDs                      []string
+	Codes                     []string
+	AudienceSelectionID       *uint
+	BundleAudienceSelectionID *uint
+	MatchedUIDs               []string
+	UnmatchedUIDs             []string
+}
+
+// selectionIDsForCampaign validates that a non-Excel audience result carries
+// the selection ID for the campaign's actual scope. Keeping the two ID types
+// distinct prevents an ID from one selection table being persisted as a
+// foreign key to the other.
+func selectionIDsForCampaign(c dto.BotGetCampaignResponse, result *AudiencePhonesResult) (*uint, *uint, error) {
+	if result == nil {
+		return nil, nil, errors.New("audience result is nil")
+	}
+
+	if c.BundleID != nil {
+		if result.AudienceSelectionID != nil {
+			return nil, nil, errors.New("bundle campaign returned a non-bundle audience selection id")
+		}
+		if result.BundleAudienceSelectionID == nil || *result.BundleAudienceSelectionID == 0 {
+			return nil, nil, errors.New("bundle campaign returned no valid bundle audience selection id")
+		}
+		return nil, result.BundleAudienceSelectionID, nil
+	}
+
+	if result.BundleAudienceSelectionID != nil {
+		return nil, nil, errors.New("non-bundle campaign returned a bundle audience selection id")
+	}
+	if result.AudienceSelectionID == nil || *result.AudienceSelectionID == 0 {
+		return nil, nil, errors.New("non-bundle campaign returned no valid audience selection id")
+	}
+	return result.AudienceSelectionID, nil, nil
 }
 
 func initSchedulerLogger(name string) (*log.Logger, *os.File, error) {
