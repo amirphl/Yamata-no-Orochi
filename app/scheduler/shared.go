@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
+	"github.com/lib/pq"
 	"github.com/xuri/excelize/v2"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -42,6 +44,10 @@ const (
 	// database per AppendAudienceData call inside the persistence transaction.
 	// Used by all platform schedulers.
 	audienceAppendBatchSize = 1000
+
+	// Campaigns targeting this tag must not be constrained by audience grades.
+	// The tag predicate itself still applies, and the tag must exist and be active.
+	audienceGradeExemptTagID uint = 17358
 )
 
 type AudiencePhonesResult struct {
@@ -142,6 +148,109 @@ func campaignExecutionTags(c dto.BotGetCampaignResponse) []string {
 		return c.SelectedTags
 	}
 	return c.Tags
+}
+
+// resolveActiveCampaignTagIDs parses the campaign's effective tags and resolves
+// every distinct ID through the active tag catalog. It deliberately fails closed:
+// a missing or inactive tag must never turn an intended tag filter into an
+// unfiltered audience query.
+func resolveActiveCampaignTagIDs(
+	ctx context.Context,
+	tagRepo repository.TagRepository,
+	c dto.BotGetCampaignResponse,
+) ([]string, pq.Int32Array, error) {
+	executionTags, requestedIDs, err := parseCampaignTagIDs(c)
+	if err != nil {
+		return executionTags, nil, err
+	}
+
+	activeTags, err := tagRepo.ListByIDs(ctx, requestedIDs)
+	if err != nil {
+		return executionTags, nil, fmt.Errorf("resolve active audience tags for campaign id=%d: %w", c.ID, err)
+	}
+
+	resolved, err := requireAllTagsActive(c.ID, requestedIDs, activeTags)
+	if err != nil {
+		return executionTags, nil, err
+	}
+	return executionTags, resolved, nil
+}
+
+func parseCampaignTagIDs(c dto.BotGetCampaignResponse) ([]string, []uint, error) {
+	executionTags := campaignExecutionTags(c)
+	if len(executionTags) == 0 {
+		return executionTags, nil, fmt.Errorf("campaign id=%d has no audience tags", c.ID)
+	}
+
+	requestedIDs := make([]uint, 0, len(executionTags))
+	seen := make(map[uint]struct{}, len(executionTags))
+	for _, rawTagID := range executionTags {
+		tagID, err := strconv.ParseUint(strings.TrimSpace(rawTagID), 10, 31)
+		if err != nil || tagID == 0 {
+			if err == nil {
+				err = errors.New("tag ID must be positive")
+			}
+			return executionTags, nil, fmt.Errorf("campaign id=%d has invalid audience tag %q: %w", c.ID, rawTagID, err)
+		}
+		id := uint(tagID)
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		requestedIDs = append(requestedIDs, id)
+	}
+	return executionTags, requestedIDs, nil
+}
+
+func requireAllTagsActive(campaignID uint, requestedIDs []uint, activeTags []*models.Tag) (pq.Int32Array, error) {
+	activeByID := make(map[uint]struct{}, len(activeTags))
+	for _, tag := range activeTags {
+		if tag != nil {
+			activeByID[tag.ID] = struct{}{}
+		}
+	}
+
+	resolved := make(pq.Int32Array, 0, len(requestedIDs))
+	missingOrInactive := make([]uint, 0)
+	for _, id := range requestedIDs {
+		if _, active := activeByID[id]; !active {
+			missingOrInactive = append(missingOrInactive, id)
+			continue
+		}
+		resolved = append(resolved, int32(id))
+	}
+	if len(missingOrInactive) > 0 {
+		return nil, fmt.Errorf(
+			"campaign id=%d has missing or inactive audience tag IDs: %v",
+			campaignID,
+			missingOrInactive,
+		)
+	}
+
+	return resolved, nil
+}
+
+func campaignIgnoresAudienceGrades(c dto.BotGetCampaignResponse) bool {
+	tagFound := false
+	for _, rawTagID := range campaignExecutionTags(c) {
+		tagID, err := strconv.ParseUint(strings.TrimSpace(rawTagID), 10, 31)
+		if err != nil || uint(tagID) != audienceGradeExemptTagID {
+			return false
+		}
+		tagFound = true
+	}
+	return tagFound
+}
+
+func requireAudienceMatch(campaignID uint, tagIDs pq.Int32Array, selected int) error {
+	if selected > 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"no audience profiles matched campaign id=%d tag IDs=%v and targeting constraints",
+		campaignID,
+		[]int32(tagIDs),
+	)
 }
 
 func fetchTargetAudienceUIDsFromExcel(ctx context.Context, botClient BotClient, jazzToken string, campaignID uint) ([]string, error) {
