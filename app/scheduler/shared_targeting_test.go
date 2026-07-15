@@ -1,10 +1,12 @@
 package scheduler
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/lib/pq"
 )
 
 func TestUsesExcelAudienceTargetingBackwardCompatibilityAndPriority(t *testing.T) {
@@ -44,6 +46,68 @@ func TestCampaignExecutionTagsKeepsSmartTagsSeparate(t *testing.T) {
 	})
 	if len(got) != 1 || got[0] != "1" {
 		t.Fatalf("standard targeting must keep using tags, got %#v", got)
+	}
+}
+
+func TestCampaignIgnoresAudienceGradesOnlyForTag17358(t *testing.T) {
+	if !campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{"17358"}}) {
+		t.Fatal("tag 17358 must bypass audience grades")
+	}
+	if !campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{" 17358 ", "17358"}}) {
+		t.Fatal("duplicate tag 17358 values must bypass audience grades")
+	}
+	if campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{"17358", "9"}}) {
+		t.Fatal("grade bypass must not leak to campaigns targeting other tags")
+	}
+	if campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{"9"}}) {
+		t.Fatal("tags other than 17358 must retain audience grades")
+	}
+}
+
+func TestParseCampaignTagIDsRejectsInvalidAndDeduplicates(t *testing.T) {
+	_, ids, err := parseCampaignTagIDs(dto.BotGetCampaignResponse{ID: 10, Tags: []string{"7", "7", "9"}})
+	if err != nil {
+		t.Fatalf("parse valid tags: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 7 || ids[1] != 9 {
+		t.Fatalf("parsed tag IDs = %v, want [7 9]", ids)
+	}
+
+	for _, campaign := range []dto.BotGetCampaignResponse{
+		{ID: 11},
+		{ID: 12, Tags: []string{"not-an-id"}},
+		{ID: 13, Tags: []string{"0"}},
+	} {
+		if _, _, err := parseCampaignTagIDs(campaign); err == nil {
+			t.Fatalf("campaign %d: expected invalid tags to fail", campaign.ID)
+		}
+	}
+}
+
+func TestRequireAllTagsActiveFailsClosed(t *testing.T) {
+	if _, err := requireAllTagsActive(746, []uint{17358}, nil); err == nil || !strings.Contains(err.Error(), "17358") {
+		t.Fatalf("inactive tag must produce a descriptive error, got %v", err)
+	}
+
+	if _, err := requireAllTagsActive(747, []uint{7, 9}, []*models.Tag{{ID: 7}}); err == nil || !strings.Contains(err.Error(), "9") {
+		t.Fatalf("partially resolved tags must fail closed, got %v", err)
+	}
+
+	resolved, err := requireAllTagsActive(748, []uint{7, 9}, []*models.Tag{{ID: 9}, {ID: 7}})
+	if err != nil {
+		t.Fatalf("active tags unexpectedly failed: %v", err)
+	}
+	if len(resolved) != 2 || resolved[0] != 7 || resolved[1] != 9 {
+		t.Fatalf("resolved tag IDs = %v, want [7 9]", resolved)
+	}
+}
+
+func TestRequireAudienceMatchRejectsEmptySelection(t *testing.T) {
+	if err := requireAudienceMatch(746, pq.Int32Array{17358}, 0); err == nil || !strings.Contains(err.Error(), "no audience profiles matched") {
+		t.Fatalf("empty audience selection must fail, got %v", err)
+	}
+	if err := requireAudienceMatch(746, pq.Int32Array{17358}, 1); err != nil {
+		t.Fatalf("non-empty audience selection unexpectedly failed: %v", err)
 	}
 }
 
