@@ -942,6 +942,10 @@ func (s *RubikaCampaignScheduler) resolveScoreConstraint(ctx context.Context, c 
 	if usesSmartAudienceTargeting(c) {
 		return nil, nil
 	}
+	if campaignIgnoresAudienceGrades(c) {
+		s.logger.Printf("resolveScoreConstraint: campaign id=%d tag_id=%d bypasses audience grade filter", c.ID, audienceGradeExemptTagID)
+		return nil, nil
+	}
 	if !gradesNeedScoreFilter(c.AudienceGrades) {
 		return nil, nil
 	}
@@ -978,24 +982,10 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(
 		return nil, fmt.Errorf("campaign num_audiences must be positive")
 	}
 
-	toExtract := make([]uint, len(executionTags))
-	for i, tag := range executionTags {
-		tagID, err := strconv.ParseUint(tag, 10, 32)
-		if err != nil {
-			s.logger.Printf("fetchRubikaAudiencePhones tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
-			return nil, err
-		}
-		toExtract[i] = uint(tagID)
-	}
-	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
+	executionTags, tagIDs, err := resolveActiveCampaignTagIDs(ctx, s.tagRepo, c)
 	if err != nil {
-		s.logger.Printf("fetchRubikaAudiencePhones tags lookup failed: campaign_id=%d err=%v", c.ID, err)
+		s.logger.Printf("fetchRubikaAudiencePhones tags resolution failed: campaign_id=%d err=%v", c.ID, err)
 		return nil, err
-	}
-
-	tagIDs := make(pq.Int32Array, len(tags))
-	for i, tag := range tags {
-		tagIDs[i] = int32(tag.ID)
 	}
 	s.logger.Printf("fetchRubikaAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(executionTags), len(tagIDs))
 
@@ -1075,6 +1065,9 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhones(
 			return nil, err
 		}
 		s.logger.Printf("fetchRubikaAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
+	}
+	if err := requireAudienceMatch(c.ID, tagIDs, len(ids)); err != nil {
+		return nil, err
 	}
 
 	var sel *AudienceSelection
@@ -1209,24 +1202,10 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhonesByBundle(
 		return nil, fmt.Errorf("campaign num_audiences must be positive")
 	}
 
-	executionTags := campaignExecutionTags(c)
-	toExtract := make([]uint, len(executionTags))
-	for i, tag := range executionTags {
-		tagID, err := strconv.ParseUint(tag, 10, 32)
-		if err != nil {
-			s.logger.Printf("fetchRubikaAudiencePhonesByBundle tag parse failed: campaign_id=%d tag=%q err=%v", c.ID, tag, err)
-			return nil, err
-		}
-		toExtract[i] = uint(tagID)
-	}
-	tags, err := s.tagRepo.ListByIDs(ctx, toExtract)
+	executionTags, tagIDs, err := resolveActiveCampaignTagIDs(ctx, s.tagRepo, c)
 	if err != nil {
-		s.logger.Printf("fetchRubikaAudiencePhonesByBundle tags lookup failed: campaign_id=%d err=%v", c.ID, err)
+		s.logger.Printf("fetchRubikaAudiencePhonesByBundle tags resolution failed: campaign_id=%d err=%v", c.ID, err)
 		return nil, err
-	}
-	tagIDs := make(pq.Int32Array, len(tags))
-	for i, tag := range tags {
-		tagIDs[i] = int32(tag.ID)
 	}
 	s.logger.Printf("fetchRubikaAudiencePhonesByBundle tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(executionTags), len(tagIDs))
 
@@ -1256,6 +1235,9 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhonesByBundle(
 	}
 	s.logger.Printf("fetchRubikaAudiencePhonesByBundle selected: campaign_id=%d bundle_id=%d selected=%d requested=%d",
 		c.ID, bundleID, len(phones), numAudiences)
+	if err := requireAudienceMatch(c.ID, tagIDs, len(ids)); err != nil {
+		return nil, err
+	}
 
 	// Persist the newly selected IDs merged with the existing bundle selection.
 	sel, err := s.bundleAudienceCache.SaveWithMerge(ctx, c.CustomerID, bundleID, correlationID, ids)
