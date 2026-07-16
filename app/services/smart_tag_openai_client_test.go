@@ -69,7 +69,7 @@ func TestSmartTagOpenAIClientRejectsHTTPErrorStatus(t *testing.T) {
 			Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode: http.StatusTooManyRequests,
-					Header:     make(http.Header),
+					Header:     http.Header{"Retry-After": []string{"2"}},
 					Body:       io.NopCloser(strings.NewReader(`{"error":{"message":"rate limited"}}`)),
 				}, nil
 			}),
@@ -82,8 +82,24 @@ func TestSmartTagOpenAIClientRejectsHTTPErrorStatus(t *testing.T) {
 	if result == nil || result.HTTPStatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected status in audit result, got %+v", result)
 	}
+	if result.RetryAfter != 2*time.Second {
+		t.Fatalf("expected Retry-After in audit result, got %v", result.RetryAfter)
+	}
 	httpErr, ok := err.(*SmartTagOpenAIHTTPError)
 	if !ok || !httpErr.Retryable() {
 		t.Fatalf("expected retryable typed HTTP error, got %T: %v", err, err)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	if got := parseRetryAfter("3", now); got != 3*time.Second {
+		t.Fatalf("numeric Retry-After = %v, want 3s", got)
+	}
+	if got := parseRetryAfter(now.Add(5*time.Second).Format(http.TimeFormat), now); got != 5*time.Second {
+		t.Fatalf("date Retry-After = %v, want 5s", got)
+	}
+	if got := parseRetryAfter("invalid", now); got != 0 {
+		t.Fatalf("invalid Retry-After = %v, want 0", got)
 	}
 }
