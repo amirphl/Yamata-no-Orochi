@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
@@ -41,6 +42,7 @@ type BundleTagEvaluationFlowImpl struct {
 	db                 *gorm.DB
 	cfg                config.SmartTagEvaluationConfig
 	newClient          openAIClientFactory
+	requestPacer       *openAIRequestPacer
 }
 
 type BundleTagEvaluationConflictError struct {
@@ -93,7 +95,103 @@ type snapshotOpenAIConfig struct {
 }
 
 type snapshotBatchingConfig struct {
-	TagBatchSize *int `json:"tag_batch_size,omitempty"`
+	TagBatchSize       *int `json:"tag_batch_size,omitempty"`
+	MaxParallelBatches *int `json:"max_parallel_batches,omitempty"`
+}
+
+type openAIRequestPacer struct {
+	mu            sync.Mutex
+	interval      time.Duration
+	nextRequestAt time.Time
+	pauseUntil    time.Time
+}
+
+type pacedOpenAIClient struct {
+	delegate services.SmartTagOpenAIClient
+	pacer    *openAIRequestPacer
+}
+
+func newOpenAIRequestPacer(maxRequestsPerMinute int) *openAIRequestPacer {
+	if maxRequestsPerMinute <= 0 {
+		return nil
+	}
+	interval := time.Minute / time.Duration(maxRequestsPerMinute)
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+	return &openAIRequestPacer{interval: interval}
+}
+
+func (p *openAIRequestPacer) Wait(ctx context.Context) error {
+	if p == nil || p.interval <= 0 {
+		return nil
+	}
+
+	p.mu.Lock()
+	now := time.Now()
+	requestAt := now
+	if p.nextRequestAt.After(requestAt) {
+		requestAt = p.nextRequestAt
+	}
+	p.nextRequestAt = requestAt.Add(p.interval)
+	p.mu.Unlock()
+
+	for {
+		delay := time.Until(requestAt)
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		p.mu.Lock()
+		now = time.Now()
+		if !p.pauseUntil.After(now) {
+			p.mu.Unlock()
+			return nil
+		}
+		requestAt = p.pauseUntil
+		if p.nextRequestAt.After(requestAt) {
+			requestAt = p.nextRequestAt
+		}
+		p.nextRequestAt = requestAt.Add(p.interval)
+		p.mu.Unlock()
+	}
+}
+
+func (p *openAIRequestPacer) Pause(delay time.Duration) {
+	if p == nil || delay <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	until := time.Now().Add(delay)
+	if until.After(p.pauseUntil) {
+		p.pauseUntil = until
+	}
+}
+
+func (c *pacedOpenAIClient) CallResponsesAPI(ctx context.Context, payload map[string]any) (*services.SmartTagOpenAIResult, error) {
+	if c == nil || c.delegate == nil {
+		return nil, fmt.Errorf("OpenAI client is not configured")
+	}
+	if err := c.pacer.Wait(ctx); err != nil {
+		return nil, err
+	}
+	result, err := c.delegate.CallResponsesAPI(ctx, payload)
+	var httpErr *services.SmartTagOpenAIHTTPError
+	if errors.As(err, &httpErr) && httpErr.StatusCode == 429 {
+		delay := time.Second
+		if result != nil && result.RetryAfter > delay {
+			delay = result.RetryAfter
+		}
+		c.pacer.Pause(delay)
+	}
+	return result, err
 }
 
 type snapshotValidationConfig struct {
@@ -129,6 +227,7 @@ func NewBundleTagEvaluationFlow(
 		db:                 db,
 		cfg:                cfg,
 		newClient:          services.NewSmartTagOpenAIClient,
+		requestPacer:       newOpenAIRequestPacer(cfg.OpenAI.MaxRequestsPerMinute),
 	}
 }
 
@@ -399,6 +498,7 @@ func (f *BundleTagEvaluationFlowImpl) ExecuteBundleTagEvaluationRun(ctx context.
 	if err != nil {
 		return f.failRunUnlessCanceled(ctx, run.ID, err)
 	}
+	client = &pacedOpenAIClient{delegate: client, pacer: f.requestPacer}
 
 	personaAnalysisText, err := f.ensurePersonaAnalysis(ctx, run, executionCfg, client)
 	if err != nil {
@@ -410,13 +510,8 @@ func (f *BundleTagEvaluationFlowImpl) ExecuteBundleTagEvaluationRun(ctx context.
 		return f.failRunUnlessCanceled(ctx, run.ID, err)
 	}
 
-	for _, batch := range batches {
-		if batch == nil {
-			continue
-		}
-		if err := f.processBatch(ctx, run, batch, personaAnalysisText, executionCfg, client); err != nil {
-			return f.failRunUnlessCanceled(ctx, run.ID, err)
-		}
+	if err := f.processBatchesConcurrently(ctx, run, batches, personaAnalysisText, executionCfg, client); err != nil {
+		return f.failRunUnlessCanceled(ctx, run.ID, err)
 	}
 
 	totalExpected := 0
@@ -448,6 +543,98 @@ func (f *BundleTagEvaluationFlowImpl) ExecuteBundleTagEvaluationRun(ctx context.
 		}
 	}
 	return nil
+}
+
+type batchProcessingError struct {
+	batchNumber int
+	err         error
+}
+
+func (f *BundleTagEvaluationFlowImpl) processBatchesConcurrently(
+	ctx context.Context,
+	run *models.BundleTagEvaluationRun,
+	batches []*models.BundleTagEvaluationBatch,
+	personaAnalysisText string,
+	executionCfg config.SmartTagEvaluationConfig,
+	client services.SmartTagOpenAIClient,
+) error {
+	return runBatchesConcurrently(ctx, batches, executionCfg.Batching.MaxParallelBatches, func(workerCtx context.Context, batch *models.BundleTagEvaluationBatch) error {
+		return f.processBatch(workerCtx, run, batch, personaAnalysisText, executionCfg, client)
+	})
+}
+
+func runBatchesConcurrently(
+	ctx context.Context,
+	batches []*models.BundleTagEvaluationBatch,
+	maxParallel int,
+	process func(context.Context, *models.BundleTagEvaluationBatch) error,
+) error {
+	if process == nil {
+		return fmt.Errorf("batch processor is not configured")
+	}
+	pending := make([]*models.BundleTagEvaluationBatch, 0, len(batches))
+	for _, batch := range batches {
+		if batch != nil {
+			pending = append(pending, batch)
+		}
+	}
+	if len(pending) == 0 {
+		return nil
+	}
+
+	workerCount := max(1, maxParallel)
+	if workerCount > len(pending) {
+		workerCount = len(pending)
+	}
+
+	workerCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan *models.BundleTagEvaluationBatch, len(pending))
+	results := make(chan batchProcessingError, workerCount)
+	for _, batch := range pending {
+		jobs <- batch
+	}
+	close(jobs)
+
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go func() {
+			defer workers.Done()
+			for batch := range jobs {
+				if workerCtx.Err() != nil {
+					return
+				}
+				if err := process(workerCtx, batch); err != nil {
+					results <- batchProcessingError{batchNumber: batch.BatchNumber, err: err}
+					cancel()
+					return
+				}
+			}
+		}()
+	}
+	workers.Wait()
+	close(results)
+
+	var selected *batchProcessingError
+	for result := range results {
+		if result.err == nil {
+			continue
+		}
+		if selected == nil || (isContextError(selected.err) && !isContextError(result.err)) ||
+			(isContextError(selected.err) == isContextError(result.err) && result.batchNumber < selected.batchNumber) {
+			copy := result
+			selected = &copy
+		}
+	}
+	if selected != nil {
+		return fmt.Errorf("batch %d: %w", selected.batchNumber, selected.err)
+	}
+	return ctx.Err()
+}
+
+func isContextError(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func (f *BundleTagEvaluationFlowImpl) ensurePersonaAnalysis(ctx context.Context, run *models.BundleTagEvaluationRun, executionCfg config.SmartTagEvaluationConfig, client services.SmartTagOpenAIClient) (string, error) {
@@ -520,6 +707,9 @@ func (f *BundleTagEvaluationFlowImpl) ensurePersonaAnalysis(ctx context.Context,
 			if !shouldRetryOpenAIError(callErr) {
 				return "", callErr
 			}
+			if err := waitBeforeOpenAIRetry(ctx, result, attemptNumber, maxAttempts); err != nil {
+				return "", err
+			}
 			continue
 		}
 
@@ -574,6 +764,9 @@ func (f *BundleTagEvaluationFlowImpl) ensurePersonaAnalysis(ctx context.Context,
 			}
 			return *extractedPtr, nil
 		}
+		if err := waitBeforeOpenAIRetry(ctx, result, attemptNumber, maxAttempts); err != nil {
+			return "", err
+		}
 	}
 
 	return "", fmt.Errorf("persona analysis failed after retries")
@@ -601,6 +794,9 @@ func (f *BundleTagEvaluationFlowImpl) ensureBatches(ctx context.Context, run *mo
 		for _, tag := range rows {
 			if tag == nil {
 				continue
+			}
+			if tag.IsActive == nil || !*tag.IsActive {
+				return nil, fmt.Errorf("active tag query returned inactive tag %d", tag.ID)
 			}
 			if strings.TrimSpace(tag.Name) == "" ||
 				strings.TrimSpace(derefString(tag.DisplayTitle)) == "" ||
@@ -742,6 +938,9 @@ func (f *BundleTagEvaluationFlowImpl) processBatch(ctx context.Context, run *mod
 	}
 	maxAttempts := executionCfg.OpenAI.MaxRetries + 1
 	for attemptNumber := baseAttempt; attemptNumber <= maxAttempts; attemptNumber++ {
+		if err := f.ensureBatchTagsRemainActive(ctx, tagSnapshots); err != nil {
+			return err
+		}
 		payload := f.buildTagScoringPayload(executionCfg, personaAnalysisText, tagSnapshots)
 		result, callErr := client.CallResponsesAPI(ctx, payload)
 		now := time.Now().UTC()
@@ -793,6 +992,9 @@ func (f *BundleTagEvaluationFlowImpl) processBatch(ctx context.Context, run *mod
 			if !shouldRetryOpenAIError(callErr) {
 				return callErr
 			}
+			if err := waitBeforeOpenAIRetry(ctx, result, attemptNumber, maxAttempts); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -814,6 +1016,9 @@ func (f *BundleTagEvaluationFlowImpl) processBatch(ctx context.Context, run *mod
 				Payload:         f.mustMarshalJSON(map[string]any{"batch_number": batch.BatchNumber, "attempt_number": attemptNumber, "message": parseErr.Error()}),
 				CreatedAt:       time.Now().UTC(),
 			})
+			if err := waitBeforeOpenAIRetry(ctx, result, attemptNumber, maxAttempts); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -829,6 +1034,71 @@ func (f *BundleTagEvaluationFlowImpl) processBatch(ctx context.Context, run *mod
 		})
 	}
 	return fmt.Errorf("batch %d failed after retries", batch.BatchNumber)
+}
+
+func (f *BundleTagEvaluationFlowImpl) ensureBatchTagsRemainActive(ctx context.Context, snapshots []models.BundleTagEvaluationTagSnapshot) error {
+	if len(snapshots) == 0 {
+		return fmt.Errorf("batch contains no tags")
+	}
+	ids := make([]uint, 0, len(snapshots))
+	expected := make(map[uint]struct{}, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.TagID == 0 {
+			return fmt.Errorf("batch contains an invalid tag ID")
+		}
+		if _, duplicate := expected[snapshot.TagID]; duplicate {
+			return fmt.Errorf("batch contains duplicate tag %d", snapshot.TagID)
+		}
+		expected[snapshot.TagID] = struct{}{}
+		ids = append(ids, snapshot.TagID)
+	}
+
+	activeTags, err := f.tagRepo.ListByIDs(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("failed to revalidate active batch tags: %w", err)
+	}
+	for _, tag := range activeTags {
+		if tag != nil {
+			delete(expected, tag.ID)
+		}
+	}
+	if len(expected) == 0 {
+		return nil
+	}
+
+	inactiveIDs := make([]uint, 0, len(expected))
+	for _, id := range ids {
+		if _, inactive := expected[id]; inactive {
+			inactiveIDs = append(inactiveIDs, id)
+		}
+	}
+	return fmt.Errorf("tag catalog changed during evaluation; inactive or missing tags would be sent to OpenAI: %v", inactiveIDs)
+}
+
+func waitBeforeOpenAIRetry(ctx context.Context, result *services.SmartTagOpenAIResult, attemptNumber, maxAttempts int) error {
+	if attemptNumber >= maxAttempts {
+		return nil
+	}
+
+	delay := 500 * time.Millisecond
+	for retry := 1; retry < attemptNumber && delay < 30*time.Second; retry++ {
+		delay *= 2
+	}
+	if delay > 30*time.Second {
+		delay = 30 * time.Second
+	}
+	if result != nil && result.RetryAfter > delay {
+		delay = result.RetryAfter
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (f *BundleTagEvaluationFlowImpl) insertBatchScores(ctx context.Context, run *models.BundleTagEvaluationRun, batch *models.BundleTagEvaluationBatch, batchAttemptID int64, tags []models.BundleTagEvaluationTagSnapshot, results map[uint]bundleTagScoreResult, rawResults map[uint]json.RawMessage) error {
@@ -1042,7 +1312,7 @@ func (f *BundleTagEvaluationFlowImpl) configurationSnapshot() bundleTagEvaluatio
 		proxy = &redactedProxy
 	}
 	return bundleTagEvaluationConfigurationSnapshot{
-		Version:         3,
+		Version:         4,
 		PersonaAnalysis: snapshotPromptConfig{SystemPrompt: &f.cfg.PersonaAnalysis.SystemPrompt},
 		TagScoring:      snapshotPromptConfig{SystemPrompt: &f.cfg.TagScoring.SystemPrompt},
 		OpenAI: snapshotOpenAIConfig{
@@ -1055,7 +1325,10 @@ func (f *BundleTagEvaluationFlowImpl) configurationSnapshot() bundleTagEvaluatio
 			MaxRetries:      &f.cfg.OpenAI.MaxRetries,
 			HTTPProxy:       proxy,
 		},
-		Batching: snapshotBatchingConfig{TagBatchSize: &f.cfg.Batching.TagBatchSize},
+		Batching: snapshotBatchingConfig{
+			TagBatchSize:       &f.cfg.Batching.TagBatchSize,
+			MaxParallelBatches: &f.cfg.Batching.MaxParallelBatches,
+		},
 		Validation: snapshotValidationConfig{
 			RequireExactTagCount: &f.cfg.Validation.RequireExactTagCount,
 			RequireExactTagIDs:   &f.cfg.Validation.RequireExactTagIDs,
@@ -1113,6 +1386,12 @@ func (f *BundleTagEvaluationFlowImpl) executionConfiguration(run *models.BundleT
 	if snapshot.OpenAI.MaxRetries != nil {
 		executionCfg.OpenAI.MaxRetries = *snapshot.OpenAI.MaxRetries
 	}
+	if snapshot.Batching.TagBatchSize != nil {
+		executionCfg.Batching.TagBatchSize = *snapshot.Batching.TagBatchSize
+	}
+	if snapshot.Batching.MaxParallelBatches != nil {
+		executionCfg.Batching.MaxParallelBatches = *snapshot.Batching.MaxParallelBatches
+	}
 	if snapshot.Validation.RequireExactTagCount != nil {
 		executionCfg.Validation.RequireExactTagCount = *snapshot.Validation.RequireExactTagCount
 	}
@@ -1130,6 +1409,11 @@ func (f *BundleTagEvaluationFlowImpl) executionConfiguration(run *models.BundleT
 	}
 	if executionCfg.OpenAI.MaxRetries < 0 {
 		return executionCfg, fmt.Errorf("evaluation max_retries snapshot must not be negative")
+	}
+	if executionCfg.Batching.MaxParallelBatches <= 0 {
+		// Snapshots written before parallel batch execution did not contain this
+		// setting. Preserve resumability while keeping concurrency bounded.
+		executionCfg.Batching.MaxParallelBatches = 1
 	}
 	return executionCfg, nil
 }

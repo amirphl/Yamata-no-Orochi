@@ -1,14 +1,24 @@
 package businessflow
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/app/services"
 	"github.com/amirphl/Yamata-no-Orochi/config"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 )
+
+type smartTagOpenAIClientFunc func(context.Context, map[string]any) (*services.SmartTagOpenAIResult, error)
+
+func (f smartTagOpenAIClientFunc) CallResponsesAPI(ctx context.Context, payload map[string]any) (*services.SmartTagOpenAIResult, error) {
+	return f(ctx, payload)
+}
 
 func TestExecutionConfigurationUsesRunSnapshot(t *testing.T) {
 	reasoningEffort := "medium"
@@ -27,7 +37,7 @@ func TestExecutionConfigurationUsesRunSnapshot(t *testing.T) {
 			MaxRetries:      2,
 			HTTPProxy:       &proxy,
 		},
-		Batching: config.SmartTagBatchingConfig{TagBatchSize: 10},
+		Batching: config.SmartTagBatchingConfig{TagBatchSize: 10, MaxParallelBatches: 3},
 		Validation: config.SmartTagValidationConfig{
 			RequireExactTagCount: true,
 			RequireExactTagIDs:   true,
@@ -64,6 +74,121 @@ func TestExecutionConfigurationUsesRunSnapshot(t *testing.T) {
 	}
 	if got.OpenAI.HTTPProxy == nil || *got.OpenAI.HTTPProxy != currentProxy {
 		t.Fatalf("expected current operational proxy, got %v", got.OpenAI.HTTPProxy)
+	}
+	if got.Batching.MaxParallelBatches != 3 {
+		t.Fatalf("expected snapshotted max parallel batches, got %d", got.Batching.MaxParallelBatches)
+	}
+}
+
+func TestRunBatchesConcurrentlyBoundsParallelism(t *testing.T) {
+	batches := []*models.BundleTagEvaluationBatch{
+		{BatchNumber: 1},
+		{BatchNumber: 2},
+		{BatchNumber: 3},
+		{BatchNumber: 4},
+	}
+	started := make(chan struct{}, len(batches))
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	var active atomic.Int32
+	var maximum atomic.Int32
+	var calls atomic.Int32
+
+	go func() {
+		done <- runBatchesConcurrently(context.Background(), batches, 2, func(ctx context.Context, _ *models.BundleTagEvaluationBatch) error {
+			current := active.Add(1)
+			defer active.Add(-1)
+			calls.Add(1)
+			for {
+				observed := maximum.Load()
+				if current <= observed || maximum.CompareAndSwap(observed, current) {
+					break
+				}
+			}
+			started <- struct{}{}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-release:
+				return nil
+			}
+		})
+	}()
+
+	<-started
+	<-started
+	select {
+	case <-started:
+		t.Fatal("more than two batches started before a worker became available")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("unexpected worker error: %v", err)
+	}
+	if got := maximum.Load(); got != 2 {
+		t.Fatalf("maximum concurrency = %d, want 2", got)
+	}
+	if got := calls.Load(); got != int32(len(batches)) {
+		t.Fatalf("processed batches = %d, want %d", got, len(batches))
+	}
+}
+
+func TestRunBatchesConcurrentlyPreservesRootError(t *testing.T) {
+	rootErr := errors.New("invalid OpenAI batch response")
+	batches := []*models.BundleTagEvaluationBatch{{BatchNumber: 1}, {BatchNumber: 2}}
+	err := runBatchesConcurrently(context.Background(), batches, 2, func(ctx context.Context, batch *models.BundleTagEvaluationBatch) error {
+		if batch.BatchNumber == 2 {
+			return rootErr
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	if !errors.Is(err, rootErr) {
+		t.Fatalf("expected root batch error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "batch 2") {
+		t.Fatalf("expected batch context in error, got %v", err)
+	}
+}
+
+func TestOpenAIRequestPacerSpacesRequestsAndHonorsCancellation(t *testing.T) {
+	pacer := newOpenAIRequestPacer(120)
+	if pacer == nil || pacer.interval != 500*time.Millisecond {
+		t.Fatalf("unexpected request interval: %+v", pacer)
+	}
+	if err := pacer.Wait(context.Background()); err != nil {
+		t.Fatalf("first request should proceed immediately: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := pacer.Wait(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("queued request should honor cancellation, got %v", err)
+	}
+}
+
+func TestPacedOpenAIClientPausesAllRequestsAfterRateLimit(t *testing.T) {
+	pacer := newOpenAIRequestPacer(60)
+	client := &pacedOpenAIClient{
+		pacer: pacer,
+		delegate: smartTagOpenAIClientFunc(func(context.Context, map[string]any) (*services.SmartTagOpenAIResult, error) {
+			return &services.SmartTagOpenAIResult{RetryAfter: 2 * time.Second}, &services.SmartTagOpenAIHTTPError{
+				StatusCode: 429,
+				Message:    "rate limited",
+			}
+		}),
+	}
+
+	before := time.Now()
+	if _, err := client.CallResponsesAPI(context.Background(), map[string]any{}); err == nil {
+		t.Fatal("expected rate-limit error")
+	}
+	pacer.mu.Lock()
+	pauseUntil := pacer.pauseUntil
+	pacer.mu.Unlock()
+	if pauseUntil.Before(before.Add(1900 * time.Millisecond)) {
+		t.Fatalf("global request pause is too short: %v", pauseUntil.Sub(before))
 	}
 }
 
