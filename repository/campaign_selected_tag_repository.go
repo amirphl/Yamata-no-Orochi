@@ -90,6 +90,9 @@ func availableSmartTagsQuery(db *gorm.DB, bundleID uint) *gorm.DB {
 			scores.relation_type,
 			scores.reason
 		FROM current_bundle_tag_scores AS scores
+		JOIN tags AS scored_tags
+		  ON scored_tags.id = scores.tag_id
+		 AND scored_tags.is_active = TRUE
 		WHERE scores.bundle_id = ?
 
 		UNION ALL
@@ -106,10 +109,13 @@ func availableSmartTagsQuery(db *gorm.DB, bundleID uint) *gorm.DB {
 			NULL::text AS relation_type,
 			NULL::text AS reason
 		FROM tags
-		WHERE COALESCE(tags.is_active, TRUE) = TRUE
+		WHERE tags.is_active = TRUE
 		  AND NOT EXISTS (
 			  SELECT 1
 			  FROM current_bundle_tag_scores AS existing_scores
+			  JOIN tags AS existing_tags
+			    ON existing_tags.id = existing_scores.tag_id
+			   AND existing_tags.is_active = TRUE
 			  WHERE existing_scores.bundle_id = ?
 		  )
 	) AS available_tags`, bundleID, bundleID)
