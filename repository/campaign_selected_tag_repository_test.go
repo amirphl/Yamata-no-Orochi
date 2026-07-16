@@ -57,6 +57,8 @@ func TestAvailableSmartTagsQueryPrefersScoreSnapshotWithCatalogFallback(t *testi
 	sql := statement.SQL.String()
 	for _, fragment := range []string{
 		"FROM current_bundle_tag_scores AS scores",
+		"JOIN tags AS scored_tags",
+		"scored_tags.is_active = TRUE",
 		"scores.tag_name_snapshot",
 		"scores.tag_persona_snapshot",
 		"scores.tag_audience_count_snapshot",
@@ -64,6 +66,7 @@ func TestAvailableSmartTagsQueryPrefersScoreSnapshotWithCatalogFallback(t *testi
 		"FROM tags",
 		"NOT EXISTS",
 		"FROM current_bundle_tag_scores AS existing_scores",
+		"existing_tags.is_active = TRUE",
 	} {
 		if !strings.Contains(sql, fragment) {
 			t.Fatalf("available-tag query does not contain %q:\n%s", fragment, sql)

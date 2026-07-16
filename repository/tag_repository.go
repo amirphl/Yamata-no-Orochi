@@ -74,7 +74,7 @@ func (r *TagRepositoryImpl) ListByNames(ctx context.Context, names []string) ([]
 
 func (r *TagRepositoryImpl) ListActiveAfterID(ctx context.Context, afterID *uint, limit int) ([]*models.Tag, error) {
 	db := r.getDB(ctx).Model(&models.Tag{}).
-		Where("COALESCE(is_active, TRUE) = TRUE")
+		Where("is_active = ?", true)
 
 	if afterID != nil && *afterID > 0 {
 		db = db.Where("id > ?", *afterID)

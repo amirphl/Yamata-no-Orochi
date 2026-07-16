@@ -302,6 +302,7 @@ func (r *BundleTagEvaluationReadRepositoryImpl) ListPendingRuns(ctx context.Cont
 
 func (r *BundleTagEvaluationReadRepositoryImpl) ListCurrentScoresByBundleID(ctx context.Context, bundleID uint, limit, offset int) ([]*models.CurrentBundleTagScore, error) {
 	query := r.getDB(ctx).Model(&models.CurrentBundleTagScore{}).
+		Joins("JOIN tags AS active_tags ON active_tags.id = current_bundle_tag_scores.tag_id AND active_tags.is_active = ?", true).
 		Where("bundle_id = ?", bundleID).
 		Order("bundle_fit_score DESC, tag_id ASC")
 	if limit > 0 {
@@ -320,6 +321,7 @@ func (r *BundleTagEvaluationReadRepositoryImpl) ListCurrentScoresByBundleID(ctx 
 func (r *BundleTagEvaluationReadRepositoryImpl) CountCurrentScoresByBundleID(ctx context.Context, bundleID uint) (int64, error) {
 	var count int64
 	err := r.getDB(ctx).Model(&models.CurrentBundleTagScore{}).
+		Joins("JOIN tags AS active_tags ON active_tags.id = current_bundle_tag_scores.tag_id AND active_tags.is_active = ?", true).
 		Where("bundle_id = ?", bundleID).
 		Count(&count).Error
 	return count, err
