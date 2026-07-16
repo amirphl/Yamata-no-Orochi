@@ -23,6 +23,7 @@ type SmartTagOpenAIResult struct {
 	RequestPayload     json.RawMessage
 	RawResponse        string
 	HTTPStatusCode     int
+	RetryAfter         time.Duration
 	ProviderResponseID *string
 	ModelName          string
 	UsageMetadata      json.RawMessage
@@ -144,6 +145,7 @@ func (c *smartTagOpenAIClient) CallResponsesAPI(ctx context.Context, payload map
 
 	result.RawResponse = string(body)
 	result.HTTPStatusCode = resp.StatusCode
+	result.RetryAfter = parseRetryAfter(resp.Header.Get("Retry-After"), respondedAt)
 	result.RespondedAt = respondedAt
 
 	var decoded map[string]any
@@ -169,6 +171,22 @@ func (c *smartTagOpenAIClient) CallResponsesAPI(ctx context.Context, payload map
 	}
 
 	return result, nil
+}
+
+func parseRetryAfter(raw string, now time.Time) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if seconds, err := time.ParseDuration(raw + "s"); err == nil && seconds > 0 {
+		return seconds
+	}
+	if retryAt, err := http.ParseTime(raw); err == nil {
+		if delay := retryAt.Sub(now); delay > 0 {
+			return delay
+		}
+	}
+	return 0
 }
 
 func openAIErrorMessage(statusCode int, body []byte) string {
