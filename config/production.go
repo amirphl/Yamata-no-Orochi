@@ -436,19 +436,21 @@ type SmartTagPromptConfig struct {
 }
 
 type SmartTagOpenAIConfig struct {
-	APIKeyEnv       string        `json:"api_key_env"`
-	BaseURL         string        `json:"base_url"`
-	Model           string        `json:"model"`
-	ReasoningEffort *string       `json:"reasoning_effort,omitempty"`
-	MaxOutputTokens int           `json:"max_output_tokens"`
-	Temperature     *float64      `json:"temperature,omitempty"`
-	Timeout         time.Duration `json:"timeout"`
-	MaxRetries      int           `json:"max_retries"`
-	HTTPProxy       *string       `json:"http_proxy,omitempty"`
+	APIKeyEnv            string        `json:"api_key_env"`
+	BaseURL              string        `json:"base_url"`
+	Model                string        `json:"model"`
+	ReasoningEffort      *string       `json:"reasoning_effort,omitempty"`
+	MaxOutputTokens      int           `json:"max_output_tokens"`
+	Temperature          *float64      `json:"temperature,omitempty"`
+	Timeout              time.Duration `json:"timeout"`
+	MaxRetries           int           `json:"max_retries"`
+	MaxRequestsPerMinute int           `json:"max_requests_per_minute"`
+	HTTPProxy            *string       `json:"http_proxy,omitempty"`
 }
 
 type SmartTagBatchingConfig struct {
-	TagBatchSize int `json:"tag_batch_size"`
+	TagBatchSize       int `json:"tag_batch_size"`
+	MaxParallelBatches int `json:"max_parallel_batches"`
 }
 
 type SmartTagValidationConfig struct {
@@ -740,18 +742,20 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 				SystemPrompt: tagScoringSystemPrompt,
 			},
 			OpenAI: SmartTagOpenAIConfig{
-				APIKeyEnv:       getEnvString("SMART_TAG_EVALUATION_OPENAI_API_KEY_ENV", "OPENAI_API_KEY"),
-				BaseURL:         getEnvString("SMART_TAG_EVALUATION_OPENAI_BASE_URL", "https://api.openai.com/v1"),
-				Model:           getEnvString("SMART_TAG_EVALUATION_OPENAI_MODEL", ""),
-				ReasoningEffort: getOptionalEnvString("SMART_TAG_EVALUATION_OPENAI_REASONING_EFFORT"),
-				MaxOutputTokens: getEnvInt("SMART_TAG_EVALUATION_OPENAI_MAX_OUTPUT_TOKENS", 8000),
-				Temperature:     getOptionalEnvFloat64("SMART_TAG_EVALUATION_OPENAI_TEMPERATURE"),
-				Timeout:         getEnvDuration("SMART_TAG_EVALUATION_OPENAI_TIMEOUT", 120*time.Second),
-				MaxRetries:      getEnvInt("SMART_TAG_EVALUATION_OPENAI_MAX_RETRIES", 3),
-				HTTPProxy:       getOptionalEnvString("SMART_TAG_EVALUATION_OPENAI_HTTP_PROXY"),
+				APIKeyEnv:            getEnvString("SMART_TAG_EVALUATION_OPENAI_API_KEY_ENV", "OPENAI_API_KEY"),
+				BaseURL:              getEnvString("SMART_TAG_EVALUATION_OPENAI_BASE_URL", "https://api.openai.com/v1"),
+				Model:                getEnvString("SMART_TAG_EVALUATION_OPENAI_MODEL", ""),
+				ReasoningEffort:      getOptionalEnvString("SMART_TAG_EVALUATION_OPENAI_REASONING_EFFORT"),
+				MaxOutputTokens:      getEnvInt("SMART_TAG_EVALUATION_OPENAI_MAX_OUTPUT_TOKENS", 8000),
+				Temperature:          getOptionalEnvFloat64("SMART_TAG_EVALUATION_OPENAI_TEMPERATURE"),
+				Timeout:              getEnvDuration("SMART_TAG_EVALUATION_OPENAI_TIMEOUT", 120*time.Second),
+				MaxRetries:           getEnvInt("SMART_TAG_EVALUATION_OPENAI_MAX_RETRIES", 3),
+				MaxRequestsPerMinute: getEnvInt("SMART_TAG_EVALUATION_OPENAI_MAX_REQUESTS_PER_MINUTE", 60),
+				HTTPProxy:            getOptionalEnvString("SMART_TAG_EVALUATION_OPENAI_HTTP_PROXY"),
 			},
 			Batching: SmartTagBatchingConfig{
-				TagBatchSize: getEnvInt("SMART_TAG_EVALUATION_BATCHING_TAG_BATCH_SIZE", 50),
+				TagBatchSize:       getEnvInt("SMART_TAG_EVALUATION_BATCHING_TAG_BATCH_SIZE", 50),
+				MaxParallelBatches: getEnvInt("SMART_TAG_EVALUATION_BATCHING_MAX_PARALLEL_BATCHES", 4),
 			},
 			Validation: SmartTagValidationConfig{
 				RequireExactTagCount: getEnvBool("SMART_TAG_EVALUATION_VALIDATION_REQUIRE_EXACT_TAG_COUNT", true),
@@ -1074,8 +1078,14 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 		if cfg.SmartTagEvaluation.OpenAI.MaxRetries < 0 {
 			errors = append(errors, "SMART_TAG_EVALUATION_OPENAI_MAX_RETRIES must be zero or greater")
 		}
+		if cfg.SmartTagEvaluation.OpenAI.MaxRequestsPerMinute <= 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_OPENAI_MAX_REQUESTS_PER_MINUTE must be positive")
+		}
 		if cfg.SmartTagEvaluation.Batching.TagBatchSize <= 0 {
 			errors = append(errors, "SMART_TAG_EVALUATION_BATCHING_TAG_BATCH_SIZE must be positive")
+		}
+		if cfg.SmartTagEvaluation.Batching.MaxParallelBatches <= 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_BATCHING_MAX_PARALLEL_BATCHES must be positive")
 		}
 		if cfg.SmartTagEvaluation.Scheduler.PollInterval <= 0 {
 			errors = append(errors, "SMART_TAG_EVALUATION_SCHEDULER_POLL_INTERVAL must be positive")
