@@ -41,6 +41,7 @@ func TestExecutionConfigurationUsesRunSnapshot(t *testing.T) {
 		Validation: config.SmartTagValidationConfig{
 			RequireExactTagCount: true,
 			RequireExactTagIDs:   true,
+			MaxMissingTagCount:   1,
 		},
 	}
 	queuedFlow := &BundleTagEvaluationFlowImpl{cfg: original}
@@ -65,8 +66,8 @@ func TestExecutionConfigurationUsesRunSnapshot(t *testing.T) {
 	if got.PersonaAnalysis.SystemPrompt != "persona-v1" || got.TagScoring.SystemPrompt != "scoring-v1" {
 		t.Fatalf("expected snapshotted prompts, got persona=%q scoring=%q", got.PersonaAnalysis.SystemPrompt, got.TagScoring.SystemPrompt)
 	}
-	if got.OpenAI.Model != "model-v1" || got.Validation.RequireExactTagIDs != true {
-		t.Fatalf("expected snapshotted execution settings, got model=%q exact_ids=%v", got.OpenAI.Model, got.Validation.RequireExactTagIDs)
+	if got.OpenAI.Model != "model-v1" || !got.Validation.RequireExactTagIDs || got.Validation.MaxMissingTagCount != 1 {
+		t.Fatalf("expected snapshotted execution settings, got model=%q exact_ids=%v max_missing=%d", got.OpenAI.Model, got.Validation.RequireExactTagIDs, got.Validation.MaxMissingTagCount)
 	}
 	if got.OpenAI.ReasoningEffort == nil || *got.OpenAI.ReasoningEffort != reasoningEffort ||
 		got.OpenAI.Temperature == nil || *got.OpenAI.Temperature != temperature {
@@ -334,6 +335,7 @@ func TestParseAndValidateBatchResponse(t *testing.T) {
 			Validation: config.SmartTagValidationConfig{
 				RequireExactTagCount: true,
 				RequireExactTagIDs:   true,
+				MaxMissingTagCount:   1,
 			},
 		},
 	}
@@ -410,10 +412,31 @@ func TestParseAndValidateBatchResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("rejects missing tag", func(t *testing.T) {
+	t.Run("accepts one missing tag within tolerance", func(t *testing.T) {
 		raw := `{"output_text":"[{\"tag_id\":11,\"bundle_fit_score\":91,\"fit_level\":\"very_strong\",\"relation_type\":\"direct\",\"reason\":\"foo\"}]"}`
-		if _, _, err := flow.parseAndValidateBatchResponse(raw, tags, flow.cfg.Validation); err == nil {
-			t.Fatalf("expected validation error for missing tag")
+		results, rawResults, err := flow.parseAndValidateBatchResponse(raw, tags, flow.cfg.Validation)
+		if err != nil {
+			t.Fatalf("unexpected validation error for tolerated missing tag: %v", err)
+		}
+		if len(results) != 1 || len(rawResults) != 1 {
+			t.Fatalf("expected one result after ignoring missing tag, got results=%d raw=%d", len(results), len(rawResults))
+		}
+	})
+
+	t.Run("zero tolerance preserves strict validation", func(t *testing.T) {
+		validation := flow.cfg.Validation
+		validation.MaxMissingTagCount = 0
+		raw := `{"output_text":"[{\"tag_id\":11,\"bundle_fit_score\":91,\"fit_level\":\"very_strong\",\"relation_type\":\"direct\",\"reason\":\"foo\"}]"}`
+		if _, _, err := flow.parseAndValidateBatchResponse(raw, tags, validation); err == nil {
+			t.Fatalf("expected validation error with zero missing-tag tolerance")
+		}
+	})
+
+	t.Run("rejects missing tags beyond tolerance", func(t *testing.T) {
+		threeTags := append(append([]models.BundleTagEvaluationTagSnapshot{}, tags...), models.BundleTagEvaluationTagSnapshot{TagID: 13})
+		raw := `{"output_text":"[{\"tag_id\":11,\"bundle_fit_score\":91,\"fit_level\":\"very_strong\",\"relation_type\":\"direct\",\"reason\":\"foo\"}]"}`
+		if _, _, err := flow.parseAndValidateBatchResponse(raw, threeTags, flow.cfg.Validation); err == nil {
+			t.Fatalf("expected validation error when missing tags exceed tolerance")
 		}
 	})
 
@@ -437,6 +460,34 @@ func TestParseAndValidateBatchResponse(t *testing.T) {
 			t.Fatalf("expected validation error for null score")
 		}
 	})
+}
+
+func TestBuildBundleTagScoreRowsSkipsMissingTags(t *testing.T) {
+	score := 91.0
+	run := &models.BundleTagEvaluationRun{ID: 7, BundleID: 8}
+	batch := &models.BundleTagEvaluationBatch{ID: 9}
+	tags := []models.BundleTagEvaluationTagSnapshot{
+		{TagID: 11, TagName: "tag 11"},
+		{TagID: 14989, TagName: "ignored tag"},
+	}
+	results := map[uint]bundleTagScoreResult{
+		11: {
+			TagID:          11,
+			BundleFitScore: &score,
+			FitLevel:       "very_strong",
+			RelationType:   "direct",
+			Reason:         "reason",
+		},
+	}
+	rawResults := map[uint]json.RawMessage{11: json.RawMessage(`{"tag_id":11}`)}
+
+	rows, err := buildBundleTagScoreRows(run, batch, 10, tags, results, rawResults)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(rows) != 1 || rows[0].TagID != 11 {
+		t.Fatalf("expected only tag 11 to produce a score row, got %+v", rows)
+	}
 }
 
 func mustJSON(t *testing.T, value any) []byte {
