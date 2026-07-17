@@ -456,6 +456,7 @@ type SmartTagBatchingConfig struct {
 type SmartTagValidationConfig struct {
 	RequireExactTagCount bool `json:"require_exact_tag_count"`
 	RequireExactTagIDs   bool `json:"require_exact_tag_ids"`
+	MaxMissingTagCount   int  `json:"max_missing_tag_count"`
 }
 
 const (
@@ -760,6 +761,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Validation: SmartTagValidationConfig{
 				RequireExactTagCount: getEnvBool("SMART_TAG_EVALUATION_VALIDATION_REQUIRE_EXACT_TAG_COUNT", true),
 				RequireExactTagIDs:   getEnvBool("SMART_TAG_EVALUATION_VALIDATION_REQUIRE_EXACT_TAG_IDS", true),
+				MaxMissingTagCount:   getEnvInt("SMART_TAG_EVALUATION_VALIDATION_MAX_MISSING_TAG_COUNT", 1),
 			},
 		},
 		IRHTTPSProxy: getEnvString("IR_HTTPS_PROXY", ""),
@@ -1086,6 +1088,9 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 		}
 		if cfg.SmartTagEvaluation.Batching.MaxParallelBatches <= 0 {
 			errors = append(errors, "SMART_TAG_EVALUATION_BATCHING_MAX_PARALLEL_BATCHES must be positive")
+		}
+		if cfg.SmartTagEvaluation.Validation.MaxMissingTagCount < 0 {
+			errors = append(errors, "SMART_TAG_EVALUATION_VALIDATION_MAX_MISSING_TAG_COUNT must be zero or greater")
 		}
 		if cfg.SmartTagEvaluation.Scheduler.PollInterval <= 0 {
 			errors = append(errors, "SMART_TAG_EVALUATION_SCHEDULER_POLL_INTERVAL must be positive")
