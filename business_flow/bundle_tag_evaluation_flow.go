@@ -197,6 +197,7 @@ func (c *pacedOpenAIClient) CallResponsesAPI(ctx context.Context, payload map[st
 type snapshotValidationConfig struct {
 	RequireExactTagCount *bool `json:"require_exact_tag_count,omitempty"`
 	RequireExactTagIDs   *bool `json:"require_exact_tag_ids,omitempty"`
+	MaxMissingTagCount   *int  `json:"max_missing_tag_count,omitempty"`
 }
 
 func NewBundleTagEvaluationFlow(
@@ -524,8 +525,10 @@ func (f *BundleTagEvaluationFlowImpl) ExecuteBundleTagEvaluationRun(ctx context.
 	if err != nil {
 		return f.failRunUnlessCanceled(ctx, run.ID, err)
 	}
-	if totalActual != int64(totalExpected) {
-		return f.failRunUnlessCanceled(ctx, run.ID, fmt.Errorf("score count mismatch: expected %d got %d", totalExpected, totalActual))
+	maxMissingTotal := executionCfg.Validation.MaxMissingTagCount * len(batches)
+	missingTotal := int64(totalExpected) - totalActual
+	if missingTotal < 0 || missingTotal > int64(maxMissingTotal) {
+		return f.failRunUnlessCanceled(ctx, run.ID, fmt.Errorf("score count mismatch: expected %d got %d (maximum missing %d)", totalExpected, totalActual, maxMissingTotal))
 	}
 
 	completedExists, err := f.eventRepo.ExistsByRunIDAndType(ctx, run.ID, models.BundleTagEvaluationEventCompleted)
@@ -536,7 +539,7 @@ func (f *BundleTagEvaluationFlowImpl) ExecuteBundleTagEvaluationRun(ctx context.
 		if err := f.eventRepo.Save(ctx, &models.BundleTagEvaluationEvent{
 			EvaluationRunID: run.ID,
 			EventType:       models.BundleTagEvaluationEventCompleted,
-			Payload:         f.mustMarshalJSON(map[string]any{"message": "evaluation completed", "score_count": totalActual}),
+			Payload:         f.mustMarshalJSON(map[string]any{"message": "evaluation completed", "score_count": totalActual, "missing_tag_count": missingTotal}),
 			CreatedAt:       time.Now().UTC(),
 		}); err != nil {
 			return err
@@ -1102,15 +1105,26 @@ func waitBeforeOpenAIRetry(ctx context.Context, result *services.SmartTagOpenAIR
 }
 
 func (f *BundleTagEvaluationFlowImpl) insertBatchScores(ctx context.Context, run *models.BundleTagEvaluationRun, batch *models.BundleTagEvaluationBatch, batchAttemptID int64, tags []models.BundleTagEvaluationTagSnapshot, results map[uint]bundleTagScoreResult, rawResults map[uint]json.RawMessage) error {
+	scoreRows, err := buildBundleTagScoreRows(run, batch, batchAttemptID, tags, results, rawResults)
+	if err != nil {
+		return err
+	}
+
+	return repository.WithTransaction(ctx, f.db, func(txCtx context.Context) error {
+		return f.scoreRepo.SaveBatch(txCtx, scoreRows)
+	})
+}
+
+func buildBundleTagScoreRows(run *models.BundleTagEvaluationRun, batch *models.BundleTagEvaluationBatch, batchAttemptID int64, tags []models.BundleTagEvaluationTagSnapshot, results map[uint]bundleTagScoreResult, rawResults map[uint]json.RawMessage) ([]*models.BundleTagScore, error) {
 	scoreRows := make([]*models.BundleTagScore, 0, len(tags))
 	for _, tag := range tags {
 		result, ok := results[tag.TagID]
 		if !ok {
-			return fmt.Errorf("missing result for tag %d", tag.TagID)
+			continue
 		}
 		rawResult, ok := rawResults[tag.TagID]
 		if !ok {
-			return fmt.Errorf("missing raw result for tag %d", tag.TagID)
+			return nil, fmt.Errorf("missing raw result for tag %d", tag.TagID)
 		}
 		tagName := tag.TagName
 		tagDisplay := tag.TagDisplayTitle
@@ -1135,12 +1149,14 @@ func (f *BundleTagEvaluationFlowImpl) insertBatchScores(ctx context.Context, run
 		})
 	}
 
-	return repository.WithTransaction(ctx, f.db, func(txCtx context.Context) error {
-		return f.scoreRepo.SaveBatch(txCtx, scoreRows)
-	})
+	return scoreRows, nil
 }
 
 func (f *BundleTagEvaluationFlowImpl) parseAndValidateBatchResponse(raw string, tags []models.BundleTagEvaluationTagSnapshot, validation config.SmartTagValidationConfig) (map[uint]bundleTagScoreResult, map[uint]json.RawMessage, error) {
+	if validation.MaxMissingTagCount < 0 {
+		return nil, nil, fmt.Errorf("maximum missing tag count must not be negative")
+	}
+
 	text, err := extractOpenAIResponseText(raw)
 	if err != nil {
 		return nil, nil, err
@@ -1154,8 +1170,11 @@ func (f *BundleTagEvaluationFlowImpl) parseAndValidateBatchResponse(raw string, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if validation.RequireExactTagCount && len(items) != len(tags) {
-		return nil, nil, fmt.Errorf("unexpected result count: expected %d got %d", len(tags), len(items))
+	if validation.RequireExactTagCount {
+		missingItemCount := len(tags) - len(items)
+		if missingItemCount < 0 || missingItemCount > validation.MaxMissingTagCount {
+			return nil, nil, fmt.Errorf("unexpected result count: expected %d got %d (maximum missing %d)", len(tags), len(items), validation.MaxMissingTagCount)
+		}
 	}
 
 	expectedTags := make(map[uint]struct{}, len(tags))
@@ -1206,12 +1225,14 @@ func (f *BundleTagEvaluationFlowImpl) parseAndValidateBatchResponse(raw string, 
 		rawResults[row.TagID] = append(json.RawMessage(nil), itemJSON...)
 	}
 
-	if validation.RequireExactTagIDs {
-		for _, tag := range tags {
-			if _, ok := results[tag.TagID]; !ok {
-				return nil, nil, fmt.Errorf("missing result for tag_id %d", tag.TagID)
-			}
+	missingTagIDs := make([]uint, 0, validation.MaxMissingTagCount+1)
+	for _, tag := range tags {
+		if _, ok := results[tag.TagID]; !ok {
+			missingTagIDs = append(missingTagIDs, tag.TagID)
 		}
+	}
+	if len(missingTagIDs) > validation.MaxMissingTagCount {
+		return nil, nil, fmt.Errorf("missing results for %d tags %v (maximum missing %d)", len(missingTagIDs), missingTagIDs, validation.MaxMissingTagCount)
 	}
 
 	return results, rawResults, nil
@@ -1312,7 +1333,7 @@ func (f *BundleTagEvaluationFlowImpl) configurationSnapshot() bundleTagEvaluatio
 		proxy = &redactedProxy
 	}
 	return bundleTagEvaluationConfigurationSnapshot{
-		Version:         4,
+		Version:         5,
 		PersonaAnalysis: snapshotPromptConfig{SystemPrompt: &f.cfg.PersonaAnalysis.SystemPrompt},
 		TagScoring:      snapshotPromptConfig{SystemPrompt: &f.cfg.TagScoring.SystemPrompt},
 		OpenAI: snapshotOpenAIConfig{
@@ -1332,6 +1353,7 @@ func (f *BundleTagEvaluationFlowImpl) configurationSnapshot() bundleTagEvaluatio
 		Validation: snapshotValidationConfig{
 			RequireExactTagCount: &f.cfg.Validation.RequireExactTagCount,
 			RequireExactTagIDs:   &f.cfg.Validation.RequireExactTagIDs,
+			MaxMissingTagCount:   &f.cfg.Validation.MaxMissingTagCount,
 		},
 	}
 }
@@ -1398,6 +1420,9 @@ func (f *BundleTagEvaluationFlowImpl) executionConfiguration(run *models.BundleT
 	if snapshot.Validation.RequireExactTagIDs != nil {
 		executionCfg.Validation.RequireExactTagIDs = *snapshot.Validation.RequireExactTagIDs
 	}
+	if snapshot.Validation.MaxMissingTagCount != nil {
+		executionCfg.Validation.MaxMissingTagCount = *snapshot.Validation.MaxMissingTagCount
+	}
 
 	// API credentials and proxy routing deliberately stay operational config;
 	// snapshots contain only a redacted proxy and cannot be used for transport.
@@ -1409,6 +1434,9 @@ func (f *BundleTagEvaluationFlowImpl) executionConfiguration(run *models.BundleT
 	}
 	if executionCfg.OpenAI.MaxRetries < 0 {
 		return executionCfg, fmt.Errorf("evaluation max_retries snapshot must not be negative")
+	}
+	if executionCfg.Validation.MaxMissingTagCount < 0 {
+		return executionCfg, fmt.Errorf("evaluation max_missing_tag_count snapshot must not be negative")
 	}
 	if executionCfg.Batching.MaxParallelBatches <= 0 {
 		// Snapshots written before parallel batch execution did not contain this
