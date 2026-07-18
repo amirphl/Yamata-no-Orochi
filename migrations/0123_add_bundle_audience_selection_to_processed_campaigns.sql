@@ -23,18 +23,29 @@ WHERE processed.audience_selection_id IS NOT NULL
       WHERE bundle_selection.id = processed.audience_selection_id
   );
 
-ALTER TABLE processed_campaigns
-    ADD CONSTRAINT processed_campaigns_single_audience_selection
-    CHECK (
-        num_nonnulls(audience_selection_id, bundle_audience_selection_id) <= 1
-        AND (
-            audience_selection_id IS NULL
-            OR NULLIF(campaign_json ->> 'bundle_id', '') IS NULL
-        )
-        AND (
-            bundle_audience_selection_id IS NULL
-            OR NULLIF(campaign_json ->> 'bundle_id', '') IS NOT NULL
-        )
-    );
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'processed_campaigns'::regclass
+          AND conname = 'processed_campaigns_single_audience_selection'
+    ) THEN
+        ALTER TABLE processed_campaigns
+            ADD CONSTRAINT processed_campaigns_single_audience_selection
+            CHECK (
+                num_nonnulls(audience_selection_id, bundle_audience_selection_id) <= 1
+                AND (
+                    audience_selection_id IS NULL
+                    OR NULLIF(campaign_json ->> 'bundle_id', '') IS NULL
+                )
+                AND (
+                    bundle_audience_selection_id IS NULL
+                    OR NULLIF(campaign_json ->> 'bundle_id', '') IS NOT NULL
+                )
+            );
+    END IF;
+END
+$$;
 
 COMMIT;
