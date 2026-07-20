@@ -1005,6 +1005,7 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 		fakeJob := &models.CampaignStatusJob{
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       uuid.NewString(),
+			Platform:            models.CampaignPlatformSMS,
 			TrackingIDs:         pq.StringArray(trackingIDs),
 			RetryCount:          0,
 			ScheduledAt:         now,
@@ -1077,6 +1078,7 @@ func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, proc
 		jobs = append(jobs, &models.CampaignStatusJob{
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       corrID,
+			Platform:            models.CampaignPlatformSMS,
 			TrackingIDs:         pq.StringArray(filteredTrackingIDs),
 			RetryCount:          0,
 			ScheduledAt:         now.Add(off),
@@ -1101,7 +1103,7 @@ func (s *SMSCampaignScheduler) startStatusJobWorker(parent context.Context) {
 			}
 
 			listCtx, listCancel := context.WithTimeout(parent, 30*time.Second)
-			jobs, err := s.jobRepo.ListDue(listCtx, utils.UTCNow(), numJobsPerTick)
+			jobs, err := s.jobRepo.ListDue(listCtx, models.CampaignPlatformSMS, utils.UTCNow(), numJobsPerTick)
 			listCancel()
 			if err != nil {
 				s.logger.Printf("SMS scheduler: list status jobs failed: %v", err)
@@ -1148,7 +1150,8 @@ func (s *SMSCampaignScheduler) startStatusJobWorker(parent context.Context) {
 }
 
 func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.CampaignStatusJob, jazzAccessToken string) error {
-	statusItems, fetchErr := s.smsClient.FetchStatus(ctx, jazzAccessToken, []string(job.TrackingIDs))
+	statusResult, fetchErr := s.smsClient.FetchStatus(ctx, jazzAccessToken, []string(job.TrackingIDs))
+	job.RawProviderResponse = statusResult.RawResponse
 	if fetchErr != nil {
 		now := utils.UTCNow()
 		job.RetryCount++
@@ -1165,6 +1168,7 @@ func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.
 		}
 		return fetchErr
 	}
+	statusItems := statusResult.Items
 
 	txErr := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		now := utils.UTCNow()

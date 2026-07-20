@@ -1014,6 +1014,7 @@ func (s *SplusCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, pr
 		jobs = append(jobs, &models.CampaignStatusJob{
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       corrID,
+			Platform:            models.CampaignPlatformSPlus,
 			TrackingIDs:         pq.StringArray(filteredTrackingIDs),
 			RetryCount:          0,
 			ScheduledAt:         now.Add(off),
@@ -1038,7 +1039,7 @@ func (s *SplusCampaignScheduler) startStatusJobWorker(parent context.Context) {
 			}
 
 			listCtx, listCancel := context.WithTimeout(parent, 30*time.Second)
-			jobs, err := s.jobRepo.ListDue(listCtx, utils.UTCNow(), numJobsPerTick)
+			jobs, err := s.jobRepo.ListDue(listCtx, models.CampaignPlatformSPlus, utils.UTCNow(), numJobsPerTick)
 			listCancel()
 			if err != nil {
 				s.logger.Printf("Splus scheduler: list status jobs failed: %v", err)

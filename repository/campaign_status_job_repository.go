@@ -30,14 +30,14 @@ func (r *CampaignStatusJobRepositoryImpl) ByID(ctx context.Context, id uint) (*m
 	return &row, nil
 }
 
-// ListDue returns jobs scheduled before or at 'now' with retry_count < 3
-func (r *CampaignStatusJobRepositoryImpl) ListDue(ctx context.Context, now time.Time, limit int) ([]*models.CampaignStatusJob, error) {
+// ListDue returns jobs for one platform scheduled before or at 'now' with retry_count < 3.
+func (r *CampaignStatusJobRepositoryImpl) ListDue(ctx context.Context, platform string, now time.Time, limit int) ([]*models.CampaignStatusJob, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	db := r.getDB(ctx)
 	var rows []*models.CampaignStatusJob
-	if err := db.Where("scheduled_at <= ? AND retry_count < ? AND executed_at IS NULL", now, 3).
+	if err := db.Where("platform = ? AND scheduled_at <= ? AND retry_count < ? AND executed_at IS NULL", platform, now, 3).
 		Order("scheduled_at ASC, id ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {

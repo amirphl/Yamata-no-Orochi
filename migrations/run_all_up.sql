@@ -356,5 +356,14 @@
 \echo 'Running 0116_add_bundle_update_audit_actions.sql...'
 \i migrations/0116_add_bundle_update_audit_actions.sql
 
+\echo 'Running 0117_create_smart_tag_evaluation.sql...'
+\i migrations/0117_create_smart_tag_evaluation.sql
+
+\echo 'Running 0118_scope_campaign_status_jobs_by_platform.sql...'
+\i migrations/0118_scope_campaign_status_jobs_by_platform.sql
+
+\echo 'Running 0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql...'
+\i migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 

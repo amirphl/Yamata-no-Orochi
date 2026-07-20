@@ -26,7 +26,6 @@ import (
 type LoginFlow interface {
 	Login(ctx context.Context, request *dto.LoginRequest, metadata *ClientMetadata) (*dto.LoginResponse, error)
 	RequestLoginOTP(ctx context.Context, request *dto.LoginOTPRequest, metadata *ClientMetadata) (*dto.LoginOTPResponse, error)
-	VerifyLoginOTP(ctx context.Context, request *dto.LoginOTPVerifyRequest, metadata *ClientMetadata) (*dto.LoginOTPVerifyResponse, error)
 	ForgotPassword(ctx context.Context, request *dto.ForgotPasswordRequest, metadata *ClientMetadata) (*dto.ForgetPasswordResponse, error)
 	ResetPassword(ctx context.Context, request *dto.ResetPasswordRequest, metadata *ClientMetadata) (*dto.ResetPasswordResponse, error)
 }
@@ -75,7 +74,7 @@ func NewLoginFlow(
 	}
 }
 
-// Login authenticates a user with email/mobile and password
+// Login authenticates a user with a mobile number, password, and OTP.
 func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metadata *ClientMetadata) (*dto.LoginResponse, error) {
 	// Validate business rules
 	if err := lf.validateLoginRequest(req); err != nil {
@@ -89,11 +88,12 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 
 	var customer *models.Customer
 	var resp *dto.LoginResponse
+	var newlyVerified bool
 
 	err := repository.WithTransaction(ctx, lf.db, func(txCtx context.Context) error {
-		// Find customer by email or mobile
+		// Login is mobile-only because the OTP is sent to that mobile number.
 		var err error
-		customer, err = lf.findCustomerByIdentifier(txCtx, req.Identifier)
+		customer, err = lf.customerRepo.ByMobile(txCtx, req.Identifier)
 		if err != nil {
 			return err
 		}
@@ -118,9 +118,24 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 			return ErrAccountTypeNotFound
 		}
 
-		// Check mobile number is verified
+		// Verify and consume the OTP only after the password has been accepted.
+		if err := lf.verifyLoginOTP(txCtx, customer.ID, req.OTPCode); err != nil {
+			return err
+		}
+
+		// A valid login OTP also verifies the customer's mobile number.
 		if !utils.IsTrue(customer.IsMobileVerified) {
-			return ErrAuthenticationFailed
+			if err := lf.completeSignupAfterLogin(txCtx, customer); err != nil {
+				return err
+			}
+			newlyVerified = true
+			updated, err := lf.customerRepo.ByID(txCtx, customer.ID)
+			if err != nil {
+				return err
+			}
+			if updated != nil {
+				customer = updated
+			}
 		}
 
 		// Create new session
@@ -138,7 +153,7 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 	})
 
 	if err != nil {
-		if IsAuthenticationFailed(err) {
+		if IsAuthenticationFailed(err) || IsNoValidOTPFound(err) || IsInvalidOTPCode(err) {
 			_ = lf.recordFailedLoginAttempt(ctx, req.Identifier, metadata)
 		}
 		errMsg := fmt.Sprintf("Login failed for identifier %s: %s", req.Identifier, err.Error())
@@ -147,6 +162,11 @@ func (lf *LoginFlowImpl) Login(ctx context.Context, req *dto.LoginRequest, metad
 		return nil, NewBusinessError("LOGIN_FAILED", "Login failed", err)
 	}
 	_ = lf.clearFailedLoginAttempts(ctx, req.Identifier, metadata)
+
+	if newlyVerified {
+		msg := fmt.Sprintf("Signup completed successfully for customer %d", customer.ID)
+		_ = lf.createAuditLog(ctx, customer, models.AuditActionSignupCompleted, msg, true, nil, metadata)
+	}
 
 	msg := fmt.Sprintf("User logged in successfully for identifier %s", req.Identifier)
 	_ = lf.createAuditLog(ctx, customer, models.AuditActionLoginSuccess, msg, true, nil, metadata)
@@ -164,15 +184,12 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 	}
 	req.Identifier = normalizeLoginIdentifier(req.Identifier)
 
-	customer, err := lf.findCustomerByIdentifier(ctx, req.Identifier)
+	customer, err := lf.customerRepo.ByMobile(ctx, req.Identifier)
 	if err != nil {
 		return nil, err
 	}
-	if customer == nil {
+	if customer == nil || !utils.IsTrue(customer.IsActive) {
 		return nil, ErrCustomerNotFound
-	}
-	if !utils.IsTrue(customer.IsActive) {
-		return nil, ErrAccountInactive
 	}
 
 	key := lf.loginOTPKey(customer.ID)
@@ -237,80 +254,6 @@ func (lf *LoginFlowImpl) RequestLoginOTP(ctx context.Context, req *dto.LoginOTPR
 		AlreadySent: false,
 		OTPExpiry:   expiresAt,
 	}, nil
-}
-
-// VerifyLoginOTP verifies a login OTP and issues tokens.
-func (lf *LoginFlowImpl) VerifyLoginOTP(ctx context.Context, req *dto.LoginOTPVerifyRequest, metadata *ClientMetadata) (*dto.LoginOTPVerifyResponse, error) {
-	if err := lf.validateVerifyLoginOTPRequest(req); err != nil {
-		return nil, NewBusinessError("LOGIN_OTP_VALIDATION_FAILED", "Login OTP validation failed", err)
-	}
-
-	var customer models.Customer
-	var resp *dto.LoginOTPVerifyResponse
-	var newlyVerified bool
-
-	err := repository.WithTransaction(ctx, lf.db, func(txCtx context.Context) error {
-		existing, err := lf.customerRepo.ByID(txCtx, req.CustomerID)
-		if err != nil {
-			return err
-		}
-		if existing == nil {
-			return ErrCustomerNotFound
-		}
-		if !utils.IsTrue(existing.IsActive) {
-			return ErrAccountInactive
-		}
-		customer = *existing
-
-		if err := lf.verifyLoginOTP(txCtx, req.CustomerID, req.OTPCode); err != nil {
-			return err
-		}
-
-		// If not verified yet, mark mobile verified and run post-verification logic.
-		if !utils.IsTrue(customer.IsMobileVerified) {
-			if err := lf.completeSignupAfterLogin(txCtx, &customer); err != nil {
-				return err
-			}
-			newlyVerified = true
-			updated, err := lf.customerRepo.ByID(txCtx, customer.ID)
-			if err != nil {
-				return err
-			}
-			if updated != nil {
-				customer = *updated
-			}
-		}
-
-		session, err := lf.createSession(txCtx, customer.ID, metadata)
-		if err != nil {
-			return err
-		}
-
-		resp = &dto.LoginOTPVerifyResponse{
-			Customer: ToAuthCustomerDTO(customer),
-			Session:  ToCustomerSessionDTO(*session),
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		errMsg := fmt.Sprintf("Login OTP verification failed for customer %d: %s", req.CustomerID, err.Error())
-		if customer.ID != 0 {
-			_ = lf.createAuditLog(ctx, &customer, models.AuditActionLoginFailed, errMsg, false, &errMsg, metadata)
-		}
-		return nil, NewBusinessError("LOGIN_OTP_VERIFY_FAILED", "Login OTP verification failed", err)
-	}
-
-	if newlyVerified {
-		msg := fmt.Sprintf("Signup completed successfully for customer %d", customer.ID)
-		_ = lf.createAuditLog(ctx, &customer, models.AuditActionSignupCompleted, msg, true, nil, metadata)
-	}
-
-	msg := fmt.Sprintf("User logged in successfully via OTP for customer %d", customer.ID)
-	_ = lf.createAuditLog(ctx, &customer, models.AuditActionLoginSuccess, msg, true, nil, metadata)
-
-	return resp, nil
 }
 
 // ForgotPassword initiates the password reset process
@@ -648,8 +591,8 @@ func (lf *LoginFlowImpl) createAuditLog(ctx context.Context, customer *models.Cu
 }
 
 func (lf *LoginFlowImpl) validateLoginRequest(request *dto.LoginRequest) error {
-	// Validate identifier is not empty
-	if strings.TrimSpace(request.Identifier) == "" {
+	// Login is intentionally mobile-only; email identifiers cannot receive the OTP.
+	if strings.TrimSpace(request.Identifier) == "" || strings.Contains(request.Identifier, "@") {
 		return ErrAuthenticationFailed
 	}
 
@@ -658,22 +601,16 @@ func (lf *LoginFlowImpl) validateLoginRequest(request *dto.LoginRequest) error {
 		return ErrAuthenticationFailed
 	}
 
+	if !isSixDigitCode(request.OTPCode) {
+		return ErrInvalidOTPCode
+	}
+
 	return nil
 }
 
 func (lf *LoginFlowImpl) validateLoginOTPRequest(request *dto.LoginOTPRequest) error {
-	if strings.TrimSpace(request.Identifier) == "" {
+	if strings.TrimSpace(request.Identifier) == "" || strings.Contains(request.Identifier, "@") {
 		return ErrCustomerNotFound
-	}
-	return nil
-}
-
-func (lf *LoginFlowImpl) validateVerifyLoginOTPRequest(request *dto.LoginOTPVerifyRequest) error {
-	if request.CustomerID == 0 {
-		return ErrCustomerNotFound
-	}
-	if !isSixDigitCode(request.OTPCode) {
-		return ErrInvalidOTPCode
 	}
 	return nil
 }

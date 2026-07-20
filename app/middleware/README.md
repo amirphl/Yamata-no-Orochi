@@ -1,174 +1,163 @@
-# Authentication Middleware
+# HTTP Middleware
 
-This middleware provides JWT token validation for protecting API endpoints.
+This package contains the Fiber v3 authentication, admin authorization, and Prometheus HTTP metrics middleware used by `app/router/routes.go`.
 
-## Features
+## Authentication Contexts
 
-- **JWT Token Validation**: Validates Bearer tokens from Authorization header
-- **Error Handling**: Provides specific error codes for different failure scenarios
-- **Context Injection**: Stores user information in request context for downstream handlers
-- **Optional Authentication**: Supports endpoints that can work with or without authentication
+The backend has separate JWT validators and claims for each principal type:
 
-## Usage
+| Principal | Middleware | Context ID | Claims type |
+|---|---|---|---|
+| Customer | `Authenticate()` | `customer_id` | `*services.TokenClaims` |
+| Admin | `AdminAuthenticate()` | `admin_id` | `*services.AdminTokenClaims` |
+| Bot | `BotAuthenticate()` | `bot_id` | `*services.BotTokenClaims` |
 
-### 1. Initialize the Middleware
+All three also set `token_id` and `token_claims`. If the request contains `X-Request-ID`, they copy it to `request_id`. The router's request-ID middleware normally creates that header before authentication runs.
+
+Tokens must use this header format:
+
+```http
+Authorization: Bearer <access-token>
+```
+
+Customer, admin, and bot tokens are not interchangeable; each validator checks its own claim type.
+
+## Construction
+
+`AuthMiddleware` depends on the `services.TokenService` interface. The production application builds it from the JWT configuration in `main.go`.
 
 ```go
-import (
-    "github.com/amirphl/Yamata-no-Orochi/app/middleware"
-    "github.com/amirphl/Yamata-no-Orochi/app/services"
-)
-
-// Create token service
 tokenService, err := services.NewTokenService(
-    15*time.Minute,  // Access token TTL
-    7*24*time.Hour,  // Refresh token TTL
-    "your-app",      // Issuer
-    "your-audience", // Audience
+    15*time.Minute,
+    7*24*time.Hour,
+    "yamata-no-orochi",
+    "yamata-api",
+    false,                 // use RSA keys
+    "",                    // private key PEM
+    "",                    // public key PEM
+    "replace-with-secret", // HMAC secret
 )
+if err != nil {
+    return err
+}
 
-// Create auth middleware
-authMiddleware := middleware.NewAuthMiddleware(tokenService)
+auth := middleware.NewAuthMiddleware(tokenService)
 ```
 
-### 2. Protect Routes with Authentication
+For RSA signing, pass `true` and provide the private/public PEM values. Environment-backed construction uses the `JWT_*` settings documented in `env.template`.
+
+## Protecting Routes
+
+Apply the middleware to a group when every endpoint has the same principal type:
 
 ```go
-// Routes that require authentication
-app.Post("/api/protected", authMiddleware.Authenticate(), yourHandler)
-app.Get("/api/profile", authMiddleware.Authenticate(), profileHandler)
-app.Put("/api/settings", authMiddleware.Authenticate(), settingsHandler)
+customerRoutes := app.Group("/api/v1/campaigns")
+customerRoutes.Use(auth.Authenticate())
+customerRoutes.Get("/", listCampaigns)
+
+botRoutes := app.Group("/api/v1/bot/campaigns")
+botRoutes.Use(auth.BotAuthenticate())
+botRoutes.Use(middleware.RequireBotAuth)
+botRoutes.Get("/ready", listReadyCampaigns)
 ```
 
-### 3. Optional Authentication
+Admin routes additionally use the authorization middleware:
 
 ```go
-// Routes that can work with or without authentication
-app.Get("/api/public-data", authMiddleware.OptionalAuth(), publicDataHandler)
+authz := middleware.NewAuthorizationMiddleware(adminRepository)
+
+adminRoutes := app.Group("/api/v1/admin/campaigns")
+adminRoutes.Use(auth.AdminAuthenticate())
+adminRoutes.Use(middleware.RequireAdminAuth)
+adminRoutes.Use(authz.AdminAuthorize())
+adminRoutes.Get("/", listCampaigns)
 ```
 
-### 4. Access User Information in Handlers
+`AdminAuthorize()` resolves the method and route through `app/authorization/registry.go`, loads the admin, rejects inactive admins, and checks the required permission. An unmapped protected route fails closed with `PERMISSION_NOT_MAPPED`.
+
+## Optional Customer Authentication
+
+`OptionalAuth()` attempts customer-token validation only when a valid Bearer header is present. Missing, malformed, empty, expired, revoked, or invalid tokens are ignored and the request continues unauthenticated. Use it only when the handler is designed for both public and authenticated callers.
 
 ```go
-func yourHandler(c fiber.Ctx) error {
-    // Get customer ID from context
-    customerID, exists := middleware.GetCustomerIDFromContext(c)
-    if !exists {
-        return c.Status(401).JSON(fiber.Map{"error": "Not authenticated"})
+app.Get("/public-or-personalized", auth.OptionalAuth(), handler)
+```
+
+Do not use `OptionalAuth()` as protection for a private route.
+
+## Reading Context in Handlers
+
+Use the helpers instead of reading `Locals` directly when only the principal ID is needed:
+
+```go
+func profile(c fiber.Ctx) error {
+    customerID, ok := middleware.GetCustomerIDFromContext(c)
+    if !ok {
+        return c.SendStatus(fiber.StatusUnauthorized)
     }
-    
-    // Get full token claims
-    claims, exists := middleware.GetTokenClaimsFromContext(c)
-    if exists {
-        // Use claims.CustomerID, claims.TokenID, etc.
-    }
-    
-    // Your handler logic here
-    return c.JSON(fiber.Map{"message": "Protected data"})
-}
-```
 
-## Error Responses
-
-The middleware returns standardized error responses:
-
-### Missing Authorization Header
-```json
-{
-  "success": false,
-  "message": "Authorization header is required",
-  "error": {
-    "code": "MISSING_AUTHORIZATION_HEADER"
-  }
-}
-```
-
-### Invalid Token Format
-```json
-{
-  "success": false,
-  "message": "Invalid authorization header format. Expected 'Bearer <token>'",
-  "error": {
-    "code": "INVALID_AUTHORIZATION_FORMAT"
-  }
-}
-```
-
-### Expired Token
-```json
-{
-  "success": false,
-  "message": "Access token has expired",
-  "error": {
-    "code": "TOKEN_EXPIRED"
-  }
-}
-```
-
-### Invalid Token
-```json
-{
-  "success": false,
-  "message": "Invalid access token",
-  "error": {
-    "code": "TOKEN_INVALID"
-  }
-}
-```
-
-### Revoked Token
-```json
-{
-  "success": false,
-  "message": "Access token has been revoked",
-  "error": {
-    "code": "TOKEN_REVOKED"
-  }
-}
-```
-
-## Helper Functions
-
-### `GetCustomerIDFromContext(c fiber.Ctx) (uint, bool)`
-Extracts the customer ID from the request context.
-
-### `GetTokenClaimsFromContext(c fiber.Ctx) (*services.TokenClaims, bool)`
-Extracts the full token claims from the request context.
-
-### `RequireAuth(c fiber.Ctx) error`
-Helper function to ensure authentication is required in handlers.
-
-## Example Integration
-
-```go
-// In your main.go or router setup
-func setupProtectedRoutes(app *fiber.App, authMiddleware *middleware.AuthMiddleware) {
-    // Protected routes group
-    protected := app.Group("/api", authMiddleware.Authenticate())
-    
-    protected.Get("/profile", profileHandler)
-    protected.Put("/profile", updateProfileHandler)
-    protected.Get("/settings", settingsHandler)
-    protected.Post("/logout", logoutHandler)
-}
-
-func profileHandler(c fiber.Ctx) error {
-    customerID, _ := middleware.GetCustomerIDFromContext(c)
-    
-    // Fetch user profile using customerID
-    profile := getUserProfile(customerID)
-    
+    claims, _ := middleware.GetTokenClaimsFromContext(c)
     return c.JSON(fiber.Map{
-        "success": true,
-        "data": profile,
+        "customer_id": customerID,
+        "token_id":    claims.TokenID,
     })
 }
 ```
 
-## Security Notes
+Available helpers:
 
-1. **Token Storage**: In production, implement proper token revocation using Redis or database
-2. **HTTPS**: Always use HTTPS in production to protect tokens in transit
-3. **Token Expiration**: Set appropriate token expiration times
-4. **Rate Limiting**: Consider adding rate limiting to authentication endpoints
-5. **Logging**: Log authentication failures for security monitoring 
+- `GetCustomerIDFromContext(c) (uint, bool)`
+- `GetAdminIDFromContext(c) (uint, bool)`
+- `GetBotIDFromContext(c) (uint, bool)`
+- `GetTokenClaimsFromContext(c) (*services.TokenClaims, bool)` for customer claims
+- `RequireAuth(c) error`
+- `RequireAdminAuth(c) error`
+- `RequireBotAuth(c) error`
+
+Admin and bot claim objects remain available under `c.Locals("token_claims")` with their respective concrete types.
+
+## Authentication Errors
+
+Authentication failures return HTTP `401` in the shared `dto.APIResponse` envelope. Current codes are:
+
+| Code | Cause |
+|---|---|
+| `MISSING_AUTHORIZATION_HEADER` | No `Authorization` header |
+| `INVALID_AUTHORIZATION_FORMAT` | Header does not start with `Bearer ` |
+| `MISSING_ACCESS_TOKEN` | Bearer value is empty |
+| `TOKEN_EXPIRED` | Access token has expired |
+| `TOKEN_INVALID` | Signature, claims, or token type is invalid |
+| `TOKEN_REVOKED` | Token ID is in the in-process revocation set |
+| `TOKEN_VALIDATION_FAILED` | Other validation error |
+
+The `Require*` helpers return principal-specific missing/invalid ID codes. Admin authorization returns `401`, `403`, or `500` depending on missing identity, permission/inactive state, or repository failure.
+
+## Service-Account Permission Header
+
+`AuthorizationMiddleware.ServiceAccountAuthorize(required)` checks a comma-separated `X-Service-Permissions` header for a specific permission key. It does not authenticate the caller by itself. Only use it behind a trusted service-authentication boundary.
+
+## Prometheus Metrics
+
+`Metrics()` records:
+
+- `http_requests_total{method,route,status}`
+- `http_request_duration_seconds{method,route,status}`
+- `http_inflight_requests`
+
+It prefers the matched Fiber route template for the `route` label to avoid high-cardinality path labels. Register it as application middleware:
+
+```go
+app.Use(middleware.Metrics())
+```
+
+The Prometheus endpoint itself is served by the separate metrics server started in `main.go`, not by this package.
+
+## Tests and Security Notes
+
+Run the package tests with:
+
+```bash
+go test ./app/middleware/...
+```
+
+The current token revocation store is process-local memory, so revocations are not shared across replicas and are lost on restart. Production traffic should use HTTPS, authentication routes should remain rate-limited, JWT keys/secrets must stay outside source control, and permission-protected admin routes must be registered in the central authorization registry.

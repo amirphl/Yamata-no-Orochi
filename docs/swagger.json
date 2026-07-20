@@ -365,7 +365,7 @@
         },
         "/api/v1/admin/campaigns": {
             "get": {
-                "description": "Retrieve campaigns by title, status, start date, and end date",
+                "description": "Retrieve campaigns by campaign title, bundle title, customer name, status, start date, and end date",
                 "produces": [
                     "application/json"
                 ],
@@ -376,13 +376,25 @@
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by title (contains)",
-                        "name": "title",
+                        "description": "Filter by campaign title (contains)",
+                        "name": "campaign_title",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "Filter by status (initiated|in_progress|waiting_for_approval|approved|rejected|expired)",
+                        "description": "Filter by bundle title (contains)",
+                        "name": "bundle_title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by customer name (contains, matches first/last name or company)",
+                        "name": "customer_name",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by status (initiated|in-progress|waiting-for-approval|approved|rejected|expired)",
                         "name": "status",
                         "in": "query"
                     },
@@ -3057,7 +3069,7 @@
         },
         "/api/v1/auth/login": {
             "post": {
-                "description": "Authenticate user with email/mobile and password",
+                "description": "Authenticate user with a mobile number, password, and OTP. Both credentials must be valid.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3181,93 +3193,6 @@
                     },
                     "400": {
                         "description": "Validation error",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "User not found",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Cache not available",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/auth/login/otp/verify": {
-            "post": {
-                "description": "Verify a one-time password for login and issue tokens",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Authentication"
-                ],
-                "summary": "Verify Login OTP",
-                "parameters": [
-                    {
-                        "description": "Login OTP verification request",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/dto.LoginOTPVerifyRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Login successful",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/dto.APIResponse"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "type": "object",
-                                            "properties": {
-                                                "access_token": {
-                                                    "type": "string"
-                                                },
-                                                "customer": {
-                                                    "$ref": "#/definitions/dto.AuthCustomerDTO"
-                                                },
-                                                "expires_in": {
-                                                    "type": "integer"
-                                                },
-                                                "refresh_token": {
-                                                    "type": "string"
-                                                },
-                                                "token_type": {
-                                                    "type": "string"
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid OTP or request",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -3792,6 +3717,64 @@
                 }
             }
         },
+        "/api/v1/bot/campaigns/{id}/audience-uids": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bot Campaigns"
+                ],
+                "summary": "Bot Push Campaign Audience UIDs",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Campaign ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Audience UIDs batch",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.BotPushAudienceUIDsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.BotPushAudienceUIDsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/bot/campaigns/{id}/executed": {
             "post": {
                 "produces": [
@@ -4192,6 +4175,519 @@
                 }
             }
         },
+        "/api/v1/bundles": {
+            "get": {
+                "description": "List bundles for the authenticated customer with optional filters and pagination",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "List bundles",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Items per page",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Title filter",
+                        "name": "title",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Target customer name filter",
+                        "name": "target_customer_name",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListBundlesResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Create a new bundle for the authenticated customer",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Create bundle",
+                "parameters": [
+                    {
+                        "description": "Bundle payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.CreateBundleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.CreateBundleResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bundles/{id}": {
+            "get": {
+                "description": "Get a single bundle by ID for the authenticated customer",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Get bundle",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Bundle ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.GetBundleResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "description": "Update an existing bundle for the authenticated customer",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Update bundle",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Bundle ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Bundle payload",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UpdateBundleRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Updated",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.UpdateBundleResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bundles/{id}/tag-evaluation": {
+            "get": {
+                "description": "Retrieve the current smart tag evaluation status for the authenticated customer's bundle",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Get bundle tag evaluation status",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Bundle ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.GetBundleTagEvaluationStatusResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid bundle ID",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bundles/{id}/tag-evaluations": {
+            "post": {
+                "description": "Start an async smart tag evaluation run for the authenticated customer's bundle",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "Request bundle tag evaluation",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Bundle ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.RequestBundleTagEvaluationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid bundle ID",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Evaluation already active or feature disabled",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/bundles/{id}/tag-scores": {
+            "get": {
+                "description": "Retrieve paginated current smart tag scores for the authenticated customer's bundle",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Bundles"
+                ],
+                "summary": "List bundle tag scores",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Bundle ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "Page number",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Items per page",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Retrieved",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.ListBundleTagScoresResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid bundle ID or pagination",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns": {
             "get": {
                 "description": "Retrieve the authenticated user's campaigns with pagination, ordering, and filters",
@@ -4574,6 +5070,76 @@
                 }
             }
         },
+        "/api/v1/campaigns/hide": {
+            "post": {
+                "description": "Mark campaigns as hidden from the authenticated caller's campaign list",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Hide Campaigns",
+                "parameters": [
+                    {
+                        "description": "Campaign IDs to hide",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.HideCampaignsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Campaigns hidden successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.HideCampaignsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "One or more campaigns not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns/initiated/last": {
             "get": {
                 "description": "Retrieve the most recent campaign with status initiated for the authenticated user",
@@ -4687,6 +5253,76 @@
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/unhide": {
+            "post": {
+                "description": "Mark campaigns as visible in the authenticated caller's campaign list",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Unhide Campaigns",
+                "parameters": [
+                    {
+                        "description": "Campaign IDs to unhide",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dto.UnhideCampaignsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Campaigns unhidden successfully",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.UnhideCampaignsResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error or invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "One or more campaigns not found",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -4843,6 +5479,59 @@
                     },
                     "403": {
                         "description": "Forbidden - campaign access denied or update not allowed",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Campaign not found",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/click-report": {
+            "get": {
+                "description": "Export a CSV showing which targeted audience members clicked the campaign short link",
+                "produces": [
+                    "text/csv"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Export Campaign Click Report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "CSV file",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "schema": {
+                            "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
                         }
@@ -8030,8 +8719,20 @@
                 "agency_full_name": {
                     "type": "string"
                 },
+                "audience_grades": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "budget": {
                     "type": "integer"
+                },
+                "bundle_id": {
+                    "type": "integer"
+                },
+                "bundle_title": {
+                    "type": "string"
                 },
                 "city": {
                     "type": "array",
@@ -8053,6 +8754,9 @@
                 },
                 "customer_full_name": {
                     "type": "string"
+                },
+                "hidden": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "integer"
@@ -8090,8 +8794,14 @@
                 "num_audience": {
                     "type": "integer"
                 },
+                "phase": {
+                    "type": "string"
+                },
                 "platform": {
                     "type": "string"
+                },
+                "platform_base_price": {
+                    "type": "integer"
                 },
                 "platform_settings_id": {
                     "type": "integer"
@@ -8331,6 +9041,9 @@
         "dto.AdminLoginInitResponse": {
             "type": "object",
             "properties": {
+                "admin": {
+                    "$ref": "#/definitions/dto.AdminDTO"
+                },
                 "already_sent": {
                     "type": "boolean"
                 },
@@ -8351,6 +9064,9 @@
                 },
                 "requires_two_factor": {
                     "type": "boolean"
+                },
+                "session": {
+                    "$ref": "#/definitions/dto.AdminSessionDTO"
                 }
             }
         },
@@ -8573,6 +9289,31 @@
                 },
                 "price_factor": {
                     "type": "number"
+                }
+            }
+        },
+        "dto.AdminSessionDTO": {
+            "type": "object",
+            "properties": {
+                "access_token": {
+                    "type": "string",
+                    "example": "jwt"
+                },
+                "created_at": {
+                    "type": "string",
+                    "example": "2024-01-15T10:30:00Z"
+                },
+                "expires_in": {
+                    "type": "integer",
+                    "example": 3600
+                },
+                "refresh_token": {
+                    "type": "string",
+                    "example": "jwt"
+                },
+                "token_type": {
+                    "type": "string",
+                    "example": "Bearer"
                 }
             }
         },
@@ -9100,6 +9841,17 @@
                 }
             }
         },
+        "dto.BotAudienceUIDItem": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "uid": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.BotCampaignPlatformSettingsSpec": {
             "type": "object",
             "properties": {
@@ -9223,7 +9975,16 @@
                 "adlink": {
                     "type": "string"
                 },
+                "audience_grades": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "budget": {
+                    "type": "integer"
+                },
+                "bundle_id": {
                     "type": "integer"
                 },
                 "city": {
@@ -9243,6 +10004,9 @@
                 },
                 "customer_id": {
                     "type": "integer"
+                },
+                "hidden": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "integer"
@@ -9277,8 +10041,14 @@
                 "num_audiences": {
                     "type": "integer"
                 },
+                "phase": {
+                    "type": "string"
+                },
                 "platform": {
                     "type": "string"
+                },
+                "platform_base_price": {
+                    "type": "integer"
                 },
                 "platform_settings": {
                     "$ref": "#/definitions/dto.BotCampaignPlatformSettingsSpec"
@@ -9356,6 +10126,29 @@
                 },
                 "session": {
                     "$ref": "#/definitions/dto.BotSessionDTO"
+                }
+            }
+        },
+        "dto.BotPushAudienceUIDsRequest": {
+            "type": "object",
+            "required": [
+                "items"
+            ],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "$ref": "#/definitions/dto.BotAudienceUIDItem"
+                    }
+                }
+            }
+        },
+        "dto.BotPushAudienceUIDsResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
                 }
             }
         },
@@ -9496,104 +10289,150 @@
                 }
             }
         },
-        "dto.CalculateCampaignCapacityRequest": {
+        "dto.BundleItem": {
             "type": "object",
             "properties": {
                 "adlink": {
-                    "type": "string",
-                    "maxLength": 10000
+                    "type": "string"
                 },
-                "budget": {
+                "created_at": {
+                    "type": "string"
+                },
+                "customer_id": {
                     "type": "integer"
                 },
-                "city": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
+                "description": {
+                    "type": "string"
                 },
-                "content": {
-                    "type": "string",
-                    "maxLength": 4096,
-                    "minLength": 1
+                "id": {
+                    "type": "integer"
                 },
                 "job": {
-                    "type": "string",
-                    "maxLength": 255
+                    "type": "string"
                 },
                 "job_category": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level1": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level2s": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "level3s": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "line_number": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "media_uuid": {
                     "type": "string"
                 },
-                "platform": {
-                    "type": "string",
-                    "enum": [
-                        "sms",
-                        "rubika",
-                        "bale",
-                        "splus"
-                    ]
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
-                "platform_settings_id": {
-                    "type": "integer",
-                    "minimum": 1
-                },
-                "scheduleat": {
+                "objective": {
                     "type": "string"
-                },
-                "sex": {
-                    "type": "string",
-                    "maxLength": 255
                 },
                 "short_link_domain": {
-                    "type": "string",
-                    "maxLength": 255
+                    "type": "string"
                 },
-                "tags": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
+                "statistics": {
+                    "type": "object",
+                    "additionalProperties": {}
                 },
-                "target_audience_excel_file_uuid": {
+                "tag_evaluated_at": {
+                    "type": "string"
+                },
+                "tag_evaluation_status": {
+                    "type": "string"
+                },
+                "target_audience_persona": {
+                    "type": "string"
+                },
+                "target_customer_name": {
                     "type": "string"
                 },
                 "title": {
-                    "type": "string",
-                    "maxLength": 255
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BundleTagEvaluationStatusItem": {
+            "type": "object",
+            "properties": {
+                "bundle_id": {
+                    "type": "integer"
+                },
+                "latest_completed_at": {
+                    "type": "string"
+                },
+                "latest_error_at": {
+                    "type": "string"
+                },
+                "latest_error_message": {
+                    "type": "string"
+                },
+                "latest_run_created_at": {
+                    "type": "string"
+                },
+                "latest_run_id": {
+                    "type": "integer"
+                },
+                "latest_successful_run_id": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.BundleTagScoreItem": {
+            "type": "object",
+            "properties": {
+                "bundle_fit_score": {
+                    "type": "number"
+                },
+                "evaluation_run_id": {
+                    "type": "integer"
+                },
+                "fit_level": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "relation_type": {
+                    "type": "string"
+                },
+                "tag_audience_count_snapshot": {
+                    "type": "integer"
+                },
+                "tag_display_title_snapshot": {
+                    "type": "string"
+                },
+                "tag_id": {
+                    "type": "integer"
+                },
+                "tag_name_snapshot": {
+                    "type": "string"
+                },
+                "tag_persona_snapshot": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.CalculateCampaignCapacityRequest": {
+            "type": "object",
+            "required": [
+                "campaign_id"
+            ],
+            "properties": {
+                "campaign_id": {
+                    "type": "integer",
+                    "minimum": 1
                 }
             }
         },
         "dto.CalculateCampaignCapacityResponse": {
             "type": "object",
             "properties": {
+                "audience_grade_capacity": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
                 "capacity": {
                     "type": "integer"
                 },
@@ -9604,95 +10443,16 @@
         },
         "dto.CalculateCampaignCostRequest": {
             "type": "object",
+            "required": [
+                "campaign_id"
+            ],
             "properties": {
-                "adlink": {
-                    "type": "string",
-                    "maxLength": 10000
-                },
                 "budget": {
                     "type": "integer"
                 },
-                "city": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "content": {
-                    "type": "string",
-                    "maxLength": 4096,
-                    "minLength": 1
-                },
-                "job": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "job_category": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level1": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level2s": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "level3s": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "line_number": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "media_uuid": {
-                    "type": "string"
-                },
-                "platform": {
-                    "type": "string",
-                    "enum": [
-                        "sms",
-                        "rubika",
-                        "bale",
-                        "splus"
-                    ]
-                },
-                "platform_settings_id": {
+                "campaign_id": {
                     "type": "integer",
                     "minimum": 1
-                },
-                "scheduleat": {
-                    "type": "string"
-                },
-                "sex": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "short_link_domain": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "target_audience_excel_file_uuid": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string",
-                    "maxLength": 255
                 }
             }
         },
@@ -9716,97 +10476,16 @@
         "dto.CalculateCampaignCostV2Request": {
             "type": "object",
             "required": [
+                "campaign_id",
                 "num_messages"
             ],
             "properties": {
-                "adlink": {
-                    "type": "string",
-                    "maxLength": 10000
-                },
-                "city": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "content": {
-                    "type": "string",
-                    "maxLength": 4096,
-                    "minLength": 1
-                },
-                "job": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "job_category": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level1": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level2s": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "level3s": {
-                    "type": "array",
-                    "maxItems": 255,
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "line_number": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "media_uuid": {
-                    "type": "string"
-                },
-                "num_messages": {
-                    "type": "integer"
-                },
-                "platform": {
-                    "type": "string",
-                    "enum": [
-                        "sms",
-                        "rubika",
-                        "bale",
-                        "splus"
-                    ]
-                },
-                "platform_settings_id": {
+                "campaign_id": {
                     "type": "integer",
                     "minimum": 1
                 },
-                "scheduleat": {
-                    "type": "string"
-                },
-                "sex": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "short_link_domain": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "tags": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "target_audience_excel_file_uuid": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string",
-                    "maxLength": 255
+                "num_messages": {
+                    "type": "integer"
                 }
             }
         },
@@ -9924,15 +10603,89 @@
                 }
             }
         },
+        "dto.CreateBundleRequest": {
+            "type": "object",
+            "required": [
+                "objective",
+                "target_audience_persona",
+                "title"
+            ],
+            "properties": {
+                "adlink": {
+                    "type": "string",
+                    "maxLength": 2047
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 2047
+                },
+                "job": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job_category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "objective": {
+                    "type": "string",
+                    "maxLength": 1023
+                },
+                "short_link_domain": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "target_audience_persona": {
+                    "type": "string",
+                    "maxLength": 1023
+                },
+                "target_customer_name": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                }
+            }
+        },
+        "dto.CreateBundleResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.CreateCampaignRequest": {
             "type": "object",
+            "required": [
+                "bundle_id",
+                "phase"
+            ],
             "properties": {
                 "adlink": {
                     "type": "string",
                     "maxLength": 10000
                 },
+                "audience_grades": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "budget": {
                     "type": "integer"
+                },
+                "bundle_id": {
+                    "type": "integer",
+                    "minimum": 1
                 },
                 "city": {
                     "type": "array",
@@ -9978,6 +10731,10 @@
                 },
                 "media_uuid": {
                     "type": "string"
+                },
+                "phase": {
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "platform": {
                     "type": "string",
@@ -10354,14 +11111,48 @@
                 }
             }
         },
+        "dto.GetBundleResponse": {
+            "type": "object",
+            "properties": {
+                "item": {
+                    "$ref": "#/definitions/dto.BundleItem"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "dto.GetBundleTagEvaluationStatusResponse": {
+            "type": "object",
+            "properties": {
+                "item": {
+                    "$ref": "#/definitions/dto.BundleTagEvaluationStatusItem"
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.GetCampaignResponse": {
             "type": "object",
             "properties": {
                 "adlink": {
                     "type": "string"
                 },
+                "audience_grades": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "budget": {
                     "type": "integer"
+                },
+                "bundle_id": {
+                    "type": "integer"
+                },
+                "bundle_title": {
+                    "type": "string"
                 },
                 "city": {
                     "type": "array",
@@ -10380,6 +11171,9 @@
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "hidden": {
+                    "type": "boolean"
                 },
                 "id": {
                     "type": "integer"
@@ -10417,8 +11211,14 @@
                 "num_audience": {
                     "type": "integer"
                 },
+                "phase": {
+                    "type": "string"
+                },
                 "platform": {
                     "type": "string"
+                },
+                "platform_base_price": {
+                    "type": "integer"
                 },
                 "platform_settings_id": {
                     "type": "integer"
@@ -10583,6 +11383,32 @@
                 }
             }
         },
+        "dto.HideCampaignsRequest": {
+            "type": "object",
+            "required": [
+                "campaign_ids"
+            ],
+            "properties": {
+                "campaign_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "dto.HideCampaignsResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "updated_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.ListActiveLineNumbersResponse": {
             "type": "object",
             "properties": {
@@ -10636,6 +11462,40 @@
                 },
                 "message": {
                     "type": "string"
+                }
+            }
+        },
+        "dto.ListBundleTagScoresResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BundleTagScoreItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "$ref": "#/definitions/dto.PaginationInfo"
+                }
+            }
+        },
+        "dto.ListBundlesResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.BundleItem"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "pagination": {
+                    "$ref": "#/definitions/dto.PaginationInfo"
                 }
             }
         },
@@ -10731,9 +11591,11 @@
             "properties": {
                 "identifier": {
                     "type": "string",
-                    "maxLength": 255,
-                    "minLength": 3,
-                    "example": "user@example.com or +989123456789"
+                    "example": "+989123456789"
+                },
+                "log_otp_to_console": {
+                    "type": "boolean",
+                    "example": false
                 }
             }
         },
@@ -10760,35 +11622,21 @@
                 }
             }
         },
-        "dto.LoginOTPVerifyRequest": {
-            "type": "object",
-            "required": [
-                "customer_id",
-                "otp_code"
-            ],
-            "properties": {
-                "customer_id": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "otp_code": {
-                    "type": "string",
-                    "example": "123456"
-                }
-            }
-        },
         "dto.LoginRequest": {
             "type": "object",
             "required": [
                 "identifier",
+                "otp_code",
                 "password"
             ],
             "properties": {
                 "identifier": {
                     "type": "string",
-                    "maxLength": 255,
-                    "minLength": 3,
-                    "example": "user@example.com or +989123456789"
+                    "example": "+989123456789"
+                },
+                "otp_code": {
+                    "type": "string",
+                    "example": "123456"
                 },
                 "password": {
                     "type": "string",
@@ -11077,6 +11925,23 @@
                 },
                 "success": {
                     "type": "boolean"
+                }
+            }
+        },
+        "dto.RequestBundleTagEvaluationResponse": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "evaluation_run_id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
@@ -11543,6 +12408,92 @@
                 }
             }
         },
+        "dto.UnhideCampaignsRequest": {
+            "type": "object",
+            "required": [
+                "campaign_ids"
+            ],
+            "properties": {
+                "campaign_ids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
+        "dto.UnhideCampaignsResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "updated_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.UpdateBundleRequest": {
+            "type": "object",
+            "required": [
+                "objective",
+                "target_audience_persona",
+                "title"
+            ],
+            "properties": {
+                "adlink": {
+                    "type": "string",
+                    "maxLength": 2047
+                },
+                "description": {
+                    "type": "string",
+                    "maxLength": 2047
+                },
+                "job": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "job_category": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "objective": {
+                    "type": "string",
+                    "maxLength": 1023
+                },
+                "short_link_domain": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "target_audience_persona": {
+                    "type": "string",
+                    "maxLength": 1023
+                },
+                "target_customer_name": {
+                    "type": "string",
+                    "maxLength": 255
+                },
+                "title": {
+                    "type": "string",
+                    "maxLength": 255
+                }
+            }
+        },
+        "dto.UpdateBundleResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "dto.UpdateCampaignRequest": {
             "type": "object",
             "properties": {
@@ -11550,8 +12501,18 @@
                     "type": "string",
                     "maxLength": 10000
                 },
+                "audience_grades": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
                 "budget": {
                     "type": "integer"
+                },
+                "bundle_id": {
+                    "type": "integer",
+                    "minimum": 1
                 },
                 "city": {
                     "type": "array",
@@ -11600,6 +12561,10 @@
                 },
                 "media_uuid": {
                     "type": "string"
+                },
+                "phase": {
+                    "type": "string",
+                    "maxLength": 255
                 },
                 "platform": {
                     "type": "string",

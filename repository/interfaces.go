@@ -286,6 +286,55 @@ type TagRepository interface {
 	ByName(ctx context.Context, name string) (*models.Tag, error)
 	ListByIDs(ctx context.Context, ids []uint) ([]*models.Tag, error)
 	ListByNames(ctx context.Context, names []string) ([]*models.Tag, error)
+	ListActiveAfterID(ctx context.Context, afterID *uint, limit int) ([]*models.Tag, error)
+}
+
+type BundleTagEvaluationRunRepository interface {
+	Save(ctx context.Context, entity *models.BundleTagEvaluationRun) error
+	ByID(ctx context.Context, id int64) (*models.BundleTagEvaluationRun, error)
+	ListByBundleID(ctx context.Context, bundleID uint, limit int) ([]*models.BundleTagEvaluationRun, error)
+}
+
+type BundleTagEvaluationEventRepository interface {
+	Save(ctx context.Context, entity *models.BundleTagEvaluationEvent) error
+	LatestByRunID(ctx context.Context, runID int64) (*models.BundleTagEvaluationEvent, error)
+	ListByRunID(ctx context.Context, runID int64) ([]*models.BundleTagEvaluationEvent, error)
+	ExistsByRunIDAndType(ctx context.Context, runID int64, eventType string) (bool, error)
+	ExistsByBatchIDAndType(ctx context.Context, batchID int64, eventType string) (bool, error)
+}
+
+type BundleTagPersonaAnalysisAttemptRepository interface {
+	Save(ctx context.Context, entity *models.BundleTagPersonaAnalysisAttempt) error
+	LatestByRunID(ctx context.Context, runID int64) (*models.BundleTagPersonaAnalysisAttempt, error)
+	ListByRunID(ctx context.Context, runID int64) ([]*models.BundleTagPersonaAnalysisAttempt, error)
+}
+
+type BundleTagEvaluationBatchRepository interface {
+	Save(ctx context.Context, entity *models.BundleTagEvaluationBatch) error
+	SaveBatch(ctx context.Context, entities []*models.BundleTagEvaluationBatch) error
+	ListByRunID(ctx context.Context, runID int64) ([]*models.BundleTagEvaluationBatch, error)
+}
+
+type BundleTagEvaluationBatchAttemptRepository interface {
+	Save(ctx context.Context, entity *models.BundleTagEvaluationBatchAttempt) error
+	LatestByBatchID(ctx context.Context, batchID int64) (*models.BundleTagEvaluationBatchAttempt, error)
+	ListByBatchID(ctx context.Context, batchID int64) ([]*models.BundleTagEvaluationBatchAttempt, error)
+}
+
+type BundleTagScoreRepository interface {
+	SaveBatch(ctx context.Context, entities []*models.BundleTagScore) error
+	CountByRunID(ctx context.Context, runID int64) (int64, error)
+	CountByRunIDAndBatchID(ctx context.Context, runID int64, batchID int64) (int64, error)
+	ListByRunID(ctx context.Context, runID int64) ([]*models.BundleTagScore, error)
+}
+
+type BundleTagEvaluationReadRepository interface {
+	ByBundleID(ctx context.Context, bundleID uint) (*models.CurrentBundleTagEvaluationStatus, error)
+	ListByBundleIDs(ctx context.Context, bundleIDs []uint) ([]*models.CurrentBundleTagEvaluationStatus, error)
+	ByRunID(ctx context.Context, runID int64) (*models.BundleTagEvaluationRunStatus, error)
+	ListPendingRuns(ctx context.Context, limit int) ([]*models.BundleTagEvaluationRunStatus, error)
+	ListCurrentScoresByBundleID(ctx context.Context, bundleID uint, limit, offset int) ([]*models.CurrentBundleTagScore, error)
+	CountCurrentScoresByBundleID(ctx context.Context, bundleID uint) (int64, error)
 }
 
 // ProcessedCampaignRepository defines operations for processed campaigns
@@ -379,7 +428,7 @@ type CampaignStatusJobRepository interface {
 	Repository[models.CampaignStatusJob, any]
 	ByID(ctx context.Context, id uint) (*models.CampaignStatusJob, error)
 	SaveBatch(ctx context.Context, jobs []*models.CampaignStatusJob) error
-	ListDue(ctx context.Context, now time.Time, limit int) ([]*models.CampaignStatusJob, error)
+	ListDue(ctx context.Context, platform string, now time.Time, limit int) ([]*models.CampaignStatusJob, error)
 	Update(ctx context.Context, job *models.CampaignStatusJob) error
 }
 

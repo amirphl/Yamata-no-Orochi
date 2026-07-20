@@ -72,6 +72,24 @@ func (r *TagRepositoryImpl) ListByNames(ctx context.Context, names []string) ([]
 	return rows, nil
 }
 
+func (r *TagRepositoryImpl) ListActiveAfterID(ctx context.Context, afterID *uint, limit int) ([]*models.Tag, error) {
+	db := r.getDB(ctx).Model(&models.Tag{}).
+		Where("COALESCE(is_active, TRUE) = TRUE")
+
+	if afterID != nil && *afterID > 0 {
+		db = db.Where("id > ?", *afterID)
+	}
+	if limit > 0 {
+		db = db.Limit(limit)
+	}
+
+	var rows []*models.Tag
+	if err := db.Order("id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // applyFilter applies filter criteria to a GORM query
 func (r *TagRepositoryImpl) applyFilter(query *gorm.DB, filter models.TagFilter) *gorm.DB {
 	if filter.ID != nil {
