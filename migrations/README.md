@@ -3,10 +3,10 @@
 This directory contains the ordered PostgreSQL schema history for Yamata no Orochi. The current schema head is:
 
 ```text
-0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql
+0127_normalize_bundle_audience_allocations.sql
 ```
 
-There are currently 121 numbered up files and 120 numbered down files. The difference is `0050_remove_short_links_indexes.sql`, which has no matching down migration.
+There are currently 129 numbered up files and 128 numbered down files. The difference is `0050_remove_short_links_indexes.sql`, which has no matching down migration.
 
 ## Naming and Ordering
 
@@ -24,31 +24,17 @@ The history has two duplicate ordinals, so filename—not just the number—is t
 - `0104_create_sent_rubika_messages`
 - `0104_create_splus_status_results`
 
-New changes should use the next unused ordinal (`0120` after the current head), include a down file whenever rollback is safe, and update both aggregate manifests.
+New changes should use the next unused ordinal (`0128` after the current head), include a down file whenever rollback is safe, and update both aggregate manifests.
 
-## Current Aggregate-Manifest Issues
+## Aggregate Manifests
 
-`run_all_up.sql` and `run_all_down.sql` are intended as convenience manifests, but the checked-in versions are not fully consistent with the files in this directory.
-
-`run_all_up.sql` currently:
-
-- References missing `0052_add_indexes_to_short_links.sql`; the existing file is `0052_rename_segment_to_level1_and_add_level3.sql`.
-- References missing `0054_add_indexes_to_short_link_clicks.sql`; the existing file is `0054_backfill_short_link_clicks_from_short_links.sql`.
-- Omits `0104_create_splus_status_results.sql`.
-
-`run_all_down.sql` currently:
-
-- References the corresponding nonexistent `0052_add_indexes_to_short_links_down.sql` and `0054_add_indexes_to_short_link_clicks_down.sql`.
-- Omits `0052_rename_segment_to_level1_and_add_level3_down.sql`, `0054_backfill_short_link_clicks_from_short_links_down.sql`, and `0104_create_splus_status_results_down.sql`.
-- Includes both `0077_drop_audit_log_customer_fk_down.sql` and `0078_drop_agency_commissions_down.sql` twice.
-
-Do not treat either aggregate file as validated until these entries are reconciled. With `ON_ERROR_STOP=1`, the up manifest stops at the first nonexistent include; without it, `psql` can continue after an error and leave an unexpectedly partial schema.
+`run_all_up.sql` and `run_all_down.sql` are convenience manifests containing every numbered migration in order. Use `ON_ERROR_STOP=1` so `psql` cannot continue after an error and leave an unexpectedly partial schema.
 
 ## Running Migrations
 
 Run commands from the repository root because the manifests use paths such as `migrations/0001_create_account_types.sql`.
 
-After reconciling the aggregate manifest, apply it with fail-fast behavior:
+Apply the aggregate manifest with fail-fast behavior:
 
 ```bash
 psql \
@@ -60,7 +46,7 @@ psql \
   -f migrations/run_all_up.sql
 ```
 
-`make migrate` invokes the same up manifest after checking PostgreSQL connectivity, but the current target does not pass `ON_ERROR_STOP=1`. Prefer the explicit command above when correctness matters.
+`make migrate` invokes the same fail-fast up manifest after checking PostgreSQL connectivity.
 
 Apply one migration directly with:
 
@@ -71,10 +57,19 @@ psql \
   -U "$DB_USER" \
   -d "$DB_NAME" \
   -v ON_ERROR_STOP=1 \
-  -f migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial.sql
+  -f migrations/0127_normalize_bundle_audience_allocations.sql
 ```
 
 These SQL files do not use a migration-state table. Before applying an individual file, verify which predecessors already exist in the target database.
+
+### `0127` rollout note
+
+Run `0127_normalize_bundle_audience_allocations.sql` in a maintenance window.
+It backfills the normalized bundle member ledger from legacy cumulative arrays,
+checks that no allocation overlap was silently discarded, and builds unique
+campaign/tracking indexes. The migration intentionally aborts on inconsistent
+legacy allocations or duplicate processed-campaign checkpoints; repair those
+records explicitly and rerun instead of deleting an arbitrary duplicate.
 
 ## Rollback
 
@@ -87,10 +82,10 @@ psql \
   -U "$DB_USER" \
   -d "$DB_NAME" \
   -v ON_ERROR_STOP=1 \
-  -f migrations/0119_convert_bundle_tag_evaluation_ids_to_bigserial_down.sql
+  -f migrations/0127_normalize_bundle_audience_allocations_down.sql
 ```
 
-`run_all_down.sql` attempts to remove the entire application schema in reverse order. It is destructive, currently has the manifest issues above, and should not be run against a database containing data that must be retained. Take and verify a backup first.
+`run_all_down.sql` attempts to remove the entire application schema in reverse order. It is destructive and should not be run against a database containing data that must be retained. Take and verify a backup first.
 
 Migration `0050_remove_short_links_indexes.sql` has no checked-in rollback file. Restoring its removed indexes requires a deliberate replacement migration or manual schema repair based on the preceding schema.
 
@@ -106,7 +101,7 @@ Migration `0050_remove_short_links_indexes.sql` has no checked-in rollback file.
 | `0077`–`0097` | Legacy FK/table cleanup, deposits/invoices, admin audit actions, base/page prices, ACL requests, permissions, expiry, exports, and refund/invoice audit coverage |
 | `0098`–`0106` | Platform-neutral status jobs, tracking IDs, Bale/Soroush Plus/Rubika status data, Rubika sends, campaign test-send auditing, and wallet-charge previews |
 | `0107`–`0116` | Bundles, campaign phases, bundle audience selections, audience scores/statistics, normalized scoring, hidden campaigns, and bundle audit actions |
-| `0117`–`0120` | Smart-tag evaluation persistence, platform-scoped campaign status jobs, `BIGSERIAL`/`BIGINT` evaluation identifiers, and campaign-level Smart Targeting selections |
+| `0117`–`0127` | Smart-tag evaluation persistence, campaign-level tag selections, count-only exact-capacity generations, processed Bundle selection linkage, normalized append-only Bundle audience allocations, source-reference hierarchy, and high-volume campaign audience indexes |
 
 ## Current Schema Areas
 
