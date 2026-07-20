@@ -410,6 +410,13 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
 	platformBasePriceRepo := repository.NewPlatformBasePriceRepository(db)
 	pagePriceRepo := repository.NewPagePriceRepository(db)
+	bundleTagEvaluationRunRepo := repository.NewBundleTagEvaluationRunRepository(db)
+	bundleTagEvaluationEventRepo := repository.NewBundleTagEvaluationEventRepository(db)
+	bundleTagPersonaAttemptRepo := repository.NewBundleTagPersonaAnalysisAttemptRepository(db)
+	bundleTagEvaluationBatchRepo := repository.NewBundleTagEvaluationBatchRepository(db)
+	bundleTagEvaluationBatchAttemptRepo := repository.NewBundleTagEvaluationBatchAttemptRepository(db)
+	bundleTagScoreRepo := repository.NewBundleTagScoreRepository(db)
+	bundleTagEvaluationReadRepo := repository.NewBundleTagEvaluationReadRepository(db)
 	// Crypto payment repositories
 	cryptoPaymentRequestRepo := repository.NewCryptoPaymentRequestRepository(db)
 	cryptoDepositRepo := repository.NewCryptoDepositRepository(db)
@@ -642,7 +649,21 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	multimediaAdminFlow := businessflow.NewMultimediaAdminFlow(customerRepo, multimediaRepo)
 	multimediaBotFlow := businessflow.NewMultimediaBotFlow(multimediaRepo)
 	platformSettingsFlow := businessflow.NewPlatformSettingsFlow(platformSettingsRepo, multimediaRepo, notificationService, cfg.Admin)
-	bundleFlow := businessflow.NewBundleFlow(bundleRepo, campaignRepo, customerRepo, auditRepo, db)
+	bundleFlow := businessflow.NewBundleFlow(bundleRepo, campaignRepo, customerRepo, auditRepo, bundleTagEvaluationReadRepo, db)
+	bundleTagEvaluationFlow := businessflow.NewBundleTagEvaluationFlow(
+		bundleRepo,
+		customerRepo,
+		tagRepo,
+		bundleTagEvaluationRunRepo,
+		bundleTagEvaluationEventRepo,
+		bundleTagPersonaAttemptRepo,
+		bundleTagEvaluationBatchRepo,
+		bundleTagEvaluationBatchAttemptRepo,
+		bundleTagScoreRepo,
+		bundleTagEvaluationReadRepo,
+		db,
+		cfg.SmartTagEvaluation,
+	)
 	platformSettingsAdminFlow := businessflow.NewPlatformSettingsAdminFlow(platformSettingsRepo, multimediaRepo)
 	platformBasePriceFlow := businessflow.NewPlatformBasePriceFlow(platformBasePriceRepo)
 	platformBasePriceAdminFlow := businessflow.NewPlatformBasePriceAdminFlow(platformBasePriceRepo, auditRepo)
@@ -663,7 +684,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
-	bundleHandler := handlers.NewBundleHandler(bundleFlow)
+	bundleHandler := handlers.NewBundleHandler(bundleFlow, bundleTagEvaluationFlow)
 	campaignHandler := handlers.NewCampaignHandler(campaignFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 	paymentAdminHandler := handlers.NewPaymentAdminHandler(paymentAdminFlow)
@@ -818,6 +839,18 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		)
 		stopSplusScheduler := splusSched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopSplusScheduler)
+	}
+
+	if cfg.SmartTagEvaluation.Enabled && cfg.SmartTagEvaluation.Scheduler.Enabled {
+		smartTagScheduler := scheduler.NewBundleTagEvaluationScheduler(
+			bundleTagEvaluationFlow,
+			bundleTagEvaluationReadRepo,
+			log.Default(),
+			cfg.SmartTagEvaluation.Scheduler.PollInterval,
+			cfg.SmartTagEvaluation.Scheduler.MaxParallelRuns,
+		)
+		stopSmartTagScheduler := smartTagScheduler.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopSmartTagScheduler)
 	}
 
 	// Create application struct from FiberRouter

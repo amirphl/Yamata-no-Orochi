@@ -981,6 +981,7 @@ func (s *BaleCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, pro
 		jobs = append(jobs, &models.CampaignStatusJob{
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       corrID,
+			Platform:            models.CampaignPlatformBale,
 			TrackingIDs:         pq.StringArray(filteredTrackingIDs),
 			RetryCount:          0,
 			ScheduledAt:         now.Add(off),
@@ -1005,7 +1006,7 @@ func (s *BaleCampaignScheduler) startStatusJobWorker(parent context.Context) {
 			}
 
 			listCtx, listCancel := context.WithTimeout(parent, 30*time.Second)
-			jobs, err := s.jobRepo.ListDue(listCtx, utils.UTCNow(), numJobsPerTick)
+			jobs, err := s.jobRepo.ListDue(listCtx, models.CampaignPlatformBale, utils.UTCNow(), numJobsPerTick)
 			listCancel()
 			if err != nil {
 				s.logger.Printf("Bale scheduler: list status jobs failed: %v", err)
@@ -1072,7 +1073,8 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		return s.markStatusJobExecuted(ctx, job, nil)
 	}
 
-	statusItems, fetchErr := s.baleClient.FetchStatus(ctx, serverIDs)
+	statusResult, fetchErr := s.baleClient.FetchStatus(ctx, serverIDs)
+	job.RawProviderResponse = statusResult.RawResponse
 	if fetchErr != nil {
 		now := utils.UTCNow()
 		job.RetryCount++
@@ -1090,6 +1092,7 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		}
 		return fetchErr
 	}
+	statusItems := statusResult.Items
 
 	txErr := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		now := utils.UTCNow()

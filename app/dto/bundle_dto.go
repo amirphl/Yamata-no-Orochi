@@ -76,6 +76,8 @@ type BundleItem struct {
 	Job                   *string        `json:"job,omitempty"`
 	Metadata              map[string]any `json:"metadata,omitempty"`
 	Statistics            map[string]any `json:"statistics,omitempty"`
+	TagEvaluationStatus   *string        `json:"tag_evaluation_status,omitempty"`
+	TagEvaluatedAt        *time.Time     `json:"tag_evaluated_at,omitempty"`
 	CustomerID            uint           `json:"customer_id"`
 	CreatedAt             time.Time      `json:"created_at"`
 	UpdatedAt             time.Time      `json:"updated_at"`
@@ -85,4 +87,63 @@ type ListBundlesResponse struct {
 	Message    string         `json:"message"`
 	Items      []BundleItem   `json:"items"`
 	Pagination PaginationInfo `json:"pagination"`
+}
+
+type RequestBundleTagEvaluationRequest struct {
+	CustomerID uint `json:"-"`
+	BundleID   uint `json:"-"`
+}
+
+type RequestBundleTagEvaluationResponse struct {
+	Message         string    `json:"message"`
+	EvaluationRunID int64     `json:"evaluation_run_id"`
+	Status          string    `json:"status"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+type GetBundleTagEvaluationStatusRequest struct {
+	CustomerID uint `json:"-"`
+	BundleID   uint `json:"-"`
+}
+
+type BundleTagEvaluationStatusItem struct {
+	BundleID              uint       `json:"bundle_id"`
+	Status                string     `json:"status"`
+	LatestRunID           *int64     `json:"latest_run_id,omitempty"`
+	LatestSuccessfulRunID *int64     `json:"latest_successful_run_id,omitempty"`
+	LatestRunCreatedAt    *time.Time `json:"latest_run_created_at,omitempty"`
+	LatestCompletedAt     *time.Time `json:"latest_completed_at,omitempty"`
+	LatestErrorMessage    *string    `json:"latest_error_message,omitempty"`
+	LatestErrorAt         *time.Time `json:"latest_error_at,omitempty"`
+}
+
+type GetBundleTagEvaluationStatusResponse struct {
+	Message string                         `json:"message"`
+	Item    *BundleTagEvaluationStatusItem `json:"item,omitempty"`
+}
+
+type ListBundleTagScoresRequest struct {
+	CustomerID uint `json:"-"`
+	BundleID   uint `json:"-"`
+	Page       int  `json:"page" validate:"omitempty,min=1,max=100"`
+	Limit      int  `json:"limit" validate:"omitempty,min=1,max=100"`
+}
+
+type BundleTagScoreItem struct {
+	EvaluationRunID          int64   `json:"evaluation_run_id"`
+	TagID                    uint    `json:"tag_id"`
+	TagNameSnapshot          *string `json:"tag_name_snapshot,omitempty"`
+	TagDisplayTitleSnapshot  *string `json:"tag_display_title_snapshot,omitempty"`
+	TagPersonaSnapshot       *string `json:"tag_persona_snapshot,omitempty"`
+	TagAudienceCountSnapshot *int64  `json:"tag_audience_count_snapshot,omitempty"`
+	BundleFitScore           float64 `json:"bundle_fit_score"`
+	FitLevel                 string  `json:"fit_level"`
+	RelationType             string  `json:"relation_type"`
+	Reason                   string  `json:"reason"`
+}
+
+type ListBundleTagScoresResponse struct {
+	Message    string               `json:"message"`
+	Items      []BundleTagScoreItem `json:"items"`
+	Pagination PaginationInfo       `json:"pagination"`
 }

@@ -68,10 +68,18 @@ type PayamStatusResponse struct {
 	Status                string  `json:"status"`
 }
 
+// PayamStatusFetchResult keeps the provider payload alongside its parsed items.
+// RawResponse is set whenever an HTTP response body was received, even if the
+// response is empty, partial, non-2xx, or cannot be decoded.
+type PayamStatusFetchResult struct {
+	Items       []PayamStatusResponse
+	RawResponse *string
+}
+
 type PayamSMSClient interface {
 	SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error)
 	GetToken(ctx context.Context) (string, error)
-	FetchStatus(ctx context.Context, token string, ids []string) ([]PayamStatusResponse, error)
+	FetchStatus(ctx context.Context, token string, ids []string) (PayamStatusFetchResult, error)
 }
 
 type httpPayamSMSClient struct {
@@ -248,9 +256,9 @@ func (c *httpPayamSMSClient) getTokenOnce(ctx context.Context) (string, error) {
 }
 
 // FetchStatus retrieves delivery statuses for the given tracking IDs with exponential backoff retries.
-func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trackingIDs []string) ([]PayamStatusResponse, error) {
+func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trackingIDs []string) (PayamStatusFetchResult, error) {
 	var (
-		out []PayamStatusResponse
+		out PayamStatusFetchResult
 		err error
 	)
 	for attempt := 0; ; attempt++ {
@@ -268,14 +276,14 @@ func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trac
 	return out, err
 }
 
-func (c *httpPayamSMSClient) fetchStatusOnce(ctx context.Context, token string, trackingIDs []string) ([]PayamStatusResponse, error) {
+func (c *httpPayamSMSClient) fetchStatusOnce(ctx context.Context, token string, trackingIDs []string) (PayamStatusFetchResult, error) {
 	if len(trackingIDs) == 0 {
-		return nil, fmt.Errorf("no tracking ids provided")
+		return PayamStatusFetchResult{}, fmt.Errorf("no tracking ids provided")
 	}
 	baseURL := "https://www.payamsms.com/report/webservice/status"
 	u, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, err
+		return PayamStatusFetchResult{}, err
 	}
 	q := u.Query()
 	q.Set("byCustomer", "true")
@@ -291,28 +299,29 @@ func (c *httpPayamSMSClient) fetchStatusOnce(ctx context.Context, token string, 
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return nil, err
+		return PayamStatusFetchResult{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return PayamStatusFetchResult{}, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		bodyBytes, readErr := io.ReadAll(resp.Body)
-		body := strings.TrimSpace(string(bodyBytes))
-		if readErr != nil {
-			body = fmt.Sprintf("unable to read response body: %v", readErr)
-		}
-		return nil, fmt.Errorf("payamsms status http status: %d, body: %s", resp.StatusCode, body)
+	bodyBytes, readErr := io.ReadAll(resp.Body)
+	rawResponse := string(bodyBytes)
+	result := PayamStatusFetchResult{RawResponse: &rawResponse}
+	if readErr != nil {
+		return result, fmt.Errorf("read payamsms status response: %w", readErr)
 	}
 
-	var out []PayamStatusResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return result, fmt.Errorf("payamsms status http status: %d, body: %s", resp.StatusCode, strings.TrimSpace(rawResponse))
 	}
-	return out, nil
+
+	if err := json.Unmarshal(bodyBytes, &result.Items); err != nil {
+		return result, err
+	}
+	return result, nil
 }
