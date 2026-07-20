@@ -161,14 +161,14 @@
 \echo 'Running 0051_add_job_category_to_customers.sql...'
 \i migrations/0051_add_job_category_to_customers.sql
 
-\echo 'Running 0052_add_indexes_to_short_links.sql...'
-\i migrations/0052_add_indexes_to_short_links.sql
+\echo 'Running 0052_rename_segment_to_level1_and_add_level3.sql...'
+\i migrations/0052_rename_segment_to_level1_and_add_level3.sql
 
 \echo 'Running 0053_denormalize_short_link_clicks.sql...'
 \i migrations/0053_denormalize_short_link_clicks.sql
 
-\echo 'Running 0054_add_indexes_to_short_link_clicks.sql...'
-\i migrations/0054_add_indexes_to_short_link_clicks.sql
+\echo 'Running 0054_backfill_short_link_clicks_from_short_links.sql...'
+\i migrations/0054_backfill_short_link_clicks_from_short_links.sql
 
 \echo 'Running 0055_create_sms_status_jobs.sql...'
 \i migrations/0055_create_sms_status_jobs.sql
@@ -320,6 +320,9 @@
 \echo 'Running 0104_create_sent_rubika_messages.sql...'
 \i migrations/0104_create_sent_rubika_messages.sql
 
+\echo 'Running 0104_create_splus_status_results.sql...'
+\i migrations/0104_create_splus_status_results.sql
+
 \echo 'Running 0105_create_rubika_status_results.sql...'
 \i migrations/0105_create_rubika_status_results.sql
 
@@ -370,6 +373,24 @@
 
 \echo 'Running 0121_backfill_campaign_audience_targeting_method.sql...'
 \i migrations/0121_backfill_campaign_audience_targeting_method.sql
+
+\echo 'Running 0122_create_campaign_targeting_capacity_calculations.sql...'
+\i migrations/0122_create_campaign_targeting_capacity_calculations.sql
+
+\echo 'Running 0123_add_bundle_audience_selection_to_processed_campaigns.sql...'
+\i migrations/0123_add_bundle_audience_selection_to_processed_campaigns.sql
+
+\echo 'Running 0124_index_smart_targeting_capacity_reservations.sql...'
+\i migrations/0124_index_smart_targeting_capacity_reservations.sql
+
+\echo 'Running 0125_create_src_reference.sql...'
+\i migrations/0125_create_src_reference.sql
+
+\echo 'Running 0126_optimize_campaign_audience_selection.sql...'
+\i migrations/0126_optimize_campaign_audience_selection.sql
+
+\echo 'Running 0127_normalize_bundle_audience_allocations.sql...'
+\i migrations/0127_normalize_bundle_audience_allocations.sql
 
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
