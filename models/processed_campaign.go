@@ -15,7 +15,7 @@ import (
 // Array columns use PostgreSQL biginteger[]
 type ProcessedCampaign struct {
 	ID             uint            `gorm:"primaryKey" json:"id"`
-	CampaignID     uint            `gorm:"not null;index:idx_processed_campaigns_campaign_id" json:"campaign_id"`
+	CampaignID     uint            `gorm:"not null;uniqueIndex:uk_processed_campaigns_campaign_id" json:"campaign_id"`
 	CampaignJSON   json.RawMessage `gorm:"type:jsonb;not null" json:"campaign_json"`
 	AudienceIDs    pq.Int64Array   `gorm:"type:bigint[];not null" json:"audience_ids"`
 	AudienceCodes  pq.StringArray  `gorm:"type:text[];not null" json:"audience_codes"`
