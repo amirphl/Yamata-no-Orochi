@@ -43,6 +43,7 @@ type NormalizedScoreConstraint struct {
 // For array fields, use the *Contains filters to match any single value presence
 type AudienceProfileFilter struct {
 	ID              *uint
+	IDs             []int64
 	UID             *string
 	PhoneNumber     *string
 	Tags            *pq.Int32Array
@@ -50,4 +51,7 @@ type AudienceProfileFilter struct {
 	CreatedAfter    *time.Time
 	CreatedBefore   *time.Time
 	NormalizedScore *NormalizedScoreConstraint
+	// ExcludeBundleID excludes the append-only audience usage ledger for a
+	// bundle. It is intentionally independent of campaign platform.
+	ExcludeBundleID *uint
 }
