@@ -50,8 +50,10 @@ type BotRepository interface {
 type AudienceProfileRepository interface {
 	Repository[models.AudienceProfile, models.AudienceProfileFilter]
 	ByID(ctx context.Context, id uint) (*models.AudienceProfile, error)
+	ByIDs(ctx context.Context, ids []int64) ([]*models.AudienceProfile, error)
 	ByUID(ctx context.Context, uid string) (*models.AudienceProfile, error)
 	ByUIDs(ctx context.Context, uids []string) ([]*models.AudienceProfile, error)
+	SelectCampaignCandidates(ctx context.Context, filter models.AudienceProfileFilter, excludeIDs []int64, limit int) ([]*models.AudienceProfile, error)
 }
 
 // LineNumberRepository defines operations for line numbers
