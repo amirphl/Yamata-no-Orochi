@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -30,6 +31,33 @@ func (r *AudienceProfileRepositoryImpl) ByID(ctx context.Context, id uint) (*mod
 	return &ap, nil
 }
 
+func (r *AudienceProfileRepositoryImpl) ByIDs(ctx context.Context, ids []int64) ([]*models.AudienceProfile, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var unordered []*models.AudienceProfile
+	err := r.getDB(ctx).Model(&models.AudienceProfile{}).
+		Select("id", "uid", "phone_number").
+		Where("id = ANY(?::bigint[])", pq.Int64Array(ids)).
+		Find(&unordered).Error
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[int64]*models.AudienceProfile, len(unordered))
+	for _, row := range unordered {
+		if row != nil {
+			byID[int64(row.ID)] = row
+		}
+	}
+	rows := make([]*models.AudienceProfile, 0, len(ids))
+	for _, id := range ids {
+		if row := byID[id]; row != nil {
+			rows = append(rows, row)
+		}
+	}
+	return rows, nil
+}
+
 func (r *AudienceProfileRepositoryImpl) ByUID(ctx context.Context, uid string) (*models.AudienceProfile, error) {
 	rows, err := r.ByFilter(ctx, models.AudienceProfileFilter{UID: &uid}, "", 1, 0)
 	if err != nil {
@@ -48,18 +76,77 @@ func (r *AudienceProfileRepositoryImpl) ByUIDs(ctx context.Context, uids []strin
 
 	db := r.getDB(ctx)
 	rows := make([]*models.AudienceProfile, 0, len(uids))
-	if err := db.Model(&models.AudienceProfile{}).
-		Where("uid IN ?", uids).
-		Find(&rows).Error; err != nil {
+	if err := audienceProfilesByUIDsQuery(db, uids).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 
 	return rows, nil
 }
 
+func audienceProfilesByUIDsQuery(db *gorm.DB, uids []string) *gorm.DB {
+	return db.Model(&models.AudienceProfile{}).
+		Select("id", "uid", "phone_number").
+		Where("uid = ANY(?::varchar[])", pq.StringArray(uids))
+}
+
+// SelectCampaignCandidates returns only the columns the campaign schedulers use
+// and applies exclusions in PostgreSQL before LIMIT. Keeping the excluded IDs in
+// one typed array parameter avoids PostgreSQL's bind-parameter limit even when a
+// selection contains tens of thousands of audience IDs.
+func (r *AudienceProfileRepositoryImpl) SelectCampaignCandidates(
+	ctx context.Context,
+	filter models.AudienceProfileFilter,
+	excludeIDs []int64,
+	limit int,
+) ([]*models.AudienceProfile, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	db := r.getDB(ctx)
+	query := r.campaignCandidatesQuery(db, filter, excludeIDs, limit)
+
+	var rows []*models.AudienceProfile
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("failed to select campaign audience candidates: %w", err)
+	}
+	return rows, nil
+}
+
+func (r *AudienceProfileRepositoryImpl) campaignCandidatesQuery(
+	db *gorm.DB,
+	filter models.AudienceProfileFilter,
+	excludeIDs []int64,
+	limit int,
+) *gorm.DB {
+	query := r.applyFilter(db.Model(&models.AudienceProfile{}), filter).
+		Select("id", "uid", "phone_number").
+		Where("phone_number IS NOT NULL AND BTRIM(phone_number) <> ''")
+	if len(excludeIDs) > 0 {
+		query = query.Where(
+			`NOT EXISTS (
+				SELECT 1
+				FROM unnest(?::bigint[]) AS excluded(id)
+				WHERE excluded.id = audience_profiles.id
+			)`,
+			pq.Int64Array(excludeIDs),
+		)
+	}
+	if filter.ExcludeBundleID != nil {
+		query = query.Where(`NOT EXISTS (
+			SELECT 1 FROM bundle_audience_selection_members AS used
+			WHERE used.bundle_id = ? AND used.audience_id = audience_profiles.id
+		)`, *filter.ExcludeBundleID)
+	}
+	return query.Order("id DESC").Limit(limit)
+}
+
 func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.AudienceProfileFilter) *gorm.DB {
 	if f.ID != nil {
 		db = db.Where("id = ?", *f.ID)
+	}
+	if len(f.IDs) > 0 {
+		db = db.Where("id = ANY(?::bigint[])", pq.Int64Array(f.IDs))
 	}
 	if f.UID != nil {
 		db = db.Where("uid = ?", *f.UID)
