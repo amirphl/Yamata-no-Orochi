@@ -59,7 +59,7 @@ func (r *BaseRepository[T, F]) getDBForWrite(ctx context.Context) (*gorm.DB, boo
 // }
 
 // Save inserts a new entity
-func (r *BaseRepository[T, F]) Save(ctx context.Context, entity *T) error {
+func (r *BaseRepository[T, F]) Save(ctx context.Context, entity *T) (err error) {
 	db, shouldCommit, err := r.getDBForWrite(ctx)
 	if err != nil {
 		return err
@@ -68,9 +68,9 @@ func (r *BaseRepository[T, F]) Save(ctx context.Context, entity *T) error {
 	if shouldCommit {
 		defer func() {
 			if err != nil {
-				db.Rollback()
+				_ = db.Rollback().Error
 			} else {
-				db.Commit()
+				err = db.Commit().Error
 			}
 		}()
 	}
@@ -84,7 +84,7 @@ func (r *BaseRepository[T, F]) Save(ctx context.Context, entity *T) error {
 }
 
 // SaveBatch inserts multiple entities in a single transaction
-func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) error {
+func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) (err error) {
 	if len(entities) == 0 {
 		return nil
 	}
@@ -97,9 +97,9 @@ func (r *BaseRepository[T, F]) SaveBatch(ctx context.Context, entities []*T) err
 	if shouldCommit {
 		defer func() {
 			if err != nil {
-				db.Rollback()
+				_ = db.Rollback().Error
 			} else {
-				db.Commit()
+				err = db.Commit().Error
 			}
 		}()
 	}
