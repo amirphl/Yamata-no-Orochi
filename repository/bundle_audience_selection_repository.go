@@ -10,8 +10,8 @@ import (
 )
 
 type BundleAudienceSelectionRepository interface {
-	Latest(ctx context.Context, customerID uint, bundleID uint) (*models.BundleAudienceSelection, error)
-	InsertWithMerge(ctx context.Context, customerID uint, bundleID uint, correlationID string, ids []int64) (*models.BundleAudienceSelection, error)
+	ByCampaignID(ctx context.Context, campaignID uint) (*models.BundleAudienceSelection, error)
+	InsertForCampaign(ctx context.Context, customerID, bundleID, campaignID uint, correlationID string, ids []int64) (*models.BundleAudienceSelection, error)
 }
 
 type BundleAudienceSelectionRepositoryImpl struct {
@@ -23,59 +23,98 @@ func NewBundleAudienceSelectionRepository(db *gorm.DB) BundleAudienceSelectionRe
 }
 
 func (r *BundleAudienceSelectionRepositoryImpl) getDB(ctx context.Context) *gorm.DB {
+	if tx, ok := ctx.Value(TxContextKey).(*gorm.DB); ok && tx != nil {
+		return tx.WithContext(ctx)
+	}
 	return r.DB.WithContext(ctx)
 }
 
-// Latest returns the most recent selection snapshot for the given (customer_id, bundle_id) pair,
-// or nil if no selection has been recorded yet for this bundle.
-func (r *BundleAudienceSelectionRepositoryImpl) Latest(ctx context.Context, customerID uint, bundleID uint) (*models.BundleAudienceSelection, error) {
-	db := r.getDB(ctx)
+func (r *BundleAudienceSelectionRepositoryImpl) ByCampaignID(ctx context.Context, campaignID uint) (*models.BundleAudienceSelection, error) {
+	return loadBundleAudienceSelectionByCampaign(r.getDB(ctx), campaignID)
+}
+
+func loadBundleAudienceSelectionByCampaign(db *gorm.DB, campaignID uint) (*models.BundleAudienceSelection, error) {
 	var row models.BundleAudienceSelection
-	err := db.Where("customer_id = ? AND bundle_id = ?", customerID, bundleID).
-		Order("created_at DESC, id DESC").
-		First(&row).Error
+	err := db.Where("campaign_id = ?", campaignID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	var ids []int64
+	if err := db.Model(&models.BundleAudienceSelectionMember{}).
+		Where("selection_id = ?", row.ID).
+		Order("audience_id ASC").
+		Pluck("audience_id", &ids).Error; err != nil {
+		return nil, err
+	}
+	row.SelectedAudienceIDs = ids
 	return &row, nil
 }
 
-// InsertWithMerge inserts a new selection snapshot that merges ids with the existing
-// cumulative set for this bundle. The new row becomes the authoritative latest snapshot.
-func (r *BundleAudienceSelectionRepositoryImpl) InsertWithMerge(ctx context.Context, customerID uint, bundleID uint, correlationID string, ids []int64) (*models.BundleAudienceSelection, error) {
+// InsertForCampaign appends one immutable allocation and its normalized
+// members. The caller may already hold the bundle lock; otherwise this method
+// takes it. A retry returns the original campaign allocation unchanged.
+func (r *BundleAudienceSelectionRepositoryImpl) InsertForCampaign(ctx context.Context, customerID, bundleID, campaignID uint, correlationID string, ids []int64) (*models.BundleAudienceSelection, error) {
 	db := r.getDB(ctx)
 	var inserted models.BundleAudienceSelection
 
-	err := db.Transaction(func(tx *gorm.DB) error {
-		merged := dedupeAndSort(ids)
-
-		var latest models.BundleAudienceSelection
-		err := tx.Where("customer_id = ? AND bundle_id = ?", customerID, bundleID).
-			Order("created_at DESC, id DESC").
-			First(&latest).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	persist := func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT id FROM bundles WHERE id = ? FOR UPDATE", bundleID).Error; err != nil {
 			return err
 		}
-		if err == nil && len(latest.AudienceIDs) > 0 {
-			merged = dedupeAndSort(append(merged, []int64(latest.AudienceIDs)...))
+		existing, err := loadBundleAudienceSelectionByCampaign(tx, campaignID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			if existing.CustomerID != customerID || existing.BundleID != bundleID || existing.AudienceCount != int64(len(existing.SelectedAudienceIDs)) {
+				return errors.New("persisted bundle audience allocation does not match the campaign scope")
+			}
+			inserted = *existing
+			return nil
+		}
+		normalized := dedupeAndSort(ids)
+		if len(normalized) != len(ids) {
+			return errors.New("bundle audience allocation contains duplicate audience IDs")
+		}
+		for _, id := range normalized {
+			if id <= 0 {
+				return errors.New("bundle audience allocation contains an invalid audience ID")
+			}
 		}
 
 		row := models.BundleAudienceSelection{
-			CustomerID:    customerID,
-			BundleID:      bundleID,
-			CorrelationID: correlationID,
-			AudienceIDs:   merged,
-			CreatedAt:     utils.UTCNow(),
+			CustomerID: customerID, BundleID: bundleID, CampaignID: &campaignID,
+			CorrelationID: correlationID, AudienceCount: int64(len(normalized)), CreatedAt: utils.UTCNow(),
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
+		members := make([]models.BundleAudienceSelectionMember, 0, len(normalized))
+		for _, audienceID := range normalized {
+			members = append(members, models.BundleAudienceSelectionMember{
+				SelectionID: row.ID, BundleID: bundleID, AudienceID: audienceID, CreatedAt: row.CreatedAt,
+			})
+		}
+		if len(members) > 0 {
+			if err := tx.CreateInBatches(&members, 1000).Error; err != nil {
+				return err
+			}
+		}
+		row.SelectedAudienceIDs = normalized
 		inserted = row
 		return nil
-	})
+	}
+	var err error
+	if tx, ok := ctx.Value(TxContextKey).(*gorm.DB); ok && tx != nil {
+		// The caller owns the transaction and may already hold the Bundle lock.
+		// Persist directly so selection and merge remain one atomic operation.
+		err = persist(db)
+	} else {
+		err = db.Transaction(persist)
+	}
 	if err != nil {
 		return nil, err
 	}
