@@ -9,6 +9,11 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// Keep each INSERT safely below PostgreSQL's extended-query bind-parameter
+// ceiling. SMSStatusResult has several writable columns, so a single 25k-row
+// GORM Create would otherwise expand to hundreds of thousands of parameters.
+const smsStatusResultWriteBatchSize = 500
+
 // SMSStatusResultRepositoryImpl implements SMSStatusResultRepository
 type SMSStatusResultRepositoryImpl struct {
 	*BaseRepository[models.SMSStatusResult, any]
@@ -86,7 +91,7 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 			"status":                  clause.Expr{SQL: "EXCLUDED.status"},
 			"created_at":              clause.Expr{SQL: "LEAST(sms_status_results.created_at, EXCLUDED.created_at)"},
 		}),
-	}).Create(&deduped).Error
+	}).CreateInBatches(&deduped, smsStatusResultWriteBatchSize).Error
 }
 
 // ByFilter: no filter fields, just order/limit/offset
