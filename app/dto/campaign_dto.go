@@ -387,11 +387,6 @@ type AdminRescheduleCampaignResponse struct {
 	Message string `json:"message"`
 }
 
-type AdminRemoveAudienceSpecResponse struct {
-	Message  string `json:"message"`
-	Platform string `json:"platform"`
-}
-
 type AdminUpdatePagePriceRequest struct {
 	Platform string `json:"platform" validate:"required,oneof=sms rubika bale splus"`
 	Price    uint64 `json:"price" validate:"required,gt=0"`
@@ -486,6 +481,20 @@ type BotListCampaignsResponse struct {
 type AudienceSpecItem struct {
 	Tags              []string `json:"tags"`
 	AvailableAudience int      `json:"available_audience"`
+	DistinctUsers     int64    `json:"distinct_users"`
+	BlackUsers        int64    `json:"black_users"`
+	WhiteUsers        int64    `json:"white_users"`
+	PinkUsers         int64    `json:"pink_users"`
+	WeakWhite         int64    `json:"weak_white"`
+	GoodWhite         int64    `json:"good_white"`
+	BestWhite         int64    `json:"best_white"`
+	WeakBlack         int64    `json:"weak_black"`
+	GoodBlack         int64    `json:"good_black"`
+	BestBlack         int64    `json:"best_black"`
+	WeakPink          int64    `json:"weak_pink"`
+	GoodPink          int64    `json:"good_pink"`
+	BestPink          int64    `json:"best_pink"`
+	ScoredUsers       int64    `json:"scored_users"`
 }
 
 type AudienceSpecLevel2 struct {
