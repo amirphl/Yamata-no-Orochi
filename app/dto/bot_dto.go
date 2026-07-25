@@ -1,38 +1,6 @@
 // Package dto contains Data Transfer Objects for API request and response structures
 package dto
 
-// BotUpdateAudienceSpecRequest is used by bots to update available campaign spec
-// color must be one of: black, white, pink
-// tags must contain at least one non-empty element
-type BotUpdateAudienceSpecRequest struct {
-	Platform          string         `json:"platform" validate:"required,oneof=sms rubika bale splus"`
-	Level1            string         `json:"level1" validate:"required,max=255"`
-	Level2            string         `json:"level2" validate:"required,max=255"`
-	Level3            string         `json:"level3" validate:"required,max=255"`
-	Tags              []string       `json:"tags" validate:"required,min=1,dive,required,max=255"`
-	AvailableAudience int            `json:"available_audience" validate:"required,gte=0"`
-	Metadata          map[string]any `json:"metadata,omitempty" validate:"omitempty"`
-}
-
-// BotUpdateAudienceSpecResponse acknowledges a successful update
-type BotUpdateAudienceSpecResponse struct {
-	Message string `json:"message"`
-}
-
-// BotResetAudienceSpecRequest is used by bots to reset/delete audience spec
-// This will completely remove the specified level1/level2/level3 from the audience spec
-type BotResetAudienceSpecRequest struct {
-	Platform string `json:"platform" validate:"required,oneof=sms rubika bale splus"`
-	Level1   string `json:"level1" validate:"required,max=255"`
-	Level2   string `json:"level2" validate:"required,max=255"`
-	Level3   string `json:"level3" validate:"required,max=255"`
-}
-
-// BotResetAudienceSpecResponse acknowledges a successful reset/deletion
-type BotResetAudienceSpecResponse struct {
-	Message string `json:"message"`
-}
-
 // Bot DTOs for auth and listing (referenced by business flows)
 // Minimal types used in flows; detailed types may live elsewhere
 
