@@ -99,6 +99,7 @@ var (
 
 	ErrCampaignNotWaitingForApproval          = errors.New("campaign is not waiting for approval")
 	ErrCampaignNotApproved                    = errors.New("campaign is not approved")
+	ErrCampaignNotRunning                     = errors.New("campaign is not running")
 	ErrFreezeTransactionNotFound              = errors.New("freeze transaction not found for campaign")
 	ErrMultipleFreezeTransactionsFound        = errors.New("multiple freeze transactions found for campaign")
 	ErrCampaignDebitTransactionNotFound       = errors.New("campaign debit transaction not found")
