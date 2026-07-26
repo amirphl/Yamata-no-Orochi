@@ -29,7 +29,6 @@ type AdminCampaignFlow interface {
 	ApproveCampaign(ctx context.Context, req *dto.AdminApproveCampaignRequest) (*dto.AdminApproveCampaignResponse, error)
 	RejectCampaign(ctx context.Context, req *dto.AdminRejectCampaignRequest) (*dto.AdminRejectCampaignResponse, error)
 	CancelCampaign(ctx context.Context, req *dto.AdminCancelCampaignRequest) (*dto.AdminCancelCampaignResponse, error)
-	RemoveAudienceSpec(ctx context.Context, platform *string) (*dto.AdminRemoveAudienceSpecResponse, error)
 	RescheduleCampaign(ctx context.Context, req *dto.AdminRescheduleCampaignRequest) (*dto.AdminRescheduleCampaignResponse, error)
 	UpdatePagePrice(ctx context.Context, req *dto.AdminUpdatePagePriceRequest) (*dto.AdminUpdatePagePriceResponse, error)
 	GetPagePrices(ctx context.Context) (*dto.AdminGetPagePricesResponse, error)
@@ -37,23 +36,25 @@ type AdminCampaignFlow interface {
 
 // AdminCampaignFlowImpl implements the campaign business flow
 type AdminCampaignFlowImpl struct {
-	campaignRepo         repository.CampaignRepository
-	customerRepo         repository.CustomerRepository
-	walletRepo           repository.WalletRepository
-	balanceSnapshotRepo  repository.BalanceSnapshotRepository
-	transactionRepo      repository.TransactionRepository
-	auditRepo            repository.AuditLogRepository
-	platformSettingsRepo repository.PlatformSettingsRepository
-	platformBaseRepo     repository.PlatformBasePriceRepository
-	lineNumberRepo       repository.LineNumberRepository
-	segmentPriceRepo     repository.SegmentPriceFactorRepository
-	pagePriceRepo        repository.PagePriceRepository
-	notifier             services.NotificationService
-	adminConfig          config.AdminConfig
-	messageConfig        config.MessageConfig
-	cacheConfig          config.CacheConfig
-	rc                   *redis.Client
-	db                   *gorm.DB
+	campaignRepo            repository.CampaignRepository
+	customerRepo            repository.CustomerRepository
+	walletRepo              repository.WalletRepository
+	balanceSnapshotRepo     repository.BalanceSnapshotRepository
+	transactionRepo         repository.TransactionRepository
+	auditRepo               repository.AuditLogRepository
+	platformSettingsRepo    repository.PlatformSettingsRepository
+	platformBaseRepo        repository.PlatformBasePriceRepository
+	lineNumberRepo          repository.LineNumberRepository
+	segmentPriceRepo        repository.SegmentPriceFactorRepository
+	pagePriceRepo           repository.PagePriceRepository
+	selectedTagRepo         repository.CampaignSelectedTagRepository
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository
+	notifier                services.NotificationService
+	adminConfig             config.AdminConfig
+	messageConfig           config.MessageConfig
+	cacheConfig             config.CacheConfig
+	rc                      *redis.Client
+	db                      *gorm.DB
 }
 
 const (
@@ -76,6 +77,8 @@ func NewAdminCampaignFlow(
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	pagePriceRepo repository.PagePriceRepository,
+	selectedTagRepo repository.CampaignSelectedTagRepository,
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -84,23 +87,25 @@ func NewAdminCampaignFlow(
 	cacheConfig config.CacheConfig,
 ) AdminCampaignFlow {
 	return &AdminCampaignFlowImpl{
-		campaignRepo:         campaignRepo,
-		customerRepo:         customerRepo,
-		walletRepo:           walletRepo,
-		balanceSnapshotRepo:  balanceSnapshotRepo,
-		transactionRepo:      transactionRepo,
-		auditRepo:            auditRepo,
-		platformSettingsRepo: platformSettingsRepo,
-		platformBaseRepo:     platformBaseRepo,
-		lineNumberRepo:       lineNumberRepo,
-		segmentPriceRepo:     segmentPriceRepo,
-		pagePriceRepo:        pagePriceRepo,
-		notifier:             notifier,
-		adminConfig:          adminConfig,
-		messageConfig:        messageConfig,
-		cacheConfig:          cacheConfig,
-		rc:                   rc,
-		db:                   db,
+		campaignRepo:            campaignRepo,
+		customerRepo:            customerRepo,
+		walletRepo:              walletRepo,
+		balanceSnapshotRepo:     balanceSnapshotRepo,
+		transactionRepo:         transactionRepo,
+		auditRepo:               auditRepo,
+		platformSettingsRepo:    platformSettingsRepo,
+		platformBaseRepo:        platformBaseRepo,
+		lineNumberRepo:          lineNumberRepo,
+		segmentPriceRepo:        segmentPriceRepo,
+		pagePriceRepo:           pagePriceRepo,
+		selectedTagRepo:         selectedTagRepo,
+		capacityCalculationRepo: capacityCalculationRepo,
+		notifier:                notifier,
+		adminConfig:             adminConfig,
+		messageConfig:           messageConfig,
+		cacheConfig:             cacheConfig,
+		rc:                      rc,
+		db:                      db,
 	}
 }
 
@@ -496,6 +501,9 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 	var customer models.Customer
 
 	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		if err := repository.LockCampaignForUpdate(txCtx, req.CampaignID); err != nil {
+			return err
+		}
 		var err error
 		campaign, err = s.campaignRepo.ByID(txCtx, req.CampaignID)
 		if err != nil {
@@ -509,6 +517,24 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		}
 		if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.Before(utils.UTCNow()) {
 			return ErrScheduleTimeTooSoon
+		}
+		if campaign.Spec.UsesSmartTargeting() {
+			if campaign.BundleID == nil || s.capacityCalculationRepo == nil {
+				return ErrSmartTargetingExactCapacityRequired
+			}
+			// Approvals for one bundle share this lock. After one approval commits,
+			// the next request observes its changed allocation fingerprint and
+			// cannot reserve the same exact capacity.
+			if err := repository.LockBundleForUpdate(txCtx, *campaign.BundleID); err != nil {
+				return err
+			}
+			exact, err := CurrentSmartTargetingCapacity(txCtx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, campaign)
+			if err != nil {
+				return err
+			}
+			if exact.UsableUniqueAudienceCount < 0 || campaign.NumAudience == nil || *campaign.NumAudience > uint64(exact.UsableUniqueAudienceCount) {
+				return ErrSmartTargetingExactCapacityRequired
+			}
 		}
 		if err := s.validateApprovalPlatformSettings(txCtx, campaign); err != nil {
 			return err
@@ -623,9 +649,21 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, ErrSmartTargetingExactCapacityRequired) && campaign != nil && s.capacityCalculationRepo != nil {
+			_, ensureErr := EnsureCurrentSmartTargetingCapacity(ctx, s.db, s.campaignRepo, s.selectedTagRepo, s.capacityCalculationRepo, campaign)
+			if ensureErr != nil {
+				err = ensureErr
+			}
+		}
 		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignApproved, "Admin approved campaign", false, nil, map[string]any{
 			"campaign_id": req.CampaignID,
 		}, err)
+		if errors.Is(err, ErrSmartTargetingCapacityPending) {
+			return nil, NewBusinessError("SMART_TARGETING_CAPACITY_PENDING", "Exact Smart Targeting capacity calculation was submitted; please wait and retry approval", err)
+		}
+		if errors.Is(err, ErrSmartTargetingExactCapacityRequired) {
+			return nil, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required before approval", err)
+		}
 		return nil, NewBusinessError("ADMIN_APPROVE_CAMPAIGN_FAILED", "Failed to approve campaign", err)
 	}
 
@@ -1282,59 +1320,6 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 	return &dto.AdminCancelCampaignResponse{
 		Message: "Campaign cancelled and budget refunded successfully",
 	}, nil
-}
-
-func (s *AdminCampaignFlowImpl) RemoveAudienceSpec(ctx context.Context, platform *string) (*dto.AdminRemoveAudienceSpecResponse, error) {
-	if s.rc == nil {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_FAILED", "Cache config is not available", ErrCacheNotAvailable)
-	}
-
-	normalizedPlatform, err := normalizeAudienceSpecPlatformDefault(platform)
-	if err != nil {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_INVALID_PLATFORM", "Invalid platform", ErrAudienceSpecPlatformInvalid)
-	}
-
-	lockKey := audienceSpecPlatformLockKey(s.cacheConfig, normalizedPlatform)
-	cacheKey := audienceSpecPlatformCacheKey(s.cacheConfig, normalizedPlatform)
-	filePath := audienceSpecFilePath()
-
-	ok, err := s.rc.SetNX(ctx, lockKey, "1", 10*time.Second).Result()
-	if err != nil {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_LOCK_FAILED", "Failed to acquire lock", err)
-	}
-	if !ok {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_LOCK_BUSY", "Another worker is updating audience spec", errors.New("lock busy"))
-	}
-	defer func() {
-		_ = s.rc.Del(context.Background(), lockKey).Err()
-	}()
-
-	currentByPlatform, err := readAudienceSpecFileByPlatform(filePath)
-	if err != nil {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
-	}
-	delete(currentByPlatform, normalizedPlatform)
-
-	bytes, err := json.MarshalIndent(currentByPlatform, "", "  ")
-	if err != nil {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_MARSHAL_FAILED", "Failed to marshal audience spec", err)
-	}
-	if err := atomicWrite(filePath, bytes, 0o644); err != nil {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_WRITE_FAILED", "Failed to write audience spec file", err)
-	}
-
-	if err := s.rc.Del(ctx, cacheKey).Err(); err != nil {
-		return nil, NewBusinessError("ADMIN_REMOVE_AUDIENCE_SPEC_CACHE_FAILED", "Failed to clear audience spec cache", err)
-	}
-
-	resp := &dto.AdminRemoveAudienceSpecResponse{
-		Message:  "Audience spec removed successfully",
-		Platform: normalizedPlatform,
-	}
-	logAdminAction(ctx, s.auditRepo, models.AuditActionAdminRemoveAudienceSpec, "Admin removed audience spec", true, nil, map[string]any{
-		"platform": normalizedPlatform,
-	}, nil)
-	return resp, nil
 }
 
 func (s *AdminCampaignFlowImpl) UpdatePagePrice(ctx context.Context, req *dto.AdminUpdatePagePriceRequest) (*dto.AdminUpdatePagePriceResponse, error) {
