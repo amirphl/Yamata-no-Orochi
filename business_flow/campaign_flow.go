@@ -52,35 +52,37 @@ type CampaignFlow interface {
 
 // CampaignFlowImpl implements the campaign business flow
 type CampaignFlowImpl struct {
-	campaignRepo          repository.CampaignRepository
-	bundleRepo            repository.BundleRepository
-	shortLinkRepo         repository.ShortLinkRepository
-	customerRepo          repository.CustomerRepository
-	multimediaRepo        repository.MultimediaAssetRepository
-	platformSettingsRepo  repository.PlatformSettingsRepository
-	walletRepo            repository.WalletRepository
-	balanceSnapshotRepo   repository.BalanceSnapshotRepository
-	transactionRepo       repository.TransactionRepository
-	auditRepo             repository.AuditLogRepository
-	lineNumberRepo        repository.LineNumberRepository
-	segmentPriceRepo      repository.SegmentPriceFactorRepository
-	platformBaseRepo      repository.PlatformBasePriceRepository
-	pagePriceRepo         repository.PagePriceRepository
-	processedCampaignRepo repository.ProcessedCampaignRepository
-	smsStatusResultRepo   repository.SMSStatusResultRepository
-	shortLinkClickRepo    repository.ShortLinkClickRepository
-	selectedTagRepo       repository.CampaignSelectedTagRepository
-	notifier              services.NotificationService
-	adminConfig           config.AdminConfig
-	cacheConfig           config.CacheConfig
-	botConfig             config.BotConfig
-	payamSMSConfig        config.PayamSMSConfig
-	baleConfig            config.BaleConfig
-	rubikaConfig          config.RubikaConfig
-	splusConfig           config.SplusConfig
-	irHTTPSProxy          string
-	rc                    *redis.Client
-	db                    *gorm.DB
+	campaignRepo            repository.CampaignRepository
+	bundleRepo              repository.BundleRepository
+	shortLinkRepo           repository.ShortLinkRepository
+	customerRepo            repository.CustomerRepository
+	multimediaRepo          repository.MultimediaAssetRepository
+	platformSettingsRepo    repository.PlatformSettingsRepository
+	walletRepo              repository.WalletRepository
+	balanceSnapshotRepo     repository.BalanceSnapshotRepository
+	transactionRepo         repository.TransactionRepository
+	auditRepo               repository.AuditLogRepository
+	lineNumberRepo          repository.LineNumberRepository
+	segmentPriceRepo        repository.SegmentPriceFactorRepository
+	platformBaseRepo        repository.PlatformBasePriceRepository
+	pagePriceRepo           repository.PagePriceRepository
+	processedCampaignRepo   repository.ProcessedCampaignRepository
+	smsStatusResultRepo     repository.SMSStatusResultRepository
+	shortLinkClickRepo      repository.ShortLinkClickRepository
+	selectedTagRepo         repository.CampaignSelectedTagRepository
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository
+	audienceSpecRepo        repository.AudienceSpecRepository
+	notifier                services.NotificationService
+	adminConfig             config.AdminConfig
+	cacheConfig             config.CacheConfig
+	botConfig               config.BotConfig
+	payamSMSConfig          config.PayamSMSConfig
+	baleConfig              config.BaleConfig
+	rubikaConfig            config.RubikaConfig
+	splusConfig             config.SplusConfig
+	irHTTPSProxy            string
+	rc                      *redis.Client
+	db                      *gorm.DB
 }
 
 const (
@@ -89,6 +91,9 @@ const (
 	defaultSegmentPriceFactor    = 1.0
 	defaultLineNumberPriceFactor = 1.0
 	undeliveredRefundDelay       = 72 * time.Hour
+	audienceGradeA               = "A"
+	audienceGradeB               = "B"
+	audienceGradeC               = "C"
 )
 
 var tehranLoc *time.Location
@@ -115,6 +120,8 @@ func NewCampaignFlow(
 	smsStatusResultRepo repository.SMSStatusResultRepository,
 	shortLinkClickRepo repository.ShortLinkClickRepository,
 	selectedTagRepo repository.CampaignSelectedTagRepository,
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository,
+	audienceSpecRepo repository.AudienceSpecRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -128,35 +135,37 @@ func NewCampaignFlow(
 	irHTTPSProxy string,
 ) CampaignFlow {
 	return &CampaignFlowImpl{
-		campaignRepo:          campaignRepo,
-		bundleRepo:            bundleRepo,
-		shortLinkRepo:         shortLinkRepo,
-		customerRepo:          customerRepo,
-		multimediaRepo:        multimediaRepo,
-		platformSettingsRepo:  platformSettingsRepo,
-		walletRepo:            walletRepo,
-		balanceSnapshotRepo:   balanceSnapshotRepo,
-		transactionRepo:       transactionRepo,
-		auditRepo:             auditRepo,
-		lineNumberRepo:        lineNumberRepo,
-		segmentPriceRepo:      segmentPriceRepo,
-		platformBaseRepo:      platformBaseRepo,
-		pagePriceRepo:         pagePriceRepo,
-		processedCampaignRepo: processedCampaignRepo,
-		smsStatusResultRepo:   smsStatusResultRepo,
-		shortLinkClickRepo:    shortLinkClickRepo,
-		selectedTagRepo:       selectedTagRepo,
-		notifier:              notifier,
-		adminConfig:           adminConfig,
-		cacheConfig:           cacheConfig,
-		botConfig:             botConfig,
-		payamSMSConfig:        payamSMSConfig,
-		baleConfig:            baleConfig,
-		rubikaConfig:          rubikaConfig,
-		splusConfig:           splusConfig,
-		irHTTPSProxy:          irHTTPSProxy,
-		rc:                    rc,
-		db:                    db,
+		campaignRepo:            campaignRepo,
+		bundleRepo:              bundleRepo,
+		shortLinkRepo:           shortLinkRepo,
+		customerRepo:            customerRepo,
+		multimediaRepo:          multimediaRepo,
+		platformSettingsRepo:    platformSettingsRepo,
+		walletRepo:              walletRepo,
+		balanceSnapshotRepo:     balanceSnapshotRepo,
+		transactionRepo:         transactionRepo,
+		auditRepo:               auditRepo,
+		lineNumberRepo:          lineNumberRepo,
+		segmentPriceRepo:        segmentPriceRepo,
+		platformBaseRepo:        platformBaseRepo,
+		pagePriceRepo:           pagePriceRepo,
+		processedCampaignRepo:   processedCampaignRepo,
+		smsStatusResultRepo:     smsStatusResultRepo,
+		shortLinkClickRepo:      shortLinkClickRepo,
+		selectedTagRepo:         selectedTagRepo,
+		capacityCalculationRepo: capacityCalculationRepo,
+		audienceSpecRepo:        audienceSpecRepo,
+		notifier:                notifier,
+		adminConfig:             adminConfig,
+		cacheConfig:             cacheConfig,
+		botConfig:               botConfig,
+		payamSMSConfig:          payamSMSConfig,
+		baleConfig:              baleConfig,
+		rubikaConfig:            rubikaConfig,
+		splusConfig:             splusConfig,
+		irHTTPSProxy:            irHTTPSProxy,
+		rc:                      rc,
+		db:                      db,
 	}
 }
 
@@ -1155,27 +1164,21 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 
 	usingTargetAudienceExcelFile := campaign.Spec.UsesExcelTargeting()
 	if campaign.Spec.UsesSmartTargeting() {
-		summary, err := s.selectedTagRepo.Summary(ctx, campaign.ID)
+		if s.capacityCalculationRepo == nil {
+			return nil, NewBusinessError("SMART_TARGETING_CAPACITY_UNAVAILABLE", "Exact Smart Targeting capacity calculation is unavailable", ErrSmartTargetingExactCapacityRequired)
+		}
+		exact, err := EnsureCurrentSmartTargetingCapacity(ctx, s.db, s.campaignRepo, s.selectedTagRepo, s.capacityCalculationRepo, &campaign)
 		if err != nil {
-			return nil, NewBusinessError("SMART_TARGETING_SELECTION_LOOKUP_FAILED", "Failed to load Smart Targeting selection", err)
-		}
-		if summary.SelectedTagCount == 0 {
-			return nil, NewBusinessError("CALCULATE_CAMPAIGN_CAPACITY_VALIDATION_FAILED", "Campaign capacity calculation validation failed", ErrSmartTargetingTagsRequired)
-		}
-		if campaign.BundleID == nil {
-			return nil, NewBusinessError("BUNDLE_NOT_FOUND", "Campaign bundle not found", ErrBundleNotFound)
-		}
-		if err := s.selectedTagRepo.Validate(ctx, campaign.ID, *campaign.BundleID); err != nil {
-			if errors.Is(err, repository.ErrInvalidCampaignSelectedTags) {
-				return nil, NewBusinessError("SMART_TARGETING_SELECTION_INVALID", ErrSmartTargetingTagInvalid.Error(), ErrSmartTargetingTagInvalid)
+			if errors.Is(err, ErrSmartTargetingCapacityPending) {
+				return nil, NewBusinessError("SMART_TARGETING_CAPACITY_PENDING", "Exact Smart Targeting capacity calculation was submitted; please wait and retry", err)
 			}
-			return nil, NewBusinessError("SMART_TARGETING_SELECTION_LOOKUP_FAILED", "Failed to validate Smart Targeting selection", err)
+			return nil, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_LOOKUP_FAILED", "Failed to validate exact Smart Targeting capacity", err)
 		}
-		if summary.SelectedRawCapacity < 0 {
-			return nil, NewBusinessError("SMART_TARGETING_CAPACITY_INVALID", "Selected raw capacity is invalid", ErrInvalidState)
+		if exact.UsableUniqueAudienceCount < 0 {
+			return nil, NewBusinessError("SMART_TARGETING_CAPACITY_INVALID", "Exact Smart Targeting capacity is invalid", ErrInvalidState)
 		}
 		return &dto.CalculateCampaignCapacityResponse{
-			Message: "Campaign capacity calculated successfully", Capacity: uint64(summary.SelectedRawCapacity),
+			Message: "Campaign capacity calculated successfully", Capacity: uint64(exact.UsableUniqueAudienceCount),
 			AudienceGradeCapacity: map[string]uint64{audienceGradeA: 0, audienceGradeB: 0, audienceGradeC: 0},
 		}, nil
 	}
@@ -1216,28 +1219,19 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 		}, nil
 	}
 
-	if csvCapacity, foundAllLevel3s, err := calculateCampaignCapacityFromCSV(campaign.Spec.Platform, campaign.Spec.Level3s, campaign.Spec.AudienceGrades); err == nil {
-		if !foundAllLevel3s {
-			return &dto.CalculateCampaignCapacityResponse{
-				Message:               "Campaign capacity calculated successfully",
-				Capacity:              0,
-				AudienceGradeCapacity: csvCapacity.AudienceGradeCapacity,
-			}, nil
-		}
-		return &dto.CalculateCampaignCapacityResponse{
-			Message:               "Campaign capacity calculated successfully",
-			Capacity:              csvCapacity.TotalCapacity,
-			AudienceGradeCapacity: csvCapacity.AudienceGradeCapacity,
-		}, nil
-	}
-
-	// Fetch audience spec (from cache or file)
+	// Fetch the database-backed audience spec (with Redis used only as a
+	// five-minute cache).
 	specResp, err := s.ListAudienceSpec(ctx, &campaign.Spec.Platform)
 	if err != nil {
 		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_FAILED", "Failed to load audience spec", err)
 	}
 
 	var capacity uint64
+	audienceGradeCapacity := map[string]uint64{
+		audienceGradeA: 0,
+		audienceGradeB: 0,
+		audienceGradeC: 0,
+	}
 
 	// Build a set of requested tags for quick lookup
 	tagSet := make(map[string]struct{}, len(campaign.Spec.Tags))
@@ -1284,19 +1278,36 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 							continue
 						}
 					}
-					if len(tagSet) == 0 {
-						capacity += uint64(item.AvailableAudience)
-						continue
-					}
-					matched := false
-					for _, it := range item.Tags {
-						if _, ok := tagSet[it]; ok {
-							matched = true
-							break
+					if len(tagSet) > 0 {
+						matched := false
+						for _, it := range item.Tags {
+							if _, ok := tagSet[it]; ok {
+								matched = true
+								break
+							}
+						}
+						if !matched {
+							continue
 						}
 					}
-					if matched {
-						capacity += uint64(item.AvailableAudience)
+
+					selectedCapacity, gradeCapacity, capacityErr := calculateAudienceSpecItemCapacity(
+						campaign.Spec.Platform,
+						campaign.Spec.AudienceGrades,
+						item,
+					)
+					if capacityErr != nil {
+						return nil, NewBusinessError("AUDIENCE_STATS_INVALID", "Audience statistics are invalid", capacityErr)
+					}
+					capacity, capacityErr = addAudienceCapacity(capacity, selectedCapacity)
+					if capacityErr != nil {
+						return nil, NewBusinessError("AUDIENCE_CAPACITY_OVERFLOW", "Audience capacity exceeds the supported range", capacityErr)
+					}
+					for grade, gradeValue := range gradeCapacity {
+						audienceGradeCapacity[grade], capacityErr = addAudienceCapacity(audienceGradeCapacity[grade], gradeValue)
+						if capacityErr != nil {
+							return nil, NewBusinessError("AUDIENCE_CAPACITY_OVERFLOW", "Audience capacity exceeds the supported range", capacityErr)
+						}
 					}
 				}
 			}
@@ -1306,8 +1317,73 @@ func (s *CampaignFlowImpl) CalculateCampaignCapacity(ctx context.Context, req *d
 	return &dto.CalculateCampaignCapacityResponse{
 		Message:               "Campaign capacity calculated successfully",
 		Capacity:              capacity,
-		AudienceGradeCapacity: map[string]uint64{audienceGradeA: 0, audienceGradeB: 0, audienceGradeC: 0},
+		AudienceGradeCapacity: audienceGradeCapacity,
 	}, nil
+}
+
+func calculateAudienceSpecItemCapacity(platform string, selectedGrades []string, item dto.AudienceSpecItem) (uint64, map[string]uint64, error) {
+	if !models.IsValidCampaignPlatform(platform) {
+		return 0, nil, ErrCampaignPlatformInvalid
+	}
+
+	gradeCapacity := make(map[string]uint64, 3)
+	for _, grade := range []string{audienceGradeA, audienceGradeB, audienceGradeC} {
+		capacity, err := audienceSpecItemGradeCapacity(platform, grade, item)
+		if err != nil {
+			return 0, nil, err
+		}
+		gradeCapacity[grade] = capacity
+	}
+
+	var selectedCapacity uint64
+	for _, grade := range campaignAudienceGradesOrDefault(selectedGrades) {
+		grade = strings.ToUpper(strings.TrimSpace(grade))
+		capacity, ok := gradeCapacity[grade]
+		if !ok {
+			return 0, nil, ErrCampaignAudienceGradesInvalid
+		}
+		var err error
+		selectedCapacity, err = addAudienceCapacity(selectedCapacity, capacity)
+		if err != nil {
+			return 0, nil, err
+		}
+	}
+	return selectedCapacity, gradeCapacity, nil
+}
+
+func audienceSpecItemGradeCapacity(platform, grade string, item dto.AudienceSpecItem) (uint64, error) {
+	var white, pink, black int64
+	switch grade {
+	case audienceGradeA:
+		white, pink, black = item.BestWhite, item.BestPink, item.BestBlack
+	case audienceGradeB:
+		white, pink, black = item.GoodWhite, item.GoodPink, item.GoodBlack
+	case audienceGradeC:
+		white, pink, black = item.WeakWhite, item.WeakPink, item.WeakBlack
+	default:
+		return 0, ErrCampaignAudienceGradesInvalid
+	}
+	if white < 0 || pink < 0 || black < 0 {
+		return 0, fmt.Errorf("negative audience grade statistics")
+	}
+
+	capacity := uint64(white)
+	var err error
+	if platform == models.CampaignPlatformSMS {
+		return addAudienceCapacity(capacity, uint64(pink)/3)
+	}
+	capacity, err = addAudienceCapacity(capacity, uint64(pink))
+	if err != nil {
+		return 0, err
+	}
+	return addAudienceCapacity(capacity, uint64(black))
+}
+
+func addAudienceCapacity(total, value uint64) (uint64, error) {
+	if ^uint64(0)-total < value {
+		return 0, fmt.Errorf("audience capacity overflow")
+	}
+	return total + value, nil
 }
 
 // CalculateCampaignCost handles the campaign cost calculation process
@@ -1464,7 +1540,29 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		pricePerMsg = pbp.Price*uint64(1*1) + uint64(segmentPriceFactor*pagePrice)
 	}
 
-	// Calculate campaign capacity (target audience size)
+	// Smart Targeting cost must use the persisted exact generation rather than
+	// Feature 2's raw sum. Pending, failed, expired, or fingerprint-stale
+	// generations are deliberately rejected so budget reservations cannot use a
+	// capacity that is no longer operationally valid.
+	if campaign.Spec.UsesSmartTargeting() {
+		if s.capacityCalculationRepo == nil {
+			return 0, 0, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required", ErrSmartTargetingExactCapacityRequired)
+		}
+		exact, err := EnsureCurrentSmartTargetingCapacity(ctx, s.db, s.campaignRepo, s.selectedTagRepo, s.capacityCalculationRepo, &campaign)
+		if err != nil {
+			if errors.Is(err, ErrSmartTargetingCapacityPending) {
+				return 0, 0, NewBusinessError("SMART_TARGETING_CAPACITY_PENDING", "Exact Smart Targeting capacity calculation was submitted; please wait and retry", err)
+			}
+			return 0, 0, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_LOOKUP_FAILED", "Failed to validate exact Smart Targeting capacity", err)
+		}
+		if exact.UsableUniqueAudienceCount < 0 {
+			return 0, 0, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_INVALID", "Exact Smart Targeting capacity is invalid", ErrInvalidState)
+		}
+		return pricePerMsg, uint64(exact.UsableUniqueAudienceCount), nil
+	}
+
+	// Calculate campaign capacity (target audience size) for standard and Excel
+	// targeting. Their established behavior remains unchanged.
 	capacityResp, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
 		CampaignID: campaign.ID,
 		CustomerID: campaign.CustomerID,
@@ -3665,86 +3763,6 @@ func (s *CampaignFlowImpl) GetPagePrices(ctx context.Context) (*dto.GetPagePrice
 	return &dto.GetPagePricesResponse{
 		Message: "Page prices retrieved successfully",
 		Items:   items,
-	}, nil
-}
-
-// ListAudienceSpec returns the current audience spec from cache or file
-func (s *CampaignFlowImpl) ListAudienceSpec(ctx context.Context, platform *string) (*dto.ListAudienceSpecResponse, error) {
-	// derive redis key and file path consistent with bot audience spec flow
-	normalizedPlatform, err := normalizeAudienceSpecPlatformDefault(platform)
-	if err != nil {
-		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_PLATFORM_INVALID", "Invalid platform", err)
-	}
-	cacheKey := audienceSpecPlatformCacheKey(s.cacheConfig, normalizedPlatform)
-	filePath := audienceSpecFilePath()
-	hideTestLayer := s.shouldHideTestAudience(ctx)
-
-	// try redis first
-	if bs, err := s.rc.Get(ctx, cacheKey).Bytes(); err == nil && len(bs) > 0 {
-		var out dto.AudienceSpec
-		if err := json.Unmarshal(bs, &out); err == nil {
-			if hideTestLayer {
-				out = filterAudienceSpecLayer(out, "L1-test")
-			}
-			return &dto.ListAudienceSpecResponse{
-				Message: "Audience spec retrieved from cache",
-				Spec:    out,
-			}, nil
-		}
-	}
-
-	// Read existing JSON file (if any) for selected platform
-	byPlatform, err := readAudienceSpecFileByPlatform(filePath)
-	if err != nil {
-		return nil, NewBusinessError("LIST_AUDIENCE_SPEC_READ_FAILED", "Failed to read audience spec file", err)
-	}
-	current := byPlatform[normalizedPlatform]
-	if current == nil {
-		current = make(audienceSpecFile)
-	}
-
-	// Build DTO shape including level-2 metadata and only positive-availability items
-	out := make(dto.AudienceSpec)
-	for l1, l2map := range current {
-		for l2k, node := range l2map {
-			if node == nil {
-				continue
-			}
-			// Collect items with AvailableAudience > 0
-			items := make(map[string]dto.AudienceSpecItem)
-			for l3k, leaf := range node.Items {
-				if leaf.AvailableAudience > 0 {
-					items[l3k] = dto.AudienceSpecItem{
-						Tags:              leaf.Tags,
-						AvailableAudience: leaf.AvailableAudience,
-					}
-				}
-			}
-			if len(items) == 0 && len(node.Metadata) == 0 {
-				// Skip empty level2 without items and metadata
-				continue
-			}
-			if _, ok := out[l1]; !ok {
-				out[l1] = make(map[string]dto.AudienceSpecLevel2)
-			}
-			out[l1][l2k] = dto.AudienceSpecLevel2{
-				Metadata: node.Metadata,
-				Items:    items,
-			}
-		}
-	}
-
-	// Cache DTO JSON
-	if bs, err := json.MarshalIndent(out, "", "  "); err == nil {
-		_ = s.rc.Set(ctx, cacheKey, bs, 0).Err()
-	}
-	if hideTestLayer {
-		out = filterAudienceSpecLayer(out, "L1-test")
-	}
-
-	return &dto.ListAudienceSpecResponse{
-		Message: "Audience spec retrieved",
-		Spec:    out,
 	}, nil
 }
 
