@@ -22,10 +22,17 @@ type SegmentPriceFactorAdminFlow interface {
 
 type SegmentPriceFactorFlowImpl struct {
 	segmentPriceFactorRepo repository.SegmentPriceFactorRepository
+	audienceSpecRepo       repository.AudienceSpecRepository
 }
 
-func NewSegmentPriceFactorFlow(segmentPriceFactorRepo repository.SegmentPriceFactorRepository) *SegmentPriceFactorFlowImpl {
-	return &SegmentPriceFactorFlowImpl{segmentPriceFactorRepo: segmentPriceFactorRepo}
+func NewSegmentPriceFactorFlow(
+	segmentPriceFactorRepo repository.SegmentPriceFactorRepository,
+	audienceSpecRepo repository.AudienceSpecRepository,
+) *SegmentPriceFactorFlowImpl {
+	return &SegmentPriceFactorFlowImpl{
+		segmentPriceFactorRepo: segmentPriceFactorRepo,
+		audienceSpecRepo:       audienceSpecRepo,
+	}
 }
 
 // AdminCreateSegmentPriceFactor upserts a price factor for a given level3 (latest row wins).
@@ -81,26 +88,31 @@ func (f *SegmentPriceFactorFlowImpl) AdminListSegmentPriceFactors(ctx context.Co
 	}, nil
 }
 
-// AdminListLevel3Options returns available level3 keys from the audience spec (filtered to entries with available audience > 0).
+// AdminListLevel3Options returns active, database-backed level3 keys with a
+// positive audience. It never reads the legacy audience-spec file.
 func (f *SegmentPriceFactorFlowImpl) AdminListLevel3Options(ctx context.Context) (*dto.AdminListLevel3OptionsResponse, error) {
-	filePath := audienceSpecFilePath()
-	specByPlatform, err := readAudienceSpecFileByPlatform(filePath)
+	rows, err := f.audienceSpecRepo.ListActive(ctx)
 	if err != nil {
-		return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_LEVEL3_LOAD_FAILED", "Failed to load audience spec", err)
+		return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_LEVEL3_LOAD_FAILED", "Failed to load audience spec from database", err)
 	}
 
 	set := make(map[string]struct{})
-	for _, spec := range specByPlatform {
-		for _, l2map := range spec {
-			for _, node := range l2map {
-				if node == nil || len(node.Items) == 0 {
-					continue
-				}
-				for l3, leaf := range node.Items {
-					if leaf.AvailableAudience > 0 {
-						set[l3] = struct{}{}
-					}
-				}
+	for _, row := range rows {
+		if !row.StatsFound {
+			return nil, NewBusinessError(
+				"SEGMENT_PRICE_FACTOR_LEVEL3_LOAD_FAILED",
+				"An active tag reference has no matching audience statistics",
+				fmt.Errorf("active tag %d has no matching src_layer_all_stats row", row.TagID),
+			)
+		}
+		capacity, capacityErr := audienceCapacityForPlatform(row, models.CampaignPlatformBale)
+		if capacityErr != nil {
+			return nil, NewBusinessError("SEGMENT_PRICE_FACTOR_LEVEL3_LOAD_FAILED", "Audience statistics are invalid", capacityErr)
+		}
+		if capacity > 0 {
+			level3 := strings.TrimSpace(row.Layer3Category)
+			if level3 != "" {
+				set[level3] = struct{}{}
 			}
 		}
 	}
