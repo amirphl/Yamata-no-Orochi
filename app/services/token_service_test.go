@@ -332,6 +332,10 @@ func TestRevokeToken(t *testing.T) {
 			}
 		})
 	}
+
+	claims, err := service.ValidateToken(accessToken)
+	assert.ErrorIs(t, err, ErrTokenRevoked)
+	assert.Nil(t, claims)
 }
 
 func TestGetTokenClaims(t *testing.T) {
