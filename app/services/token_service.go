@@ -4,6 +4,7 @@ package services
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
@@ -76,7 +77,8 @@ type TokenServiceImpl struct {
 	useRSAKeys      bool
 	issuer          string
 	audience        string
-	mu              sync.RWMutex // Mutex for concurrent access to revokedTokens
+	mu              sync.RWMutex
+	revokedTokens   map[[sha256.Size]byte]time.Time
 }
 
 // NewTokenService creates a new token service
@@ -113,6 +115,7 @@ func NewTokenService(accessTokenTTL, refreshTokenTTL time.Duration, issuer, audi
 		useRSAKeys:      useRSAKeys,
 		issuer:          issuer,
 		audience:        audience,
+		revokedTokens:   make(map[[sha256.Size]byte]time.Time),
 	}, nil
 }
 
@@ -540,51 +543,40 @@ func (s *TokenServiceImpl) RefreshToken(refreshToken string) (newAccessToken, ne
 	return s.GenerateTokens(claims.CustomerID)
 }
 
-// RevokeToken marks a token as revoked (in a real implementation, you'd store this in a database)
+// RevokeToken validates a token and keeps a hashed revocation entry until the
+// token expires. Deployments that require revocations to survive restarts
+// should replace this process-local store with Redis or durable persistence.
 func (s *TokenServiceImpl) RevokeToken(token string) error {
+	claims, err := s.ValidateToken(token)
+	if err != nil {
+		return fmt.Errorf("invalid token: %w", err)
+	}
+	digest := sha256.Sum256([]byte(token))
+	now := utils.UTCNow()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// In a production environment, you would:
-	// 1. Validate the token
-	// 2. Extract the token ID (jti)
-	// 3. Store the token ID in a revocation list (Redis/database)
-	// 4. Set an expiration on the revoked token entry
-
-	// claims, err := s.ValidateToken(token)
-	// if err != nil {
-	// 	return fmt.Errorf("invalid token: %w", err)
-	// }
-
-	// For now, we'll just validate the token
-	// In production, you'd add the token ID to a revocation list
-	// TODO:
-
+	for key, expiresAt := range s.revokedTokens {
+		if !expiresAt.After(now) {
+			delete(s.revokedTokens, key)
+		}
+	}
+	s.revokedTokens[digest] = claims.ExpiresAt
 	return nil
 }
 
-// GetTokenClaims extracts claims from a token without full validation
+// GetTokenClaims returns fully validated customer-token claims.
 func (s *TokenServiceImpl) GetTokenClaims(token string) (*TokenClaims, error) {
-	// Use ValidateToken to ensure proper validation and security
-	// TODO:
-	return nil, nil
+	return s.ValidateToken(token)
 }
 
 // IsTokenRevoked checks if a token has been revoked
-// In a production environment, this would check against a revocation list (Redis/database)
 func (s *TokenServiceImpl) IsTokenRevoked(token string) bool {
+	digest := sha256.Sum256([]byte(token))
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-
-	// Extract token ID from the token
-	// claims, err := s.GetTokenClaims(token)
-	// if err != nil {
-	// 	return true // Consider invalid tokens as revoked
-	// }
-
-	// TODO:
-
-	return false
+	expiresAt, exists := s.revokedTokens[digest]
+	return exists && expiresAt.After(utils.UTCNow())
 }
 
 // generateToken creates a signed JWT token
