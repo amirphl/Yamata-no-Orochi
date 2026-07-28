@@ -16,8 +16,6 @@ import (
 
 // CampaignBotHandlerInterface defines the contract for bot campaign handlers
 type CampaignBotHandlerInterface interface {
-	UpdateAudienceSpec(c fiber.Ctx) error
-	ResetAudienceSpec(c fiber.Ctx) error
 	ListReadyCampaigns(c fiber.Ctx) error
 	MoveCampaignToExecuted(c fiber.Ctx) error
 	MoveCampaignToRunning(c fiber.Ctx) error
@@ -57,94 +55,6 @@ func (h *CampaignBotHandler) SuccessResponse(c fiber.Ctx, statusCode int, messag
 		Message: message,
 		Data:    data,
 	})
-}
-
-// UpdateAudienceSpec updates audience spec (bot)
-// @Summary Bot Update Audience Spec
-// @Tags Bot Campaigns
-// @Accept json
-// @Produce json
-// @Param request body dto.BotUpdateAudienceSpecRequest true "Audience spec update"
-// @Success 201 {object} dto.APIResponse{data=dto.BotUpdateAudienceSpecResponse}
-// @Failure 400 {object} dto.APIResponse
-// @Router /api/v1/bot/campaigns/audience-spec [post]
-func (h *CampaignBotHandler) UpdateAudienceSpec(c fiber.Ctx) error {
-	var req dto.BotUpdateAudienceSpecRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
-	}
-	if err := h.validator.Struct(&req); err != nil {
-		var validationErrors []string
-		for _, err := range err.(validator.ValidationErrors) {
-			validationErrors = append(validationErrors, getValidationErrorMessage(err))
-		}
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
-	}
-	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	_ = metadata
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/audience-spec", 30*time.Second)
-	defer cancel()
-	res, err := h.campaignFlow.UpdateAudienceSpec(ctx, &req)
-	if err != nil {
-		if businessflow.IsAudienceSpecPlatformRequired(err) || businessflow.IsAudienceSpecPlatformInvalid(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
-		}
-		if be, ok := err.(*businessflow.BusinessError); ok {
-			switch be.Code {
-			case "BOT_AUDIENCE_SPEC_LOCK_BUSY":
-				return h.ErrorResponse(c, fiber.StatusConflict, "Another worker is updating audience spec", be.Code, nil)
-			case "BOT_AUDIENCE_SPEC_READ_FAILED", "BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "BOT_AUDIENCE_SPEC_WRITE_FAILED", "BOT_AUDIENCE_SPEC_CACHE_FAILED", "BOT_AUDIENCE_SPEC_LOCK_FAILED":
-				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update audience spec", be.Code, nil)
-			}
-		}
-		log.Println("Update audience spec failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to update audience spec", "UPDATE_AUDIENCE_SPEC_FAILED", nil)
-	}
-	return h.SuccessResponse(c, fiber.StatusCreated, "Audience spec updated", res)
-}
-
-// ResetAudienceSpec resets/deletes audience spec (bot)
-// @Summary Bot Reset Audience Spec
-// @Tags Bot Campaigns
-// @Accept json
-// @Produce json
-// @Param request body dto.BotResetAudienceSpecRequest true "Audience spec reset"
-// @Success 200 {object} dto.APIResponse{data=dto.BotResetAudienceSpecResponse}
-// @Failure 400 {object} dto.APIResponse
-// @Router /api/v1/bot/campaigns/audience-spec/reset [post]
-func (h *CampaignBotHandler) ResetAudienceSpec(c fiber.Ctx) error {
-	var req dto.BotResetAudienceSpecRequest
-	if err := c.Bind().JSON(&req); err != nil {
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", err.Error())
-	}
-	if err := h.validator.Struct(&req); err != nil {
-		var validationErrors []string
-		for _, err := range err.(validator.ValidationErrors) {
-			validationErrors = append(validationErrors, getValidationErrorMessage(err))
-		}
-		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", validationErrors)
-	}
-	metadata := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
-	_ = metadata
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/bot/campaigns/audience-spec/reset", 30*time.Second)
-	defer cancel()
-	res, err := h.campaignFlow.ResetAudienceSpec(ctx, &req)
-	if err != nil {
-		if businessflow.IsAudienceSpecPlatformRequired(err) || businessflow.IsAudienceSpecPlatformInvalid(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
-		}
-		if be, ok := err.(*businessflow.BusinessError); ok {
-			switch be.Code {
-			case "BOT_AUDIENCE_SPEC_LOCK_BUSY":
-				return h.ErrorResponse(c, fiber.StatusConflict, "Another worker is updating audience spec", be.Code, nil)
-			case "BOT_AUDIENCE_SPEC_READ_FAILED", "BOT_AUDIENCE_SPEC_MARSHAL_FAILED", "BOT_AUDIENCE_SPEC_WRITE_FAILED", "BOT_AUDIENCE_SPEC_CACHE_FAILED", "BOT_AUDIENCE_SPEC_LOCK_FAILED":
-				return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reset audience spec", be.Code, nil)
-			}
-		}
-		log.Println("Reset audience spec failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to reset audience spec", "RESET_AUDIENCE_SPEC_FAILED", nil)
-	}
-	return h.SuccessResponse(c, fiber.StatusOK, "Audience spec reset", res)
 }
 
 // ListReadyCampaigns lists ready campaigns and marks them running
