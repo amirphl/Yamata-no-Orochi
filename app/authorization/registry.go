@@ -24,8 +24,6 @@ var RoutePermissionRegistry = []RoutePermission{
 	{"POST", "/api/v1/admin/campaigns/reject", PermissionCampaignApprove, "Reject campaigns"},
 	{"POST", "/api/v1/admin/campaigns/reschedule", PermissionCampaignApprove, "Reschedule campaigns"},
 	{"POST", "/api/v1/admin/campaigns/cancel", PermissionCampaignApprove, "Cancel campaigns"},
-	{"DELETE", "/api/v1/admin/campaigns/audience-spec", PermissionCampaignWrite, "Remove audience spec"},
-
 	// Payments admin
 	{"POST", "/api/v1/admin/payments/charge-wallet", PermissionPaymentChargeWallet, "Charge wallet (admin)"},
 	{"POST", "/api/v1/admin/payments/charge-wallet/preview", PermissionPaymentChargeWallet, "Preview wallet charge impact (admin)"},
