@@ -270,6 +270,9 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/:uuid/smart-targeting/selection", r.campaignHandler.GetSmartTargetingSelection)
 	campaigns.Put("/:uuid/smart-targeting/selection", r.campaignHandler.ReplaceSmartTargetingSelection)
 	campaigns.Post("/:uuid/smart-targeting/selection/auto", r.campaignHandler.AutoSelectSmartTargetingTags)
+	campaigns.Post("/:uuid/smart-targeting/capacity-calculations", r.campaignHandler.StartSmartTargetingCapacityCalculation)
+	campaigns.Get("/:uuid/smart-targeting/capacity-calculations", r.campaignHandler.GetSmartTargetingCapacityCalculation)
+	campaigns.Get("/:uuid/smart-targeting/capacity-calculations/:calculation_id", r.campaignHandler.GetSmartTargetingCapacityCalculationByID)
 	campaigns.Post("/:uuid/clone", r.campaignHandler.CloneCampaign)
 	campaigns.Post("/:uuid/test-send", r.campaignHandler.SendCampaignTestMessage)
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
@@ -309,7 +312,6 @@ func (r *FiberRouter) SetupRoutes() {
 	adminCampaigns.Post("/reject", r.campaignAdminHandler.RejectCampaign)
 	adminCampaigns.Post("/reschedule", r.campaignAdminHandler.RescheduleCampaign)
 	adminCampaigns.Post("/cancel", r.campaignAdminHandler.CancelCampaign)
-	adminCampaigns.Delete("/audience-spec", r.campaignAdminHandler.RemoveAudienceSpec)
 	adminCampaigns.Put("/page-prices", r.campaignAdminHandler.UpdatePagePrice)
 
 	// Admin segment price factors
@@ -339,8 +341,6 @@ func (r *FiberRouter) SetupRoutes() {
 	botCampaigns.Use(r.authMiddleware.BotAuthenticate())
 	botCampaigns.Use(func(c fiber.Ctx) error { return middleware.RequireBotAuth(c) })
 	botCampaigns.Get("/ready", r.campaignBotHandler.ListReadyCampaigns)
-	botCampaigns.Post("/audience-spec", r.campaignBotHandler.UpdateAudienceSpec)
-	botCampaigns.Post("/audience-spec/reset", r.campaignBotHandler.ResetAudienceSpec)
 	botCampaigns.Post("/:id/executed", r.campaignBotHandler.MoveCampaignToExecuted)
 	botCampaigns.Post("/:id/running", r.campaignBotHandler.MoveCampaignToRunning)
 	botCampaigns.Post("/:id/statistics", r.campaignBotHandler.UpdateCampaignStatistics)
