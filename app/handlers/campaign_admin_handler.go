@@ -24,7 +24,6 @@ type CampaignAdminHandlerInterface interface {
 	ApproveCampaign(c fiber.Ctx) error
 	RejectCampaign(c fiber.Ctx) error
 	CancelCampaign(c fiber.Ctx) error
-	RemoveAudienceSpec(c fiber.Ctx) error
 	RescheduleCampaign(c fiber.Ctx) error
 	UpdatePagePrice(c fiber.Ctx) error
 	GetPagePrices(c fiber.Ctx) error
@@ -208,6 +207,16 @@ func (h *CampaignAdminHandler) ApproveCampaign(c fiber.Ctx) error {
 	defer cancel()
 	res, err := h.campaignFlow.ApproveCampaign(ctx, &req)
 	if err != nil {
+		if errors.Is(err, businessflow.ErrSmartTargetingCapacityPending) {
+			var pending *businessflow.SmartTargetingCapacityPendingError
+			if errors.As(err, &pending) && pending != nil {
+				return h.ErrorResponse(c, fiber.StatusConflict, "Exact Smart Targeting capacity calculation is pending; please wait and retry approval", "SMART_TARGETING_CAPACITY_PENDING", pending.Response)
+			}
+			return h.ErrorResponse(c, fiber.StatusConflict, "Exact Smart Targeting capacity calculation is pending; please wait and retry approval", "SMART_TARGETING_CAPACITY_PENDING", nil)
+		}
+		if errors.Is(err, businessflow.ErrSmartTargetingExactCapacityRequired) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "A current exact Smart Targeting capacity calculation is required before approval", "SMART_TARGETING_EXACT_CAPACITY_REQUIRED", nil)
+		}
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
 		}
@@ -427,46 +436,6 @@ func (h *CampaignAdminHandler) CancelCampaign(c fiber.Ctx) error {
 		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to cancel campaign", "ADMIN_CANCEL_CAMPAIGN_FAILED", nil)
 	}
 	return h.SuccessResponse(c, fiber.StatusOK, "Campaign cancelled successfully", res)
-}
-
-// RemoveAudienceSpec removes audience spec for a platform from both file and cache.
-// @Summary Remove Audience Spec
-// @Description Remove audience spec for a platform from storage and cache (default platform is sms)
-// @Tags Admin Campaigns
-// @Produce json
-// @Param platform query string false "Platform (default: sms)"
-// @Success 200 {object} dto.APIResponse{data=dto.AdminRemoveAudienceSpecResponse}
-// @Failure 400 {object} dto.APIResponse "Validation error"
-// @Failure 500 {object} dto.APIResponse "Internal server error"
-// @Router /api/v1/admin/campaigns/audience-spec [delete]
-func (h *CampaignAdminHandler) RemoveAudienceSpec(c fiber.Ctx) error {
-	var platform *string
-	platformRaw := c.Query("platform")
-	if platformRaw != "" {
-		platform = &platformRaw
-	}
-
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/admin/campaigns/audience-spec", 30*time.Second)
-	defer cancel()
-	res, err := h.campaignFlow.RemoveAudienceSpec(ctx, platform)
-	if err != nil {
-		if businessflow.IsAudienceSpecPlatformInvalid(err) || businessflow.IsAudienceSpecPlatformRequired(err) {
-			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid platform", "INVALID_PLATFORM", nil)
-		}
-		if businessflow.IsCacheNotAvailable(err) {
-			return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Cache is not available", "CACHE_NOT_AVAILABLE", nil)
-		}
-		var be *businessflow.BusinessError
-		if errors.As(err, &be) {
-			switch be.Code {
-			case "ADMIN_REMOVE_AUDIENCE_SPEC_LOCK_BUSY":
-				return h.ErrorResponse(c, fiber.StatusConflict, "Another worker is updating audience spec", "AUDIENCE_SPEC_LOCK_BUSY", nil)
-			}
-		}
-		log.Println("Admin remove audience spec failed", err)
-		return h.ErrorResponse(c, fiber.StatusInternalServerError, "Failed to remove audience spec", "ADMIN_REMOVE_AUDIENCE_SPEC_FAILED", nil)
-	}
-	return h.SuccessResponse(c, fiber.StatusOK, "Audience spec removed successfully", res)
 }
 
 // UpdatePagePrice inserts a new page price record for a platform.
