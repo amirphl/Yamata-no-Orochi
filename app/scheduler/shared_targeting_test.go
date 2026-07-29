@@ -1,13 +1,23 @@
 package scheduler
 
 import (
+	"context"
+	"io"
+	"log"
 	"strings"
 	"testing"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/lib/pq"
 )
+
+type missingSchedulerStatsRepository struct{}
+
+func (missingSchedulerStatsRepository) FetchPercentiles(context.Context, *string, []string, []string) (*repository.LayerPercentiles, error) {
+	return nil, nil
+}
 
 func TestUsesExcelAudienceTargetingBackwardCompatibilityAndPriority(t *testing.T) {
 	excelUUID := "4a54766e-4330-4cff-8658-bcd3c742b469"
@@ -26,6 +36,12 @@ func TestUsesExcelAudienceTargetingBackwardCompatibilityAndPriority(t *testing.T
 		TargetAudienceExcelFileUUID: &excelUUID,
 	}) {
 		t.Fatal("Smart targeting must take priority over a stale Excel UUID")
+	}
+	if usesExcelAudienceTargeting(dto.BotGetCampaignResponse{
+		TargetingMethod:             models.CampaignAudienceTargetingStandard,
+		TargetAudienceExcelFileUUID: &excelUUID,
+	}) {
+		t.Fatal("Standard targeting must take priority over a stale Excel UUID")
 	}
 }
 
@@ -61,6 +77,21 @@ func TestCampaignIgnoresAudienceGradesOnlyForTag17358(t *testing.T) {
 	}
 	if campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{"9"}}) {
 		t.Fatal("tags other than 17358 must retain audience grades")
+	}
+}
+
+func TestHashTagsUsesCanonicalSetSemantics(t *testing.T) {
+	want := hashTags([]string{"7", "9"})
+	for _, tags := range [][]string{
+		{"9", "7"},
+		{" 7 ", "9", "7"},
+	} {
+		if got := hashTags(tags); got != want {
+			t.Fatalf("hashTags(%q) = %q, want canonical hash %q", tags, got, want)
+		}
+	}
+	if got := hashTags([]string{" ", ""}); got != "" {
+		t.Fatalf("blank tags hash = %q, want empty", got)
 	}
 }
 
@@ -102,12 +133,93 @@ func TestRequireAllTagsActiveFailsClosed(t *testing.T) {
 	}
 }
 
-func TestRequireAudienceMatchRejectsEmptySelection(t *testing.T) {
-	if err := requireAudienceMatch(746, pq.Int32Array{17358}, 0); err == nil || !strings.Contains(err.Error(), "no audience profiles matched") {
-		t.Fatalf("empty audience selection must fail, got %v", err)
+func TestRequireExactAudienceCountRejectsPartialSelection(t *testing.T) {
+	if err := requireExactAudienceCount(746, 50_000, 49_999); err == nil || !strings.Contains(err.Error(), "requires exactly 50000 audiences") {
+		t.Fatalf("partial audience selection must fail with requested and selected counts, got %v", err)
 	}
-	if err := requireAudienceMatch(746, pq.Int32Array{17358}, 1); err != nil {
-		t.Fatalf("non-empty audience selection unexpectedly failed: %v", err)
+	if err := requireExactAudienceCount(746, 50_000, 50_000); err != nil {
+		t.Fatalf("exact audience selection unexpectedly failed: %v", err)
+	}
+	if err := requireAudienceMatch(745, pq.Int32Array{7}, 1); err != nil {
+		t.Fatalf("legacy non-bundle partial selection must remain valid: %v", err)
+	}
+	if err := requireAudienceMatch(745, pq.Int32Array{7}, 0); err == nil {
+		t.Fatal("legacy non-bundle empty selection must fail")
+	}
+}
+
+func TestExcelTargetingPreservesReusableEmptyAudienceBehavior(t *testing.T) {
+	result, err := fetchAudiencePhonesByUIDs(
+		context.Background(),
+		log.New(io.Discard, "", 0),
+		nil,
+		nil,
+		dto.BotGetCampaignResponse{ID: 747},
+		"",
+		nil,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("empty reusable Excel audience unexpectedly failed: %v", err)
+	}
+	if result == nil || len(result.IDs) != 0 || result.AudienceSelectionID != nil || result.BundleAudienceSelectionID != nil {
+		t.Fatalf("Excel targeting must remain outside selection caches: %#v", result)
+	}
+}
+
+func TestExcelTargetingCanReuseAudienceAcrossBundleCampaigns(t *testing.T) {
+	bundleID := uint(44)
+	phone := "09120000001"
+	repo := &stubSMSAudienceProfileRepo{byUIDsFn: func(_ context.Context, uids []string) ([]*models.AudienceProfile, error) {
+		if len(uids) != 1 || uids[0] != "uid-1" {
+			t.Fatalf("unexpected Excel UIDs: %v", uids)
+		}
+		return []*models.AudienceProfile{{ID: 91, UID: "uid-1", PhoneNumber: &phone}}, nil
+	}}
+	for attempt := 0; attempt < 2; attempt++ {
+		campaign := dto.BotGetCampaignResponse{ID: uint(748 + attempt), BundleID: &bundleID, TargetingMethod: models.CampaignAudienceTargetingExcel}
+		result, err := fetchAudiencePhonesByUIDs(context.Background(), log.New(io.Discard, "", 0), repo, nil, campaign, "", []string{"uid-1"}, "")
+		if err != nil {
+			t.Fatalf("Excel selection attempt %d failed: %v", attempt+1, err)
+		}
+		if len(result.IDs) != 1 || result.IDs[0] != 91 || result.AudienceSelectionID != nil || result.BundleAudienceSelectionID != nil {
+			t.Fatalf("Excel selection attempt %d unexpectedly entered selection cache: %#v", attempt+1, result)
+		}
+	}
+}
+
+func TestStandardScoreResolutionOnlyRequiresStatisticsForRestrictedGrades(t *testing.T) {
+	t.Parallel()
+	logger := log.New(io.Discard, "", 0)
+	bypassCampaigns := []dto.BotGetCampaignResponse{
+		{ID: 812, Tags: []string{"7"}, AudienceGrades: []string{"A", "B", "C"}},
+		{ID: 813, Tags: []string{"17358"}, AudienceGrades: []string{"A"}},
+	}
+	restricted := dto.BotGetCampaignResponse{ID: 814, Tags: []string{"7"}, AudienceGrades: []string{"A"}}
+
+	resolvers := []struct {
+		name    string
+		resolve func(context.Context, dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error)
+	}{
+		{name: "sms", resolve: (&SMSCampaignScheduler{statsRepo: missingSchedulerStatsRepository{}, logger: logger}).resolveScoreConstraint},
+		{name: "bale", resolve: (&BaleCampaignScheduler{statsRepo: missingSchedulerStatsRepository{}, logger: logger}).resolveScoreConstraint},
+		{name: "rubika", resolve: (&RubikaCampaignScheduler{statsRepo: missingSchedulerStatsRepository{}, logger: logger}).resolveScoreConstraint},
+		{name: "splus", resolve: (&SplusCampaignScheduler{statsRepo: missingSchedulerStatsRepository{}, logger: logger}).resolveScoreConstraint},
+	}
+
+	for _, tt := range resolvers {
+		tc := tt
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for _, campaign := range bypassCampaigns {
+				if constraint, err := tc.resolve(context.Background(), campaign); err != nil || constraint != nil {
+					t.Fatalf("campaign %d: no score filter should be required, constraint=%v err=%v", campaign.ID, constraint, err)
+				}
+			}
+			if _, err := tc.resolve(context.Background(), restricted); err == nil || !strings.Contains(err.Error(), "statistics are missing") {
+				t.Fatalf("restricted grades without statistics must fail, got %v", err)
+			}
+		})
 	}
 }
 
