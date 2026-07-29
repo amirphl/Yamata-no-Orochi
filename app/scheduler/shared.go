@@ -44,6 +44,9 @@ const (
 	// database per AppendAudienceData call inside the persistence transaction.
 	// Used by all platform schedulers.
 	audienceAppendBatchSize = 1000
+	// Campaign workers have a four-hour execution deadline. A larger stale
+	// threshold avoids reclaiming a live worker while recovering hard crashes.
+	campaignExecutionStaleAfter = 5 * time.Hour
 
 	// Campaigns targeting this tag must not be constrained by audience grades.
 	// The tag predicate itself still applies, and the tag must exist and be active.
@@ -59,6 +62,38 @@ type AudiencePhonesResult struct {
 	BundleAudienceSelectionID *uint
 	MatchedUIDs               []string
 	UnmatchedUIDs             []string
+}
+
+// releaseUnpreparedCampaignOnFailure returns a failed scheduler claim to the
+// durable approved queue only when no processed checkpoint was committed. The
+// repository predicate makes this safe to call after any later-stage error.
+func releaseUnpreparedCampaignOnFailure(db *gorm.DB, logger *log.Logger, schedulerName string, campaignID uint, failure *error) {
+	if db == nil || failure == nil || *failure == nil {
+		return
+	}
+	releaseCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := repository.ReleaseUnpreparedCampaign(releaseCtx, db, campaignID); err != nil {
+		if logger != nil {
+			logger.Printf("%s scheduler: release unprepared campaign id=%d failed: %v", schedulerName, campaignID, err)
+		}
+	}
+}
+
+func recoverStaleUnpreparedCampaigns(ctx context.Context, db *gorm.DB, logger *log.Logger, schedulerName string) {
+	if db == nil {
+		return
+	}
+	count, err := repository.ReleaseStaleUnpreparedCampaigns(ctx, db, utils.UTCNow().Add(-campaignExecutionStaleAfter))
+	if err != nil {
+		if logger != nil {
+			logger.Printf("%s scheduler: recover stale unprepared campaigns failed: %v", schedulerName, err)
+		}
+		return
+	}
+	if count > 0 && logger != nil {
+		logger.Printf("%s scheduler: returned %d stale unprepared campaign claim(s) to approved", schedulerName, count)
+	}
 }
 
 // selectionIDsForCampaign validates that a non-Excel audience result carries
@@ -126,15 +161,13 @@ func hasTargetAudienceExcelFileUUID(fileUUID *string) bool {
 }
 
 // usesExcelAudienceTargeting keeps schedulers compatible with older bot
-// responses that did not include audience_targeting_method. Smart targeting
-// always wins over a stale Excel UUID.
+// responses that did not include audience_targeting_method. Any valid explicit
+// method is authoritative; only legacy/invalid responses infer Excel targeting
+// from the attached file UUID.
 func usesExcelAudienceTargeting(c dto.BotGetCampaignResponse) bool {
 	method := strings.ToLower(strings.TrimSpace(c.TargetingMethod))
-	if method == models.CampaignAudienceTargetingSmart {
-		return false
-	}
-	if method == models.CampaignAudienceTargetingExcel {
-		return true
+	if models.IsValidCampaignAudienceTargetingMethod(method) {
+		return method == models.CampaignAudienceTargetingExcel
 	}
 	return hasTargetAudienceExcelFileUUID(c.TargetAudienceExcelFileUUID)
 }
@@ -242,6 +275,29 @@ func campaignIgnoresAudienceGrades(c dto.BotGetCampaignResponse) bool {
 	return tagFound
 }
 
+// requireExactAudienceCount fails closed when targeting cannot satisfy the
+// campaign allocation. Campaign execution must never silently continue with a
+// partial audience set because billing, bundle capacity, and delivery state all
+// assume the approved audience count is exact.
+func requireExactAudienceCount(campaignID uint, requested int64, selected int) error {
+	if requested <= 0 {
+		return fmt.Errorf("campaign id=%d has invalid requested audience count %d", campaignID, requested)
+	}
+	if int64(selected) != requested {
+		return fmt.Errorf(
+			"campaign id=%d requires exactly %d audiences, but %d eligible audiences were retrieved",
+			campaignID,
+			requested,
+			selected,
+		)
+	}
+	return nil
+}
+
+// requireAudienceMatch preserves the historical behavior for legacy campaigns
+// that predate mandatory bundles: they may execute with an available subset,
+// but must never create an empty processed campaign. Bundle campaigns use the
+// stricter exact-count reservation path.
 func requireAudienceMatch(campaignID uint, tagIDs pq.Int32Array, selected int) error {
 	if selected > 0 {
 		return nil
@@ -251,6 +307,103 @@ func requireAudienceMatch(campaignID uint, tagIDs pq.Int32Array, selected int) e
 		campaignID,
 		[]int32(tagIDs),
 	)
+}
+
+type standardBundleAudienceSelector func(context.Context, map[int64]struct{}) ([]string, []int64, []string, error)
+type reservedBundleAudienceLoader func(context.Context, []int64) ([]string, []int64, []string, error)
+
+func loadReservedBundleAudience(ctx context.Context, repo repository.AudienceProfileRepository, reserved []int64) ([]string, []int64, []string, error) {
+	rows, err := repo.ByIDs(ctx, reserved)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(rows) != len(reserved) {
+		return nil, nil, nil, fmt.Errorf("persisted bundle audience allocation is incomplete: expected=%d available=%d", len(reserved), len(rows))
+	}
+	phones := make([]string, 0, len(rows))
+	ids := make([]int64, 0, len(rows))
+	uids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || row.PhoneNumber == nil || strings.TrimSpace(*row.PhoneNumber) == "" {
+			return nil, nil, nil, errors.New("persisted bundle audience profile has no usable phone number")
+		}
+		phones = append(phones, strings.TrimSpace(*row.PhoneNumber))
+		ids = append(ids, int64(row.ID))
+		uids = append(uids, row.UID)
+	}
+	return phones, ids, uids, nil
+}
+
+// selectAndReserveStandardBundleCandidates serializes standard targeting for a
+// bundle across application replicas. The Bundle UPDATE lock covers the full
+// read/select/validate/merge sequence, so two concurrent campaigns cannot read
+// the same exclusion snapshot and reserve overlapping audience IDs.
+func selectAndReserveStandardBundleCandidates(
+	ctx context.Context,
+	db *gorm.DB,
+	cache *BundleAudienceCache,
+	campaignID uint,
+	customerID uint,
+	bundleID uint,
+	requested int64,
+	correlationID string,
+	selectCandidates standardBundleAudienceSelector,
+	loadReserved reservedBundleAudienceLoader,
+) ([]string, []int64, []string, uint, error) {
+	if db == nil {
+		return nil, nil, nil, 0, fmt.Errorf("database is unavailable for campaign %d bundle audience reservation", campaignID)
+	}
+	if cache == nil || selectCandidates == nil || loadReserved == nil {
+		return nil, nil, nil, 0, fmt.Errorf("bundle audience selection is unavailable for campaign %d", campaignID)
+	}
+
+	var phones []string
+	var ids []int64
+	var uids []string
+	var selectionID uint
+	err := repository.WithTransaction(ctx, db, func(txCtx context.Context) error {
+		if err := repository.LockBundleForUpdate(txCtx, bundleID); err != nil {
+			return fmt.Errorf("lock bundle %d for campaign %d audience reservation: %w", bundleID, campaignID, err)
+		}
+		existing, err := cache.ByCampaignID(txCtx, campaignID)
+		if err != nil {
+			return fmt.Errorf("load campaign %d bundle allocation: %w", campaignID, err)
+		}
+		if existing != nil {
+			reserved := audienceIDsFromSet(existing.IDs)
+			phones, ids, uids, err = loadReserved(txCtx, reserved)
+			if err != nil {
+				return err
+			}
+			if err := requireExactAudienceCount(campaignID, requested, len(ids)); err != nil {
+				return err
+			}
+			selectionID = existing.ID
+			return nil
+		}
+
+		phones, ids, uids, err = selectCandidates(txCtx, nil)
+		if err != nil {
+			return err
+		}
+		if err := requireExactAudienceCount(campaignID, requested, len(ids)); err != nil {
+			return err
+		}
+
+		saved, err := cache.SaveForCampaign(txCtx, customerID, bundleID, campaignID, correlationID, ids)
+		if err != nil {
+			return fmt.Errorf("save bundle %d audience selection for campaign %d: %w", bundleID, campaignID, err)
+		}
+		if saved == nil || saved.ID == 0 {
+			return fmt.Errorf("bundle audience selection was not persisted for campaign %d", campaignID)
+		}
+		selectionID = saved.ID
+		return nil
+	})
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
+	return phones, ids, uids, selectionID, nil
 }
 
 func fetchTargetAudienceUIDsFromExcel(ctx context.Context, botClient BotClient, jazzToken string, campaignID uint) ([]string, error) {
@@ -393,7 +546,6 @@ func fetchAudiencePhonesByUIDs(
 		uids = append(uids, item.uid)
 		matchedUIDs = append(matchedUIDs, item.uid)
 	}
-
 	if !hasCampaignAdLink(c.AdLink) {
 		logger.Printf("fetchAudiencePhonesByUIDs skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
 		return &AudiencePhonesResult{
@@ -534,22 +686,57 @@ func hashTags(tags []string) string {
 	if len(tags) == 0 {
 		return ""
 	}
-	cp := make([]string, len(tags))
-	copy(cp, tags)
-	sort.Strings(cp)
-	h := sha1.Sum([]byte(strings.Join(cp, ",")))
+	// Tags have set semantics. Canonicalizing them here prevents equivalent
+	// campaign payloads (for example ["7", "7"] and [" 7 "]) from using
+	// different audience-selection histories and selecting the same recipients
+	// again.
+	unique := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			unique[tag] = struct{}{}
+		}
+	}
+	if len(unique) == 0 {
+		return ""
+	}
+	canonical := make([]string, 0, len(unique))
+	for tag := range unique {
+		canonical = append(canonical, tag)
+	}
+	sort.Strings(canonical)
+	h := sha1.Sum([]byte(strings.Join(canonical, ",")))
 	return hex.EncodeToString(h[:])
 }
 
-// gradesNeedScoreFilter returns true when AudienceGrades specifies a subset of [A,B,C],
-// meaning a normalized_score filter must be applied during audience selection.
+func checkedAudienceQueryLimit(count int64) (int, error) {
+	if count <= 0 {
+		return 0, nil
+	}
+	if count > int64(int(^uint(0)>>1)) {
+		return 0, fmt.Errorf("requested audience count %d exceeds platform limit", count)
+	}
+	return int(count), nil
+}
+
+func audienceIDsFromSet(ids map[int64]struct{}) []int64 {
+	out := make([]int64, 0, len(ids))
+	for id := range ids {
+		out = append(out, id)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
+
+// gradesNeedScoreFilter reports whether a standard-targeting campaign needs
+// percentile data. Empty grades and the complete A/B/C set select the whole
+// scored population, so looking up percentiles cannot change their result.
 func gradesNeedScoreFilter(grades []string) bool {
 	if len(grades) == 0 {
 		return false
 	}
 	set := make(map[string]struct{}, len(grades))
-	for _, g := range grades {
-		set[strings.ToUpper(strings.TrimSpace(g))] = struct{}{}
+	for _, grade := range grades {
+		set[strings.ToUpper(strings.TrimSpace(grade))] = struct{}{}
 	}
 	_, hasA := set["A"]
 	_, hasB := set["B"]
