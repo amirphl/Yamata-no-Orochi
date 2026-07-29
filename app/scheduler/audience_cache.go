@@ -15,6 +15,13 @@ type AudienceSelection struct {
 }
 
 // AudienceCache is a database-backed cache of previously used audience IDs per customer/tags hash.
+//
+// TODO(audience-selection): Selection currently takes two database round trips:
+// one to load the already-sent audience IDs here and another to select fresh
+// candidates while excluding those IDs. Once the cumulative selection state is
+// normalized into indexed rows, fold that lookup into the candidate SELECT with
+// an anti-join so PostgreSQL retrieves and excludes already-sent audiences in the
+// same query.
 type AudienceCache struct {
 	repo repository.AudienceSelectionRepository
 }
@@ -55,6 +62,9 @@ func (c *AudienceCache) SaveWithMerge(ctx context.Context, customerID uint, tags
 	if err != nil {
 		return nil, err
 	}
+	if row == nil {
+		return nil, errors.New("audience selection repository returned no saved row")
+	}
 	sel := &AudienceSelection{
 		ID:            row.ID,
 		CorrelationID: row.CorrelationID,
@@ -74,6 +84,9 @@ func (c *AudienceCache) SaveSnapshot(ctx context.Context, customerID uint, tagsH
 	row, err := c.repo.InsertSnapshot(ctx, customerID, tagsHash, correlationID, ids)
 	if err != nil {
 		return nil, err
+	}
+	if row == nil {
+		return nil, errors.New("audience selection repository returned no saved snapshot")
 	}
 	sel := &AudienceSelection{
 		ID:            row.ID,
