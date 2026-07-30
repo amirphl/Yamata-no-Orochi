@@ -155,6 +155,7 @@ func (s *SMSCampaignScheduler) Start(parent context.Context) func() {
 }
 
 func (s *SMSCampaignScheduler) runOnce(ctx context.Context, parent context.Context) {
+	// recoverStaleUnpreparedCampaigns(ctx, s.db, s.logger, "SMS")
 	jazzAccessToken, err := s.botClient.Login(ctx)
 	if err != nil {
 		s.logger.Printf("SMS scheduler: bot login failed: %v", err)
@@ -258,7 +259,7 @@ func (s *SMSCampaignScheduler) dispatchPendingSMSCampaigns(
 	}
 }
 
-func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) error {
+func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) (err error) {
 	// Sender from campaign line number
 	if c.LineNumber == nil {
 		return fmt.Errorf("resolve SMS sender for campaign id=%d: sender is nil", c.ID)
@@ -271,6 +272,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
 		return fmt.Errorf("move campaign id=%d to running: %w", c.ID, err)
 	}
+	// defer releaseUnpreparedCampaignOnFailure(s.db, s.logger, "SMS", c.ID, &err)
 	s.logger.Printf("SMS scheduler: campaign id=%d moved to running", c.ID)
 
 	// Fetch audience data OUTSIDE any DB transaction.
@@ -315,7 +317,8 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("context expired before fetching audiences for campaign id=%d: %w", c.ID, err)
 		}
-		// Fetch audiences (white then pink, DB-shuffled), and sort order is enforced inside repo
+		// Audience eligibility is platform-neutral; deterministic ordering is
+		// enforced by the repository.
 		correlationID := uuid.NewString()
 		s.logger.Printf("SMS scheduler: campaign id=%d fetching audience phones (correlation_id=%s)", c.ID, correlationID)
 		var (
@@ -550,8 +553,8 @@ func (s *SMSCampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse)
 
 // resolveScoreConstraint looks up the percentile thresholds from src_layer_all_stats
 // for the campaign's levels and converts AudienceGrades into a score filter.
-// Returns nil when no filter is needed (grades are empty or [A,B,C]) or when no
-// matching stats row exists (score filtering is skipped with a log warning).
+// Returns nil when no filter is needed (grades are empty or [A,B,C]). A
+// restricted grade set fails closed when percentile statistics are missing.
 func (s *SMSCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error) {
 	if usesSmartAudienceTargeting(c) {
 		return nil, nil
@@ -564,16 +567,14 @@ func (s *SMSCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto
 		return nil, nil
 	}
 	if s.statsRepo == nil {
-		s.logger.Printf("resolveScoreConstraint: statsRepo not configured, skipping score filter for campaign id=%d", c.ID)
-		return nil, nil
+		return nil, fmt.Errorf("audience score statistics repository is unavailable for campaign id=%d with grades=%v", c.ID, c.AudienceGrades)
 	}
 	percentiles, err := s.statsRepo.FetchPercentiles(ctx, c.Level1, c.Level2s, c.Level3s)
 	if err != nil {
 		return nil, fmt.Errorf("fetch percentiles for campaign id=%d: %w", c.ID, err)
 	}
 	if percentiles == nil {
-		s.logger.Printf("resolveScoreConstraint: no stats row found for campaign id=%d levels, skipping score filter", c.ID)
-		return nil, nil
+		return nil, fmt.Errorf("audience score statistics are missing for campaign id=%d levels and grades=%v", c.ID, c.AudienceGrades)
 	}
 	s.logger.Printf("resolveScoreConstraint: campaign id=%d grades=%v p33=%.4f p66=%.4f", c.ID, c.AudienceGrades, percentiles.P33, percentiles.P66)
 	return gradesToScoreConstraint(c.AudienceGrades, percentiles.P33, percentiles.P66), nil
@@ -609,8 +610,6 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 		return nil, err
 	}
 
-	const limit = 10000000
-
 	tagsHash := hashTags(executionTags)
 	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
 	if err != nil {
@@ -624,64 +623,7 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 	}
 
 	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, []string, error) {
-		phones := make([]string, 0, numAudiences)
-		ids := make([]int64, 0, numAudiences)
-		uids := make([]string, 0, numAudiences)
-
-		filter := models.AudienceProfileFilter{
-			Tags:            &tagIDs,
-			Color:           utils.ToPtr("white"),
-			NormalizedScore: scoreConstraint,
-		}
-		whites, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
-		if err != nil {
-			s.logger.Printf("fetchSMSAudiencePhones fetch white failed: campaign_id=%d err=%v", c.ID, err)
-			return nil, nil, nil, err
-		}
-		s.logger.Printf("fetchSMSAudiencePhones white candidates: campaign_id=%d count=%d", c.ID, len(whites))
-
-		appendIfFresh := func(ap *models.AudienceProfile) {
-			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
-				return
-			}
-			if exclude != nil {
-				if _, ok := exclude[int64(ap.ID)]; ok {
-					return
-				}
-			}
-			phones = append(phones, *ap.PhoneNumber)
-			ids = append(ids, int64(ap.ID))
-			uids = append(uids, ap.UID)
-		}
-
-		for _, ap := range whites {
-			if int64(len(phones)) >= numAudiences {
-				break
-			}
-			appendIfFresh(ap)
-		}
-
-		if int64(len(phones)) < numAudiences {
-			filter := models.AudienceProfileFilter{
-				Tags:            &tagIDs,
-				Color:           utils.ToPtr("pink"),
-				NormalizedScore: scoreConstraint,
-			}
-			pinks, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
-			if err != nil {
-				s.logger.Printf("fetchSMSAudiencePhones fetch pink failed: campaign_id=%d err=%v", c.ID, err)
-				return nil, nil, nil, err
-			}
-			s.logger.Printf("fetchSMSAudiencePhones pink candidates: campaign_id=%d count=%d", c.ID, len(pinks))
-			for _, ap := range pinks {
-				if len(phones) >= int(numAudiences) {
-					break
-				}
-				appendIfFresh(ap)
-			}
-		}
-
-		return phones, ids, uids, nil
+		return s.selectTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, nil, scoreConstraint)
 	}
 
 	// First attempt excluding prior picks for this customer/tags
@@ -780,82 +722,78 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhones(
 	}, nil
 }
 
-// selectTagAudiences fetches audience profiles matching tagIDs (white first, then pink),
-// skipping any IDs present in exclude, up to numAudiences. If fewer than numAudiences
-// fresh profiles exist the caller receives whatever is available — no reset is performed.
+// selectTagAudiences preserves SMS eligibility and priority: white recipients
+// are selected first, then pink recipients fill any remaining capacity. Black
+// recipients are intentionally excluded from standard SMS campaigns.
 func (s *SMSCampaignScheduler) selectTagAudiences(
 	ctx context.Context,
 	campaignID uint,
 	tagIDs pq.Int32Array,
 	numAudiences int64,
 	exclude map[int64]struct{},
+	excludeBundleID *uint,
 	scoreConstraint *models.NormalizedScoreConstraint,
 ) (phones []string, ids []int64, uids []string, err error) {
-	const limit = 10000000
+	if numAudiences <= 0 {
+		return []string{}, []int64{}, []string{}, nil
+	}
+	limit, err := checkedAudienceQueryLimit(numAudiences)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	phones = make([]string, 0, numAudiences)
 	ids = make([]int64, 0, numAudiences)
 	uids = make([]string, 0, numAudiences)
+	excludeIDs := audienceIDsFromSet(exclude)
 
-	appendIfFresh := func(ap *models.AudienceProfile) {
-		if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
+	appendCandidate := func(ap *models.AudienceProfile) {
+		if ap == nil || ap.PhoneNumber == nil || strings.TrimSpace(*ap.PhoneNumber) == "" {
 			return
 		}
-		if exclude != nil {
-			if _, ok := exclude[int64(ap.ID)]; ok {
-				return
-			}
-		}
-		phones = append(phones, *ap.PhoneNumber)
+		phones = append(phones, strings.TrimSpace(*ap.PhoneNumber))
 		ids = append(ids, int64(ap.ID))
 		uids = append(uids, ap.UID)
 	}
 
-	whites, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{
-		Tags:            &tagIDs,
-		Color:           utils.ToPtr("white"),
-		NormalizedScore: scoreConstraint,
-	}, "id DESC", limit, 0)
-	if err != nil {
+	selectColor := func(color string, colorLimit int) error {
+		if colorLimit <= 0 {
+			return nil
+		}
+		candidates, err := s.audRepo.SelectCampaignCandidates(ctx, models.AudienceProfileFilter{
+			Tags:            &tagIDs,
+			Color:           utils.ToPtr(color),
+			NormalizedScore: scoreConstraint,
+			ExcludeBundleID: excludeBundleID,
+		}, excludeIDs, colorLimit)
+		if err != nil {
+			return err
+		}
+		s.logger.Printf("selectTagAudiences %s candidates: campaign_id=%d count=%d limit=%d excluded=%d", color, campaignID, len(candidates), colorLimit, len(excludeIDs))
+		for _, ap := range candidates {
+			appendCandidate(ap)
+		}
+		return nil
+	}
+
+	if err := selectColor("white", limit); err != nil {
 		s.logger.Printf("selectTagAudiences fetch white failed: campaign_id=%d err=%v", campaignID, err)
 		return nil, nil, nil, err
 	}
-	s.logger.Printf("selectTagAudiences white candidates: campaign_id=%d count=%d", campaignID, len(whites))
-
-	for _, ap := range whites {
-		if int64(len(phones)) >= numAudiences {
-			break
-		}
-		appendIfFresh(ap)
-	}
-
-	if int64(len(phones)) < numAudiences {
-		pinks, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{
-			Tags:            &tagIDs,
-			Color:           utils.ToPtr("pink"),
-			NormalizedScore: scoreConstraint,
-		}, "id DESC", limit, 0)
-		if err != nil {
-			s.logger.Printf("selectTagAudiences fetch pink failed: campaign_id=%d err=%v", campaignID, err)
-			return nil, nil, nil, err
-		}
-		s.logger.Printf("selectTagAudiences pink candidates: campaign_id=%d count=%d", campaignID, len(pinks))
-		for _, ap := range pinks {
-			if int64(len(phones)) >= numAudiences {
-				break
-			}
-			appendIfFresh(ap)
-		}
+	remaining := limit - len(ids)
+	if err := selectColor("pink", remaining); err != nil {
+		s.logger.Printf("selectTagAudiences fetch pink failed: campaign_id=%d err=%v", campaignID, err)
+		return nil, nil, nil, err
 	}
 
 	return phones, ids, uids, nil
 }
 
 // fetchSMSAudiencePhonesByBundle selects audiences for a campaign that belongs to a bundle.
-// Uniqueness is enforced across all campaigns in the bundle via (customer_id, bundle_id):
+// Uniqueness is enforced across all campaigns in the bundle:
 // audiences already selected by earlier campaigns in the same bundle are excluded.
-// Unlike the tag-hash path there is no rolling-window reset — if fewer fresh audiences
-// exist than requested, the available subset is returned as-is.
+// Unlike the tag-hash path there is no rolling-window reset. Selection and
+// persistence run under the Bundle lock and require the exact requested count.
 func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
 	ctx context.Context,
 	c dto.BotGetCampaignResponse,
@@ -887,38 +825,37 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
 		return nil, err
 	}
 
-	// Load the cumulative set of audience IDs already used by earlier campaigns in this bundle.
-	var exclude map[int64]struct{}
-	bundleSel, err := s.bundleAudienceCache.Latest(ctx, c.CustomerID, bundleID)
-	if err != nil {
-		s.logger.Printf("fetchSMSAudiencePhonesByBundle latest bundle selection failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
-		return nil, err
-	}
-	if bundleSel != nil {
-		exclude = bundleSel.IDs
-		s.logger.Printf("fetchSMSAudiencePhonesByBundle bundle selection hit: campaign_id=%d bundle_id=%d prior_ids=%d", c.ID, bundleID, len(bundleSel.IDs))
+	var phones []string
+	var ids []int64
+	var uids []string
+	var selectionID uint
+	if usesSmartAudienceTargeting(c) {
+		phones, ids, uids, selectionID, err = selectAndReserveExactSmartTargetingCandidates(ctx, s.db, c, numAudiences, correlationID)
 	} else {
-		s.logger.Printf("fetchSMSAudiencePhonesByBundle bundle selection miss: campaign_id=%d bundle_id=%d", c.ID, bundleID)
+		phones, ids, uids, selectionID, err = selectAndReserveStandardBundleCandidates(
+			ctx, s.db, s.bundleAudienceCache, c.ID, c.CustomerID, bundleID, numAudiences, correlationID,
+			func(selectionCtx context.Context, exclude map[int64]struct{}) ([]string, []int64, []string, error) {
+				return s.selectTagAudiences(selectionCtx, c.ID, tagIDs, numAudiences, exclude, &bundleID, scoreConstraint)
+			},
+			func(selectionCtx context.Context, ids []int64) ([]string, []int64, []string, error) {
+				return loadReservedBundleAudience(selectionCtx, s.audRepo, ids)
+			},
+		)
 	}
-
-	phones, ids, uids, err := s.selectTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, scoreConstraint)
 	if err != nil {
 		return nil, err
+	}
+	if selectionID == 0 {
+		return nil, fmt.Errorf("bundle audience selection was not persisted for campaign %d", c.ID)
 	}
 	s.logger.Printf("fetchSMSAudiencePhonesByBundle selected: campaign_id=%d bundle_id=%d selected=%d requested=%d",
 		c.ID, bundleID, len(phones), numAudiences)
-	if err := requireAudienceMatch(c.ID, tagIDs, len(ids)); err != nil {
+	if err := requireExactAudienceCount(c.ID, numAudiences, len(ids)); err != nil {
 		return nil, err
 	}
 
-	// Persist the newly selected IDs merged with the existing bundle selection.
-	sel, err := s.bundleAudienceCache.SaveWithMerge(ctx, c.CustomerID, bundleID, correlationID, ids)
-	if err != nil {
-		s.logger.Printf("fetchSMSAudiencePhonesByBundle selection save failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
-		return nil, err
-	}
 	s.logger.Printf("fetchSMSAudiencePhonesByBundle selection saved: campaign_id=%d bundle_id=%d selection_id=%d selected=%d",
-		c.ID, bundleID, sel.ID, len(ids))
+		c.ID, bundleID, selectionID, len(ids))
 
 	if !hasCampaignAdLink(c.AdLink) {
 		s.logger.Printf("fetchSMSAudiencePhonesByBundle skipped short links: campaign_id=%d ad_link=empty", c.ID)
@@ -927,7 +864,7 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
 			IDs:                       ids,
 			UIDs:                      uids,
 			Codes:                     make([]string, len(phones)),
-			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+			BundleAudienceSelectionID: utils.ToPtr(selectionID),
 		}, nil
 	}
 
@@ -938,7 +875,7 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
 			IDs:                       ids,
 			UIDs:                      uids,
 			Codes:                     make([]string, len(phones)),
-			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+			BundleAudienceSelectionID: utils.ToPtr(selectionID),
 		}, nil
 	}
 
@@ -964,13 +901,13 @@ func (s *SMSCampaignScheduler) fetchSMSAudiencePhonesByBundle(
 		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d bundle_id=%d: phones=%d codes=%d", c.ID, bundleID, len(phones), len(codes))
 	}
 	s.logger.Printf("fetchSMSAudiencePhonesByBundle success: campaign_id=%d bundle_id=%d selected=%d codes=%d selection_id=%d",
-		c.ID, bundleID, len(phones), len(codes), sel.ID)
+		c.ID, bundleID, len(phones), len(codes), selectionID)
 	return &AudiencePhonesResult{
 		Phones:                    phones,
 		IDs:                       ids,
 		UIDs:                      uids,
 		Codes:                     codes,
-		BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+		BundleAudienceSelectionID: utils.ToPtr(selectionID),
 	}, nil
 }
 
