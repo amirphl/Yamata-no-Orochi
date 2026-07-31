@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/repository"
+	"github.com/lib/pq"
 )
 
 type stubSMSClient struct {
@@ -35,6 +38,56 @@ func (s *stubSMSClient) FetchStatus(ctx context.Context, token string, ids []str
 type stubSMSCampaignStatusJobRepo struct {
 	updated []*models.CampaignStatusJob
 }
+
+type stubSMSAudienceProfileRepo struct {
+	selectCandidatesFn func(context.Context, models.AudienceProfileFilter, []int64, int) ([]*models.AudienceProfile, error)
+	byUIDsFn           func(context.Context, []string) ([]*models.AudienceProfile, error)
+}
+
+func (s *stubSMSAudienceProfileRepo) ByFilter(context.Context, models.AudienceProfileFilter, string, int, int) ([]*models.AudienceProfile, error) {
+	return nil, nil
+}
+
+func (s *stubSMSAudienceProfileRepo) Save(context.Context, *models.AudienceProfile) error {
+	return nil
+}
+
+func (s *stubSMSAudienceProfileRepo) SaveBatch(context.Context, []*models.AudienceProfile) error {
+	return nil
+}
+
+func (s *stubSMSAudienceProfileRepo) Count(context.Context, models.AudienceProfileFilter) (int64, error) {
+	return 0, nil
+}
+
+func (s *stubSMSAudienceProfileRepo) Exists(context.Context, models.AudienceProfileFilter) (bool, error) {
+	return false, nil
+}
+
+func (s *stubSMSAudienceProfileRepo) ByID(context.Context, uint) (*models.AudienceProfile, error) {
+	return nil, nil
+}
+
+func (s *stubSMSAudienceProfileRepo) ByIDs(context.Context, []int64) ([]*models.AudienceProfile, error) {
+	return nil, nil
+}
+
+func (s *stubSMSAudienceProfileRepo) ByUID(context.Context, string) (*models.AudienceProfile, error) {
+	return nil, nil
+}
+
+func (s *stubSMSAudienceProfileRepo) ByUIDs(ctx context.Context, uids []string) ([]*models.AudienceProfile, error) {
+	if s.byUIDsFn != nil {
+		return s.byUIDsFn(ctx, uids)
+	}
+	return nil, nil
+}
+
+func (s *stubSMSAudienceProfileRepo) SelectCampaignCandidates(ctx context.Context, filter models.AudienceProfileFilter, excludeIDs []int64, limit int) ([]*models.AudienceProfile, error) {
+	return s.selectCandidatesFn(ctx, filter, excludeIDs, limit)
+}
+
+var _ repository.AudienceProfileRepository = (*stubSMSAudienceProfileRepo)(nil)
 
 func (s *stubSMSCampaignStatusJobRepo) ByFilter(ctx context.Context, filter any, orderBy string, limit, offset int) ([]*models.CampaignStatusJob, error) {
 	return nil, nil
@@ -129,6 +182,66 @@ func TestDispatchPendingSMSCampaignsSerializesSameBundle(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatalf("timed out waiting for second campaign in same bundle to start")
+	}
+}
+
+func TestSelectTagAudiencesPushesLimitAndExclusionsIntoRepository(t *testing.T) {
+	t.Parallel()
+
+	phone1 := "09120000001"
+	phone2 := "09120000002"
+	phone3 := "09120000003"
+	excluded := make(map[int64]struct{}, 50_000)
+	for i := int64(1); i <= 50_000; i++ {
+		excluded[i] = struct{}{}
+	}
+
+	call := 0
+	audRepo := &stubSMSAudienceProfileRepo{selectCandidatesFn: func(_ context.Context, filter models.AudienceProfileFilter, excludeIDs []int64, limit int) ([]*models.AudienceProfile, error) {
+		call++
+		if len(excludeIDs) != len(excluded) {
+			t.Fatalf("exclusion count = %d, want %d", len(excludeIDs), len(excluded))
+		}
+		if filter.Color == nil {
+			t.Fatal("standard SMS candidate query must filter audience color")
+		}
+		switch call {
+		case 1:
+			if *filter.Color != "white" || limit != 3 {
+				t.Fatalf("first query color=%q limit=%d, want white/3", *filter.Color, limit)
+			}
+			return []*models.AudienceProfile{{ID: 60_002, UID: "u2", PhoneNumber: &phone2}}, nil
+		case 2:
+			if *filter.Color != "pink" || limit != 2 {
+				t.Fatalf("second query color=%q limit=%d, want pink/2", *filter.Color, limit)
+			}
+			return []*models.AudienceProfile{
+				{ID: 60_001, UID: "u1", PhoneNumber: &phone1},
+				{ID: 60_003, UID: "u3", PhoneNumber: &phone3},
+			}, nil
+		default:
+			t.Fatalf("unexpected candidate query %d", call)
+			return nil, nil
+		}
+	}}
+	s := &SMSCampaignScheduler{audRepo: audRepo, logger: log.New(io.Discard, "", 0)}
+	tags := pq.Int32Array{10, 20}
+
+	phones, ids, uids, err := s.selectTagAudiences(context.Background(), 99, tags, 3, excluded, nil, nil)
+	if err != nil {
+		t.Fatalf("select tag audiences: %v", err)
+	}
+	if call != 2 {
+		t.Fatalf("candidate query calls = %d, want 2", call)
+	}
+	if got, want := strings.Join(phones, ","), strings.Join([]string{phone2, phone1, phone3}, ","); got != want {
+		t.Fatalf("phones = %q, want %q", got, want)
+	}
+	if got, want := fmt.Sprint(ids), fmt.Sprint([]int64{60_002, 60_001, 60_003}); got != want {
+		t.Fatalf("ids = %s, want %s", got, want)
+	}
+	if got, want := strings.Join(uids, ","), "u2,u1,u3"; got != want {
+		t.Fatalf("uids = %q, want %q", got, want)
 	}
 }
 
