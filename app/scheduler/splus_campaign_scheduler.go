@@ -155,6 +155,7 @@ func (s *SplusCampaignScheduler) Start(parent context.Context) func() {
 }
 
 func (s *SplusCampaignScheduler) runOnce(ctx context.Context, parent context.Context) {
+	// recoverStaleUnpreparedCampaigns(ctx, s.db, s.logger, "Splus")
 	jazzAccessToken, err := s.botClient.Login(ctx)
 	if err != nil {
 		s.logger.Printf("Splus scheduler: bot login failed: %v", err)
@@ -258,7 +259,7 @@ func (s *SplusCampaignScheduler) dispatchPendingSplusCampaigns(
 	}
 }
 
-func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) error {
+func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzAccessToken string, c dto.BotGetCampaignResponse) (err error) {
 	botID, err := extractSplusBotID(c)
 	if err != nil {
 		return fmt.Errorf("resolve Splus bot id for campaign id=%d: %w", c.ID, err)
@@ -270,6 +271,7 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
 		return fmt.Errorf("move campaign id=%d to running: %w", c.ID, err)
 	}
+	// defer releaseUnpreparedCampaignOnFailure(s.db, s.logger, "Splus", c.ID, &err)
 	s.logger.Printf("Splus scheduler: campaign id=%d moved to running", c.ID)
 
 	// Fetch audience data OUTSIDE any DB transaction.
@@ -625,16 +627,14 @@ func (s *SplusCampaignScheduler) resolveScoreConstraint(ctx context.Context, c d
 		return nil, nil
 	}
 	if s.statsRepo == nil {
-		s.logger.Printf("resolveScoreConstraint: statsRepo not configured, skipping score filter for campaign id=%d", c.ID)
-		return nil, nil
+		return nil, fmt.Errorf("audience score statistics repository is unavailable for campaign id=%d with grades=%v", c.ID, c.AudienceGrades)
 	}
 	percentiles, err := s.statsRepo.FetchPercentiles(ctx, c.Level1, c.Level2s, c.Level3s)
 	if err != nil {
 		return nil, fmt.Errorf("fetch percentiles for campaign id=%d: %w", c.ID, err)
 	}
 	if percentiles == nil {
-		s.logger.Printf("resolveScoreConstraint: no stats row found for campaign id=%d levels, skipping score filter", c.ID)
-		return nil, nil
+		return nil, fmt.Errorf("audience score statistics are missing for campaign id=%d levels and grades=%v", c.ID, c.AudienceGrades)
 	}
 	s.logger.Printf("resolveScoreConstraint: campaign id=%d grades=%v p33=%.4f p66=%.4f", c.ID, c.AudienceGrades, percentiles.P33, percentiles.P66)
 	return gradesToScoreConstraint(c.AudienceGrades, percentiles.P33, percentiles.P66), nil
@@ -670,8 +670,6 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 		return nil, err
 	}
 
-	const limit = 10000000
-
 	tagsHash := hashTags(executionTags)
 	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
 	if err != nil {
@@ -685,42 +683,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhones(
 	}
 
 	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, []string, error) {
-		phones := make([]string, 0, numAudiences)
-		ids := make([]int64, 0, numAudiences)
-		uids := make([]string, 0, numAudiences)
-
-		// Splus campaigns intentionally do not segment audiences by color (white/pink).
-		// Color-based routing is SMS-specific, so Splus always queries by tag criteria only.
-		filter := models.AudienceProfileFilter{Tags: &tagIDs, NormalizedScore: scoreConstraint}
-		candidates, err := s.audRepo.ByFilter(ctx, filter, "id DESC", limit, 0)
-		if err != nil {
-			s.logger.Printf("fetchSplusAudiencePhones fetch candidates failed: campaign_id=%d err=%v", c.ID, err)
-			return nil, nil, nil, err
-		}
-		s.logger.Printf("fetchSplusAudiencePhones candidates: campaign_id=%d count=%d", c.ID, len(candidates))
-
-		appendIfFresh := func(ap *models.AudienceProfile) {
-			if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
-				return
-			}
-			if exclude != nil {
-				if _, ok := exclude[int64(ap.ID)]; ok {
-					return
-				}
-			}
-			phones = append(phones, *ap.PhoneNumber)
-			ids = append(ids, int64(ap.ID))
-			uids = append(uids, ap.UID)
-		}
-
-		for _, ap := range candidates {
-			if int64(len(phones)) >= numAudiences {
-				break
-			}
-			appendIfFresh(ap)
-		}
-
-		return phones, ids, uids, nil
+		return s.selectSplusTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, nil, scoreConstraint)
 	}
 
 	// First attempt excluding prior picks for this customer/tags
@@ -827,34 +790,40 @@ func (s *SplusCampaignScheduler) selectSplusTagAudiences(
 	tagIDs pq.Int32Array,
 	numAudiences int64,
 	exclude map[int64]struct{},
+	excludeBundleID *uint,
 	scoreConstraint *models.NormalizedScoreConstraint,
 ) (phones []string, ids []int64, uids []string, err error) {
-	const limit = 10000000
+	if numAudiences <= 0 {
+		return []string{}, []int64{}, []string{}, nil
+	}
+	limit, err := checkedAudienceQueryLimit(numAudiences)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	phones = make([]string, 0, numAudiences)
 	ids = make([]int64, 0, numAudiences)
 	uids = make([]string, 0, numAudiences)
+	excludeIDs := audienceIDsFromSet(exclude)
 
-	candidates, err := s.audRepo.ByFilter(ctx, models.AudienceProfileFilter{Tags: &tagIDs, NormalizedScore: scoreConstraint}, "id DESC", limit, 0)
+	// Splus intentionally does not segment audiences by color.
+	candidates, err := s.audRepo.SelectCampaignCandidates(
+		ctx,
+		models.AudienceProfileFilter{Tags: &tagIDs, NormalizedScore: scoreConstraint, ExcludeBundleID: excludeBundleID},
+		excludeIDs,
+		limit,
+	)
 	if err != nil {
 		s.logger.Printf("selectSplusTagAudiences fetch candidates failed: campaign_id=%d err=%v", campaignID, err)
 		return nil, nil, nil, err
 	}
-	s.logger.Printf("selectSplusTagAudiences candidates: campaign_id=%d count=%d", campaignID, len(candidates))
+	s.logger.Printf("selectSplusTagAudiences candidates: campaign_id=%d count=%d limit=%d excluded=%d", campaignID, len(candidates), limit, len(excludeIDs))
 
 	for _, ap := range candidates {
-		if int64(len(phones)) >= numAudiences {
-			break
-		}
-		if ap == nil || ap.PhoneNumber == nil || *ap.PhoneNumber == "" {
+		if ap == nil || ap.PhoneNumber == nil || strings.TrimSpace(*ap.PhoneNumber) == "" {
 			continue
 		}
-		if exclude != nil {
-			if _, ok := exclude[int64(ap.ID)]; ok {
-				continue
-			}
-		}
-		phones = append(phones, *ap.PhoneNumber)
+		phones = append(phones, strings.TrimSpace(*ap.PhoneNumber))
 		ids = append(ids, int64(ap.ID))
 		uids = append(uids, ap.UID)
 	}
@@ -863,9 +832,10 @@ func (s *SplusCampaignScheduler) selectSplusTagAudiences(
 }
 
 // fetchSplusAudiencePhonesByBundle selects audiences for an Splus campaign that belongs to a bundle.
-// Uniqueness is enforced across all campaigns in the bundle via (customer_id, bundle_id):
+// Uniqueness is enforced across all campaigns in the bundle:
 // audiences already selected by earlier campaigns in the same bundle are excluded.
-// No rolling-window reset — if fewer fresh audiences exist than requested, the available subset is returned as-is.
+// There is no rolling-window reset. Selection and persistence run under the
+// Bundle lock and require the exact requested count.
 func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 	ctx context.Context,
 	c dto.BotGetCampaignResponse,
@@ -897,38 +867,37 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 		return nil, err
 	}
 
-	// Load the cumulative set of audience IDs already used by earlier campaigns in this bundle.
-	var exclude map[int64]struct{}
-	bundleSel, err := s.bundleAudienceCache.Latest(ctx, c.CustomerID, bundleID)
-	if err != nil {
-		s.logger.Printf("fetchSplusAudiencePhonesByBundle latest bundle selection failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
-		return nil, err
-	}
-	if bundleSel != nil {
-		exclude = bundleSel.IDs
-		s.logger.Printf("fetchSplusAudiencePhonesByBundle bundle selection hit: campaign_id=%d bundle_id=%d prior_ids=%d", c.ID, bundleID, len(bundleSel.IDs))
+	var phones []string
+	var ids []int64
+	var uids []string
+	var selectionID uint
+	if usesSmartAudienceTargeting(c) {
+		phones, ids, uids, selectionID, err = selectAndReserveExactSmartTargetingCandidates(ctx, s.db, c, numAudiences, correlationID)
 	} else {
-		s.logger.Printf("fetchSplusAudiencePhonesByBundle bundle selection miss: campaign_id=%d bundle_id=%d", c.ID, bundleID)
+		phones, ids, uids, selectionID, err = selectAndReserveStandardBundleCandidates(
+			ctx, s.db, s.bundleAudienceCache, c.ID, c.CustomerID, bundleID, numAudiences, correlationID,
+			func(selectionCtx context.Context, exclude map[int64]struct{}) ([]string, []int64, []string, error) {
+				return s.selectSplusTagAudiences(selectionCtx, c.ID, tagIDs, numAudiences, exclude, &bundleID, scoreConstraint)
+			},
+			func(selectionCtx context.Context, ids []int64) ([]string, []int64, []string, error) {
+				return loadReservedBundleAudience(selectionCtx, s.audRepo, ids)
+			},
+		)
 	}
-
-	phones, ids, uids, err := s.selectSplusTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, scoreConstraint)
 	if err != nil {
 		return nil, err
+	}
+	if selectionID == 0 {
+		return nil, fmt.Errorf("bundle audience selection was not persisted for campaign %d", c.ID)
 	}
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle selected: campaign_id=%d bundle_id=%d selected=%d requested=%d",
 		c.ID, bundleID, len(phones), numAudiences)
-	if err := requireAudienceMatch(c.ID, tagIDs, len(ids)); err != nil {
+	if err := requireExactAudienceCount(c.ID, numAudiences, len(ids)); err != nil {
 		return nil, err
 	}
 
-	// Persist the newly selected IDs merged with the existing bundle selection.
-	sel, err := s.bundleAudienceCache.SaveWithMerge(ctx, c.CustomerID, bundleID, correlationID, ids)
-	if err != nil {
-		s.logger.Printf("fetchSplusAudiencePhonesByBundle selection save failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
-		return nil, err
-	}
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle selection saved: campaign_id=%d bundle_id=%d selection_id=%d selected=%d",
-		c.ID, bundleID, sel.ID, len(ids))
+		c.ID, bundleID, selectionID, len(ids))
 
 	if !hasCampaignAdLink(c.AdLink) {
 		s.logger.Printf("fetchSplusAudiencePhonesByBundle skipped short links: campaign_id=%d ad_link=empty", c.ID)
@@ -937,7 +906,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 			IDs:                       ids,
 			UIDs:                      uids,
 			Codes:                     make([]string, len(phones)),
-			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+			BundleAudienceSelectionID: utils.ToPtr(selectionID),
 		}, nil
 	}
 
@@ -948,7 +917,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 			IDs:                       ids,
 			UIDs:                      uids,
 			Codes:                     make([]string, len(phones)),
-			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+			BundleAudienceSelectionID: utils.ToPtr(selectionID),
 		}, nil
 	}
 
@@ -974,13 +943,13 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d bundle_id=%d: phones=%d codes=%d", c.ID, bundleID, len(phones), len(codes))
 	}
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle success: campaign_id=%d bundle_id=%d selected=%d codes=%d selection_id=%d",
-		c.ID, bundleID, len(phones), len(codes), sel.ID)
+		c.ID, bundleID, len(phones), len(codes), selectionID)
 	return &AudiencePhonesResult{
 		Phones:                    phones,
 		IDs:                       ids,
 		UIDs:                      uids,
 		Codes:                     codes,
-		BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+		BundleAudienceSelectionID: utils.ToPtr(selectionID),
 	}, nil
 }
 
