@@ -240,3 +240,20 @@ func TestSplusHandleStatusJobFetchFailureMarksExecutedAtOnMaxRetry(t *testing.T)
 		t.Fatalf("expected one job update, got=%d", len(jobRepo.updated))
 	}
 }
+
+func TestSplusSendRetriesTransientTransportErrors(t *testing.T) {
+	t.Parallel()
+
+	for _, err := range []error{
+		errors.New("connection reset by peer"),
+		errors.New("dial tcp: connection refused"),
+		errors.New("unexpected EOF"),
+	} {
+		if !isRetryableSplusError(nil, err) {
+			t.Fatalf("transient transport error %q must be retryable", err)
+		}
+	}
+	if isRetryableSplusError(nil, errors.New("invalid request")) {
+		t.Fatal("permanent request error must not be retryable")
+	}
+}
