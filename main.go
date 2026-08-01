@@ -35,6 +35,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -236,7 +237,22 @@ func initializeDatabase(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
 		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Name, cfg.SSLMode)
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	logLevel := gormlogger.Error
+	if cfg.SlowQueryLog {
+		logLevel = gormlogger.Warn
+	}
+	gormLog := gormlogger.New(log.New(log.Writer(), "", log.Flags()), gormlogger.Config{
+		SlowThreshold:             cfg.SlowQueryTime,
+		LogLevel:                  logLevel,
+		IgnoreRecordNotFoundError: false,
+		// Large UID/audience arrays must never be interpolated into logs. Besides
+		// producing enormous log lines, interpolation itself adds latency and can
+		// expose customer targeting data.
+		ParameterizedQueries: true,
+		Colorful:             true,
+	})
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{Logger: gormLog})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -391,7 +407,9 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	audienceProfileRepo := repository.NewAudienceProfileRepository(db)
 	tagRepo := repository.NewTagRepository(db)
 	campaignSelectedTagRepo := repository.NewCampaignSelectedTagRepository(db)
+	capacityCalculationRepo := repository.NewCampaignTargetingCapacityRepository(db)
 	srcLayerAllStatsRepo := repository.NewSrcLayerAllStatsRepository(db)
+	audienceSpecRepo := repository.NewAudienceSpecRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
 	sentRubikaMessageRepo := repository.NewSentRubikaMessageRepository(db)
@@ -501,6 +519,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		smsStatusResultRepo,
 		shortLinkClickRepo,
 		campaignSelectedTagRepo,
+		capacityCalculationRepo,
+		audienceSpecRepo,
 		db,
 		rc,
 		notificationService,
@@ -518,6 +538,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		bundleRepo,
 		campaignSelectedTagRepo,
 		bundleTagEvaluationReadRepo,
+		db,
+	)
+	smartTargetingCapacityFlow := businessflow.NewSmartTargetingCapacityFlow(
+		campaignRepo,
+		campaignSelectedTagRepo,
+		capacityCalculationRepo,
 		db,
 	)
 
@@ -620,6 +646,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberRepo,
 		segmentPriceFactorRepo,
 		pagePriceRepo,
+		campaignSelectedTagRepo,
+		capacityCalculationRepo,
 		db,
 		rc,
 		notificationService,
@@ -688,14 +716,14 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	// Profile flow
 	profileFlow := businessflow.NewProfileFlow(customerRepo)
 
-	segmentPriceFactorFlow := businessflow.NewSegmentPriceFactorFlow(segmentPriceFactorRepo)
+	segmentPriceFactorFlow := businessflow.NewSegmentPriceFactorFlow(segmentPriceFactorRepo, audienceSpecRepo)
 
 	accessControlFlow := businessflow.NewAccessControlFlow(adminRepo, repository.NewACLChangeRequestRepository(db), auditRepo)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	bundleHandler := handlers.NewBundleHandler(bundleFlow, bundleTagEvaluationFlow)
-	campaignHandler := handlers.NewCampaignHandler(campaignFlow, smartTargetingFlow)
+	campaignHandler := handlers.NewCampaignHandler(campaignFlow, smartTargetingFlow, smartTargetingCapacityFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 	paymentAdminHandler := handlers.NewPaymentAdminHandler(paymentAdminFlow)
 	cryptoPaymentHandler := handlers.NewCryptoPaymentHandler(cryptoPaymentFlow, cfg)
@@ -862,6 +890,18 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		stopSmartTagScheduler := smartTagScheduler.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopSmartTagScheduler)
 	}
+
+	// Exact Smart Targeting capacity requests are durable database jobs. This
+	// worker is intentionally independent of AI tag evaluation configuration.
+	capacityScheduler := scheduler.NewSmartTargetingCapacityScheduler(
+		smartTargetingCapacityFlow,
+		capacityCalculationRepo,
+		log.Default(),
+		5*time.Second,
+		2,
+	)
+	stopCapacityScheduler := capacityScheduler.Start(context.Background())
+	stopFuncs = append(stopFuncs, stopCapacityScheduler)
 
 	// Create application struct from FiberRouter
 	fiberRouter := appRouter.(*router.FiberRouter)
