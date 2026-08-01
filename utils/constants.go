@@ -54,5 +54,4 @@ const (
 
 const (
 	AudienceSpecCacheKey = "audience_spec:cache"
-	AudienceSpecLockKey  = "audience_spec:lock"
 )
