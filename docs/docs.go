@@ -541,58 +541,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/campaigns/audience-spec": {
-            "delete": {
-                "description": "Remove audience spec for a platform from storage and cache (default platform is sms)",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Admin Campaigns"
-                ],
-                "summary": "Remove Audience Spec",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Platform (default: sms)",
-                        "name": "platform",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/dto.APIResponse"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/dto.AdminRemoveAudienceSpecResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "Validation error",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/admin/campaigns/cancel": {
             "post": {
                 "description": "Cancel an approved campaign by admin and refund consumed budget to customer. Approved campaigns still require at least 2 minutes before schedule_at; a waiting-for-approval campaign that already missed schedule_at may also be cancelled.",
@@ -3587,108 +3535,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/bot/campaigns/audience-spec": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Bot Campaigns"
-                ],
-                "summary": "Bot Update Audience Spec",
-                "parameters": [
-                    {
-                        "description": "Audience spec update",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/dto.BotUpdateAudienceSpecRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/dto.APIResponse"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/dto.BotUpdateAudienceSpecResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/bot/campaigns/audience-spec/reset": {
-            "post": {
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Bot Campaigns"
-                ],
-                "summary": "Bot Reset Audience Spec",
-                "parameters": [
-                    {
-                        "description": "Audience spec reset",
-                        "name": "request",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/dto.BotResetAudienceSpecRequest"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "allOf": [
-                                {
-                                    "$ref": "#/definitions/dto.APIResponse"
-                                },
-                                {
-                                    "type": "object",
-                                    "properties": {
-                                        "data": {
-                                            "$ref": "#/definitions/dto.BotResetAudienceSpecResponse"
-                                        }
-                                    }
-                                }
-                            ]
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/dto.APIResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/bot/campaigns/ready": {
             "get": {
                 "produces": [
@@ -5008,14 +4854,7 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "object",
-                                            "additionalProperties": {
-                                                "type": "object",
-                                                "additionalProperties": {
-                                                    "type": "object",
-                                                    "additionalProperties": true
-                                                }
-                                            }
+                                            "$ref": "#/definitions/dto.ListAudienceSpecResponse"
                                         }
                                     }
                                 }
@@ -5817,6 +5656,161 @@ const docTemplate = `{
                         "description": "Internal server error",
                         "schema": {
                             "$ref": "#/definitions/dto.APIResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get current exact Smart Targeting capacity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingCapacityCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Calculate exact Smart Targeting capacity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Score-class selection; omitted reuses the campaign selection, with an empty campaign selection meaning A, B, and C",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.StartSmartTargetingCapacityCalculationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingCapacityCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations/{calculation_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get an exact Smart Targeting capacity generation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Calculation generation ID",
+                        "name": "calculation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingCapacityCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     }
                 }
@@ -9771,17 +9765,6 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.AdminRemoveAudienceSpecResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string"
-                },
-                "platform": {
-                    "type": "string"
-                }
-            }
-        },
         "dto.AdminRescheduleCampaignRequest": {
             "type": "object",
             "required": [
@@ -10281,6 +10264,86 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.AudienceSpec": {
+            "type": "object",
+            "additionalProperties": {
+                "type": "object",
+                "additionalProperties": {
+                    "$ref": "#/definitions/dto.AudienceSpecLevel2"
+                }
+            }
+        },
+        "dto.AudienceSpecItem": {
+            "type": "object",
+            "properties": {
+                "available_audience": {
+                    "type": "integer"
+                },
+                "best_black": {
+                    "type": "integer"
+                },
+                "best_pink": {
+                    "type": "integer"
+                },
+                "best_white": {
+                    "type": "integer"
+                },
+                "black_users": {
+                    "type": "integer"
+                },
+                "distinct_users": {
+                    "type": "integer"
+                },
+                "good_black": {
+                    "type": "integer"
+                },
+                "good_pink": {
+                    "type": "integer"
+                },
+                "good_white": {
+                    "type": "integer"
+                },
+                "pink_users": {
+                    "type": "integer"
+                },
+                "scored_users": {
+                    "type": "integer"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "weak_black": {
+                    "type": "integer"
+                },
+                "weak_pink": {
+                    "type": "integer"
+                },
+                "weak_white": {
+                    "type": "integer"
+                },
+                "white_users": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dto.AudienceSpecLevel2": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "$ref": "#/definitions/dto.AudienceSpecItem"
+                    }
+                },
+                "metadata": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
         "dto.AuthCustomerDTO": {
             "type": "object",
             "properties": {
@@ -10718,46 +10781,6 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.BotResetAudienceSpecRequest": {
-            "type": "object",
-            "required": [
-                "level1",
-                "level2",
-                "level3",
-                "platform"
-            ],
-            "properties": {
-                "level1": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level2": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level3": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "platform": {
-                    "type": "string",
-                    "enum": [
-                        "sms",
-                        "rubika",
-                        "bale",
-                        "splus"
-                    ]
-                }
-            }
-        },
-        "dto.BotResetAudienceSpecResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
-                    "type": "string"
-                }
-            }
-        },
         "dto.BotSessionDTO": {
             "type": "object",
             "properties": {
@@ -10774,63 +10797,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "token_type": {
-                    "type": "string"
-                }
-            }
-        },
-        "dto.BotUpdateAudienceSpecRequest": {
-            "type": "object",
-            "required": [
-                "available_audience",
-                "level1",
-                "level2",
-                "level3",
-                "platform",
-                "tags"
-            ],
-            "properties": {
-                "available_audience": {
-                    "type": "integer",
-                    "minimum": 0
-                },
-                "level1": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level2": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "level3": {
-                    "type": "string",
-                    "maxLength": 255
-                },
-                "metadata": {
-                    "type": "object",
-                    "additionalProperties": {}
-                },
-                "platform": {
-                    "type": "string",
-                    "enum": [
-                        "sms",
-                        "rubika",
-                        "bale",
-                        "splus"
-                    ]
-                },
-                "tags": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "string"
-                    }
-                }
-            }
-        },
-        "dto.BotUpdateAudienceSpecResponse": {
-            "type": "object",
-            "properties": {
-                "message": {
                     "type": "string"
                 }
             }
@@ -12049,6 +12015,17 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.ListAudienceSpecResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                },
+                "spec": {
+                    "$ref": "#/definitions/dto.AudienceSpec"
+                }
+            }
+        },
         "dto.ListBundleTagScoresResponse": {
             "type": "object",
             "properties": {
@@ -12786,6 +12763,68 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.SmartTargetingCapacityCalculationResponse": {
+            "type": "object",
+            "properties": {
+                "approved_campaign_audience_deduction": {
+                    "type": "integer"
+                },
+                "bundle_id": {
+                    "type": "integer"
+                },
+                "calculation_id": {
+                    "type": "integer"
+                },
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "eligible_unique_audience_count_before_approved_campaign_deduction": {
+                    "type": "integer"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "is_current": {
+                    "type": "boolean"
+                },
+                "raw_audience_count": {
+                    "type": "integer"
+                },
+                "recalculation_required": {
+                    "type": "boolean"
+                },
+                "selected_score_classes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "selected_tag_count": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "usable_unique_audience_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.SmartTargetingSelectionResponse": {
             "type": "object",
             "properties": {
@@ -12846,6 +12885,18 @@ const docTemplate = `{
                 "test_phase_avg_ctr": {
                     "description": "Reason                *string  ` + "`" + `json:\"reason\"` + "`" + `",
                     "type": "number"
+                }
+            }
+        },
+        "dto.StartSmartTargetingCapacityCalculationRequest": {
+            "type": "object",
+            "properties": {
+                "score_classes": {
+                    "type": "array",
+                    "maxItems": 3,
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
