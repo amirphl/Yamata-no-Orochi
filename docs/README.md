@@ -1,447 +1,160 @@
-# 🐉 Yamata no Orochi API
+# Yamata no Orochi Documentation
 
-[![CI/CD Pipeline](https://github.com/amirphl/yamata-no-orochi/actions/workflows/ci.yml/badge.svg)](https://github.com/amirphl/yamata-no-orochi/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/amirphl/yamata-no-orochi)](https://goreportcard.com/report/github.com/amirphl/yamata-no-orochi)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://docker.com)
-[![Security](https://img.shields.io/badge/Security-OWASP%20Compliant-green.svg)](./PRODUCTION_SECURITY_CHECKLIST.md)
+This directory contains the generated OpenAPI output and the deployment, configuration, security, and provider notes for the Jazebeh backend. For the project overview and local setup, start with the [root README](../README.md).
 
-A production-ready, secure, and scalable Go API built with clean architecture principles for user authentication and management. Features comprehensive security, monitoring, and deployment automation.
+> The current beta production migration and operations source of truth is
+> [`../PRODUCTION_MIGRATION.md`](../PRODUCTION_MIGRATION.md). Older generic
+> production examples below do not describe the restored Compose stack or its
+> isolated campaign scheduler.
 
-## 🎯 **Quick Start**
+## Current Implementation
 
-**Your API will be running at `https://thewritingonthewall.com` with full monitoring!**
+The application is a Go 1.26 service built on Fiber v3, GORM, PostgreSQL, and Redis. It currently provides three authentication surfaces (customer, admin, and bot) and supports:
 
-### **🚀 Production Deployment (3 Commands)**
+- SMS, Bale, Rubika, and Soroush Plus campaigns.
+- Bundle-based test and execution phases, audience selection, scoring, and campaign grouping.
+- Asynchronous bundle smart-tag evaluation through an OpenAI-compatible Responses API.
+- Wallets, Atipay, deposit receipts, invoices, crypto-payment providers, and agency discounts.
+- Short links and click reporting, media, tickets, pricing, platform settings, admin customer management, and maker-checker access control.
+- Prometheus metrics, Grafana dashboards, structured/rotated logs, request IDs, and Sentry-compatible GlitchTip reporting.
+
+The schema head is migration `0127`. The newest schema work adds campaign-level Smart Targeting selections, normalized Bundle audience allocations, source-reference data, and optimized audience lookup indexes.
+
+## Source of Truth
+
+Use these files when documentation and implementation differ:
+
+| Concern | Canonical source |
+|---|---|
+| HTTP routes and middleware | [`app/router/routes.go`](../app/router/routes.go) |
+| Environment variables and defaults | [`config/production.go`](../config/production.go) and [`env.template`](../env.template) |
+| Startup wiring and workers | [`main.go`](../main.go) |
+| Database order and execution guidance | [`migrations/README.md`](../migrations/README.md) |
+| Beta deployment topology | [`docker-compose.beta.yml`](../docker-compose.beta.yml) |
+| Build, test, migration, and Swagger commands | [`Makefile`](../Makefile) |
+
+## Documentation Map
+
+| Document | Purpose |
+|---|---|
+| [Production deployment](PRODUCTION_DEPLOYMENT.md) | Deployment procedure and operational checks |
+| [Production configuration](PRODUCTION_CONFIGURATION.md) | Production environment and service configuration |
+| [Production security checklist](PRODUCTION_SECURITY_CHECKLIST.md) | Security review checklist |
+| [Multi-server deployment](MULTI_SERVER_DEPLOYMENT.md) | Multi-host/domain deployment notes |
+| [Bale integration](bale.md) | Bale/Najva provider notes |
+| [Migration guide](../migrations/README.md) | Current schema head, migration groups, execution, rollback, and known gaps |
+| [Pitch and architecture index](../pitch/README.md) | Board-facing and technical Mermaid documents |
+
+Deployment documents contain environment-specific examples. Verify hostnames, image versions, secrets, and service names against `docker-compose.beta.yml` and `env.template` before applying them.
+
+## OpenAPI and Swagger
+
+The checked-in generated artifacts are:
+
+- `docs.go`
+- `swagger.yaml`
+- `swagger.json`
+- `swagger-ui.html`
+- `swagger-ui-standalone.html`
+- `swagger-ui-assets/`
+
+Regenerate the Go/OpenAPI artifacts after changing handler annotations:
+
 ```bash
-git clone https://github.com/amirphl/yamata-no-orochi.git
-cd yamata-no-orochi
-cp env.production.template .env.production
-# Edit .env.production with your values
-./scripts/deploy-docker-compose.sh
+make swag
 ```
-**Your API will be running at `https://your-domain.com` with full monitoring!**
 
-### **💻 Manual Local Development**
+`make swag` installs the `swag` CLI when it is missing. Review generated diffs before committing them.
+
+Swagger routes are registered only when `APP_ENV=development` or `APP_ENV=local`:
+
+| Route | Description |
+|---|---|
+| `GET /api/v1/docs` | API documentation response |
+| `GET /api/v1/swagger.json` | Generated OpenAPI JSON |
+| `GET /swagger` | Embedded Swagger UI |
+| `GET /swagger-standalone` | Standalone Swagger UI |
+| `GET /swagger-ui-assets/*` | Local UI assets |
+
+The generated specification can lag behind `app/router/routes.go` until `make swag` is run.
+
+## API Surface
+
+All JSON API routes use the `/api/v1` prefix unless noted.
+
+| Surface | Main route groups |
+|---|---|
+| Public | `/api/v1/health`, customer/admin/bot login routes, crypto provider callback, `/s/:uid`, `/:uid` |
+| Customer | `/campaigns`, `/bundles`, `/wallet`, `/payments`, `/crypto`, `/reports`, `/profile`, `/media`, `/platform-settings`, `/platform-base-prices`, `/segment-price-factors`, `/line-numbers`, `/tickets` |
+| Admin | `/admin/campaigns`, `/admin/payments`, `/admin/media`, `/admin/platform-settings`, `/admin/platform-base-prices`, `/admin/segment-price-factors`, `/admin/line-numbers`, `/admin/tickets`, `/admin/short-links`, `/admin/customer-management`, `/admin/access-control` |
+| Bot | `/bot/campaigns`, `/bot/short-links`, `/bot/media` |
+
+Admin groups use both admin JWT authentication and the central permission registry. Bot groups use separate bot JWT claims. Customer groups use customer JWT claims.
+
+Bundle endpoints include CRUD plus:
+
+```text
+POST /api/v1/bundles/:id/tag-evaluations
+GET  /api/v1/bundles/:id/tag-evaluation
+GET  /api/v1/bundles/:id/tag-scores
+```
+
+## Local Documentation Setup
+
+Create the environment file and configure at least PostgreSQL, JWT, required system identities/wallets, and any enabled integrations:
+
 ```bash
-git clone https://github.com/amirphl/yamata-no-orochi.git
-cd yamata-no-orochi
+cp env.template .env
 go mod download
-docker-compose up -d postgres redis  # Start dependencies
-go run main.go                       # Start application
 ```
 
-📖 **See [Local Deployment Guide](LOCAL_DEPLOYMENT.md) for detailed instructions.**
+Create the database separately, then consult the [migration guide](../migrations/README.md). The aggregate manifests include every numbered migration; run them with `ON_ERROR_STOP=1` so any database error stops immediately.
 
-## 🏗️ **Architecture Overview**
+Start the API:
 
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│     Client      │    │      Nginx      │    │   Go App (API)  │
-│   (Frontend)    │◄──►│ (Reverse Proxy) │◄──►│   (Fiber v3)    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                                                        │
-                       ┌─────────────────┐              │
-                       │   Monitoring    │              │
-                       │ Prometheus +    │◄─────────────┤
-                       │    Grafana      │              │
-                       └─────────────────┘              │
-                                                        │
-                       ┌─────────────────┐              │
-                       │   PostgreSQL    │◄─────────────┤
-                       │   (Database)    │              │
-                       └─────────────────┘              │
-                                                        │
-                       ┌─────────────────┐              │
-                       │     Redis       │◄─────────────┘
-                       │    (Cache)      │
-                       └─────────────────┘
-```
-
-## ✨ **Key Features**
-
-### 🔒 **Security First**
-- ✅ **OWASP Compliant** security implementation
-- ✅ **JWT Authentication** with secure token rotation
-- ✅ **OTP Verification** system (SMS/Email)
-- ✅ **Rate Limiting** (5 auth requests/minute, 1000 global/minute)
-- ✅ **Input Validation** with custom rules
-- ✅ **SQL Injection Prevention** via parameterized queries
-- ✅ **XSS Protection** with security headers
-- ✅ **bcrypt Password Hashing** (cost 12)
-- ✅ **Audit Logging** for all user actions
-
-### 🚀 **Production Ready**
-- ✅ **Docker Compose** deployment with Nginx
-- ✅ **Kubernetes** manifests included
-- ✅ **Auto-SSL** with Let's Encrypt
-- ✅ **Health Checks** and monitoring
-- ✅ **Graceful Shutdown** handling
-- ✅ **Log Rotation** and structured logging
-- ✅ **Resource Limits** and security hardening
-- ✅ **Backup Scripts** and disaster recovery
-
-### 📊 **Monitoring & Observability**
-- ✅ **Prometheus** metrics collection
-- ✅ **Grafana** dashboards
-- ✅ **Structured JSON Logging**
-- ✅ **Request Tracing** with correlation IDs
-- ✅ **Performance Metrics** (response times, throughput)
-- ✅ **Database Monitoring** (slow queries, connections)
-- ✅ **Security Monitoring** (failed attempts, anomalies)
-
-### 🧪 **Quality Assurance**
-- ✅ **CI/CD Pipeline** with GitHub Actions
-- ✅ **Automated Testing** (unit, integration, security)
-- ✅ **Code Quality** scanning (golangci-lint)
-- ✅ **Security Scanning** (Trivy, Gosec)
-- ✅ **Dependency Updates** (Dependabot)
-- ✅ **Code Coverage** reporting
-
-## 🏛️ **Clean Architecture**
-
-Following Uncle Bob's Clean Architecture principles:
-
-```
-┌─────────────────┐
-│   Presentation  │  ← app/handlers, app/router
-├─────────────────┤
-│   Use Cases     │  ← business_flow/
-├─────────────────┤
-│   Services      │  ← app/services/
-├─────────────────┤
-│   Repository    │  ← repository/
-├─────────────────┤
-│    Models       │  ← models/
-└─────────────────┘
-```
-
-### **Layer Responsibilities**
-- **🎯 Presentation**: HTTP handlers, request/response validation
-- **🔄 Use Cases**: Business logic orchestration
-- **🔌 Services**: External integrations (SMS, Email, JWT)
-- **💾 Repository**: Data access abstraction
-- **📋 Models**: Core business entities
-
-## 📋 **Project Structure**
-
-```
-yamata-no-orochi/
-├── 🗃️  migrations/           # Database schema migrations
-├── 📊 models/               # Core business entities
-├── 🗄️  repository/          # Data access layer
-├── 🔄 business_flow/        # Business logic
-├── 🌐 app/
-│   ├── dto/                # Data Transfer Objects
-│   ├── handlers/           # HTTP handlers
-│   ├── services/           # External services
-│   └── router/             # Route configuration
-├── 🐳 docker/              # Docker configurations
-├── ☸️  deployments/         # Kubernetes manifests
-├── 🔧 scripts/             # Deployment scripts
-├── 📚 docs/                # Documentation
-└── 🧪 .github/             # CI/CD workflows
-```
-
-## 🗄️ **Database Schema**
-
-### **Core Tables**
-- **`account_types`**: Account type definitions (individual, company, agency)
-- **`customers`**: Unified customer entity with conditional fields
-- **`customer_sessions`**: JWT session tracking
-- **`audit_log`**: Comprehensive audit trail
-
-### **Migration Management**
 ```bash
-# Apply all migrations
-psql -U postgres -d yamata_db -f migrations/run_all_up.sql
-
-# Rollback all migrations
-psql -U postgres -d yamata_db -f migrations/run_all_down.sql
-
-# Apply specific migration
-psql -U postgres -d yamata_db -f migrations/0001_create_account_types.sql
+make run
 ```
 
-## 🔌 **API Endpoints**
+Check health and open the local documentation:
 
-### **Authentication**
-
-#### **User Registration**
-```http
-POST /api/v1/auth/signup
-Content-Type: application/json
-
-{
-  "account_type": "individual",
-  "representative_first_name": "John",
-  "representative_last_name": "Doe",
-  "representative_mobile": "+989123456789",
-  "email": "john@example.com",
-  "password": "SecurePass123!",
-  "confirm_password": "SecurePass123!"
-}
-```
-
-#### **OTP Verification**
-```http
-POST /api/v1/auth/verify
-Content-Type: application/json
-
-{
-  "customer_id": 123,
-  "otp_code": "123456",
-  "otp_type": "mobile"
-}
-```
-
-#### **Resend OTP**
-```http
-POST /api/v1/auth/resend-otp/123
-```
-
-#### **User Login** ✨ **NEW**
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
-
-{
-  "identifier": "john@example.com",
-  "password": "SecurePass123!"
-}
-```
-
-#### **Forgot Password** ✨ **NEW**
-```http
-POST /api/v1/auth/forgot-password
-Content-Type: application/json
-
-{
-  "identifier": "john@example.com"
-}
-```
-
-#### **Reset Password** ✨ **NEW**
-```http
-POST /api/v1/auth/reset
-Content-Type: application/json
-
-{
-  "customer_id": 123,
-  "otp_code": "654321",
-  "new_password": "NewSecurePass123!",
-  "confirm_password": "NewSecurePass123!"
-}
-```
-
-### **System**
-```http
-GET /api/v1/health
-GET /api/v1/docs
-GET /metrics (Prometheus metrics)
-```
-
-## 🔧 **Development**
-
-### **Prerequisites**
-- **Go 1.21+**
-- **Docker & Docker Compose**
-- **PostgreSQL 15+**
-- **Redis 7+**
-- **Git**
-
-### **Code Quality**
 ```bash
-# Run tests with coverage
-go test -v -race -coverprofile=coverage.out ./...
-go tool cover -html=coverage.out
-
-# Lint code
-golangci-lint run
-
-# Security scan
-gosec ./...
-
-# Format code
-gofmt -w .
-goimports -w .
+curl http://localhost:8080/api/v1/health
 ```
 
-### **Docker Development**
+Then visit `http://localhost:8080/swagger` with `APP_ENV=development` or `APP_ENV=local`.
+
+## Smart-Tag Evaluation
+
+Smart-tag evaluation is off by default. When enabling it:
+
+- Set `SMART_TAG_EVALUATION_ENABLED=true` and configure `SMART_TAG_EVALUATION_OPENAI_*`.
+- Set the environment variable named by `SMART_TAG_EVALUATION_OPENAI_API_KEY_ENV` (defaults to `OPENAI_API_KEY`).
+- Place both multiline prompt files at the repository root:
+  - `SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT`
+  - `SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT`
+- Enable `SMART_TAG_EVALUATION_SCHEDULER_ENABLED` only when this process should claim queued runs.
+
+The scheduler poll interval, maximum parallel runs, tag batch size, validation strictness, model, reasoning effort, token limit, timeout, retry count, temperature, and optional proxy are configurable through `env.template`.
+
+## Beta Deployment Stack
+
+`docker-compose.beta.yml` currently defines PostgreSQL 15, Redis 8, the Go application, nginx, a PostgreSQL backup container, GlitchTip with its PostgreSQL/Redis dependencies, an nginx Sentry forwarder, certificate monitoring, Prometheus, Grafana, PostgreSQL exporter, node exporter, cAdvisor, and the frontend image. Only nginx publishes host ports (`80` and `443`) in the checked-in compose file.
+
+Use [`scripts/deploy-beta.sh`](../scripts/deploy-beta.sh) and the production guides as references; there is no checked-in production Kubernetes manifest or generic `docker-compose.production.yml` in the current repository.
+
+## Verification
+
+Run the complete Go package test suite:
+
 ```bash
-# Build application
-docker build -f docker/Dockerfile.production -t yamata-no-orochi .
-
-# Run full stack
-docker-compose -f docker-compose.production.yml up -d
-
-# View logs
-docker-compose logs -f app
+go test ./...
 ```
 
-## 📚 **Documentation**
+Run the maintained database/Redis-free CI subset with the race detector:
 
-### **📖 Comprehensive Guides**
-- **[🚀 Production Deployment](./PRODUCTION_DEPLOYMENT.md)** - Complete deployment guide
-- **[🌐 Multi-Server Deployment](./MULTI_SERVER_DEPLOYMENT.md)** - Deploy to multiple servers with different domains
-- **[🔒 Security Checklist](./PRODUCTION_SECURITY_CHECKLIST.md)** - Security best practices
-- **[🏗️ Clean Architecture](./CLEAN_ARCHITECTURE_README.md)** - Architecture principles
-- **[🤝 Contributing Guide](./CONTRIBUTING.md)** - How to contribute
-- **[📋 Database Migrations](./migrations/README.md)** - Schema management
-- **[📝 Changelog](./CHANGELOG.md)** - Release history
-
-### **🔗 Quick Links**
-- **[Issue Templates](.github/ISSUE_TEMPLATE/)** - Bug reports & feature requests
-- **[PR Template](.github/pull_request_template.md)** - Pull request guidelines
-- **[CI/CD Pipeline](.github/workflows/)** - Automated workflows
-- **[Docker Configs](./docker/)** - Container configurations
-
-## 🌟 **Production Features**
-
-### **🔐 Security Hardening**
-```yaml
-Security Headers:
-  X-Frame-Options: DENY
-  X-Content-Type-Options: nosniff
-  X-XSS-Protection: "1; mode=block"
-  Strict-Transport-Security: "max-age=31536000"
-  Content-Security-Policy: "default-src 'self'..."
-  
-Rate Limiting:
-  Auth Endpoints: 5 requests/minute
-  Global API: 1000 requests/minute
-  Connection Limit: 20 per IP
-```
-
-### **⚡ Performance Optimizations**
-```yaml
-Database:
-  Connection Pool: 200 max connections
-  Query Optimization: Indexed searches
-  Connection Timeout: 30s
-  
-Caching:
-  Redis: 256MB with LRU eviction
-  Nginx: Static file caching
-  Application: Query result caching
-  
-Compression:
-  Gzip: Enabled for text content
-  Response Size: Up to 90% reduction
-```
-
-### **📊 Monitoring Stack**
-```yaml
-Metrics:
-  - Application performance
-  - Database statistics
-  - Cache hit rates
-  - Security events
-  
-Dashboards:
-  - System overview
-  - API performance
-  - Security monitoring
-  - Error tracking
-  
-Alerts:
-  - High error rates
-  - Performance degradation
-  - Security incidents
-  - System resource usage
-```
-
-## 🚀 **Deployment Options**
-
-### **🐳 Docker Compose (Recommended for start)**
 ```bash
-./scripts/deploy-docker-compose.sh
-```
-- **One-command deployment**
-- **Automatic SSL certificates**
-- **Full monitoring stack**
-- **Production-ready configuration**
-
-### **☸️ Kubernetes (Enterprise scale)**
-```bash
-kubectl apply -f deployments/k8s/production.yaml
-```
-- **High availability**
-- **Auto-scaling**
-- **Rolling updates**
-- **Advanced networking**
-
-## 🔄 **CI/CD Pipeline**
-
-### **Automated Workflows**
-- ✅ **Code Quality**: Linting, formatting, complexity analysis
-- ✅ **Security**: Vulnerability scanning, secret detection
-- ✅ **Testing**: Unit tests, integration tests, race detection
-- ✅ **Building**: Multi-arch Docker images
-- ✅ **Deployment**: Automated staging/production deployment
-- ✅ **Monitoring**: Health checks and rollback automation
-
-### **Quality Gates**
-- **Test Coverage**: >80%
-- **Code Quality**: A grade
-- **Security**: No high/critical vulnerabilities
-- **Performance**: <100ms avg response time
-
-## 🤝 **Contributing**
-
-We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details.
-
-### **Getting Started**
-1. **Fork** the repository
-2. **Create** a feature branch (`git checkout -b feature/amazing-feature`)
-3. **Commit** your changes (`git commit -m 'feat: add amazing feature'`)
-4. **Push** to the branch (`git push origin feature/amazing-feature`)
-5. **Open** a Pull Request
-
-### **Development Setup**
-```bash
-git clone https://github.com/your-username/yamata-no-orochi.git
-cd yamata-no-orochi
-go mod download
-docker-compose up -d postgres redis
-go run main.go
+make ci-test-unit
 ```
 
-## 📊 **Project Status**
-
-- ✅ **Production Ready**: Full deployment automation
-- ✅ **Security Audited**: OWASP compliance verified
-- ✅ **Performance Tested**: Load testing completed
-- ✅ **Documentation Complete**: Comprehensive guides available
-- ✅ **CI/CD Implemented**: Automated quality gates
-- ✅ **Monitoring Configured**: Full observability stack
-
-## 📞 **Support & Community**
-
-### **Getting Help**
-- **📚 Documentation**: Check our comprehensive guides
-- **🐛 Bug Reports**: Use our [issue templates](.github/ISSUE_TEMPLATE/)
-- **💡 Feature Requests**: Submit detailed proposals
-- **💬 Discussions**: Join our GitHub Discussions
-
-### **Professional Support**
-- **🔒 Security Issues**: security@yamata-no-orochi.com
-- **🚀 Enterprise Support**: enterprise@yamata-no-orochi.com
-- **📧 General Inquiries**: dev@yamata-no-orochi.com
-
-## 📄 **License**
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 **Acknowledgments**
-
-- **Clean Architecture** principles by Robert C. Martin
-- **Go community** for excellent tooling and libraries
-- **OWASP** for security guidelines
-- **Docker** and **Kubernetes** communities
-- **Open source contributors** who make this possible
-
----
-
-**🎉 Ready to deploy a production-grade Go API? Get started with our [3-command deployment](#-production-deployment-3-commands)!** 
+Other useful checks are `make fmt`, `make vet`, `make lint`, and `make build`. Several older Make targets still point at a non-existent `./tests` package; use the commands above for the maintained suite.
