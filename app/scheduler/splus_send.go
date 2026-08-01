@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -82,8 +84,21 @@ func (s *SplusCampaignScheduler) resolveSendResult(resp *SplusResponse, sendErr 
 
 func isRetryableSplusError(resp *SplusResponse, err error) bool {
 	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return true
+		}
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "429") || strings.Contains(msg, "too many requests") {
+		if strings.Contains(msg, "429") ||
+			strings.Contains(msg, "too many requests") ||
+			strings.Contains(msg, "timeout") ||
+			strings.Contains(msg, "timed out") ||
+			strings.Contains(msg, "connection reset") ||
+			strings.Contains(msg, "connection refused") ||
+			strings.Contains(msg, "connection aborted") ||
+			strings.Contains(msg, "temporary failure") ||
+			strings.Contains(msg, "no such host") ||
+			strings.Contains(msg, "eof") {
 			return true
 		}
 	}
