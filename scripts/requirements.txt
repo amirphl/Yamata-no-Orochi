@@ -1,0 +1,7 @@
+# Dependencies used by the standalone Python operation and repair scripts.
+cryptography>=44.0,<47.0
+openpyxl>=3.1,<4.0
+pandas>=2.2,<4.0
+psycopg2-binary>=2.9,<3.0
+redis>=5.0,<7.0
+requests>=2.32,<3.0
