@@ -52,35 +52,36 @@ type CampaignFlow interface {
 
 // CampaignFlowImpl implements the campaign business flow
 type CampaignFlowImpl struct {
-	campaignRepo          repository.CampaignRepository
-	bundleRepo            repository.BundleRepository
-	shortLinkRepo         repository.ShortLinkRepository
-	customerRepo          repository.CustomerRepository
-	multimediaRepo        repository.MultimediaAssetRepository
-	platformSettingsRepo  repository.PlatformSettingsRepository
-	walletRepo            repository.WalletRepository
-	balanceSnapshotRepo   repository.BalanceSnapshotRepository
-	transactionRepo       repository.TransactionRepository
-	auditRepo             repository.AuditLogRepository
-	lineNumberRepo        repository.LineNumberRepository
-	segmentPriceRepo      repository.SegmentPriceFactorRepository
-	platformBaseRepo      repository.PlatformBasePriceRepository
-	pagePriceRepo         repository.PagePriceRepository
-	processedCampaignRepo repository.ProcessedCampaignRepository
-	smsStatusResultRepo   repository.SMSStatusResultRepository
-	shortLinkClickRepo    repository.ShortLinkClickRepository
-	selectedTagRepo       repository.CampaignSelectedTagRepository
-	notifier              services.NotificationService
-	adminConfig           config.AdminConfig
-	cacheConfig           config.CacheConfig
-	botConfig             config.BotConfig
-	payamSMSConfig        config.PayamSMSConfig
-	baleConfig            config.BaleConfig
-	rubikaConfig          config.RubikaConfig
-	splusConfig           config.SplusConfig
-	irHTTPSProxy          string
-	rc                    *redis.Client
-	db                    *gorm.DB
+	campaignRepo            repository.CampaignRepository
+	bundleRepo              repository.BundleRepository
+	shortLinkRepo           repository.ShortLinkRepository
+	customerRepo            repository.CustomerRepository
+	multimediaRepo          repository.MultimediaAssetRepository
+	platformSettingsRepo    repository.PlatformSettingsRepository
+	walletRepo              repository.WalletRepository
+	balanceSnapshotRepo     repository.BalanceSnapshotRepository
+	transactionRepo         repository.TransactionRepository
+	auditRepo               repository.AuditLogRepository
+	lineNumberRepo          repository.LineNumberRepository
+	segmentPriceRepo        repository.SegmentPriceFactorRepository
+	platformBaseRepo        repository.PlatformBasePriceRepository
+	pagePriceRepo           repository.PagePriceRepository
+	processedCampaignRepo   repository.ProcessedCampaignRepository
+	smsStatusResultRepo     repository.SMSStatusResultRepository
+	shortLinkClickRepo      repository.ShortLinkClickRepository
+	selectedTagRepo         repository.CampaignSelectedTagRepository
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository
+	notifier                services.NotificationService
+	adminConfig             config.AdminConfig
+	cacheConfig             config.CacheConfig
+	botConfig               config.BotConfig
+	payamSMSConfig          config.PayamSMSConfig
+	baleConfig              config.BaleConfig
+	rubikaConfig            config.RubikaConfig
+	splusConfig             config.SplusConfig
+	irHTTPSProxy            string
+	rc                      *redis.Client
+	db                      *gorm.DB
 }
 
 const (
@@ -115,6 +116,7 @@ func NewCampaignFlow(
 	smsStatusResultRepo repository.SMSStatusResultRepository,
 	shortLinkClickRepo repository.ShortLinkClickRepository,
 	selectedTagRepo repository.CampaignSelectedTagRepository,
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -128,35 +130,36 @@ func NewCampaignFlow(
 	irHTTPSProxy string,
 ) CampaignFlow {
 	return &CampaignFlowImpl{
-		campaignRepo:          campaignRepo,
-		bundleRepo:            bundleRepo,
-		shortLinkRepo:         shortLinkRepo,
-		customerRepo:          customerRepo,
-		multimediaRepo:        multimediaRepo,
-		platformSettingsRepo:  platformSettingsRepo,
-		walletRepo:            walletRepo,
-		balanceSnapshotRepo:   balanceSnapshotRepo,
-		transactionRepo:       transactionRepo,
-		auditRepo:             auditRepo,
-		lineNumberRepo:        lineNumberRepo,
-		segmentPriceRepo:      segmentPriceRepo,
-		platformBaseRepo:      platformBaseRepo,
-		pagePriceRepo:         pagePriceRepo,
-		processedCampaignRepo: processedCampaignRepo,
-		smsStatusResultRepo:   smsStatusResultRepo,
-		shortLinkClickRepo:    shortLinkClickRepo,
-		selectedTagRepo:       selectedTagRepo,
-		notifier:              notifier,
-		adminConfig:           adminConfig,
-		cacheConfig:           cacheConfig,
-		botConfig:             botConfig,
-		payamSMSConfig:        payamSMSConfig,
-		baleConfig:            baleConfig,
-		rubikaConfig:          rubikaConfig,
-		splusConfig:           splusConfig,
-		irHTTPSProxy:          irHTTPSProxy,
-		rc:                    rc,
-		db:                    db,
+		campaignRepo:            campaignRepo,
+		bundleRepo:              bundleRepo,
+		shortLinkRepo:           shortLinkRepo,
+		customerRepo:            customerRepo,
+		multimediaRepo:          multimediaRepo,
+		platformSettingsRepo:    platformSettingsRepo,
+		walletRepo:              walletRepo,
+		balanceSnapshotRepo:     balanceSnapshotRepo,
+		transactionRepo:         transactionRepo,
+		auditRepo:               auditRepo,
+		lineNumberRepo:          lineNumberRepo,
+		segmentPriceRepo:        segmentPriceRepo,
+		platformBaseRepo:        platformBaseRepo,
+		pagePriceRepo:           pagePriceRepo,
+		processedCampaignRepo:   processedCampaignRepo,
+		smsStatusResultRepo:     smsStatusResultRepo,
+		shortLinkClickRepo:      shortLinkClickRepo,
+		selectedTagRepo:         selectedTagRepo,
+		capacityCalculationRepo: capacityCalculationRepo,
+		notifier:                notifier,
+		adminConfig:             adminConfig,
+		cacheConfig:             cacheConfig,
+		botConfig:               botConfig,
+		payamSMSConfig:          payamSMSConfig,
+		baleConfig:              baleConfig,
+		rubikaConfig:            rubikaConfig,
+		splusConfig:             splusConfig,
+		irHTTPSProxy:            irHTTPSProxy,
+		rc:                      rc,
+		db:                      db,
 	}
 }
 
@@ -1464,7 +1467,29 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		pricePerMsg = pbp.Price*uint64(1*1) + uint64(segmentPriceFactor*pagePrice)
 	}
 
-	// Calculate campaign capacity (target audience size)
+	// Smart Targeting cost must use the persisted exact generation rather than
+	// Feature 2's raw sum. Pending, failed, expired, or fingerprint-stale
+	// generations are deliberately rejected so budget reservations cannot use a
+	// capacity that is no longer operationally valid.
+	if campaign.Spec.UsesSmartTargeting() {
+		if s.capacityCalculationRepo == nil {
+			return 0, 0, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required", ErrSmartTargetingExactCapacityRequired)
+		}
+		exact, err := CurrentSmartTargetingCapacity(ctx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, &campaign)
+		if err != nil {
+			if errors.Is(err, ErrSmartTargetingExactCapacityRequired) {
+				return 0, 0, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required", err)
+			}
+			return 0, 0, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_LOOKUP_FAILED", "Failed to validate exact Smart Targeting capacity", err)
+		}
+		if exact.UsableUniqueAudienceCount < 0 {
+			return 0, 0, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_INVALID", "Exact Smart Targeting capacity is invalid", ErrInvalidState)
+		}
+		return pricePerMsg, uint64(exact.UsableUniqueAudienceCount), nil
+	}
+
+	// Calculate campaign capacity (target audience size) for standard and Excel
+	// targeting. Their established behavior remains unchanged.
 	capacityResp, err := s.CalculateCampaignCapacity(ctx, &dto.CalculateCampaignCapacityRequest{
 		CampaignID: campaign.ID,
 		CustomerID: campaign.CustomerID,

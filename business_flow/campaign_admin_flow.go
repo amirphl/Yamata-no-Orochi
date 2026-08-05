@@ -37,23 +37,25 @@ type AdminCampaignFlow interface {
 
 // AdminCampaignFlowImpl implements the campaign business flow
 type AdminCampaignFlowImpl struct {
-	campaignRepo         repository.CampaignRepository
-	customerRepo         repository.CustomerRepository
-	walletRepo           repository.WalletRepository
-	balanceSnapshotRepo  repository.BalanceSnapshotRepository
-	transactionRepo      repository.TransactionRepository
-	auditRepo            repository.AuditLogRepository
-	platformSettingsRepo repository.PlatformSettingsRepository
-	platformBaseRepo     repository.PlatformBasePriceRepository
-	lineNumberRepo       repository.LineNumberRepository
-	segmentPriceRepo     repository.SegmentPriceFactorRepository
-	pagePriceRepo        repository.PagePriceRepository
-	notifier             services.NotificationService
-	adminConfig          config.AdminConfig
-	messageConfig        config.MessageConfig
-	cacheConfig          config.CacheConfig
-	rc                   *redis.Client
-	db                   *gorm.DB
+	campaignRepo            repository.CampaignRepository
+	customerRepo            repository.CustomerRepository
+	walletRepo              repository.WalletRepository
+	balanceSnapshotRepo     repository.BalanceSnapshotRepository
+	transactionRepo         repository.TransactionRepository
+	auditRepo               repository.AuditLogRepository
+	platformSettingsRepo    repository.PlatformSettingsRepository
+	platformBaseRepo        repository.PlatformBasePriceRepository
+	lineNumberRepo          repository.LineNumberRepository
+	segmentPriceRepo        repository.SegmentPriceFactorRepository
+	pagePriceRepo           repository.PagePriceRepository
+	selectedTagRepo         repository.CampaignSelectedTagRepository
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository
+	notifier                services.NotificationService
+	adminConfig             config.AdminConfig
+	messageConfig           config.MessageConfig
+	cacheConfig             config.CacheConfig
+	rc                      *redis.Client
+	db                      *gorm.DB
 }
 
 const (
@@ -76,6 +78,8 @@ func NewAdminCampaignFlow(
 	lineNumberRepo repository.LineNumberRepository,
 	segmentPriceRepo repository.SegmentPriceFactorRepository,
 	pagePriceRepo repository.PagePriceRepository,
+	selectedTagRepo repository.CampaignSelectedTagRepository,
+	capacityCalculationRepo repository.CampaignTargetingCapacityRepository,
 	db *gorm.DB,
 	rc *redis.Client,
 	notifier services.NotificationService,
@@ -84,23 +88,25 @@ func NewAdminCampaignFlow(
 	cacheConfig config.CacheConfig,
 ) AdminCampaignFlow {
 	return &AdminCampaignFlowImpl{
-		campaignRepo:         campaignRepo,
-		customerRepo:         customerRepo,
-		walletRepo:           walletRepo,
-		balanceSnapshotRepo:  balanceSnapshotRepo,
-		transactionRepo:      transactionRepo,
-		auditRepo:            auditRepo,
-		platformSettingsRepo: platformSettingsRepo,
-		platformBaseRepo:     platformBaseRepo,
-		lineNumberRepo:       lineNumberRepo,
-		segmentPriceRepo:     segmentPriceRepo,
-		pagePriceRepo:        pagePriceRepo,
-		notifier:             notifier,
-		adminConfig:          adminConfig,
-		messageConfig:        messageConfig,
-		cacheConfig:          cacheConfig,
-		rc:                   rc,
-		db:                   db,
+		campaignRepo:            campaignRepo,
+		customerRepo:            customerRepo,
+		walletRepo:              walletRepo,
+		balanceSnapshotRepo:     balanceSnapshotRepo,
+		transactionRepo:         transactionRepo,
+		auditRepo:               auditRepo,
+		platformSettingsRepo:    platformSettingsRepo,
+		platformBaseRepo:        platformBaseRepo,
+		lineNumberRepo:          lineNumberRepo,
+		segmentPriceRepo:        segmentPriceRepo,
+		pagePriceRepo:           pagePriceRepo,
+		selectedTagRepo:         selectedTagRepo,
+		capacityCalculationRepo: capacityCalculationRepo,
+		notifier:                notifier,
+		adminConfig:             adminConfig,
+		messageConfig:           messageConfig,
+		cacheConfig:             cacheConfig,
+		rc:                      rc,
+		db:                      db,
 	}
 }
 
@@ -510,6 +516,24 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.Before(utils.UTCNow()) {
 			return ErrScheduleTimeTooSoon
 		}
+		if campaign.Spec.UsesSmartTargeting() {
+			if campaign.BundleID == nil || s.capacityCalculationRepo == nil {
+				return ErrSmartTargetingExactCapacityRequired
+			}
+			// Approvals for one bundle share this lock. After one approval commits,
+			// the next request observes its changed allocation fingerprint and
+			// cannot reserve the same exact capacity.
+			if err := smartTargetingDB(txCtx, s.db).Exec("SELECT id FROM bundles WHERE id = ? FOR UPDATE", *campaign.BundleID).Error; err != nil {
+				return err
+			}
+			exact, err := CurrentSmartTargetingCapacity(txCtx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, campaign)
+			if err != nil {
+				return err
+			}
+			if exact.UsableUniqueAudienceCount < 0 || campaign.NumAudience == nil || *campaign.NumAudience > uint64(exact.UsableUniqueAudienceCount) {
+				return ErrSmartTargetingExactCapacityRequired
+			}
+		}
 		if err := s.validateApprovalPlatformSettings(txCtx, campaign); err != nil {
 			return err
 		}
@@ -626,6 +650,9 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		logAdminAction(ctx, s.auditRepo, models.AuditActionAdminCampaignApproved, "Admin approved campaign", false, nil, map[string]any{
 			"campaign_id": req.CampaignID,
 		}, err)
+		if errors.Is(err, ErrSmartTargetingExactCapacityRequired) {
+			return nil, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required before approval", err)
+		}
 		return nil, NewBusinessError("ADMIN_APPROVE_CAMPAIGN_FAILED", "Failed to approve campaign", err)
 	}
 

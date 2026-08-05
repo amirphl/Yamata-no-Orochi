@@ -391,6 +391,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	audienceProfileRepo := repository.NewAudienceProfileRepository(db)
 	tagRepo := repository.NewTagRepository(db)
 	campaignSelectedTagRepo := repository.NewCampaignSelectedTagRepository(db)
+	capacityCalculationRepo := repository.NewCampaignTargetingCapacityRepository(db)
 	srcLayerAllStatsRepo := repository.NewSrcLayerAllStatsRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
@@ -501,6 +502,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		smsStatusResultRepo,
 		shortLinkClickRepo,
 		campaignSelectedTagRepo,
+		capacityCalculationRepo,
 		db,
 		rc,
 		notificationService,
@@ -518,6 +520,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		bundleRepo,
 		campaignSelectedTagRepo,
 		bundleTagEvaluationReadRepo,
+		db,
+	)
+	smartTargetingCapacityFlow := businessflow.NewSmartTargetingCapacityFlow(
+		campaignRepo,
+		campaignSelectedTagRepo,
+		capacityCalculationRepo,
 		db,
 	)
 
@@ -620,6 +628,8 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		lineNumberRepo,
 		segmentPriceFactorRepo,
 		pagePriceRepo,
+		campaignSelectedTagRepo,
+		capacityCalculationRepo,
 		db,
 		rc,
 		notificationService,
@@ -695,7 +705,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(signupFlow, loginFlow)
 	bundleHandler := handlers.NewBundleHandler(bundleFlow, bundleTagEvaluationFlow)
-	campaignHandler := handlers.NewCampaignHandler(campaignFlow, smartTargetingFlow)
+	campaignHandler := handlers.NewCampaignHandler(campaignFlow, smartTargetingFlow, smartTargetingCapacityFlow)
 	paymentHandler := handlers.NewPaymentHandler(paymentFlow)
 	paymentAdminHandler := handlers.NewPaymentAdminHandler(paymentAdminFlow)
 	cryptoPaymentHandler := handlers.NewCryptoPaymentHandler(cryptoPaymentFlow, cfg)
@@ -862,6 +872,18 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		stopSmartTagScheduler := smartTagScheduler.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopSmartTagScheduler)
 	}
+
+	// Exact Smart Targeting capacity requests are durable database jobs. This
+	// worker is intentionally independent of AI tag evaluation configuration.
+	capacityScheduler := scheduler.NewSmartTargetingCapacityScheduler(
+		smartTargetingCapacityFlow,
+		capacityCalculationRepo,
+		log.Default(),
+		5*time.Second,
+		2,
+	)
+	stopCapacityScheduler := capacityScheduler.Start(context.Background())
+	stopFuncs = append(stopFuncs, stopCapacityScheduler)
 
 	// Create application struct from FiberRouter
 	fiberRouter := appRouter.(*router.FiberRouter)

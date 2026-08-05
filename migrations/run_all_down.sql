@@ -3,6 +3,15 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0124_index_smart_targeting_capacity_reservations_down.sql...'
+\i migrations/0124_index_smart_targeting_capacity_reservations_down.sql
+
+\echo 'Running 0123_add_bundle_audience_selection_to_processed_campaigns_down.sql...'
+\i migrations/0123_add_bundle_audience_selection_to_processed_campaigns_down.sql
+
+\echo 'Running 0122_create_campaign_targeting_capacity_calculations_down.sql...'
+\i migrations/0122_create_campaign_targeting_capacity_calculations_down.sql
+
 \echo 'Running 0121_backfill_campaign_audience_targeting_method_down.sql...'
 \i migrations/0121_backfill_campaign_audience_targeting_method_down.sql
 
@@ -53,6 +62,9 @@
 
 \echo 'Running 0105_create_rubika_status_results_down.sql...'
 \i migrations/0105_create_rubika_status_results_down.sql
+
+\echo 'Running 0104_create_splus_status_results_down.sql...'
+\i migrations/0104_create_splus_status_results_down.sql
 
 \echo 'Running 0104_create_sent_rubika_messages_down.sql...'
 \i migrations/0104_create_sent_rubika_messages_down.sql
@@ -204,14 +216,14 @@
 \echo 'Running 0055_create_sms_status_jobs_down.sql...'
 \i migrations/0055_create_sms_status_jobs_down.sql
 
-\echo 'Running 0054_add_indexes_to_short_link_clicks_down.sql...'
-\i migrations/0054_add_indexes_to_short_link_clicks_down.sql
+\echo 'Running 0054_backfill_short_link_clicks_from_short_links_down.sql...'
+\i migrations/0054_backfill_short_link_clicks_from_short_links_down.sql
 
 \echo 'Running 0053_denormalize_short_link_clicks_down.sql...'
 \i migrations/0053_denormalize_short_link_clicks_down.sql
 
-\echo 'Running 0052_add_indexes_to_short_links_down.sql...'
-\i migrations/0052_add_indexes_to_short_links_down.sql
+\echo 'Running 0052_rename_segment_to_level1_and_add_level3_down.sql...'
+\i migrations/0052_rename_segment_to_level1_and_add_level3_down.sql
 
 \echo 'Running 0051_add_job_category_to_customers_down.sql...'
 \i migrations/0051_add_job_category_to_customers_down.sql
@@ -308,12 +320,6 @@
 
 \echo 'Running 0020_create_tax_wallet_down.sql...'
 \i migrations/0020_create_tax_wallet_down.sql
-
-\echo 'Running 0078_drop_agency_commissions_down.sql...'
-\i migrations/0078_drop_agency_commissions_down.sql
-
-\echo 'Running 0077_drop_audit_log_customer_fk_down.sql...'
-\i migrations/0077_drop_audit_log_customer_fk_down.sql
 
 \echo 'Running 0019_add_payment_audit_actions_down.sql...'
 \i migrations/0019_add_payment_audit_actions_down.sql

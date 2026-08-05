@@ -2940,6 +2940,47 @@ definitions:
         description: Mobile number (masked for security)
         type: string
     type: object
+  dto.SmartTargetingCapacityCalculationResponse:
+    properties:
+      approved_campaign_audience_deduction:
+        type: integer
+      bundle_id:
+        type: integer
+      calculation_id:
+        type: integer
+      campaign_id:
+        type: integer
+      created_at:
+        type: string
+      eligible_unique_audience_count_before_approved_campaign_deduction:
+        type: integer
+      error_code:
+        type: string
+      error_message:
+        type: string
+      expires_at:
+        type: string
+      finished_at:
+        type: string
+      is_current:
+        type: boolean
+      raw_audience_count:
+        type: integer
+      recalculation_required:
+        type: boolean
+      selected_score_classes:
+        items:
+          type: string
+        type: array
+      selected_tag_count:
+        type: integer
+      started_at:
+        type: string
+      status:
+        type: string
+      usable_unique_audience_count:
+        type: integer
+    type: object
   dto.SmartTargetingSelectionResponse:
     properties:
       selected_tag_ids:
@@ -2981,6 +3022,14 @@ definitions:
       test_phase_avg_ctr:
         description: Reason                *string  `json:"reason"`
         type: number
+    type: object
+  dto.StartSmartTargetingCapacityCalculationRequest:
+    properties:
+      score_classes:
+        items:
+          type: string
+        maxItems: 3
+        type: array
     type: object
   dto.SubmitDepositReceiptRequest:
     properties:
@@ -6684,6 +6733,97 @@ paths:
           schema:
             $ref: '#/definitions/dto.APIResponse'
       summary: Export Campaign Report
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations:
+    get:
+      parameters:
+      - description: Owned campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingCapacityCalculationResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get current exact Smart Targeting capacity
+      tags:
+      - Campaigns
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Owned campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Score-class selection; omitted reuses the campaign selection,
+          with an empty campaign selection meaning A, B, and C
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/dto.StartSmartTargetingCapacityCalculationRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingCapacityCalculationResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Calculate exact Smart Targeting capacity
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations/{calculation_id}:
+    get:
+      parameters:
+      - description: Owned campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Calculation generation ID
+        in: path
+        minimum: 1
+        name: calculation_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingCapacityCalculationResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get an exact Smart Targeting capacity generation
       tags:
       - Campaigns
   /api/v1/campaigns/{uuid}/smart-targeting/selection:

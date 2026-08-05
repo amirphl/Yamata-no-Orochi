@@ -41,12 +41,16 @@ type CampaignHandlerInterface interface {
 	GetSmartTargetingSelection(c fiber.Ctx) error
 	ReplaceSmartTargetingSelection(c fiber.Ctx) error
 	AutoSelectSmartTargetingTags(c fiber.Ctx) error
+	StartSmartTargetingCapacityCalculation(c fiber.Ctx) error
+	GetSmartTargetingCapacityCalculation(c fiber.Ctx) error
+	GetSmartTargetingCapacityCalculationByID(c fiber.Ctx) error
 }
 
 // CampaignHandler handles campaign-related HTTP requests
 type CampaignHandler struct {
 	campaignFlow       businessflow.CampaignFlow
 	smartTargetingFlow businessflow.SmartTargetingFlow
+	capacityFlow       businessflow.SmartTargetingCapacityFlow
 	validator          *validator.Validate
 }
 
@@ -70,10 +74,11 @@ func (h *CampaignHandler) SuccessResponse(c fiber.Ctx, statusCode int, message s
 }
 
 // NewCampaignHandler creates a new campaign handler
-func NewCampaignHandler(campaignFlow businessflow.CampaignFlow, smartTargetingFlow businessflow.SmartTargetingFlow) *CampaignHandler {
+func NewCampaignHandler(campaignFlow businessflow.CampaignFlow, smartTargetingFlow businessflow.SmartTargetingFlow, capacityFlow businessflow.SmartTargetingCapacityFlow) *CampaignHandler {
 	handler := &CampaignHandler{
 		campaignFlow:       campaignFlow,
 		smartTargetingFlow: smartTargetingFlow,
+		capacityFlow:       capacityFlow,
 		validator:          validator.New(),
 	}
 
@@ -81,6 +86,99 @@ func NewCampaignHandler(campaignFlow businessflow.CampaignFlow, smartTargetingFl
 	handler.setupCustomValidations()
 
 	return handler
+}
+
+// StartSmartTargetingCapacityCalculation queues an exact capacity generation.
+// @Summary Calculate exact Smart Targeting capacity
+// @Tags Campaigns
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned campaign UUID" format(uuid)
+// @Param request body dto.StartSmartTargetingCapacityCalculationRequest false "Score-class selection; omitted reuses the campaign selection, with an empty campaign selection meaning A, B, and C"
+// @Success 202 {object} dto.APIResponse{data=dto.SmartTargetingCapacityCalculationResponse}
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations [post]
+func (h *CampaignHandler) StartSmartTargetingCapacityCalculation(c fiber.Ctx) error {
+	var req dto.StartSmartTargetingCapacityCalculationRequest
+	if len(c.Body()) > 0 {
+		if err := c.Bind().JSON(&req); err != nil {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, "Invalid request body", "INVALID_REQUEST", nil)
+		}
+	}
+	if err := h.validator.Struct(&req); err != nil {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Validation failed", "VALIDATION_ERROR", nil)
+	}
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	if h.capacityFlow == nil {
+		return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Exact capacity calculation is unavailable", "SMART_TARGETING_CAPACITY_UNAVAILABLE", nil)
+	}
+	req.CustomerID, req.CampaignUUID = customerID, c.Params("uuid")
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/capacity-calculations", 30*time.Second)
+	defer cancel()
+	result, err := h.capacityFlow.Start(ctx, &req, businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent")))
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to request exact capacity calculation", "SMART_TARGETING_CAPACITY_REQUEST_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusAccepted, "Exact capacity calculation requested successfully", result)
+}
+
+// GetSmartTargetingCapacityCalculation returns the latest generation and
+// derives recalculation_required when tags, allocation, or expiry changed.
+// @Summary Get current exact Smart Targeting capacity
+// @Tags Campaigns
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned campaign UUID" format(uuid)
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingCapacityCalculationResponse}
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations [get]
+func (h *CampaignHandler) GetSmartTargetingCapacityCalculation(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	if h.capacityFlow == nil {
+		return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Exact capacity calculation is unavailable", "SMART_TARGETING_CAPACITY_UNAVAILABLE", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/capacity-calculations", 30*time.Second)
+	defer cancel()
+	result, err := h.capacityFlow.GetCurrent(ctx, customerID, c.Params("uuid"))
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to load exact capacity calculation", "SMART_TARGETING_CAPACITY_LOOKUP_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Exact capacity calculation retrieved successfully", result)
+}
+
+// GetSmartTargetingCapacityCalculationByID returns one historical generation.
+// @Summary Get an exact Smart Targeting capacity generation
+// @Tags Campaigns
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned campaign UUID" format(uuid)
+// @Param calculation_id path int true "Calculation generation ID" minimum(1)
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingCapacityCalculationResponse}
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations/{calculation_id} [get]
+func (h *CampaignHandler) GetSmartTargetingCapacityCalculationByID(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	calculationID, err := strconv.ParseInt(c.Params("calculation_id"), 10, 64)
+	if err != nil || calculationID < 1 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Calculation ID is invalid", "INVALID_CALCULATION_ID", nil)
+	}
+	if h.capacityFlow == nil {
+		return h.ErrorResponse(c, fiber.StatusServiceUnavailable, "Exact capacity calculation is unavailable", "SMART_TARGETING_CAPACITY_UNAVAILABLE", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/capacity-calculations/:calculation_id", 30*time.Second)
+	defer cancel()
+	result, err := h.capacityFlow.GetByID(ctx, customerID, c.Params("uuid"), calculationID)
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to load exact capacity calculation", "SMART_TARGETING_CAPACITY_LOOKUP_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Exact capacity calculation retrieved successfully", result)
 }
 
 // ListSmartTargetingTags returns the campaign's searchable, sortable tag table.
@@ -1206,6 +1304,7 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 	}
 	if errors.Is(err, businessflow.ErrSmartTargetingTagsRequired) ||
 		errors.Is(err, businessflow.ErrSmartTargetingTagInvalid) ||
+		errors.Is(err, businessflow.ErrSmartTargetingScoreClassesInvalid) ||
 		errors.Is(err, businessflow.ErrSmartTargetingSortInvalid) ||
 		errors.Is(err, businessflow.ErrSmartTargetingScoreUnavailable) ||
 		errors.Is(err, businessflow.ErrSmartTargetingSearchTooLong) ||
@@ -1218,7 +1317,19 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 		return h.ErrorResponse(c, fiber.StatusBadRequest, err.Error(), code, nil)
 	}
 	if errors.Is(err, businessflow.ErrInvalidState) {
-		return h.ErrorResponse(c, fiber.StatusConflict, "Another request is already in progress", "INVALID_STATE", nil)
+		message, code := "Another request is already in progress", "INVALID_STATE"
+		if be, ok := err.(*businessflow.BusinessError); ok {
+			if be.Message != "" {
+				message = be.Message
+			}
+			if be.Code != "" {
+				code = be.Code
+			}
+		}
+		return h.ErrorResponse(c, fiber.StatusConflict, message, code, nil)
+	}
+	if errors.Is(err, businessflow.ErrSmartTargetingExactCapacityRequired) {
+		return h.ErrorResponse(c, fiber.StatusConflict, "A current exact Smart Targeting capacity calculation is required", "SMART_TARGETING_EXACT_CAPACITY_REQUIRED", nil)
 	}
 	if businessflow.IsCampaignNotFound(err) {
 		return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)

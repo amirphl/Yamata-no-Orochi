@@ -328,6 +328,12 @@ func (s *SmartTargetingFlowImpl) replace(ctx context.Context, campaign *models.C
 		return nil, NewBusinessError("SMART_TARGETING_SELECTION_INVALID", err.Error(), err)
 	}
 	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		// Capacity calculation requests take the same lock before snapshotting
+		// selections. This gives tag replacement and exact-capacity generations a
+		// single serialization point and prevents a mixed selection snapshot.
+		if err := smartTargetingDB(txCtx, s.db).Exec("SELECT id FROM campaigns WHERE id = ? FOR UPDATE", campaign.ID).Error; err != nil {
+			return err
+		}
 		return s.selectionRepo.Replace(txCtx, campaign.ID, *campaign.BundleID, customerID, normalized)
 	})
 	if err != nil {

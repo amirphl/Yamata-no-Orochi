@@ -5822,6 +5822,161 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get current exact Smart Targeting capacity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingCapacityCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Calculate exact Smart Targeting capacity",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Score-class selection; omitted reuses the campaign selection, with an empty campaign selection meaning A, B, and C",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/dto.StartSmartTargetingCapacityCalculationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingCapacityCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/smart-targeting/capacity-calculations/{calculation_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get an exact Smart Targeting capacity generation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Calculation generation ID",
+                        "name": "calculation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingCapacityCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns/{uuid}/smart-targeting/selection": {
             "get": {
                 "security": [
@@ -12786,6 +12941,68 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.SmartTargetingCapacityCalculationResponse": {
+            "type": "object",
+            "properties": {
+                "approved_campaign_audience_deduction": {
+                    "type": "integer"
+                },
+                "bundle_id": {
+                    "type": "integer"
+                },
+                "calculation_id": {
+                    "type": "integer"
+                },
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "eligible_unique_audience_count_before_approved_campaign_deduction": {
+                    "type": "integer"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "is_current": {
+                    "type": "boolean"
+                },
+                "raw_audience_count": {
+                    "type": "integer"
+                },
+                "recalculation_required": {
+                    "type": "boolean"
+                },
+                "selected_score_classes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "selected_tag_count": {
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "usable_unique_audience_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.SmartTargetingSelectionResponse": {
             "type": "object",
             "properties": {
@@ -12846,6 +13063,18 @@ const docTemplate = `{
                 "test_phase_avg_ctr": {
                     "description": "Reason                *string  ` + "`" + `json:\"reason\"` + "`" + `",
                     "type": "number"
+                }
+            }
+        },
+        "dto.StartSmartTargetingCapacityCalculationRequest": {
+            "type": "object",
+            "properties": {
+                "score_classes": {
+                    "type": "array",
+                    "maxItems": 3,
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },

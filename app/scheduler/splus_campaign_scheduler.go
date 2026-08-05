@@ -911,9 +911,27 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 		s.logger.Printf("fetchSplusAudiencePhonesByBundle bundle selection miss: campaign_id=%d bundle_id=%d", c.ID, bundleID)
 	}
 
-	phones, ids, uids, err := s.selectSplusTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, scoreConstraint)
+	var phones []string
+	var ids []int64
+	var uids []string
+	var selectionID uint
+	if usesSmartAudienceTargeting(c) {
+		phones, ids, uids, selectionID, err = selectAndReserveExactSmartTargetingCandidates(ctx, s.db, c, numAudiences, false, correlationID)
+	} else {
+		phones, ids, uids, err = s.selectSplusTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, scoreConstraint)
+		if err == nil {
+			var saved *BundleAudienceSelection
+			saved, err = s.bundleAudienceCache.SaveWithMerge(ctx, c.CustomerID, bundleID, correlationID, ids)
+			if err == nil && saved != nil {
+				selectionID = saved.ID
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
+	}
+	if selectionID == 0 {
+		return nil, fmt.Errorf("bundle audience selection was not persisted for campaign %d", c.ID)
 	}
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle selected: campaign_id=%d bundle_id=%d selected=%d requested=%d",
 		c.ID, bundleID, len(phones), numAudiences)
@@ -921,14 +939,8 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 		return nil, err
 	}
 
-	// Persist the newly selected IDs merged with the existing bundle selection.
-	sel, err := s.bundleAudienceCache.SaveWithMerge(ctx, c.CustomerID, bundleID, correlationID, ids)
-	if err != nil {
-		s.logger.Printf("fetchSplusAudiencePhonesByBundle selection save failed: campaign_id=%d bundle_id=%d err=%v", c.ID, bundleID, err)
-		return nil, err
-	}
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle selection saved: campaign_id=%d bundle_id=%d selection_id=%d selected=%d",
-		c.ID, bundleID, sel.ID, len(ids))
+		c.ID, bundleID, selectionID, len(ids))
 
 	if !hasCampaignAdLink(c.AdLink) {
 		s.logger.Printf("fetchSplusAudiencePhonesByBundle skipped short links: campaign_id=%d ad_link=empty", c.ID)
@@ -937,7 +949,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 			IDs:                       ids,
 			UIDs:                      uids,
 			Codes:                     make([]string, len(phones)),
-			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+			BundleAudienceSelectionID: utils.ToPtr(selectionID),
 		}, nil
 	}
 
@@ -948,7 +960,7 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 			IDs:                       ids,
 			UIDs:                      uids,
 			Codes:                     make([]string, len(phones)),
-			BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+			BundleAudienceSelectionID: utils.ToPtr(selectionID),
 		}, nil
 	}
 
@@ -974,13 +986,13 @@ func (s *SplusCampaignScheduler) fetchSplusAudiencePhonesByBundle(
 		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d bundle_id=%d: phones=%d codes=%d", c.ID, bundleID, len(phones), len(codes))
 	}
 	s.logger.Printf("fetchSplusAudiencePhonesByBundle success: campaign_id=%d bundle_id=%d selected=%d codes=%d selection_id=%d",
-		c.ID, bundleID, len(phones), len(codes), sel.ID)
+		c.ID, bundleID, len(phones), len(codes), selectionID)
 	return &AudiencePhonesResult{
 		Phones:                    phones,
 		IDs:                       ids,
 		UIDs:                      uids,
 		Codes:                     codes,
-		BundleAudienceSelectionID: utils.ToPtr(sel.ID),
+		BundleAudienceSelectionID: utils.ToPtr(selectionID),
 	}, nil
 }
 

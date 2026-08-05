@@ -1,5 +1,7 @@
 package dto
 
+import "time"
+
 // ListSmartTargetingTagsRequest carries normalized list filters from either a
 // campaign-scoped or bundle-scoped Smart Targeting endpoint.
 type ListSmartTargetingTagsRequest struct {
@@ -18,9 +20,9 @@ type ListSmartTargetingTagsRequest struct {
 // evaluation. Unevaluated bundles expose live tag metadata and nil evaluation
 // fields. Nullable CTR values mean that those metrics are not yet available.
 type SmartTargetingTagItem struct {
-	TagID                 uint     `json:"tag_id"`
+	TagID uint `json:"tag_id"`
 	// TagName               string   `json:"tag_name"`
-	TagDisplayTitle       *string  `json:"tag_display_title"`
+	TagDisplayTitle *string `json:"tag_display_title"`
 	// TagAudiencePersona    *string  `json:"tag_audience_persona"`
 	TagCapacity           *int64   `json:"tag_capacity"`
 	BundlePersonaFitScore *float64 `json:"bundle_persona_fit_score"`
@@ -28,9 +30,9 @@ type SmartTargetingTagItem struct {
 	FitLevel              *string  `json:"fit_level"`
 	RelationType          *string  `json:"relation_type"`
 	// Reason                *string  `json:"reason"`
-	TestPhaseAvgCTR       *float64 `json:"test_phase_avg_ctr"`
-	OverallAvgCTR         *float64 `json:"overall_avg_ctr"`
-	Selected              bool     `json:"selected"`
+	TestPhaseAvgCTR *float64 `json:"test_phase_avg_ctr"`
+	OverallAvgCTR   *float64 `json:"overall_avg_ctr"`
+	Selected        bool     `json:"selected"`
 }
 
 // SmartTargetingSelectionSummary describes the complete selection, not only
@@ -76,4 +78,38 @@ type AutoSelectSmartTargetingTagsRequest struct {
 type SmartTargetingSelectionResponse struct {
 	SelectedTagIDs []uint                         `json:"selected_tag_ids"`
 	Summary        SmartTargetingSelectionSummary `json:"summary"`
+}
+
+// StartSmartTargetingCapacityCalculationRequest starts an asynchronous exact
+// capacity generation for the campaign identified by the URL. An omitted
+// score_classes value reuses the campaign's persisted audience grades; an
+// empty persisted selection is the deterministic shorthand for all classes.
+type StartSmartTargetingCapacityCalculationRequest struct {
+	CustomerID   uint     `json:"-"`
+	CampaignUUID string   `json:"-"`
+	ScoreClasses []string `json:"score_classes,omitempty" validate:"omitempty,max=3,dive,oneof=A B C a b c"`
+}
+
+// SmartTargetingCapacityCalculationResponse is used both by the start
+// endpoint and by polling endpoints. Count pointers distinguish a real zero
+// result from a result which is pending, failed, expired, or stale.
+type SmartTargetingCapacityCalculationResponse struct {
+	CalculationID         int64      `json:"calculation_id"`
+	CampaignID            uint       `json:"campaign_id"`
+	BundleID              uint       `json:"bundle_id"`
+	Status                string     `json:"status"`
+	IsCurrent             bool       `json:"is_current"`
+	RecalculationRequired bool       `json:"recalculation_required"`
+	SelectedScoreClasses  []string   `json:"selected_score_classes"`
+	SelectedTagCount      int        `json:"selected_tag_count"`
+	RawAudienceCount      *uint64    `json:"raw_audience_count,omitempty"`
+	EligibleUniqueCount   *uint64    `json:"eligible_unique_audience_count_before_approved_campaign_deduction,omitempty"`
+	ApprovedDeduction     *uint64    `json:"approved_campaign_audience_deduction,omitempty"`
+	UsableUniqueCount     *uint64    `json:"usable_unique_audience_count,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	StartedAt             *time.Time `json:"started_at,omitempty"`
+	FinishedAt            *time.Time `json:"finished_at,omitempty"`
+	ExpiresAt             *time.Time `json:"expires_at,omitempty"`
+	ErrorCode             *string    `json:"error_code,omitempty"`
+	ErrorMessage          *string    `json:"error_message,omitempty"`
 }

@@ -23,6 +23,9 @@ func NewBundleAudienceSelectionRepository(db *gorm.DB) BundleAudienceSelectionRe
 }
 
 func (r *BundleAudienceSelectionRepositoryImpl) getDB(ctx context.Context) *gorm.DB {
+	if tx, ok := ctx.Value(TxContextKey).(*gorm.DB); ok && tx != nil {
+		return tx.WithContext(ctx)
+	}
 	return r.DB.WithContext(ctx)
 }
 
@@ -50,6 +53,12 @@ func (r *BundleAudienceSelectionRepositoryImpl) InsertWithMerge(ctx context.Cont
 	var inserted models.BundleAudienceSelection
 
 	err := db.Transaction(func(tx *gorm.DB) error {
+		// Capacity calculations hold a SHARE lock on the same Bundle row while
+		// materializing candidates. The UPDATE lock also serializes concurrent
+		// selection merges so neither writer can lose the other's audience IDs.
+		if err := tx.Exec("SELECT id FROM bundles WHERE id = ? FOR UPDATE", bundleID).Error; err != nil {
+			return err
+		}
 		merged := dedupeAndSort(ids)
 
 		var latest models.BundleAudienceSelection

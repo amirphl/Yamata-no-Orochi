@@ -208,6 +208,9 @@ func (h *CampaignAdminHandler) ApproveCampaign(c fiber.Ctx) error {
 	defer cancel()
 	res, err := h.campaignFlow.ApproveCampaign(ctx, &req)
 	if err != nil {
+		if errors.Is(err, businessflow.ErrSmartTargetingExactCapacityRequired) {
+			return h.ErrorResponse(c, fiber.StatusConflict, "A current exact Smart Targeting capacity calculation is required before approval", "SMART_TARGETING_EXACT_CAPACITY_REQUIRED", nil)
+		}
 		if businessflow.IsCampaignNotFound(err) {
 			return h.ErrorResponse(c, fiber.StatusNotFound, "Campaign not found", "CAMPAIGN_NOT_FOUND", nil)
 		}
