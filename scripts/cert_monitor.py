@@ -17,6 +17,7 @@ Environment variables:
   SMS_RETRY_COUNT               (default: 3)
   SMS_VALIDITY_PERIOD           (default: 300) seconds
   SMS_TIMEOUT                   (default: 30s) simple duration (30s/5m/2h) or seconds
+  CERT_ALERT_RETRY_INTERVAL     (default: 5m) retry delay after transient failures
   DOMAIN / API_DOMAIN / ...     used for ${VAR} expansion inside the nginx conf paths
 
 Run forever: performs a check on start, then every 24h.
@@ -24,14 +25,13 @@ Run forever: performs a check on start, then every 24h.
 
 from __future__ import annotations
 
+import glob
+import logging
 import os
 import re
 import time
-import glob
-import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import requests
 from cryptography import x509
@@ -48,12 +48,18 @@ def _parse_timedelta(s: str) -> float:
     if not m:
         # fallback: try float seconds
         try:
-            return float(s)
-        except Exception:
-            return 30.0
+            seconds = float(s)
+        except ValueError as exc:
+            raise ValueError(f"invalid duration: {s!r}") from exc
+        if seconds <= 0:
+            raise ValueError("duration must be greater than zero")
+        return seconds
     value, unit = int(m.group(1)), m.group(2).lower()
     mult = {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
-    return float(value * mult)
+    seconds = float(value * mult)
+    if seconds <= 0:
+        raise ValueError("duration must be greater than zero")
+    return seconds
 
 
 def load_cert_expiry(p: Path) -> datetime:
@@ -74,10 +80,10 @@ def load_cert_expiry(p: Path) -> datetime:
 
 def find_cert_paths(
     conf_path: Path,
-    env_map: Dict[str, str],
+    env_map: dict[str, str],
     _depth: int = 0,
     _seen: set[Path] | None = None,
-) -> List[Path]:
+) -> list[Path]:
     if _depth > 10:
         return []
     if _seen is None:
@@ -86,7 +92,7 @@ def find_cert_paths(
     if canonical in _seen:
         return []
     _seen.add(canonical)
-    paths: List[Path] = []
+    paths: list[Path] = []
     if conf_path.exists():
         text = conf_path.read_text()
         for match in re.finditer(r"ssl_certificate\s+([^;]+);", text):
@@ -103,16 +109,16 @@ def find_cert_paths(
     return paths
 
 
-def _expand_env(value: str, env_map: Dict[str, str]) -> str:
+def _expand_env(value: str, env_map: dict[str, str]) -> str:
     out = value
     for k, v in env_map.items():
         out = out.replace(f"${{{k}}}", v)
     return out
 
 
-def unique_paths(paths: List[Path]) -> List[Path]:
+def unique_paths(paths: list[Path]) -> list[Path]:
     seen = set()
-    out: List[Path] = []
+    out: list[Path] = []
     for p in paths:
         q = p.resolve() if p.exists() else p
         if q in seen:
@@ -125,7 +131,7 @@ def unique_paths(paths: List[Path]) -> List[Path]:
 # ---------- SMS ----------
 
 
-def send_sms(recipient: str, body: str, cfg: Dict[str, str], timeout_s: float) -> None:
+def send_sms(recipient: str, body: str, cfg: dict[str, str], timeout_s: float) -> None:
     url = f"https://{cfg['SMS_PROVIDER_DOMAIN']}/api/v3.0.1/send"
     payload = [
         {
@@ -146,10 +152,34 @@ def send_sms(recipient: str, body: str, cfg: Dict[str, str], timeout_s: float) -
     )
     resp.raise_for_status()
     results = resp.json()
+    if not isinstance(results, list) or not results:
+        raise RuntimeError("SMS provider returned an invalid or empty result")
     # basic validation like Go service
     for r in results:
+        if not isinstance(r, dict):
+            raise RuntimeError("SMS provider returned a non-object result")
         if r.get("statusCode") != 200 or r.get("status") != "ACCEPTED":
-            raise RuntimeError(f"SMS delivery failed for {r.get('recipient')}: {r}")
+            raise RuntimeError("SMS provider rejected the certificate alert")
+
+
+def _validate_hostname_with_optional_port(value: str) -> None:
+    if any(ord(character) < 33 for character in value) or any(
+        character in value for character in "/\\@?#"
+    ):
+        raise ValueError("SMS_PROVIDER_DOMAIN must be a hostname with optional port")
+    host, separator, raw_port = value.rpartition(":")
+    if not separator:
+        host = value
+    elif not host or not raw_port.isdigit() or not 1 <= int(raw_port) <= 65535:
+        raise ValueError("SMS_PROVIDER_DOMAIN has an invalid port")
+    labels = host.split(".")
+    if any(
+        not label
+        or len(label) > 63
+        or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?", label)
+        for label in labels
+    ):
+        raise ValueError("SMS_PROVIDER_DOMAIN must be a valid hostname")
 
 
 # ---------- Main logic ----------
@@ -162,9 +192,13 @@ def check_and_notify() -> None:
         os.getenv("CERT_ALERT_CONF_PATH", "/etc/nginx/sites-available/yamata-beta.conf")
     )
     threshold_days = int(os.getenv("CERT_ALERT_THRESHOLD_DAYS", "7"))
+    if threshold_days < 0:
+        raise ValueError("CERT_ALERT_THRESHOLD_DAYS must be non-negative")
     recipient = os.getenv("CERT_ALERT_PHONE")
     if not recipient:
         raise SystemExit("CERT_ALERT_PHONE is required")
+    if not re.fullmatch(r"\+?[0-9]{8,15}", recipient):
+        raise ValueError("CERT_ALERT_PHONE must contain 8 to 15 digits")
 
     sms_cfg_keys = ["SMS_PROVIDER_DOMAIN", "SMS_API_KEY", "SMS_SOURCE_NUMBER"]
     missing = [k for k in sms_cfg_keys if not env_map.get(k)]
@@ -172,12 +206,22 @@ def check_and_notify() -> None:
         raise SystemExit(f"Missing SMS config envs: {', '.join(missing)}")
 
     timeout_s = _parse_timedelta(os.getenv("SMS_TIMEOUT", "30s"))
+    provider_domain = env_map["SMS_PROVIDER_DOMAIN"]
+    _validate_hostname_with_optional_port(provider_domain)
+    if not re.fullmatch(r"[0-9]{3,20}", env_map["SMS_SOURCE_NUMBER"]):
+        raise ValueError("SMS_SOURCE_NUMBER must contain 3 to 20 digits")
+    retry_count = int(env_map.get("SMS_RETRY_COUNT", "3"))
+    validity_period = int(env_map.get("SMS_VALIDITY_PERIOD", "300"))
+    if retry_count < 0:
+        raise ValueError("SMS_RETRY_COUNT must be non-negative")
+    if validity_period <= 0:
+        raise ValueError("SMS_VALIDITY_PERIOD must be greater than zero")
 
     conf_globs = os.getenv(
         "CERT_ALERT_CONF_GLOBS",
         "/etc/nginx/sites-enabled/*.conf,/etc/nginx/conf.d/*.conf",
     )
-    conf_files: List[Path] = [conf_path]
+    conf_files: list[Path] = [conf_path]
     for g in conf_globs.split(","):
         g = g.strip()
         if not g:
@@ -190,7 +234,7 @@ def check_and_notify() -> None:
         ", ".join(str(p) for p in conf_files if Path(p).exists()),
     )
 
-    paths: List[Path] = []
+    paths: list[Path] = []
     for cf in conf_files:
         paths.extend(find_cert_paths(cf, env_map))
 
@@ -208,24 +252,38 @@ def check_and_notify() -> None:
         raise SystemExit("No certificate paths found to check")
 
     now = datetime.now(timezone.utc)
-    alerts: List[Tuple[Path, datetime, int]] = []
+    alerts: list[tuple[Path, datetime, int]] = []
+    failures: list[tuple[Path, str]] = []
     for p in paths:
         if not p.exists():
-            log.warning("cert path missing: %s", p)
+            reason = "certificate file is missing"
+            log.error("%s: %s", reason, p)
+            failures.append((p, reason))
             continue
         try:
             expiry = load_cert_expiry(p)
         except Exception as e:
-            log.warning("unable to read cert %s: %s", p, e)
+            reason = "certificate file is unreadable or invalid"
+            log.error("%s: %s (%s)", reason, p, e)
+            failures.append((p, reason))
             continue
         days_left = int((expiry - now).total_seconds() // 86400)
         log.info("checked %s -> expires %s (%sd)", p, expiry.date(), days_left)
         if days_left <= threshold_days:
             alerts.append((p, expiry, days_left))
 
-    if not alerts:
+    if not alerts and not failures:
         log.info("All certificates healthy. Checked %d paths.", len(paths))
         return
+
+    for p, reason in failures:
+        send_sms(
+            recipient,
+            f"[Yamata Beta] SSL cert alert: {reason}. Path: {p}",
+            env_map,
+            timeout_s,
+        )
+        log.warning("Alert sent for %s: %s", p, reason)
 
     for p, exp, days_left in alerts:
         status = "expired" if days_left < 0 else f"{days_left}d left"
@@ -243,15 +301,19 @@ def main() -> None:
         level=getattr(logging, log_level, logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s %(message)s",
     )
-    # one run on start, then every 24h
+    retry_interval = _parse_timedelta(os.getenv("CERT_ALERT_RETRY_INTERVAL", "5m"))
+    # one run on start, then every 24h; transient failures retry sooner
     while True:
+        sleep_seconds = 24 * 3600
         try:
             check_and_notify()
+            Path("/tmp/cert-monitor-last-success").touch(mode=0o600)
         except Exception as e:
             logging.getLogger("cert_monitor").exception(
-                "Fatal error during check: %s", e
+                "Certificate check failed: %s", e
             )
-        time.sleep(24 * 3600)
+            sleep_seconds = retry_interval
+        time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":
