@@ -1,6 +1,11 @@
 FROM python:3-alpine3.23
 
-RUN apk add --no-cache ca-certificates && \
-    pip install --no-cache-dir requests cryptography
-
 WORKDIR /app
+
+COPY docker/cert-monitor/requirements.txt /tmp/requirements.txt
+RUN apk add --no-cache ca-certificates && \
+    pip install --no-cache-dir --requirement /tmp/requirements.txt && \
+    rm -f /tmp/requirements.txt
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
