@@ -3,7 +3,9 @@
 # Beta Deployment Script for Yamata no Orochi
 # This script automates the beta deployment process and validates pre-provisioned certificates
 
-set -e
+set -Eeuo pipefail
+set +x # Deployment environment values may contain credentials.
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
@@ -32,7 +34,7 @@ print_warning() {
 }
 
 print_error() {
-	echo -e "${RED}[ERROR]${NC} $1"
+	echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 # Function to check if command exists
@@ -49,16 +51,6 @@ get_docker_cmd() {
 	else
 		echo "docker"
 	fi
-}
-
-# Function to generate random password
-generate_password() {
-	openssl rand -base64 32 | tr -d "=+/" | cut -c1-25
-}
-
-# Function to generate JWT secret
-generate_jwt_secret() {
-	openssl rand -hex 32
 }
 
 # Export the variables required to render the beta nginx template safely.
@@ -82,7 +74,7 @@ validate_nginx_certificates() {
 
 	# Render the template into a temporary file with the provided domain values
 	local tmp_conf
-	tmp_conf=$(mktemp)
+	tmp_conf=$(mktemp /tmp/yamata-nginx-certcheck.XXXXXX)
 
 	export_beta_nginx_template_vars "$domain"
 
@@ -92,57 +84,11 @@ validate_nginx_certificates() {
 		exit 1
 	fi
 
-	local failed=false
-
-	# Extract certificate-related file paths (2nd field on ssl_* lines)
-	while IFS= read -r cert_path; do
-		# Trim trailing semicolon if present
-		cert_path=${cert_path%;}
-		if [ -z "$cert_path" ]; then
-			continue
-		fi
-
-		if [ ! -f "$cert_path" ]; then
-			print_error "Missing certificate file: $cert_path"
-			failed=true
-			continue
-		fi
-
-		# Skip expiry check for private keys
-		if [[ "$cert_path" == *privkey* ]]; then
-			print_success "Found key file: $cert_path"
-			continue
-		fi
-
-		if ! expiry_date=$(openssl x509 -enddate -noout -in "$cert_path" 2>/dev/null | cut -d= -f2); then
-			print_error "Invalid certificate file: $cert_path"
-			failed=true
-			continue
-		fi
-		if ! expiry_ts=$(date -d "$expiry_date" +%s 2>/dev/null); then
-			print_error "Invalid certificate expiry date for $cert_path: $expiry_date"
-			failed=true
-			continue
-		fi
-		now_ts=$(date +%s)
-		days_left=$(( (expiry_ts - now_ts) / 86400 ))
-
-		# Ensure certificate exists and is not expired.
-		if openssl x509 -checkend 0 -noout -in "$cert_path" >/dev/null 2>&1; then
-			print_success "Certificate valid: $cert_path (expires in ${days_left} days on ${expiry_date})"
-		else
-			print_error "Certificate expired: $cert_path (expires in ${days_left} days on ${expiry_date})"
-			failed=true
-		fi
-		
-	done < <(grep -E "^\s*ssl_(certificate|certificate_key|trusted_certificate)" "$tmp_conf" | awk '{print $2}')
-
-	rm -f "$tmp_conf"
-
-	if [ "$failed" = true ]; then
-		print_error "Certificate validation failed. Fix missing/expired certificates before deploying."
-		exit 1
+	if ! "$SCRIPT_DIR/check-yamata-certificates.sh" "$tmp_conf"; then
+		rm -f -- "$tmp_conf"
+		return 1
 	fi
+	rm -f -- "$tmp_conf"
 
 	print_success "All referenced certificates exist and are valid"
 }
@@ -150,11 +96,14 @@ validate_nginx_certificates() {
 # Function to generate nginx configuration from template
 generate_nginx_config() {
 	local domain=$1
+	local generated_dir="$NGINX_CONF_DIR/generated/beta"
+	local temporary_config
 	
 	print_status "Generating nginx configuration for domain: $domain"
 	
 	# Create generated directory if it doesn't exist
-	mkdir -p "$NGINX_CONF_DIR/generated/beta"
+	mkdir -p "$generated_dir"
+	temporary_config=$(mktemp "$generated_dir/.yamata.conf.XXXXXX")
 
 	# Set environment variables for template processing
 	export_beta_nginx_template_vars "$domain"
@@ -163,13 +112,19 @@ generate_nginx_config() {
 	if [ -f "$NGINX_TEMPLATE" ]; then
 		# Process the template with only specific environment variable substitution
 		# Use envsubst with specific variables to avoid interfering with Nginx variables
-		envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$NGINX_CONF_DIR/generated/beta/yamata.conf"
+		if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$temporary_config"; then
+			rm -f -- "$temporary_config"
+			print_error "Failed to render nginx configuration"
+			return 1
+		fi
 		
 		# SSL certificate paths are expected to be present in the rendered template.
 		
 		# Replace upstream server addresses for beta development
-		sed -i "s|server app:8080 max_fails=3 fail_timeout=30s;|server app-beta:8080 max_fails=3 fail_timeout=30s;|g" "$NGINX_CONF_DIR/generated/beta/yamata.conf"
-		sed -i "s|server app:9090 max_fails=3 fail_timeout=30s;|server app-beta:9090 max_fails=3 fail_timeout=30s;|g" "$NGINX_CONF_DIR/generated/beta/yamata.conf"
+		sed -i "s|server app:8080 max_fails=3 fail_timeout=30s;|server app-beta:8080 max_fails=3 fail_timeout=30s;|g" "$temporary_config"
+		sed -i "s|server app:9090 max_fails=3 fail_timeout=30s;|server app-beta:9090 max_fails=3 fail_timeout=30s;|g" "$temporary_config"
+		chmod 644 "$temporary_config"
+		mv -f -- "$temporary_config" "$generated_dir/yamata.conf"
 
 		print_success "Nginx configuration generated from template"
 	else
@@ -178,14 +133,49 @@ generate_nginx_config() {
 	fi
 }
 
-# Function to create beta environment file
+# Function to make Docker bind-mounted config files readable by container users
+normalize_docker_bind_mount_permissions() {
+	print_status "Normalizing Docker bind-mounted config permissions..."
+
+	if [ ! -d "$PROJECT_ROOT/docker" ]; then
+		print_error "Docker config directory not found: $PROJECT_ROOT/docker"
+		return 1
+	fi
+
+	find "$PROJECT_ROOT/docker" -type d -exec chmod 755 {} +
+	find "$PROJECT_ROOT/docker" -type f \( \
+		-name '*.conf' -o -name '*.yml' -o -name '*.yaml' -o -name '*.json' -o \
+		-name '*.html' -o -name '*.sql' -o -name 'Dockerfile*' \
+	\) -exec chmod 644 {} +
+
+	if [ -f "$PROJECT_ROOT/docker/postgres/process-init-beta.sh" ]; then
+		chmod 755 "$PROJECT_ROOT/docker/postgres/process-init-beta.sh"
+	fi
+
+	if [ -f "$PROJECT_ROOT/docker/redis/start-redis.sh" ]; then
+		chmod 755 "$PROJECT_ROOT/docker/redis/start-redis.sh"
+	fi
+
+	for prompt_file in \
+		SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT \
+		SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT; do
+		if [ ! -f "$PROJECT_ROOT/$prompt_file" ]; then
+			print_error "Required runtime prompt is missing: $PROJECT_ROOT/$prompt_file"
+			return 1
+		fi
+		chmod 644 "$PROJECT_ROOT/$prompt_file"
+	done
+
+	print_success "Docker bind-mounted config permissions normalized"
+}
+
+# Function to validate the pre-provisioned beta environment file
 create_beta_env() {
-	local domain=$1
-	
 	# Check if .env.beta file already exists
 	if [ -f "$ENV_FILE" ]; then
+		[ ! -L "$ENV_FILE" ] || { print_error "Refusing symlinked environment file: $ENV_FILE"; return 1; }
+		chmod 600 "$ENV_FILE"
 		print_status "Using existing .env.beta file: $ENV_FILE"
-		print_warning "If you want to regenerate the .env.beta file, please remove it first: rm $ENV_FILE"
 		return 0
 	fi
 
@@ -197,6 +187,13 @@ create_beta_env() {
 # Function to check prerequisites
 check_prerequisites() {
 	print_status "Checking prerequisites..."
+	local required_command
+	for required_command in python3 envsubst openssl sed find mktemp; do
+		if ! command_exists "$required_command"; then
+			print_error "Required command is not installed: $required_command"
+			exit 1
+		fi
+	done
 	
 	# Check Docker
 	if ! command_exists docker; then
@@ -204,20 +201,16 @@ check_prerequisites() {
 		exit 1
 	fi
 	
+	local docker_cmd
+	docker_cmd=$(get_docker_cmd)
 	# Check if docker compose is available (Docker Compose V2)
-	if ! docker compose version >/dev/null 2>&1; then
+	if ! $docker_cmd compose version >/dev/null 2>&1; then
 		print_error "Docker Compose is not available. Please ensure Docker Compose V2 is installed."
 		exit 1
 	fi
 	
-	# Check OpenSSL
-	if ! command_exists openssl; then
-		print_error "OpenSSL is not installed. Please install OpenSSL first."
-		exit 1
-	fi
-	
 	# Check if Docker daemon is running
-	if ! docker info >/dev/null 2>&1; then
+	if ! $docker_cmd info >/dev/null 2>&1; then
 		print_error "Docker daemon is not running. Please start Docker first."
 		exit 1
 	fi
@@ -230,23 +223,23 @@ check_http_proxy() {
 	local proxy_found=false
 	
 	# Check for HTTP proxy in various formats
-	if [ -n "$HTTP_PROXY" ]; then
-		print_status "Found HTTP_PROXY: $HTTP_PROXY"
+	if [ -n "${HTTP_PROXY:-}" ]; then
+		print_status "HTTP_PROXY is configured (value redacted)"
 		proxy_found=true
 	fi
 	
-	if [ -n "$http_proxy" ]; then
-		print_status "Found http_proxy: $http_proxy"
+	if [ -n "${http_proxy:-}" ]; then
+		print_status "http_proxy is configured (value redacted)"
 		proxy_found=true
 	fi
 	
-	if [ -n "$HTTPS_PROXY" ]; then
-		print_status "Found HTTPS_PROXY: $HTTPS_PROXY"
+	if [ -n "${HTTPS_PROXY:-}" ]; then
+		print_status "HTTPS_PROXY is configured (value redacted)"
 		proxy_found=true
 	fi
 	
-	if [ -n "$https_proxy" ]; then
-		print_status "Found https_proxy: $https_proxy"
+	if [ -n "${https_proxy:-}" ]; then
+		print_status "https_proxy is configured (value redacted)"
 		proxy_found=true
 	fi
 	
@@ -259,32 +252,16 @@ check_http_proxy() {
 	fi
 }
 
-# Function to get proxy environment variables
-get_proxy_env() {
-	local proxy_args=""
-	
-	# Add HTTP proxy if set
-	if [ -n "$HTTP_PROXY" ]; then
-		proxy_args="$proxy_args --build-arg HTTP_PROXY=$HTTP_PROXY"
-	elif [ -n "$http_proxy" ]; then
-		proxy_args="$proxy_args --build-arg HTTP_PROXY=$http_proxy"
+# Function to start services (all except app-beta)
+stop_application_writers() {
+	print_status "Stopping API and campaign scheduler before migrations..."
+	local docker_cmd
+	docker_cmd=$(get_docker_cmd)
+	if $docker_cmd container inspect yamata-campaign-scheduler-beta >/dev/null 2>&1; then
+		$docker_cmd stop --time 60 yamata-campaign-scheduler-beta >/dev/null
 	fi
-	
-	# Add HTTPS proxy if set
-	if [ -n "$HTTPS_PROXY" ]; then
-		proxy_args="$proxy_args --build-arg HTTPS_PROXY=$HTTPS_PROXY"
-	elif [ -n "$https_proxy" ]; then
-		proxy_args="$proxy_args --build-arg HTTPS_PROXY=$https_proxy"
-	fi
-	
-	# Add NO_PROXY if set
-	if [ -n "$NO_PROXY" ]; then
-		proxy_args="$proxy_args --build-arg NO_PROXY=$NO_PROXY"
-	elif [ -n "$no_proxy" ]; then
-		proxy_args="$proxy_args --build-arg NO_PROXY=$no_proxy"
-	fi
-	
-	echo "$proxy_args"
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml stop -t 60 app-beta >/dev/null 2>&1 || true
+	print_success "Database writers stopped"
 }
 
 # Function to start services (all except app-beta)
@@ -310,7 +287,7 @@ start_services() {
 	
 	# Start all supporting services explicitly, excluding app-beta to allow safe DB migration
 	# Note: nginx-beta depends on app-beta, so we start it after app-beta to avoid pulling app-beta up implicitly
-	$docker_cmd compose -f docker-compose.beta.yml up -d \
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d \
 		postgres-beta \
 		redis-beta \
 		sentry-postgres-beta \
@@ -337,9 +314,25 @@ wait_for_services() {
 	
 	local max_attempts=30
 	local attempt=1
+	local containers=(
+		yamata-postgres-beta yamata-redis-beta yamata-sentry-postgres-beta
+		yamata-sentry-redis-beta yamata-sentry-beta yamata-prometheus-beta
+		yamata-grafana-beta frontend-beta yamata-postgres-backup-beta
+		yamata-postgres-exporter-beta yamata-node-exporter-beta yamata-cadvisor-beta
+	)
 	
 	while [ $attempt -le $max_attempts ]; do
-		if $docker_cmd compose -f docker-compose.beta.yml ps | grep -q "Up"; then
+		local all_running=true
+		local container state health
+		for container in "${containers[@]}"; do
+			state=$($docker_cmd inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo missing)
+			health=$($docker_cmd inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || echo missing)
+			if [ "$state" != running ] || { [ "$health" != none ] && [ "$health" != healthy ]; }; then
+				all_running=false
+				break
+			fi
+		done
+		if [ "$all_running" = true ]; then
 			print_success "Services are ready!"
 			return 0
 		fi
@@ -372,7 +365,7 @@ wait_for_app_health() {
 		attempt=$((attempt + 1))
 	done
 	print_warning "app-beta did not become healthy within expected time (last status: $status)"
-	return 0
+	return 1
 }
 
 # Function to start app-beta (and nginx-beta after)
@@ -380,15 +373,15 @@ start_app_service() {
 	print_status "Starting app-beta and nginx-beta services..."
 	local docker_cmd
 	docker_cmd=$(get_docker_cmd)
-	$docker_cmd compose -f docker-compose.beta.yml up -d app-beta
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d app-beta
 	print_success "app-beta started"
 	# Start nginx after app-beta to avoid implicit dependency startup
-	$docker_cmd compose -f docker-compose.beta.yml up -d nginx-beta
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d nginx-beta
 	print_success "nginx-beta started"
 	# Start services that depend on nginx after the proxy is up.
-	$docker_cmd compose -f docker-compose.beta.yml up -d cert-monitor-beta
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d --build cert-monitor-beta
 	print_success "cert-monitor-beta started"
-	$docker_cmd compose -f docker-compose.beta.yml up -d nginx-sentry-forwarder-beta
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d nginx-sentry-forwarder-beta
 	print_success "nginx-sentry-forwarder-beta started"
 }
 
@@ -423,22 +416,22 @@ show_help() {
 	echo "  --help, -h          Show this help message"
 	echo ""
 	echo "Environment Configuration:"
-	echo "  - If .env.beta file exists, it will be used (preserves your custom settings)"
-	echo "  - If .env.beta doesn't exist, a new one will be created with generated passwords"
-	echo "  - To regenerate .env.beta: rm .env.beta && $0 <domain>"
+	echo "  - A pre-provisioned, regular .env.beta file is required"
+	echo "  - The file is restricted to mode 0600 before it is loaded"
 	echo ""
 	echo "SSL Certificate Configuration:"
 	echo "  - Certificates must be obtained before running this script"
 	echo "  - The script only checks that certificate files referenced by nginx exist and are not expired"
 	echo ""
 	echo "Examples:"
-	echo "  $0 yourdomain.com                    # Use existing .env.beta or create new one"
+	echo "  $0 yourdomain.com                    # Use the existing .env.beta"
 	echo "  $0 yourdomain.com --domain=yourdomain.com"
 	echo ""
 }
 
 # Main function
 main() {
+	cd "$PROJECT_ROOT"
 	echo "🐍 Yamata no Orochi - Beta Deployment"
 	echo "======================================"
 	echo ""
@@ -450,8 +443,13 @@ main() {
 	while [[ $# -gt 0 ]]; do
 		case $1 in
 			--domain)
+				[ $# -ge 2 ] || { print_error "--domain requires a value"; exit 2; }
 				domain="$2"
 				shift 2
+				;;
+			--domain=*)
+				domain="${1#--domain=}"
+				shift
 				;;
 			--help|-h)
 				show_help
@@ -470,11 +468,7 @@ main() {
 		esac
 	done
 	
-	# Set default domain if not provided
-	if [ -z "$domain" ]; then
-		domain="thewritingonthewall.com"
-	fi
-	# Validate domain
+	# Require an explicit domain to avoid deploying an unintended default host.
 	if [ -z "$domain" ]; then
 		print_error "Domain name is required."
 		show_help
@@ -504,29 +498,40 @@ main() {
 	
 	# Generate nginx configuration from template
 	generate_nginx_config "$domain"
+
+	# Ensure bind-mounted configs are readable by non-root container users
+	normalize_docker_bind_mount_permissions
 	
 	# Create beta environment file
-	create_beta_env "$domain"
+	create_beta_env
 	
 	# Source environment variables for database initialization
 	if [ -f "$ENV_FILE" ]; then
-		# Use set -a to automatically export variables, then source the file
-		set -a
-		source "$ENV_FILE"
-		set +a
+		# Treat dotenv content as data; never execute it as shell code.
+		# shellcheck disable=SC1091
+		source "$SCRIPT_DIR/load-yamata-env.sh"
+		load_yamata_env_file "$ENV_FILE"
+	fi
+	# Keep Compose and the generated Nginx configuration on the same explicit domain.
+	export_beta_nginx_template_vars "$domain"
+
+	if [ "${CAMPAIGN_EXECUTION_ENABLED:-}" != "false" ]; then
+		print_error "CAMPAIGN_EXECUTION_ENABLED must remain false in .env.beta"
+		print_error "Campaign execution is managed by the isolated scheduler container"
+		exit 1
 	fi
 
 	# Start core services (excluding app-beta)
+	stop_application_writers
 	start_services
+	wait_for_services
 	
 	# Initialize database and apply migrations
 	print_status "Initializing database and applying migrations..."
 	
-	if ./scripts/init-beta-database.sh; then
-		print_success "Database initialization completed"
-	else
-		print_warning "Database initialization failed or was skipped"
-	fi
+	./scripts/init-beta-database.sh --yes
+	./scripts/apply-yamata-required-migrations.sh "$PROJECT_ROOT"
+	print_success "Database initialization completed"
 	
 	# Start app service after successful migrations
 	start_app_service
