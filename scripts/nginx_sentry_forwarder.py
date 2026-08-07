@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 import json
 import os
+import re
 import secrets
 import sys
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+
+MAX_LOG_LINE_CHARS = 1024 * 1024
+MAX_LINES_PER_POLL = 1000
 
 
 def getenv(name: str, default: str = "") -> str:
@@ -15,11 +19,11 @@ def getenv(name: str, default: str = "") -> str:
 
 class SentryStoreClient:
     def __init__(self) -> None:
-        self.dsn = getenv("SENTRY_DSN")
-        if not self.dsn:
+        dsn = getenv("SENTRY_DSN")
+        if not dsn:
             raise RuntimeError("SENTRY_DSN is not configured")
 
-        parsed = urllib.parse.urlparse(self.dsn)
+        parsed = urllib.parse.urlparse(dsn)
         if parsed.scheme not in ("http", "https"):
             raise RuntimeError("SENTRY_DSN scheme must be http or https")
         if not parsed.netloc or not parsed.username:
@@ -29,20 +33,58 @@ class SentryStoreClient:
         if not project_id or not project_id.isdigit():
             raise RuntimeError("SENTRY_DSN project ID must be numeric")
 
-        self.store_url = f"{parsed.scheme}://{parsed.netloc}/api/{project_id}/store/"
-        sentry_secret = parsed.password or ""
+        hostname = parsed.hostname or ""
+        if ":" in hostname and not hostname.startswith("["):
+            hostname = f"[{hostname}]"
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise RuntimeError("SENTRY_DSN has an invalid port") from exc
+        endpoint = hostname if port is None else f"{hostname}:{port}"
+        self.store_url = f"{parsed.scheme}://{endpoint}/api/{project_id}/store/"
+        sentry_key = urllib.parse.unquote(parsed.username)
+        sentry_secret = urllib.parse.unquote(parsed.password or "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", sentry_key) or (
+            sentry_secret and not re.fullmatch(r"[A-Za-z0-9_-]+", sentry_secret)
+        ):
+            raise RuntimeError("SENTRY_DSN contains invalid authentication characters")
         self.auth_header = (
             "Sentry sentry_version=7, "
             "sentry_client=yamata-nginx-forwarder/1.0, "
-            f"sentry_key={parsed.username}, "
+            f"sentry_key={sentry_key}, "
             f"sentry_secret={sentry_secret}"
         )
         self.environment = getenv("SENTRY_ENVIRONMENT", getenv("APP_ENV", "production"))
         self.release = getenv("SENTRY_RELEASE", getenv("VERSION", "unknown"))
         self.server_name = getenv("SENTRY_SERVER_NAME", "nginx-beta")
-        self.timeout = float(getenv("SENTRY_TIMEOUT_SECONDS", "2"))
+        try:
+            self.timeout = float(getenv("SENTRY_TIMEOUT_SECONDS", "2"))
+        except ValueError as exc:
+            raise RuntimeError("SENTRY_TIMEOUT_SECONDS must be numeric") from exc
+        if self.timeout <= 0:
+            raise RuntimeError("SENTRY_TIMEOUT_SECONDS must be greater than zero")
         self.public_base_url = getenv("SENTRY_PUBLIC_BASE_URL")
         self.sentry_ui_domain = getenv("SENTRY_UI_DOMAIN")
+        if self.public_base_url:
+            try:
+                public_url = urllib.parse.urlsplit(self.public_base_url)
+                public_hostname = public_url.hostname
+                public_port = public_url.port
+            except ValueError as exc:
+                raise RuntimeError("SENTRY_PUBLIC_BASE_URL is invalid") from exc
+            if (
+                public_url.scheme not in ("http", "https")
+                or not public_hostname
+                or public_url.username is not None
+                or public_url.password is not None
+                or public_url.query
+                or public_url.fragment
+                or (public_port is not None and not 1 <= public_port <= 65535)
+            ):
+                raise RuntimeError("SENTRY_PUBLIC_BASE_URL must be an HTTP(S) URL without credentials or query")
+            self.public_base_url = urllib.parse.urlunsplit(
+                (public_url.scheme, public_url.netloc, public_url.path.rstrip("/"), "", "")
+            )
 
     def send(self, payload: dict) -> None:
         body = json.dumps(payload).encode("utf-8")
@@ -106,7 +148,10 @@ class Tailer:
 
     def _rotated(self) -> bool:
         try:
-            return os.stat(self.path).st_ino != self._inode
+            info = os.stat(self.path)
+            return info.st_ino != self._inode or (
+                self.handle is not None and info.st_size < self.handle.tell()
+            )
         except FileNotFoundError:
             return False
 
@@ -118,10 +163,14 @@ class Tailer:
             self.open()
 
         lines = []
-        while True:
-            line = self.handle.readline()
+        while len(lines) < MAX_LINES_PER_POLL:
+            line = self.handle.readline(MAX_LOG_LINE_CHARS + 1)
             if not line:
                 break
+            if len(line) > MAX_LOG_LINE_CHARS:
+                while line and not line.endswith("\n"):
+                    line = self.handle.readline(MAX_LOG_LINE_CHARS + 1)
+                continue
             lines.append(line.rstrip("\n"))
         return lines
 
@@ -133,14 +182,50 @@ def parse_request(raw_request: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+SENSITIVE_VALUE_RE = re.compile(
+    r"(?i)(authorization|password|passwd|token|secret|api[_-]?key|session|cookie)"
+    r"([=:][^\s&,;]+)"
+)
+BEARER_RE = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*")
+URL_QUERY_RE = re.compile(r"((?:https?://|/)[^\s?'\"]+)\?[^\s'\"]+")
+
+
+def redact_text(value: str) -> str:
+    value = URL_QUERY_RE.sub(r"\1?[REDACTED]", value)
+    value = BEARER_RE.sub("Bearer [REDACTED]", value)
+    return SENSITIVE_VALUE_RE.sub(lambda match: match.group(1) + "=[REDACTED]", value)
+
+
+def strip_query(value: str) -> str:
+    if not value:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    except ValueError:
+        return value.split("?", 1)[0].split("#", 1)[0]
+
+
 def build_request_url(
     base_url: str, path: str, host: str = "", scheme: str = ""
 ) -> str:
-    if host and path:
-        return f"{scheme or 'https'}://{host}{path}"
-    if not base_url or not path:
+    path = strip_query(path)
+    if base_url and path:
+        return urllib.parse.urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    if not path:
         return path
-    return urllib.parse.urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+    safe_host = safe_log_host(host)
+    if not safe_host:
+        return path
+    safe_scheme = scheme if scheme in ("http", "https") else "https"
+    return f"{safe_scheme}://{safe_host}{path}"
+
+
+def safe_log_host(value: str) -> str:
+    value = value.strip()
+    if not re.fullmatch(r"(?:[A-Za-z0-9-]+\.)*[A-Za-z0-9-]+(?::[0-9]{1,5})?", value):
+        return ""
+    return value
 
 
 def should_skip_access_entry(
@@ -172,7 +257,9 @@ def handle_access_line(client: SentryStoreClient, line: str) -> None:
         return
 
     method, path = parse_request(entry.get("request", ""))
+    path = strip_query(path)
     host = entry.get("host", "")
+    safe_host = safe_log_host(host)
     scheme = entry.get("scheme", "https")
     if should_skip_access_entry(client, host, method, path):
         return
@@ -183,22 +270,19 @@ def handle_access_line(client: SentryStoreClient, line: str) -> None:
             client.public_base_url, path, host=host, scheme=scheme
         ),
         "headers": {
-            "Host": host,
-            "User-Agent": entry.get("http_user_agent", ""),
-            "X-Forwarded-For": entry.get("http_x_forwarded_for", ""),
-            "X-Real-IP": entry.get("http_x_real_ip", ""),
+            "Host": safe_host,
+            "User-Agent": redact_text(entry.get("http_user_agent", ""))[:512],
         },
     }
 
     message = f"Nginx returned HTTP {status} for {method} {path}".strip()
     extra = {
-        "remote_addr": entry.get("remote_addr"),
         "request_time": entry.get("request_time"),
         "request_id": entry.get("request_id"),
         "upstream_addr": entry.get("upstream_addr"),
         "upstream_status": entry.get("upstream_status"),
         "upstream_response_time": entry.get("upstream_response_time"),
-        "referrer": entry.get("http_referrer"),
+        "referrer": strip_query(entry.get("http_referrer", "")),
     }
 
     client.send(
@@ -220,10 +304,11 @@ def handle_error_line(client: SentryStoreClient, line: str) -> None:
         "url": build_request_url(client.public_base_url, "/"),
         "method": "NGINX",
     }
-    extra = {"line": line[:4096]}
+    safe_line = redact_text(line)[:4096]
+    extra = {"line": safe_line}
     client.send(
         client.event(
-            message=line[:2048],
+            message=safe_line[:2048],
             level="error",
             status=None,
             request_data=request_data,
@@ -235,14 +320,20 @@ def handle_error_line(client: SentryStoreClient, line: str) -> None:
 def main() -> int:
     access_log = getenv("NGINX_ACCESS_LOG", "/var/log/nginx/access.log")
     error_log = getenv("NGINX_ERROR_LOG", "/var/log/nginx/error.log")
-    poll_interval = float(getenv("NGINX_LOG_POLL_INTERVAL_SECONDS", "0.5"))
+    try:
+        poll_interval = float(getenv("NGINX_LOG_POLL_INTERVAL_SECONDS", "0.5"))
+    except ValueError:
+        print("invalid NGINX_LOG_POLL_INTERVAL_SECONDS", file=sys.stderr)
+        return 2
+    if poll_interval <= 0:
+        print("NGINX_LOG_POLL_INTERVAL_SECONDS must be greater than zero", file=sys.stderr)
+        return 2
 
     try:
         client = SentryStoreClient()
     except RuntimeError as exc:
-        print(f"sentry forwarder disabled: {exc}", file=sys.stderr)
-        while True:
-            time.sleep(60)
+        print(f"sentry forwarder configuration error: {exc}", file=sys.stderr)
+        return 2
 
     access_tailer = Tailer(access_log)
     error_tailer = Tailer(error_log)
