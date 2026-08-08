@@ -3,10 +3,10 @@
 This directory contains the ordered PostgreSQL schema history for Yamata no Orochi. The current schema head is:
 
 ```text
-0127_normalize_bundle_audience_allocations.sql
+0128_smart_targeting_phase_preparation.sql
 ```
 
-There are currently 129 numbered up files and 128 numbered down files. The difference is `0050_remove_short_links_indexes.sql`, which has no matching down migration.
+There are currently 130 numbered up files and 129 numbered down files. The difference is `0050_remove_short_links_indexes.sql`, which has no matching down migration.
 
 ## Naming and Ordering
 
@@ -24,7 +24,7 @@ The history has two duplicate ordinals, so filename—not just the number—is t
 - `0104_create_sent_rubika_messages`
 - `0104_create_splus_status_results`
 
-New changes should use the next unused ordinal (`0128` after the current head), include a down file whenever rollback is safe, and update both aggregate manifests.
+New changes should use the next unused ordinal (`0129` after the current head), include a down file whenever rollback is safe, and update both aggregate manifests.
 
 ## Aggregate Manifests
 
@@ -57,7 +57,7 @@ psql \
   -U "$DB_USER" \
   -d "$DB_NAME" \
   -v ON_ERROR_STOP=1 \
-  -f migrations/0127_normalize_bundle_audience_allocations.sql
+  -f migrations/0128_smart_targeting_phase_preparation.sql
 ```
 
 These SQL files do not use a migration-state table. Before applying an individual file, verify which predecessors already exist in the target database.
@@ -82,7 +82,7 @@ psql \
   -U "$DB_USER" \
   -d "$DB_NAME" \
   -v ON_ERROR_STOP=1 \
-  -f migrations/0127_normalize_bundle_audience_allocations_down.sql
+  -f migrations/0128_smart_targeting_phase_preparation_down.sql
 ```
 
 `run_all_down.sql` attempts to remove the entire application schema in reverse order. It is destructive and should not be run against a database containing data that must be retained. Take and verify a backup first.
@@ -101,7 +101,7 @@ Migration `0050_remove_short_links_indexes.sql` has no checked-in rollback file.
 | `0077`–`0097` | Legacy FK/table cleanup, deposits/invoices, admin audit actions, base/page prices, ACL requests, permissions, expiry, exports, and refund/invoice audit coverage |
 | `0098`–`0106` | Platform-neutral status jobs, tracking IDs, Bale/Soroush Plus/Rubika status data, Rubika sends, campaign test-send auditing, and wallet-charge previews |
 | `0107`–`0116` | Bundles, campaign phases, bundle audience selections, audience scores/statistics, normalized scoring, hidden campaigns, and bundle audit actions |
-| `0117`–`0127` | Smart-tag evaluation persistence, campaign-level tag selections, count-only exact-capacity generations, processed Bundle selection linkage, normalized append-only Bundle audience allocations, source-reference hierarchy, and high-volume campaign audience indexes |
+| `0117`–`0128` | Smart-tag evaluation persistence, ordered campaign-level tag selections, count-only exact-capacity generations, processed Bundle selection linkage, normalized append-only Bundle audience allocations with send order, per-audience tag attribution, source-reference hierarchy, and high-volume campaign audience indexes |
 
 ## Current Schema Areas
 

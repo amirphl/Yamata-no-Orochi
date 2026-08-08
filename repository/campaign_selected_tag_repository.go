@@ -19,6 +19,16 @@ type CampaignSelectedTagRepositoryImpl struct {
 	db *gorm.DB
 }
 
+func invalidateCampaignSmartTargetingTestPreview(db *gorm.DB, campaignID uint) error {
+	return db.Model(&models.Campaign{}).Where("id = ?", campaignID).Updates(map[string]any{
+		"smart_targeting_test_satisfied_tag_ids":     gorm.Expr("ARRAY[]::integer[]"),
+		"smart_targeting_test_sampling_input_hash":   nil,
+		"smart_targeting_test_sampling_previewed_at": nil,
+		"num_audience": uint64(0),
+		"updated_at":   utils.UTCNow(),
+	}).Error
+}
+
 func NewCampaignSelectedTagRepository(db *gorm.DB) CampaignSelectedTagRepository {
 	return &CampaignSelectedTagRepositoryImpl{db: db}
 }
@@ -187,7 +197,7 @@ func (r *CampaignSelectedTagRepositoryImpl) ListAvailableTagIDs(ctx context.Cont
 
 func (r *CampaignSelectedTagRepositoryImpl) ListSelected(ctx context.Context, campaignID uint) ([]*models.CampaignSelectedTag, error) {
 	rows := make([]*models.CampaignSelectedTag, 0)
-	err := r.getDB(ctx).Where("campaign_id = ?", campaignID).Order("tag_id ASC").Find(&rows).Error
+	err := r.getDB(ctx).Where("campaign_id = ?", campaignID).Order("selection_order ASC").Find(&rows).Error
 	return rows, err
 }
 
@@ -264,6 +274,9 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 			}
 		}
 	}
+	if err := invalidateCampaignSmartTargetingTestPreview(db, campaignID); err != nil {
+		return err
+	}
 
 	if err := db.Where("campaign_id = ?", campaignID).Delete(&models.CampaignSelectedTag{}).Error; err != nil {
 		return err
@@ -273,10 +286,19 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 	}
 
 	now := utils.UTCNow()
-	rows := make([]*models.CampaignSelectedTag, 0, len(snapshots))
+	snapshotByTag := make(map[uint]snapshot, len(snapshots))
 	for _, item := range snapshots {
+		snapshotByTag[item.TagID] = item
+	}
+	rows := make([]*models.CampaignSelectedTag, 0, len(snapshots))
+	for position, tagID := range tagIDs {
+		item, ok := snapshotByTag[tagID]
+		if !ok {
+			return ErrInvalidCampaignSelectedTags
+		}
 		rows = append(rows, &models.CampaignSelectedTag{
 			CampaignID: campaignID, BundleID: bundleID, TagID: item.TagID,
+			SelectionOrder:                position,
 			BundlePersonaFitScoreSnapshot: item.BundleFitScore,
 			TagDisplayTitleSnapshot:       item.DisplayTitle,
 			TagAudienceCountSnapshot:      item.AudienceCount,
@@ -292,5 +314,9 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 }
 
 func (r *CampaignSelectedTagRepositoryImpl) Clear(ctx context.Context, campaignID uint) error {
-	return r.getDB(ctx).Where("campaign_id = ?", campaignID).Delete(&models.CampaignSelectedTag{}).Error
+	db := r.getDB(ctx)
+	if err := db.Where("campaign_id = ?", campaignID).Delete(&models.CampaignSelectedTag{}).Error; err != nil {
+		return err
+	}
+	return invalidateCampaignSmartTargetingTestPreview(db, campaignID)
 }

@@ -222,7 +222,6 @@ func selectedSmartTagIDs(ctx context.Context, selectionRepo repository.CampaignS
 			ids = append(ids, row.TagID)
 		}
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	if len(ids) == 0 {
 		return nil, ErrSmartTargetingTagsRequired
 	}
@@ -234,6 +233,14 @@ func tagIDsToInt64(ids []uint) pq.Int64Array {
 	for i, id := range ids {
 		result[i] = int64(id)
 	}
+	return result
+}
+
+// Exact-capacity snapshots describe a tag set, so their array representation
+// is canonical even though campaign selection and sampling retain user order.
+func canonicalSmartTargetingCapacityTagIDs(ids []uint) pq.Int64Array {
+	result := tagIDsToInt64(ids)
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
 }
 
@@ -300,6 +307,7 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 				// source. Persisting the request here means later edits are visible
 				// to polling, cost, approval, and scheduler validity checks.
 				lockedCampaign.Spec.AudienceGrades = append([]string(nil), effectiveClasses...)
+				clearCampaignSmartTargetingTestSamplingPreviewFields(&lockedCampaign)
 				if err := f.campaignRepo.Update(txCtx, lockedCampaign); err != nil {
 					return err
 				}
@@ -351,7 +359,7 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 			CustomerID:            lockedCampaign.CustomerID,
 			Platform:              platform,
 			RequestedByCustomerID: req.CustomerID,
-			SelectedTagIDs:        tagIDsToInt64(ids),
+			SelectedTagIDs:        canonicalSmartTargetingCapacityTagIDs(ids),
 			SelectedTagsHash:      tagHash,
 			InputHash:             inputHash,
 			SelectedScoreClasses:  pq.StringArray(effectiveClasses),

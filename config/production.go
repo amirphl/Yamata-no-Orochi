@@ -400,9 +400,19 @@ type SplusConfig struct {
 }
 
 type SchedulerConfig struct {
-	CampaignExecutionEnabled  bool          `json:"campaign_execution_enabled"`
-	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
-	MessageSendDelay          time.Duration `json:"message_send_delay"`
+	CampaignExecutionEnabled               bool          `json:"campaign_execution_enabled"`
+	CampaignExecutionInterval              time.Duration `json:"campaign_execution_interval"`
+	MessageSendDelay                       time.Duration `json:"message_send_delay"`
+	SmartTargetingCapacitySchedulerEnabled bool          `json:"smart_targeting_capacity_scheduler_enabled"`
+}
+
+func loadSchedulerConfig() SchedulerConfig {
+	return SchedulerConfig{
+		CampaignExecutionEnabled:               getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
+		CampaignExecutionInterval:              getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
+		MessageSendDelay:                       getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
+		SmartTargetingCapacitySchedulerEnabled: getEnvBool("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", false),
+	}
 }
 
 type MessageConfig struct {
@@ -706,11 +716,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Password:  getEnvString("BOT_PASSWORD", ""),
 			APIDomain: getEnvString("BOT_API_DOMAIN", ""),
 		},
-		Scheduler: SchedulerConfig{
-			CampaignExecutionEnabled:  getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
-			CampaignExecutionInterval: getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
-			MessageSendDelay:          getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
-		},
+		Scheduler: loadSchedulerConfig(),
 		Crypto: CryptoConfig{
 			DefaultPlatform: getEnvString("CRYPTO_DEFAULT_PLATFORM", "oxapay"),
 			SupportedCoins:  getEnvStringSlice("CRYPTO_SUPPORTED_COINS", []string{"ETH", "DOGE", "XRP", "BNB"}),

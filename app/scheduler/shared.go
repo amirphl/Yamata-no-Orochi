@@ -64,6 +64,18 @@ type AudiencePhonesResult struct {
 	UnmatchedUIDs             []string
 }
 
+func zeroAudienceCampaignStatistics() map[string]any {
+	return map[string]any{
+		"aggregatedTotalRecords":          int64(0),
+		"aggregatedTotalSent":             int64(0),
+		"aggregatedTotalParts":            int64(0),
+		"aggregatedTotalDeliveredParts":   int64(0),
+		"aggregatedTotalUnDeliveredParts": int64(0),
+		"aggregatedTotalUnKnownParts":     int64(0),
+		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+	}
+}
+
 // releaseUnpreparedCampaignOnFailure returns a failed scheduler claim to the
 // durable approved queue only when no processed checkpoint was committed. The
 // repository predicate makes this safe to call after any later-stage error.

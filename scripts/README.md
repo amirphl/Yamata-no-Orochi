@@ -54,6 +54,8 @@ substitution, or unresolved placeholders copied from `env.template`.
 Key rules:
 
 - Keep `CAMPAIGN_EXECUTION_ENABLED=false` in `.env.beta` and the API container.
+- Keep exact-capacity and smart-tag scheduling enabled in the API container;
+  the isolated campaign scheduler overrides both to `false`.
 - Run `deploy-production-beta.sh` after every image or environment change.
 - Stop `yamata-app-beta` and `yamata-campaign-scheduler-beta` during selective imports.
 - Restore audience profiles before scheduler runtime data.

@@ -45,7 +45,7 @@ func loadBundleAudienceSelectionByCampaign(db *gorm.DB, campaignID uint) (*model
 	var ids []int64
 	if err := db.Model(&models.BundleAudienceSelectionMember{}).
 		Where("selection_id = ?", row.ID).
-		Order("audience_id ASC").
+		Order("selection_order ASC").
 		Pluck("audience_id", &ids).Error; err != nil {
 		return nil, err
 	}
@@ -75,14 +75,16 @@ func (r *BundleAudienceSelectionRepositoryImpl) InsertForCampaign(ctx context.Co
 			inserted = *existing
 			return nil
 		}
-		normalized := dedupeAndSort(ids)
-		if len(normalized) != len(ids) {
-			return errors.New("bundle audience allocation contains duplicate audience IDs")
-		}
+		normalized := append([]int64(nil), ids...)
+		seen := make(map[int64]struct{}, len(normalized))
 		for _, id := range normalized {
 			if id <= 0 {
 				return errors.New("bundle audience allocation contains an invalid audience ID")
 			}
+			if _, exists := seen[id]; exists {
+				return errors.New("bundle audience allocation contains duplicate audience IDs")
+			}
+			seen[id] = struct{}{}
 		}
 
 		row := models.BundleAudienceSelection{
@@ -93,9 +95,9 @@ func (r *BundleAudienceSelectionRepositoryImpl) InsertForCampaign(ctx context.Co
 			return err
 		}
 		members := make([]models.BundleAudienceSelectionMember, 0, len(normalized))
-		for _, audienceID := range normalized {
+		for position, audienceID := range normalized {
 			members = append(members, models.BundleAudienceSelectionMember{
-				SelectionID: row.ID, BundleID: bundleID, AudienceID: audienceID, CreatedAt: row.CreatedAt,
+				SelectionID: row.ID, BundleID: bundleID, AudienceID: audienceID, SelectionOrder: int64(position), CreatedAt: row.CreatedAt,
 			})
 		}
 		if len(members) > 0 {

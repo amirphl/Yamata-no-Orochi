@@ -207,6 +207,21 @@ func (h *CampaignAdminHandler) ApproveCampaign(c fiber.Ctx) error {
 	defer cancel()
 	res, err := h.campaignFlow.ApproveCampaign(ctx, &req)
 	if err != nil {
+		if errors.Is(err, businessflow.ErrSmartTargetingTestPreviewRequired) {
+			return h.ErrorResponse(c, fiber.StatusConflict, businessflow.ErrSmartTargetingTestPreviewRequired.Error(), "SMART_TARGETING_TEST_PREVIEW_REQUIRED", nil)
+		}
+		if errors.Is(err, businessflow.ErrSmartTargetingTestNoSatisfiedTags) {
+			return h.ErrorResponse(c, fiber.StatusConflict, businessflow.ErrSmartTargetingTestNoSatisfiedTags.Error(), "SMART_TARGETING_TEST_NO_SATISFIED_TAGS", nil)
+		}
+		if errors.Is(err, businessflow.ErrSmartTargetingSampleSizeRequired) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, businessflow.ErrSmartTargetingSampleSizeRequired.Error(), "SMART_TARGETING_SAMPLE_SIZE_REQUIRED", nil)
+		}
+		if errors.Is(err, businessflow.ErrSmartTargetingSampleSizeInvalid) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, businessflow.ErrSmartTargetingSampleSizeInvalid.Error(), "SMART_TARGETING_SAMPLE_SIZE_INVALID", nil)
+		}
+		if errors.Is(err, businessflow.ErrSmartTargetingTestAudienceCountOverflow) {
+			return h.ErrorResponse(c, fiber.StatusBadRequest, businessflow.ErrSmartTargetingTestAudienceCountOverflow.Error(), "SMART_TARGETING_TEST_AUDIENCE_COUNT_OVERFLOW", nil)
+		}
 		if errors.Is(err, businessflow.ErrSmartTargetingCapacityPending) {
 			var pending *businessflow.SmartTargetingCapacityPendingError
 			if errors.As(err, &pending) && pending != nil {

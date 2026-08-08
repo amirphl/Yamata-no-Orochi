@@ -110,7 +110,7 @@ func TestNormalizeSelectedTagIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []uint{2, 5, 9}
+	want := []uint{9, 2, 5}
 	for i := range want {
 		if ids[i] != want[i] {
 			t.Fatalf("got %v, want %v", ids, want)
@@ -124,6 +124,17 @@ func TestNormalizeSelectedTagIDs(t *testing.T) {
 	}
 	if _, err := normalizeSelectedTagIDs([]uint{0}); !errors.Is(err, ErrSmartTargetingTagInvalid) {
 		t.Fatalf("expected invalid-tag error, got %v", err)
+	}
+}
+
+func TestCanonicalSmartTargetingCapacityTagIDsDoesNotChangeSelectionOrder(t *testing.T) {
+	selected := []uint{9, 2, 5}
+	canonical := canonicalSmartTargetingCapacityTagIDs(selected)
+	if len(canonical) != 3 || canonical[0] != 2 || canonical[1] != 5 || canonical[2] != 9 {
+		t.Fatalf("canonical capacity IDs = %v, want [2 5 9]", canonical)
+	}
+	if selected[0] != 9 || selected[1] != 2 || selected[2] != 5 {
+		t.Fatalf("selection order mutated to %v", selected)
 	}
 }
 

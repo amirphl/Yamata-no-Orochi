@@ -101,6 +101,16 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 		if err != nil {
 			return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to resolve campaign targeting tags", err)
 		}
+		var smartTestSatisfiedTagIDs []uint
+		numAudiences := c.NumAudience
+		if c.Spec.UsesSmartTargeting() && c.Phase == models.CampaignPhaseTest {
+			intent, intentErr := currentSmartTargetingTestSamplingIntent(ctx, s.selectedTagRepo, c, true)
+			if intentErr != nil {
+				return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Smart Targeting Test sampling intent is invalid", intentErr)
+			}
+			smartTestSatisfiedTagIDs = append([]uint(nil), intent.satisfied...)
+			numAudiences = utils.ToPtr(intent.effective)
+		}
 
 		// ISSUE: N+1 queries.
 		platformBasePrice, err := s.resolvePlatformBasePrice(ctx, c.ID, c.Spec.Platform)
@@ -114,36 +124,38 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 		}
 
 		items = append(items, dto.BotGetCampaignResponse{
-			ID:                 c.ID,
-			CustomerID:         c.CustomerID,
-			Hidden:             c.Hidden,
-			Status:             c.Status.String(),
-			CreatedAt:          c.CreatedAt,
-			UpdatedAt:          c.UpdatedAt,
-			Title:              c.Spec.Title,
-			Level1:             c.Spec.Level1,
-			Level2s:            c.Spec.Level2s,
-			Level3s:            c.Spec.Level3s,
-			Tags:               c.Spec.Tags,
-			SelectedTags:       selectedTags,
-			TargetingMethod:    campaignAudienceTargetingMethod(c.Spec),
-			Sex:                c.Spec.Sex,
-			City:               c.Spec.City,
-			AdLink:             c.Spec.AdLink,
-			Content:            c.Spec.Content,
-			ShortLinkDomain:    c.Spec.ShortLinkDomain,
-			Category:           c.Spec.Category,
-			Job:                c.Spec.Job,
-			ScheduleAt:         c.Spec.ScheduleAt,
-			LineNumber:         c.Spec.LineNumber,
-			MediaUUID:          c.Spec.MediaUUID,
-			PlatformSettingsID: c.Spec.PlatformSettingsID,
-			PlatformSettings:   platformSettings,
-			Platform:           c.Spec.Platform,
-			PlatformBasePrice:  platformBasePrice,
-			Budget:             c.Spec.Budget,
-			Comment:            c.Comment,
-			NumAudiences:       c.NumAudience,
+			ID:                                c.ID,
+			CustomerID:                        c.CustomerID,
+			Hidden:                            c.Hidden,
+			Status:                            c.Status.String(),
+			CreatedAt:                         c.CreatedAt,
+			UpdatedAt:                         c.UpdatedAt,
+			Title:                             c.Spec.Title,
+			Level1:                            c.Spec.Level1,
+			Level2s:                           c.Spec.Level2s,
+			Level3s:                           c.Spec.Level3s,
+			Tags:                              c.Spec.Tags,
+			SelectedTags:                      selectedTags,
+			TargetingMethod:                   campaignAudienceTargetingMethod(c.Spec),
+			Sex:                               c.Spec.Sex,
+			City:                              c.Spec.City,
+			AdLink:                            c.Spec.AdLink,
+			Content:                           c.Spec.Content,
+			ShortLinkDomain:                   c.Spec.ShortLinkDomain,
+			Category:                          c.Spec.Category,
+			Job:                               c.Spec.Job,
+			ScheduleAt:                        c.Spec.ScheduleAt,
+			LineNumber:                        c.Spec.LineNumber,
+			MediaUUID:                         c.Spec.MediaUUID,
+			PlatformSettingsID:                c.Spec.PlatformSettingsID,
+			PlatformSettings:                  platformSettings,
+			Platform:                          c.Spec.Platform,
+			PlatformBasePrice:                 platformBasePrice,
+			Budget:                            c.Spec.Budget,
+			Comment:                           c.Comment,
+			NumAudiences:                      numAudiences,
+			SampleSizePerTag:                  c.SampleSizePerTag,
+			SmartTargetingTestSatisfiedTagIDs: smartTestSatisfiedTagIDs,
 
 			BundleID: c.BundleID,
 			Phase:    campaignPhasePtr(c.Phase),

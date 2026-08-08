@@ -35,6 +35,9 @@ services:
     image: postgres:15-alpine
     container_name: yamata-postgres-beta
     restart: unless-stopped
+    # PostgreSQL parallel queries use POSIX dynamic shared memory. Docker's
+    # 64 MiB default is too small for audience-selection workloads.
+    shm_size: ${POSTGRES_SHM_SIZE:-16gb}
     environment:
       TZ: UTC
       POSTGRES_DB: ${DB_NAME}
@@ -133,6 +136,8 @@ services:
     image: postgres:15-alpine
     container_name: yamata-sentry-postgres-beta
     restart: unless-stopped
+    # Avoid Docker's 64 MiB /dev/shm default for the secondary PostgreSQL.
+    shm_size: ${SENTRY_POSTGRES_SHM_SIZE:-2gb}
     environment:
       TZ: UTC
       POSTGRES_DB: ${SENTRY_POSTGRES_DB}
@@ -431,6 +436,7 @@ services:
       CAMPAIGN_EXECUTION_ENABLED: ${CAMPAIGN_EXECUTION_ENABLED}
       CAMPAIGN_EXECUTION_INTERVAL: ${CAMPAIGN_EXECUTION_INTERVAL}
       CAMPAIGN_MESSAGE_SEND_DELAY: ${CAMPAIGN_MESSAGE_SEND_DELAY}
+      SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED: ${SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED}
 
       # Smart Tag Evaluation Configuration
       SMART_TAG_EVALUATION_ENABLED: ${SMART_TAG_EVALUATION_ENABLED}

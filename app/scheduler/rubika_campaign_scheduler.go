@@ -473,8 +473,8 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 	if err != nil {
 		return fmt.Errorf("resolve Rubika service id for campaign id=%d: %w", c.ID, err)
 	}
-	if c.NumAudiences == nil || *c.NumAudiences <= 0 {
-		return fmt.Errorf("campaign id=%d has no audiences", c.ID)
+	if _, err := schedulerConfiguredAudienceCount(c); err != nil {
+		return err
 	}
 
 	if err := s.botClient.MoveCampaignToRunning(ctx, token, c.ID); err != nil {
@@ -611,7 +611,7 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 	}
 
 	var fileID *string
-	if c.MediaUUID != nil {
+	if len(phones) > 0 && c.MediaUUID != nil {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("context expired before uploading media for campaign id=%d: %w", c.ID, err)
 		}
@@ -705,11 +705,25 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 		}
 	}
 
-	stats, err := s.updateProcessedCampaignStats(ctx, pc.ID)
-	if err != nil {
-		return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
+	var stats map[string]any
+	if len(phones) == 0 {
+		stats = zeroAudienceCampaignStatistics()
+		statsJSON, marshalErr := json.Marshal(stats)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal zero-audience stats for campaign id=%d: %w", c.ID, marshalErr)
+		}
+		pc.Statistics = statsJSON
+		pc.UpdatedAt = utils.UTCNow()
+		if err := s.pcRepo.UpdateMeta(ctx, pc); err != nil {
+			return fmt.Errorf("persist zero-audience stats for campaign id=%d: %w", c.ID, err)
+		}
+	} else {
+		stats, err = s.updateProcessedCampaignStats(ctx, pc.ID)
+		if err != nil {
+			return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
+		}
 	}
-	if stats != nil && stats["aggregatedTotalSent"] != nil && stats["aggregatedTotalSent"].(int64) > 0 {
+	if stats != nil {
 		if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
 			return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
 		}
@@ -722,14 +736,16 @@ func (s *RubikaCampaignScheduler) processRubikaCampaign(ctx context.Context, tok
 	}
 	s.logger.Printf("Rubika scheduler: campaign id=%d moved to executed", c.ID)
 
-	go func(campaignID uint, uids, codes []string) {
-		pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		defer cancel()
-		if err := s.botClient.PushCampaignAudienceUIDs(pushCtx, campaignID, uids, codes); err != nil {
-			s.logger.Printf("Rubika scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err)
-			s.notifyAdmin(fmt.Sprintf("Rubika Scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err))
-		}
-	}(c.ID, uids, codes)
+	if len(uids) > 0 {
+		go func(campaignID uint, uids, codes []string) {
+			pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
+			if err := s.botClient.PushCampaignAudienceUIDs(pushCtx, campaignID, uids, codes); err != nil {
+				s.logger.Printf("Rubika scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err)
+				s.notifyAdmin(fmt.Sprintf("Rubika Scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err))
+			}
+		}(c.ID, uids, codes)
+	}
 
 	return nil
 }
@@ -1162,16 +1178,12 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhonesByBundle(
 	correlationID string,
 ) (*AudiencePhonesResult, error) {
 	bundleID := *c.BundleID
-	numAudiences := int64(0)
-	if c.NumAudiences != nil {
-		numAudiences = int64(*c.NumAudiences)
+	numAudiences, err := schedulerConfiguredAudienceCount(c)
+	if err != nil {
+		return nil, err
 	}
 	s.logger.Printf("fetchRubikaAudiencePhonesByBundle start: campaign_id=%d customer_id=%d bundle_id=%d num_audiences=%d correlation_id=%s",
 		c.ID, c.CustomerID, bundleID, numAudiences, correlationID)
-
-	if numAudiences <= 0 {
-		return nil, fmt.Errorf("campaign num_audiences must be positive")
-	}
 
 	executionTags, tagIDs, err := resolveActiveCampaignTagIDs(ctx, s.tagRepo, c)
 	if err != nil {
@@ -1211,12 +1223,15 @@ func (s *RubikaCampaignScheduler) fetchRubikaAudiencePhonesByBundle(
 	}
 	s.logger.Printf("fetchRubikaAudiencePhonesByBundle selected: campaign_id=%d bundle_id=%d selected=%d requested=%d",
 		c.ID, bundleID, len(phones), numAudiences)
-	if err := requireExactAudienceCount(c.ID, numAudiences, len(ids)); err != nil {
+	if err := validateSchedulerSelectedAudienceCount(c, numAudiences, len(ids)); err != nil {
 		return nil, err
 	}
 
 	s.logger.Printf("fetchRubikaAudiencePhonesByBundle selection saved: campaign_id=%d bundle_id=%d selection_id=%d selected=%d",
 		c.ID, bundleID, selectionID, len(ids))
+	if len(phones) == 0 {
+		return &AudiencePhonesResult{Phones: phones, IDs: ids, UIDs: uids, Codes: []string{}, BundleAudienceSelectionID: utils.ToPtr(selectionID)}, nil
+	}
 
 	if !hasCampaignAdLink(c.AdLink) {
 		s.logger.Printf("fetchRubikaAudiencePhonesByBundle skipped short links: campaign_id=%d ad_link=empty", c.ID)

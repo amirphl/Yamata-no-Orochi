@@ -327,6 +327,7 @@ func (f *AdminCustomerManagementFlowImpl) GetCustomerWithCampaigns(ctx context.C
 			TotalClicks:                 &totalClicks,
 			ClickRate:                   clickRate,
 			NumAudience:                 c.NumAudience,
+			SampleSizePerTag:            c.SampleSizePerTag,
 			CustomerFullName:            formatCampaignPartyFullName(c.Customer),
 			AgencyFullName:              formatCampaignAgencyFullName(c.Customer),
 			TargetAudienceExcelFileUUID: c.Spec.TargetAudienceExcelFileUUID,

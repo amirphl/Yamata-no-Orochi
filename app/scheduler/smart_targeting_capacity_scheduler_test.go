@@ -8,8 +8,98 @@ import (
 	"testing"
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/lib/pq"
 )
+
+func TestAssignFirstMatchingTagsUsesPersistedSelectionOrder(t *testing.T) {
+	rows := []*models.AudienceProfile{
+		{ID: 1, Tags: pq.Int32Array{2, 9}},
+		{ID: 2, Tags: pq.Int32Array{2}},
+	}
+	got := assignFirstMatchingTags(rows, []int64{9, 2})
+	if len(got) != 2 || got[0] != 9 || got[1] != 2 {
+		t.Fatalf("assigned tags = %v, want [9 2]", got)
+	}
+}
+
+func TestSchedulerConfiguredAudienceCountIgnoresNumAudienceForSmartTest(t *testing.T) {
+	testPhase := string(models.CampaignPhaseTest)
+	sampleSize := uint64(600)
+	compatibilityCount := uint64(1)
+	campaign := dto.BotGetCampaignResponse{
+		ID:                                17,
+		TargetingMethod:                   models.CampaignAudienceTargetingSmart,
+		Phase:                             &testPhase,
+		SampleSizePerTag:                  &sampleSize,
+		SmartTargetingTestSatisfiedTagIDs: []uint{9, 2},
+		NumAudiences:                      &compatibilityCount,
+	}
+	got, err := schedulerConfiguredAudienceCount(campaign)
+	if err != nil || got != 1_200 {
+		t.Fatalf("Smart Test configured count = (%d, %v), want (1200, nil)", got, err)
+	}
+
+	executionPhase := string(models.CampaignPhaseExecution)
+	executionCount := uint64(12_000)
+	campaign.Phase = &executionPhase
+	campaign.NumAudiences = &executionCount
+	got, err = schedulerConfiguredAudienceCount(campaign)
+	if err != nil || got != 12_000 {
+		t.Fatalf("execution configured count = (%d, %v), want (12000, nil)", got, err)
+	}
+}
+
+func TestSmartTargetingTestSamplingTagIDsPreservePersistedOrder(t *testing.T) {
+	phase := string(models.CampaignPhaseTest)
+	campaign := dto.BotGetCampaignResponse{
+		ID:                                19,
+		TargetingMethod:                   models.CampaignAudienceTargetingSmart,
+		Phase:                             &phase,
+		SmartTargetingTestSatisfiedTagIDs: []uint{9, 5},
+	}
+	got, err := smartTargetingTestSamplingTagIDs(campaign, []uint{9, 2, 5})
+	if err != nil || len(got) != 2 || got[0] != 9 || got[1] != 5 {
+		t.Fatalf("sampling tag IDs = (%v, %v), want ([9 5], nil)", got, err)
+	}
+
+	campaign.SmartTargetingTestSatisfiedTagIDs = []uint{5, 9}
+	if _, err := smartTargetingTestSamplingTagIDs(campaign, []uint{9, 2, 5}); err == nil {
+		t.Fatal("out-of-order persisted satisfied tags must fail closed")
+	}
+}
+
+func TestValidateSchedulerSelectedAudienceCountAllowsSmartTestBestEffort(t *testing.T) {
+	phase := string(models.CampaignPhaseTest)
+	sampleSize := uint64(600)
+	campaign := dto.BotGetCampaignResponse{
+		ID:               23,
+		TargetingMethod:  models.CampaignAudienceTargetingSmart,
+		Phase:            &phase,
+		SampleSizePerTag: &sampleSize,
+	}
+	for _, selected := range []int{0, 600, 1_200} {
+		if err := validateSchedulerSelectedAudienceCount(campaign, 1_200, selected); err != nil {
+			t.Fatalf("best-effort selected count %d was rejected: %v", selected, err)
+		}
+	}
+	for _, selected := range []int{599, 1_201, 1_800} {
+		if err := validateSchedulerSelectedAudienceCount(campaign, 1_200, selected); err == nil {
+			t.Fatalf("invalid selected count %d was accepted", selected)
+		}
+	}
+}
+
+func TestZeroAudienceCampaignStatisticsEnableFullRefundAccounting(t *testing.T) {
+	stats := zeroAudienceCampaignStatistics()
+	if sent, ok := stats["aggregatedTotalSent"].(int64); !ok || sent != 0 {
+		t.Fatalf("zero-audience aggregatedTotalSent = %#v, want int64(0)", stats["aggregatedTotalSent"])
+	}
+	if _, ok := stats["updatedAt"].(string); !ok {
+		t.Fatalf("zero-audience updatedAt = %#v, want timestamp string", stats["updatedAt"])
+	}
+}
 
 func TestNormalizeSchedulerScoreClassesRejectsDuplicate(t *testing.T) {
 	if _, err := normalizeSchedulerScoreClasses([]string{"A", "a"}); err == nil {

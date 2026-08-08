@@ -41,10 +41,25 @@ for container in \
 	log "$container: running"
 done
 
+# PostgreSQL parallel queries allocate POSIX dynamic shared-memory segments.
+# Reject Docker's 64 MiB default (and other undersized deployments) before a
+# large audience query discovers the problem in production.
+readonly MIN_POSTGRES_SHM_BYTES=$((2 * 1024 * 1024 * 1024))
+postgres_shm_bytes="$("${DOCKER[@]}" inspect -f '{{.HostConfig.ShmSize}}' yamata-postgres-beta)"
+[[ "$postgres_shm_bytes" =~ ^[0-9]+$ ]] ||
+	die "Could not determine yamata-postgres-beta shared-memory size"
+((postgres_shm_bytes >= MIN_POSTGRES_SHM_BYTES)) ||
+	die "yamata-postgres-beta /dev/shm is undersized (${postgres_shm_bytes} bytes; require at least ${MIN_POSTGRES_SHM_BYTES})"
+log "yamata-postgres-beta /dev/shm: $((postgres_shm_bytes / 1024 / 1024 / 1024)) GiB"
+
 [[ "$(env_value yamata-app-beta CAMPAIGN_EXECUTION_ENABLED)" == false ]] ||
 	die "yamata-app-beta must have CAMPAIGN_EXECUTION_ENABLED=false"
 [[ "$(env_value yamata-campaign-scheduler-beta CAMPAIGN_EXECUTION_ENABLED)" == true ]] ||
 	die "yamata-campaign-scheduler-beta must have CAMPAIGN_EXECUTION_ENABLED=true"
+[[ "$(env_value yamata-app-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == true ]] ||
+	die "Exact Smart Targeting capacity scheduling must be enabled in yamata-app-beta"
+[[ "$(env_value yamata-campaign-scheduler-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == false ]] ||
+	die "Exact Smart Targeting capacity scheduling must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-campaign-scheduler-beta BOT_API_DOMAIN)" == http://app-beta:8080 ]] ||
 	die "Scheduler BOT_API_DOMAIN must be http://app-beta:8080"
 [[ "$(env_value yamata-campaign-scheduler-beta SERVER_HOST)" == 127.0.0.1 ]] ||
@@ -53,6 +68,10 @@ done
 	die "Smart-tag evaluation must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-campaign-scheduler-beta SMART_TAG_EVALUATION_SCHEDULER_ENABLED)" == false ]] ||
 	die "Smart-tag scheduling must be disabled in the campaign scheduler"
+[[ "$(env_value yamata-app-beta SMART_TAG_EVALUATION_ENABLED)" == true ]] ||
+	die "Smart-tag evaluation must be enabled in yamata-app-beta"
+[[ "$(env_value yamata-app-beta SMART_TAG_EVALUATION_SCHEDULER_ENABLED)" == true ]] ||
+	die "Smart-tag scheduling must be enabled in yamata-app-beta"
 [[ -n "$(env_value yamata-app-beta BOT_USERNAME)" ]] || die "BOT_USERNAME is empty"
 [[ -n "$(env_value yamata-app-beta BOT_PASSWORD)" ]] || die "BOT_PASSWORD is empty"
 

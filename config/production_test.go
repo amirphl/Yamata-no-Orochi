@@ -67,3 +67,19 @@ func TestOptionalOpenAIEnvironmentValues(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadSchedulerConfigReadsSmartTargetingCapacitySchedulerFlag(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		t.Setenv("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", "")
+		if loadSchedulerConfig().SmartTargetingCapacitySchedulerEnabled {
+			t.Fatal("SmartTargetingCapacitySchedulerEnabled = true, want false")
+		}
+	})
+
+	t.Run("enabled explicitly", func(t *testing.T) {
+		t.Setenv("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", "true")
+		if !loadSchedulerConfig().SmartTargetingCapacitySchedulerEnabled {
+			t.Fatal("SmartTargetingCapacitySchedulerEnabled = false, want true")
+		}
+	})
+}

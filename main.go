@@ -891,17 +891,19 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		stopFuncs = append(stopFuncs, stopSmartTagScheduler)
 	}
 
-	// Exact Smart Targeting capacity requests are durable database jobs. This
-	// worker is intentionally independent of AI tag evaluation configuration.
-	capacityScheduler := scheduler.NewSmartTargetingCapacityScheduler(
-		smartTargetingCapacityFlow,
-		capacityCalculationRepo,
-		log.Default(),
-		5*time.Second,
-		2,
-	)
-	stopCapacityScheduler := capacityScheduler.Start(context.Background())
-	stopFuncs = append(stopFuncs, stopCapacityScheduler)
+	if cfg.Scheduler.SmartTargetingCapacitySchedulerEnabled {
+		// Exact Smart Targeting capacity requests are durable database jobs. This
+		// worker is intentionally independent of AI tag evaluation configuration.
+		capacityScheduler := scheduler.NewSmartTargetingCapacityScheduler(
+			smartTargetingCapacityFlow,
+			capacityCalculationRepo,
+			log.Default(),
+			5*time.Second,
+			2,
+		)
+		stopCapacityScheduler := capacityScheduler.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopCapacityScheduler)
+	}
 
 	// Create application struct from FiberRouter
 	fiberRouter := appRouter.(*router.FiberRouter)
