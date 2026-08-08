@@ -3,10 +3,24 @@
 # Database Initialization Script for Yamata no Orochi Beta
 # This script creates the database and applies all migrations
 
-set -e
+set -Eeuo pipefail
+set +x # Database environment values may contain credentials.
+umask 077
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+ASSUME_YES=false
+for argument in "$@"; do
+    case "$argument" in
+        --yes|-y) ASSUME_YES=true ;;
+        --help|-h)
+            printf 'Usage: %s [--yes]\n' "$0"
+            printf 'Apply pending beta database migrations after confirming all writers are stopped.\n'
+            exit 0
+            ;;
+        *) printf 'Unknown option: %s\n' "$argument" >&2; exit 2 ;;
+    esac
+done
 
 # Colors for output
 RED='\033[0;31m'
@@ -29,17 +43,59 @@ print_warning() {
 }
 
 print_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 # Load environment variables from .env.beta file if it exists
 if [ -f "$PROJECT_ROOT/.env.beta" ]; then
+    [ ! -L "$PROJECT_ROOT/.env.beta" ] || { print_error "Refusing symlinked .env.beta"; exit 1; }
+    chmod 600 "$PROJECT_ROOT/.env.beta"
     print_status "Loading environment variables from .env.beta file..."
-    # Use set -a to automatically export variables, then source the file
-    set -a
-    source "$PROJECT_ROOT/.env.beta"
-    set +a
+    # Treat dotenv content as data; never execute it as shell code.
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/load-yamata-env.sh"
+    load_yamata_env_file "$PROJECT_ROOT/.env.beta"
 fi
+
+if docker info >/dev/null 2>&1; then
+    DOCKER=(docker)
+elif command -v sudo >/dev/null 2>&1 && sudo -n docker info >/dev/null 2>&1; then
+    DOCKER=(sudo docker)
+else
+    print_error "Docker is unavailable or requires an interactive sudo login"
+    exit 1
+fi
+readonly DOCKER
+
+read_migration_tracker() {
+    local tracking_file="$PROJECT_ROOT/.migration_tracker_beta"
+    local value=""
+    if [ ! -e "$tracking_file" ]; then
+        printf '%s' ""
+        return 0
+    fi
+    [ ! -L "$tracking_file" ] || { print_error "Refusing symlinked migration tracker" >&2; return 1; }
+    [ -f "$tracking_file" ] || { print_error "Migration tracker is not a regular file" >&2; return 1; }
+    IFS= read -r value < "$tracking_file" || true
+    [[ "$value" =~ ^[0-9]{4}_[A-Za-z0-9_]+\.sql$ ]] || {
+        print_error "Migration tracker is empty or malformed" >&2
+        return 1
+    }
+    [ "$(awk 'END { print NR }' "$tracking_file")" -eq 1 ] || {
+        print_error "Migration tracker must contain exactly one filename" >&2
+        return 1
+    }
+    printf '%s' "$value"
+}
+
+write_migration_tracker() {
+    local filename="$1"
+    local temporary
+    temporary=$(mktemp "$PROJECT_ROOT/.migration_tracker_beta.XXXXXX")
+    printf '%s\n' "$filename" > "$temporary"
+    chmod 600 "$temporary"
+    mv -f -- "$temporary" "$PROJECT_ROOT/.migration_tracker_beta"
+}
 
 # Function to get database configuration from environment variables
 get_db_config() {
@@ -48,10 +104,21 @@ get_db_config() {
     DB_PORT=${DB_PORT:-5432}
     DB_NAME=${DB_NAME:-yamata_no_orochi}
     DB_USER=${DB_USER:-yamata_user}
-    DB_PASSWORD=${DB_PASSWORD:-}
+    [[ "$DB_PORT" =~ ^[0-9]+$ ]] && ((10#$DB_PORT >= 1 && 10#$DB_PORT <= 65535)) || {
+        print_error "DB_PORT must be between 1 and 65535"
+        return 1
+    }
+    [[ "$DB_NAME" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+        print_error "DB_NAME must be a simple PostgreSQL identifier"
+        return 1
+    }
+    [[ "$DB_USER" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+        print_error "DB_USER must be a simple PostgreSQL identifier"
+        return 1
+    }
     
     # Export for use in functions
-    export DB_HOST DB_PORT DB_NAME DB_USER DB_PASSWORD
+    export DB_HOST DB_PORT DB_NAME DB_USER
     
     print_status "Database Configuration:"
     echo "  Host: $DB_HOST"
@@ -63,7 +130,7 @@ get_db_config() {
 
 # Function to check if PostgreSQL container is running
 check_postgres_container() {
-    if ! docker ps --format "table {{.Names}}" | grep -q "yamata-postgres-beta"; then
+    if ! "${DOCKER[@]}" ps --format "{{.Names}}" | grep -Fxq "yamata-postgres-beta"; then
         print_error "PostgreSQL container is not running. Please start the services first:"
         echo "  docker-compose -f docker-compose.beta.yml up -d postgres-beta"
         exit 1
@@ -75,7 +142,7 @@ check_postgres_container() {
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if docker exec yamata-postgres-beta pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
+        if "${DOCKER[@]}" exec yamata-postgres-beta pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
             print_success "PostgreSQL is ready!"
             return 0
         fi
@@ -89,9 +156,20 @@ check_postgres_container() {
     return 1
 }
 
+check_application_writers_stopped() {
+    for container in yamata-app-beta yamata-campaign-scheduler-beta; do
+        if "${DOCKER[@]}" container inspect "$container" >/dev/null 2>&1 &&
+            [ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$container")" = true ]; then
+            print_error "Stop $container before applying migrations"
+            return 1
+        fi
+    done
+}
+
 # Function to check if database exists
 check_database_exists() {
-    if docker exec yamata-postgres-beta psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1; then
+    if "${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d postgres \
+        -v db_name="$DB_NAME" -tAc "SELECT 1 FROM pg_database WHERE datname = :'db_name'" | grep -q 1; then
         print_status "Database '$DB_NAME' already exists"
         return 0
     else
@@ -109,12 +187,10 @@ apply_migrations() {
     local last_migration=""
     
     # Read last applied migration if tracking file exists
-    if [ -f "$tracking_file" ]; then
-        last_migration=$(cat "$tracking_file" 2>/dev/null || echo "")
-        if [ -n "$last_migration" ]; then
-            print_status "Last applied migration: $last_migration"
-            print_status "Will resume from the next migration after this one"
-        fi
+    if [ -e "$tracking_file" ]; then
+        last_migration=$(read_migration_tracker) || return 1
+        print_status "Last applied migration: $last_migration"
+        print_status "Will resume from the next migration after this one"
     fi
     
     # Get all migration files
@@ -156,6 +232,12 @@ apply_migrations() {
                 print_status "Found last applied migration: $filename"
             fi
         done
+
+        if [ "$found_last" != true ]; then
+            print_error "Migration tracker references an unavailable migration: $last_migration"
+            print_error "Refusing to guess database migration state"
+            return 1
+        fi
         
         if [ ${#migrations_to_apply[@]} -eq 0 ]; then
             print_success "All migrations are already applied (last: $last_migration)"
@@ -170,11 +252,11 @@ apply_migrations() {
         local filename=$(basename "$file")
         print_status "Applying migration: $filename"
         
-        if docker exec -i -e PGPASSWORD="$DB_PASSWORD" yamata-postgres-beta psql -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" < "$file"; then
+        if "${DOCKER[@]}" exec -i yamata-postgres-beta psql -X -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" < "$file"; then
             print_success "Migration '$filename' applied successfully"
             
             # Update tracking file with the last applied migration
-            echo "$filename" > "$tracking_file"
+            write_migration_tracker "$filename"
             print_status "Updated migration tracker: $filename"
         else
             print_error "Failed to apply migration '$filename'"
@@ -191,11 +273,15 @@ verify_database_setup() {
     print_status "Verifying database setup..."
     
     # Check if tables exist
-    local tables=("account_types" "customers")
+    local tables=(
+        "account_types" "customers" "src_reference"
+        "bundle_audience_selection_members"
+        "campaign_targeting_capacity_calculations"
+    )
     local missing_tables=()
     
     for table in "${tables[@]}"; do
-        if docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='$table'" | grep -q 1; then
+        if "${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='$table'" | grep -q 1; then
             print_success "Table '$table' exists"
         else
             print_warning "Table '$table' is missing"
@@ -204,17 +290,18 @@ verify_database_setup() {
     done
     
     if [ ${#missing_tables[@]} -gt 0 ]; then
-        print_warning "Missing tables: ${missing_tables[*]}"
-        print_warning "This might indicate incomplete migration application"
+        print_error "Missing tables: ${missing_tables[*]}"
+        return 1
     else
         print_success "All expected tables exist"
     fi
     
     # Check if audit_action_enum exists
-    if docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM pg_type WHERE typname='audit_action_enum'" | grep -q 1; then
+    if "${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT 1 FROM pg_type WHERE typname='audit_action_enum'" | grep -q 1; then
         print_success "audit_action_enum type exists"
     else
-        print_warning "audit_action_enum type is missing"
+        print_error "audit_action_enum type is missing"
+        return 1
     fi
 }
 
@@ -228,14 +315,16 @@ show_database_info() {
     echo ""
     
     # Show table count
-    local table_count=$(docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'")
+    local table_count
+    table_count=$("${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'")
     echo "  Tables: $table_count"
     
     # Show record counts for main tables
     local tables=("account_types" "customers" "customer_sessions" "audit_log")
     for table in "${tables[@]}"; do
-        if docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table" >/dev/null 2>&1; then
-            local count=$(docker exec yamata-postgres-beta psql -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table")
+        if "${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table" >/dev/null 2>&1; then
+            local count
+            count=$("${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table")
             echo "  $table: $count records"
         fi
     done
@@ -248,13 +337,10 @@ show_migration_status() {
     
     print_status "Migration Status:"
     
-    if [ -f "$tracking_file" ]; then
-        local last_migration=$(cat "$tracking_file" 2>/dev/null || echo "")
-        if [ -n "$last_migration" ]; then
-            echo "  Last applied migration: $last_migration"
-        else
-            echo "  No migrations have been applied yet"
-        fi
+    if [ -e "$tracking_file" ]; then
+        local last_migration
+        last_migration=$(read_migration_tracker) || return 1
+        echo "  Last applied migration: $last_migration"
     else
         echo "  No migration tracking file found (first run)"
     fi
@@ -269,8 +355,9 @@ show_migration_status() {
             total_migrations=$((total_migrations + 1))
             
             # Check if this migration is already applied
-            if [ -f "$tracking_file" ]; then
-                local last_applied=$(cat "$tracking_file" 2>/dev/null || echo "")
+            if [ -e "$tracking_file" ]; then
+                local last_applied
+                last_applied=$(read_migration_tracker) || return 1
                 if [ "$filename" = "$last_applied" ] || [ "$filename" \< "$last_applied" ]; then
                     applied_migrations=$((applied_migrations + 1))
                 fi
@@ -284,15 +371,6 @@ show_migration_status() {
     echo ""
 }
 
-# Function to reset migration tracker
-reset_migration_tracker() {
-    local tracking_file="$PROJECT_ROOT/.migration_tracker_beta"
-    if [ -f "$tracking_file" ]; then
-        rm "$tracking_file"
-        print_status "Migration tracker reset"
-    fi
-}
-
 # Main function
 main() {
     echo "🗄️  Yamata no Orochi - Beta Database Initialization"
@@ -304,6 +382,7 @@ main() {
     
     # Check if PostgreSQL container is running
     check_postgres_container
+    check_application_writers_stopped
     
     # Check if database exists — never create it; a missing DB is a fatal error
     if ! check_database_exists; then
@@ -316,12 +395,17 @@ main() {
     
     # Apply migrations
     print_status "Ready to apply database migrations."
-    read -p "Do you want to proceed with applying migrations? [y/N]: " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$ASSUME_YES" = true ]; then
+        REPLY=y
+    else
+        read -r -p "Do you want to proceed with applying migrations? [y/N]: " -n 1 REPLY
+        echo
+    fi
+    if [[ ${REPLY:-} =~ ^[Yy]$ ]]; then
         apply_migrations
     else
-        print_status "Migration step skipped."
+        print_error "Migration step cancelled; database was not initialized"
+        return 2
     fi
     
     # Verify database setup
@@ -340,4 +424,4 @@ main() {
 }
 
 # Run main function
-main "$@" 
+main
