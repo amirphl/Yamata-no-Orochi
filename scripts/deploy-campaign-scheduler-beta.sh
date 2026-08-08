@@ -4,11 +4,21 @@
 # Usage: ./scripts/deploy-campaign-scheduler-beta.sh [IMAGE]
 
 set -Eeuo pipefail
+set +x # Scheduler environment values may contain credentials.
 umask 077
 
 readonly SOURCE_CONTAINER="${YAMATA_SOURCE_CONTAINER:-yamata-app-beta}"
 readonly CONTAINER_NAME="${YAMATA_SCHEDULER_CONTAINER:-yamata-campaign-scheduler-beta}"
 readonly LOG_VOLUME="${YAMATA_SCHEDULER_LOG_VOLUME:-yamata-campaign-scheduler-logs-beta}"
+readonly INTERNAL_BOT_API_DOMAIN="${YAMATA_SCHEDULER_BOT_API_DOMAIN:-http://app-beta:8080}"
+
+case "${1:-}" in
+	--help|-h)
+		printf 'Usage: %s [IMAGE]\n' "$0"
+		printf 'Recreate the isolated campaign scheduler from the running API environment.\n'
+		exit 0
+		;;
+esac
 
 log() {
 	printf '[campaign-scheduler] %s\n' "$*"
@@ -18,6 +28,11 @@ die() {
 	printf '[campaign-scheduler] ERROR: %s\n' "$*" >&2
 	exit 1
 }
+
+for container_value in "$SOURCE_CONTAINER" "$CONTAINER_NAME" "$LOG_VOLUME"; do
+	[[ "$container_value" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] ||
+		die "Container and volume names must use only letters, digits, dot, underscore, and hyphen"
+done
 
 if docker info >/dev/null 2>&1; then
 	DOCKER=(docker)
@@ -58,20 +73,67 @@ for dependency in yamata-postgres-beta yamata-redis-beta; do
 		die "Dependency is not running: $dependency"
 done
 
+command -v python3 >/dev/null 2>&1 || die "python3 is required for safe environment validation"
+
+python3 -c '
+import sys, urllib.parse
+try:
+    value = urllib.parse.urlsplit(sys.argv[1])
+    port = value.port
+except ValueError:
+    raise SystemExit(1)
+valid = (
+    value.scheme in ("http", "https")
+    and value.hostname
+    and value.username is None
+    and value.password is None
+    and value.path in ("", "/")
+    and not value.query
+    and not value.fragment
+    and (port is None or 1 <= port <= 65535)
+)
+raise SystemExit(0 if valid else 1)
+' "$INTERNAL_BOT_API_DOMAIN" ||
+	die "YAMATA_SCHEDULER_BOT_API_DOMAIN must be an HTTP(S) origin without credentials, path, or query"
+
+PROMPT_PERSONA_SOURCE="$(
+	"${DOCKER[@]}" inspect -f \
+		'{{range .Mounts}}{{if eq .Destination "/SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT"}}{{.Source}}{{end}}{{end}}' \
+		"$SOURCE_CONTAINER"
+)"
+PROMPT_SCORING_SOURCE="$(
+	"${DOCKER[@]}" inspect -f \
+		'{{range .Mounts}}{{if eq .Destination "/SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT"}}{{.Source}}{{end}}{{end}}' \
+		"$SOURCE_CONTAINER"
+)"
+readonly PROMPT_PERSONA_SOURCE PROMPT_SCORING_SOURCE
+[[ -f "$PROMPT_PERSONA_SOURCE" ]] ||
+	die "Cannot resolve the API persona prompt bind mount"
+[[ -f "$PROMPT_SCORING_SOURCE" ]] ||
+	die "Cannot resolve the API tag-scoring prompt bind mount"
+[[ "$PROMPT_PERSONA_SOURCE" != *','* && "$PROMPT_PERSONA_SOURCE" != *$'\n'* && "$PROMPT_PERSONA_SOURCE" != *$'\r'* ]] ||
+	die "Persona prompt path contains unsupported characters"
+[[ "$PROMPT_SCORING_SOURCE" != *','* && "$PROMPT_SCORING_SOURCE" != *$'\n'* && "$PROMPT_SCORING_SOURCE" != *$'\r'* ]] ||
+	die "Tag-scoring prompt path contains unsupported characters"
+
 IMAGE="${1:-$("${DOCKER[@]}" inspect -f '{{.Config.Image}}' "$SOURCE_CONTAINER")}"
 readonly IMAGE
+[[ "$IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/@:-]*$ ]] || die "Invalid Docker image reference"
 "${DOCKER[@]}" image inspect "$IMAGE" >/dev/null 2>&1 || die "Image does not exist locally: $IMAGE"
 
-RUNTIME_ENV="$(mktemp)"
+RUNTIME_ENV="$(mktemp /tmp/yamata-scheduler-env.XXXXXX)"
 cleanup() {
 	rm -f -- "$RUNTIME_ENV"
 }
 trap cleanup EXIT
 
 # Copy the backend's exact effective environment without exposing its secrets.
+"${DOCKER[@]}" inspect -f '{{json .Config.Env}}' "$SOURCE_CONTAINER" |
+	python3 -c 'import json,sys; values=json.load(sys.stdin); bad=[v.split("=",1)[0] for v in values if "\n" in v or "\r" in v or "\0" in v]; sys.exit("container environment contains unsupported control characters: " + ", ".join(bad) if bad else 0)'
 "${DOCKER[@]}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SOURCE_CONTAINER" |
 	awk -F= '
 		BEGIN {
+			override["BOT_API_DOMAIN"] = 1
 			override["CAMPAIGN_EXECUTION_ENABLED"] = 1
 			override["SMART_TAG_EVALUATION_ENABLED"] = 1
 			override["SMART_TAG_EVALUATION_SCHEDULER_ENABLED"] = 1
@@ -88,8 +150,38 @@ trap cleanup EXIT
 			override["LOG_AUDIT_PATH"] = 1
 			override["LOG_SECURITY_PATH"] = 1
 			override["SENTRY_SERVER_NAME"] = 1
+			override["NO_PROXY"] = 1
+			override["no_proxy"] = 1
+			omit["GRAFANA_ADMIN_PASSWORD"] = 1
+			omit["CERTBOT_EMAIL"] = 1
+			omit["CERT_ALERT_PHONE"] = 1
+			omit["CERT_ALERT_CERT_PATHS"] = 1
+			omit["REDIS_PASSWORD"] = 1
+			omit["BACKUP_INTERVAL_SECONDS"] = 1
+			omit["BACKUP_S3_BUCKET"] = 1
+			omit["BACKUP_S3_ACCESS_KEY"] = 1
+			omit["BACKUP_S3_SECRET_KEY"] = 1
+			omit["ATIPAY_API_KEY"] = 1
+			omit["ATIPAY_TERMINAL"] = 1
+			omit["SENTRY_POSTGRES_DB"] = 1
+			omit["SENTRY_POSTGRES_USER"] = 1
+			omit["SENTRY_POSTGRES_PASSWORD"] = 1
+			omit["SENTRY_GLITCHTIP_SECRET_KEY"] = 1
+			omit["SENTRY_SUPERUSER_USERNAME"] = 1
+			omit["SENTRY_SUPERUSER_PASSWORD"] = 1
+			omit["SENTRY_SUPERUSER_EMAIL"] = 1
+			omit["SENTRY_DEFAULT_FROM_EMAIL"] = 1
+			omit["SENTRY_EMAIL_URL"] = 1
+			omit["SENTRY_ENABLE_USER_REGISTRATION"] = 1
+			omit["SENTRY_ENABLE_OPEN_USER_REGISTRATION"] = 1
+			omit["ADMIN_DEPOSIT_REVIEWER"] = 1
+			omit["ADMIN_2FA_MOBILES"] = 1
+			omit["ADMIN_OTP_BYPASS_MOBILES"] = 1
+			omit["ADMIN_LOGIN_OTP_FORWARD_MOBILE"] = 1
+			omit["OXA_API_KEY"] = 1
+			omit["OPENAI_API_KEY"] = 1
 		}
-		!($1 in override) { print }
+		!($1 in override) && !($1 in omit) { print }
 	' >"$RUNTIME_ENV"
 
 cat >>"$RUNTIME_ENV" <<'EOF'
@@ -109,6 +201,11 @@ LOG_ACCESS_PATH=/var/log/yamata/campaign-scheduler-access.log
 LOG_AUDIT_PATH=/var/log/yamata/campaign-scheduler-audit.log
 LOG_SECURITY_PATH=/var/log/yamata/campaign-scheduler-security.log
 SENTRY_SERVER_NAME=yamata-campaign-scheduler-beta
+EOF
+printf 'BOT_API_DOMAIN=%s\n' "$INTERNAL_BOT_API_DOMAIN" >>"$RUNTIME_ENV"
+cat >>"$RUNTIME_ENV" <<'EOF'
+NO_PROXY=localhost,127.0.0.1,app-beta,yamata-app-beta,postgres-beta,yamata-postgres-beta,redis-beta,yamata-redis-beta,172.30.0.0/24
+no_proxy=localhost,127.0.0.1,app-beta,yamata-app-beta,postgres-beta,yamata-postgres-beta,redis-beta,yamata-redis-beta,172.30.0.0/24
 EOF
 
 "${DOCKER[@]}" volume create "$LOG_VOLUME" >/dev/null
@@ -133,6 +230,8 @@ log "Starting $CONTAINER_NAME from $IMAGE on $NETWORK"
 	--tmpfs /var/cache:rw,nosuid,noexec,size=64m \
 	--mount "type=volume,source=$LOG_VOLUME,target=/var/log/yamata" \
 	--mount "type=volume,source=$LOG_VOLUME,target=/data" \
+	--mount "type=bind,source=$PROMPT_PERSONA_SOURCE,target=/SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT,readonly" \
+	--mount "type=bind,source=$PROMPT_SCORING_SOURCE,target=/SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT,readonly" \
 	--security-opt no-new-privileges=true \
 	--cap-drop ALL \
 	--log-driver local \
@@ -147,7 +246,11 @@ while ((SECONDS < deadline)); do
 	state="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "$CONTAINER_NAME")"
 	health="$("${DOCKER[@]}" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$CONTAINER_NAME")"
 	if [[ "$state" == "running" && "$health" == "healthy" ]]; then
+		"${DOCKER[@]}" exec "$CONTAINER_NAME" \
+			curl -fsS --noproxy app-beta "$INTERNAL_BOT_API_DOMAIN/api/v1/health" >/dev/null ||
+			die "$CONTAINER_NAME cannot reach the API at $INTERNAL_BOT_API_DOMAIN"
 		log "Ready. Campaign execution is enabled only in $CONTAINER_NAME"
+		log "Internal bot API: $INTERNAL_BOT_API_DOMAIN"
 		log "Logs: ${DOCKER[*]} logs -f $CONTAINER_NAME"
 		log "Persistent log volume: $LOG_VOLUME"
 		exit 0
@@ -159,4 +262,6 @@ while ((SECONDS < deadline)); do
 done
 
 "${DOCKER[@]}" logs --tail 100 "$CONTAINER_NAME" >&2 || true
-die "$CONTAINER_NAME did not become healthy; restart policy remains active"
+"${DOCKER[@]}" stop --time 30 "$CONTAINER_NAME" >/dev/null 2>&1 || true
+"${DOCKER[@]}" rm "$CONTAINER_NAME" >/dev/null 2>&1 || true
+die "$CONTAINER_NAME did not become healthy and was removed"
