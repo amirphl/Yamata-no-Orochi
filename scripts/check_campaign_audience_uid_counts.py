@@ -11,9 +11,11 @@ For each {campaign_id}.jsonl file found:
 Usage:
   python check_campaign_audience_uid_counts.py \\
       --db-host 127.0.0.1 --db-port 5432 --db-name yamata \\
-      --db-user postgres --db-password secret \\
+      --db-user postgres \\
       [--dir path/to/campaign_audience_uids] \\
       [--campaign-ids 101 102 103]
+
+Set DB_PASSWORD in the environment or enter it at the interactive prompt.
 """
 
 import argparse
@@ -22,7 +24,7 @@ import logging
 import os
 import sys
 
-import psycopg2
+from script_common import read_secret, validate_database_port, validate_positive_ids
 
 logging.basicConfig(
     level=logging.INFO,
@@ -55,8 +57,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db-port", type=int, default=5432, help="PostgreSQL port")
     parser.add_argument("--db-name", required=True, help="Database name")
     parser.add_argument("--db-user", required=True, help="Database user")
-    parser.add_argument("--db-password", required=True, help="Database password")
-    return parser.parse_args()
+    parser.add_argument("--db-sslmode", default=os.getenv("DB_SSL_MODE", "require"))
+    args = parser.parse_args()
+    validate_database_port(parser, args.db_port)
+    if args.campaign_ids:
+        validate_positive_ids(parser, "--campaign-ids", args.campaign_ids)
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +84,10 @@ def discover_campaign_ids(directory: str) -> list[int]:
             continue
         stem = name[: -len(".jsonl")]
         try:
-            ids.append(int(stem))
+            campaign_id = int(stem)
+            if campaign_id <= 0:
+                raise ValueError
+            ids.append(campaign_id)
         except ValueError:
             log.warning("Skipping non-integer filename: %s", name)
     return sorted(ids)
@@ -92,8 +101,15 @@ def count_unique_uids(filepath: str) -> tuple[int, int]:
     """
     seen: set[str] = set()
     total_lines = 0
-    with open(filepath, encoding="utf-8") as f:
-        for raw in f:
+    maximum_record_bytes = 8 * 1024 * 1024
+    with open(filepath, "rb") as f:
+        while raw_bytes := f.readline(maximum_record_bytes + 1):
+            if len(raw_bytes) > maximum_record_bytes:
+                raise ValueError(f"JSONL record exceeds 8 MiB in {filepath}")
+            try:
+                raw = raw_bytes.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"invalid UTF-8 in {filepath}") from exc
             line = raw.strip()
             if not line:
                 continue
@@ -101,10 +117,11 @@ def count_unique_uids(filepath: str) -> tuple[int, int]:
             try:
                 record = json.loads(line)
             except json.JSONDecodeError as exc:
-                log.warning("JSON parse error in %s: %s", filepath, exc)
-                continue
-            uid = (record.get("uid") or "").strip()
-            if uid:
+                raise ValueError(f"JSON parse error in {filepath}: {exc}") from exc
+            if not isinstance(record, dict) or not isinstance(record.get("uid", ""), str):
+                raise ValueError(f"invalid uid record in {filepath}")
+            uid = record.get("uid", "")
+            if uid != "":
                 seen.add(uid)
     return len(seen), total_lines
 
@@ -115,12 +132,20 @@ def count_unique_uids(filepath: str) -> tuple[int, int]:
 
 
 def connect_db(args: argparse.Namespace):
+    try:
+        import psycopg2
+    except ImportError as exc:
+        raise RuntimeError(
+            "psycopg2 is required; install scripts/requirements.txt"
+        ) from exc
     return psycopg2.connect(
         host=args.db_host,
         port=args.db_port,
         dbname=args.db_name,
         user=args.db_user,
         password=args.db_password,
+        sslmode=args.db_sslmode,
+        connect_timeout=10,
     )
 
 
@@ -146,6 +171,7 @@ def fetch_num_audiences(cur, campaign_ids: list[int]) -> dict[int, int | None]:
 
 def main() -> None:
     args = parse_args()
+    args.db_password = read_secret("DB_PASSWORD", "Database password: ")
 
     if args.campaign_ids:
         campaign_ids = sorted(set(args.campaign_ids))
@@ -183,7 +209,12 @@ def main() -> None:
             skip_count += 1
             continue
 
-        unique_uids, total_lines = count_unique_uids(filepath)
+        try:
+            unique_uids, total_lines = count_unique_uids(filepath)
+        except (OSError, ValueError) as exc:
+            log.error("campaign_id=%d invalid audience file: %s", campaign_id, exc)
+            skip_count += 1
+            continue
 
         if campaign_id not in num_audience_map:
             log.warning(
@@ -235,9 +266,13 @@ def main() -> None:
         len(campaign_ids),
     )
 
-    if mismatch_count > 0:
+    if mismatch_count > 0 or skip_count > 0:
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        log.error("Check failed: %s", exc)
+        raise SystemExit(1) from None
