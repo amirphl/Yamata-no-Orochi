@@ -8,7 +8,6 @@ import argparse
 import json
 from dataclasses import asdict, dataclass
 
-
 SMS_PLATFORM = "sms"
 
 
@@ -99,9 +98,7 @@ def expand_text(text: str, ad_link: str | None, short_link_domain: str | None) -
     has_short_link_domain = _has_value(short_link_domain)
 
     if has_ad_link and has_short_link_domain:
-        short_link_text = short_link_domain.strip()
-        if not short_link_text.startswith("https://"):
-            short_link_text = "https://" + short_link_text
+        short_link_text = short_link_domain.strip() + "/123456"
         return text_to_count.replace("{YOUR_LINK}", short_link_text)
 
     if has_ad_link:
