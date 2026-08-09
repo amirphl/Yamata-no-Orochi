@@ -14,17 +14,24 @@ Usage:
   python push_campaign_audience_uids.py \\
       --campaign-ids 101 102 103 \\
       --db-host 127.0.0.1 --db-port 5432 --db-name yamata \\
-      --db-user postgres --db-password secret \\
+      --db-user postgres \\
       --jazebeh-domain https://jazebeh.ir \\
-      --bot-username botuser --bot-password botpass
+      --bot-username botuser
+
+Set DB_PASSWORD and BOT_PASSWORD in the environment, or enter them at the
+interactive prompts. Secrets are never accepted on the command line.
 """
 
 import argparse
+import os
 import sys
 
-import psycopg2
-import psycopg2.extras
-import requests
+from script_common import (
+    read_secret,
+    validate_database_port,
+    validate_https_origin,
+    validate_positive_ids,
+)
 
 CHUNK_SIZE = 5000  # mirrors audienceUIDChunkSize in bot_client.go
 
@@ -46,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db-port", type=int, default=5432, help="PostgreSQL port")
     parser.add_argument("--db-name", required=True, help="Database name")
     parser.add_argument("--db-user", required=True, help="Database user")
-    parser.add_argument("--db-password", required=True, help="Database password")
+    parser.add_argument("--db-sslmode", default=os.getenv("DB_SSL_MODE", "require"))
     # Jazebeh args
     parser.add_argument(
         "--jazebeh-domain",
@@ -54,13 +61,18 @@ def parse_args() -> argparse.Namespace:
         help="Jazebeh API domain (no trailing slash)",
     )
     parser.add_argument("--bot-username", required=True, help="Jazebeh bot username")
-    parser.add_argument("--bot-password", required=True, help="Jazebeh bot password")
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Compute UID/code pairs but do not push to Jazebeh",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    args.jazebeh_domain = validate_https_origin(
+        parser, "--jazebeh-domain", args.jazebeh_domain
+    )
+    validate_database_port(parser, args.db_port)
+    validate_positive_ids(parser, "--campaign-ids", args.campaign_ids)
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +81,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def jazebeh_login(domain: str, username: str, password: str) -> str:
+    try:
+        import requests
+    except ImportError as exc:
+        raise RuntimeError(
+            "requests is required; install scripts/requirements.txt"
+        ) from exc
     url = domain.rstrip("/") + "/api/v1/bot/auth/login"
     resp = requests.post(
         url,
@@ -78,7 +96,7 @@ def jazebeh_login(domain: str, username: str, password: str) -> str:
     resp.raise_for_status()
     body = resp.json()
     if not body.get("success"):
-        raise RuntimeError(f"Jazebeh login failed: {body.get('message')}")
+        raise RuntimeError("Jazebeh login was rejected")
     token = body["data"]["session"]["access_token"]
     if not token:
         raise RuntimeError("Jazebeh login returned empty access token")
@@ -91,15 +109,22 @@ def jazebeh_push_audience_uids(
     """Push uid/code pairs in CHUNK_SIZE chunks, mirroring Go PushCampaignAudienceUIDs."""
     if not uids:
         return
+    if len(uids) != len(codes):
+        raise ValueError("UID and code arrays must have the same length")
+    if any(not isinstance(uid, str) or not uid for uid in uids):
+        raise ValueError("UID array contains an empty or invalid value")
+    try:
+        import requests
+    except ImportError as exc:
+        raise RuntimeError(
+            "requests is required; install scripts/requirements.txt"
+        ) from exc
 
     url = domain.rstrip("/") + f"/api/v1/bot/campaigns/{campaign_id}/audience-uids"
 
     for start in range(0, len(uids), CHUNK_SIZE):
         end = min(start + CHUNK_SIZE, len(uids))
-        items = [
-            {"uid": uids[i], "code": codes[i] if i < len(codes) else ""}
-            for i in range(start, end)
-        ]
+        items = [{"uid": uids[i], "code": codes[i]} for i in range(start, end)]
         resp = requests.post(
             url,
             json={"items": items},
@@ -111,7 +136,7 @@ def jazebeh_push_audience_uids(
         if not body.get("success"):
             raise RuntimeError(
                 f"Push audience UIDs failed for campaign {campaign_id} "
-                f"chunk [{start},{end}): {body.get('message')}"
+                f"chunk [{start},{end})"
             )
         print(f"  chunk [{start},{end}) pushed ({end - start} items)")
 
@@ -122,12 +147,20 @@ def jazebeh_push_audience_uids(
 
 
 def connect_db(args: argparse.Namespace):
+    try:
+        import psycopg2
+    except ImportError as exc:
+        raise RuntimeError(
+            "psycopg2 is required; install scripts/requirements.txt"
+        ) from exc
     return psycopg2.connect(
         host=args.db_host,
         port=args.db_port,
         dbname=args.db_name,
         user=args.db_user,
         password=args.db_password,
+        sslmode=args.db_sslmode,
+        connect_timeout=10,
     )
 
 
@@ -177,6 +210,7 @@ def resolve_uids(cur, audience_ids: list[int]) -> dict[int, str]:
 
 def main() -> None:
     args = parse_args()
+    args.db_password = read_secret("DB_PASSWORD", "Database password: ")
 
     print(f"Campaigns: {args.campaign_ids}")
     print(f"Dry-run  : {args.dry_run}")
@@ -187,12 +221,11 @@ def main() -> None:
 
     token: str | None = None
     if not args.dry_run:
+        args.bot_password = read_secret("BOT_PASSWORD", "Jazebeh bot password: ")
         print("Logging in to Jazebeh...")
         token = jazebeh_login(args.jazebeh_domain, args.bot_username, args.bot_password)
         print("Login successful.")
 
-    if token is None:
-        print("Jazebeh Access Token is empty. Exiting ...")
     success_count = 0
     skip_count = 0
     error_count = 0
@@ -219,34 +252,36 @@ def main() -> None:
 
         if len(audience_codes) != len(audience_ids):
             print(
-                f"  WARNING: audience_codes length ({len(audience_codes)}) != "
-                f"audience_ids length ({len(audience_ids)}) — codes will be padded with empty strings"
+                f"  ERROR: audience_codes length ({len(audience_codes)}) != "
+                f"audience_ids length ({len(audience_ids)}); refusing to send misaligned data",
+                file=sys.stderr,
             )
+            error_count += 1
+            continue
 
         # Resolve UIDs from audience_profiles, preserving the order of audience_ids
         uid_map = resolve_uids(cur, audience_ids)
         missing = [aid for aid in audience_ids if aid not in uid_map]
         if missing:
             print(
-                f"  WARNING: {len(missing)} audience_id(s) not found in audience_profiles "
-                f"(first 10: {missing[:10]}); those entries will use empty UID"
+                f"  ERROR: {len(missing)} audience_id(s) not found in audience_profiles "
+                f"(first 10: {missing[:10]}); refusing to send incomplete data",
+                file=sys.stderr,
             )
+            error_count += 1
+            continue
 
-        uids = [uid_map.get(aid, "") for aid in audience_ids]
-        codes = [
-            audience_codes[i] if i < len(audience_codes) else ""
-            for i in range(len(uids))
-        ]
+        uids = [uid_map[aid] for aid in audience_ids]
+        if any(not isinstance(uid, str) or not uid for uid in uids):
+            print("  ERROR: one or more audience profiles have an empty UID", file=sys.stderr)
+            error_count += 1
+            continue
+        codes = list(audience_codes)
 
         print(f"  resolved {len(uids)} uid/code pairs")
 
         if args.dry_run:
             print("  DRY-RUN: skipping push to Jazebeh")
-            # Show a small sample
-            sample = [
-                {"uid": uids[i], "code": codes[i]} for i in range(min(3, len(uids)))
-            ]
-            print(f"  sample (first {len(sample)}): {sample}")
             success_count += 1
             continue
 
@@ -272,4 +307,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
