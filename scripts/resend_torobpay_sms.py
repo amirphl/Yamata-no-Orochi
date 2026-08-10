@@ -2,8 +2,8 @@
 """
 Resend TorobPay installment SMS rows from a CSV/TSV export.
 
-Default mode is dry-run. Use --send to call PayamSMS.
-Secrets are intentionally hardcoded placeholders; fill them before --send.
+Default mode is dry-run. Use --send to call PayamSMS. Credentials are read
+only from PAYAM_SMS_* environment variables.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import posixpath
 import re
 import sys
@@ -36,18 +37,22 @@ except ImportError:  # pragma: no cover
 TARGET_TEXT = "از ترب\u200cپی قسطی بخر"
 LINK_RE = re.compile(r"\bjo1n\.ir/?([A-Za-z0-9]+)\b")
 SEND_DELAY_SECONDS = 0.010
+MAX_INPUT_BYTES = 512 * 1024 * 1024
+MAX_XLSX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
 LOGGER = logging.getLogger("torobpay_resend")
 
-# Fill these before running with --send.
 PAYAM_SMS = {
-    "token_url": "https://www.payamsms.com/auth/oauth/token",
-    "system_name": "",
-    "username": "",
-    "password": "",
-    "scope": "webservice",
-    "grant_type": "password",
-    "root_access_token": "",
-    "send_url": "https://www.payamsms.com/panel/webservice/sendMultipleWithSrc",
+    "token_url": os.getenv("PAYAM_SMS_TOKEN_URL", "https://www.payamsms.com/auth/oauth/token"),
+    "system_name": os.getenv("PAYAM_SMS_SYSTEM_NAME", ""),
+    "username": os.getenv("PAYAM_SMS_USERNAME", ""),
+    "password": os.getenv("PAYAM_SMS_PASSWORD", ""),
+    "scope": os.getenv("PAYAM_SMS_SCOPE", "webservice"),
+    "grant_type": os.getenv("PAYAM_SMS_GRANT_TYPE", "password"),
+    "root_access_token": os.getenv("PAYAM_SMS_ROOT_ACCESS_TOKEN", ""),
+    "send_url": os.getenv(
+        "PAYAM_SMS_SEND_URL",
+        "https://www.payamsms.com/panel/webservice/sendMultipleWithSrc",
+    ),
 }
 
 
@@ -168,7 +173,26 @@ def parse_args() -> argparse.Namespace:
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         help="Logging verbosity. Default: INFO.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    for option_name in ("text_col", "sender_col", "recipient_col", "row_id_col"):
+        if getattr(args, option_name) <= 0:
+            parser.error(f"--{option_name.replace('_', '-')} must be greater than zero")
+    if args.delimiter is not None and len(args.delimiter) != 1:
+        parser.error("--delimiter must be exactly one character")
+    return args
+
+
+def open_private_append(path_value: str | Path):
+    path = Path(path_value)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if path.is_symlink():
+        raise OSError(f"refusing symlinked output file: {path}")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    os.fchmod(descriptor, 0o600)
+    return os.fdopen(descriptor, "a", encoding="utf-8")
 
 
 def setup_logging(log_file: str, level_name: str) -> None:
@@ -178,7 +202,7 @@ def setup_logging(log_file: str, level_name: str) -> None:
         datefmt="%Y-%m-%dT%H:%M:%S%z",
     )
 
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler = logging.StreamHandler(open_private_append(log_file))
     file_handler.setFormatter(formatter)
     file_handler.setLevel(level)
 
@@ -187,6 +211,8 @@ def setup_logging(log_file: str, level_name: str) -> None:
     console_handler.setLevel(level)
 
     LOGGER.setLevel(level)
+    for old_handler in LOGGER.handlers:
+        old_handler.close()
     LOGGER.handlers.clear()
     LOGGER.addHandler(file_handler)
     LOGGER.addHandler(console_handler)
@@ -207,7 +233,7 @@ def detect_text_encoding(path: Path, encoding: str) -> str:
 
 
 def sniff_delimiter(path: Path, encoding: str) -> str:
-    sample = path.read_text(encoding=encoding, errors="replace")[:8192]
+    sample = path.read_text(encoding=encoding, errors="strict")[:8192]
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters="\t,;|")
         return dialect.delimiter
@@ -230,7 +256,7 @@ def read_table(path: Path, args: argparse.Namespace) -> list[list[str]]:
         if args.delimiter is not None
         else sniff_delimiter(path, encoding)
     )
-    text = path.read_text(encoding=encoding, errors="replace")
+    text = path.read_text(encoding=encoding, errors="strict")
     physical_lines = text.splitlines()
     LOGGER.info(
         "csv diagnostics path=%s encoding=%s delimiter=%r physical_lines=%d mode=%s",
@@ -269,6 +295,7 @@ def read_table(path: Path, args: argparse.Namespace) -> list[list[str]]:
 
 def read_xlsx_rows(path: Path, sheet_selector: str) -> list[list[str]]:
     with zipfile.ZipFile(path) as zf:
+        validate_xlsx_archive(zf)
         shared_strings = read_shared_strings(zf)
         sheets = workbook_sheets(zf)
         if sheet_selector.strip().lower() == "all":
@@ -308,7 +335,7 @@ def read_xlsx_sheet_rows(
     sheet_path: str,
     shared_strings: list[str],
 ) -> list[list[str]]:
-    root = ET.fromstring(zf.read(sheet_path))
+    root = parse_xlsx_xml(zf.read(sheet_path), sheet_path)
     rows: list[list[str]] = []
     ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     for row_el in root.findall(".//x:sheetData/x:row", ns):
@@ -328,7 +355,7 @@ def read_shared_strings(zf: zipfile.ZipFile) -> list[str]:
         raw = zf.read("xl/sharedStrings.xml")
     except KeyError:
         return []
-    root = ET.fromstring(raw)
+    root = parse_xlsx_xml(raw, "xl/sharedStrings.xml")
     ns = {"x": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     strings: list[str] = []
     for si in root.findall("x:si", ns):
@@ -344,8 +371,10 @@ def workbook_sheets(zf: zipfile.ZipFile) -> list[dict[str, Any]]:
     }
     rel_ns = {"rel": "http://schemas.openxmlformats.org/package/2006/relationships"}
 
-    workbook = ET.fromstring(zf.read("xl/workbook.xml"))
-    rels = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+    workbook = parse_xlsx_xml(zf.read("xl/workbook.xml"), "xl/workbook.xml")
+    rels = parse_xlsx_xml(
+        zf.read("xl/_rels/workbook.xml.rels"), "xl/_rels/workbook.xml.rels"
+    )
     rel_targets = {
         rel.attrib["Id"]: rel.attrib["Target"]
         for rel in rels.findall("rel:Relationship", rel_ns)
@@ -388,14 +417,36 @@ def select_sheet(sheets: list[dict[str, Any]], sheet_selector: str) -> dict[str,
 
 def normalize_xlsx_target(target: str) -> str:
     if target.startswith("/"):
-        return target.lstrip("/")
-    if target.startswith("xl/"):
-        return target
-    return posixpath.normpath(posixpath.join("xl", target))
+        normalized = posixpath.normpath(target.lstrip("/"))
+    elif target.startswith("xl/"):
+        normalized = posixpath.normpath(target)
+    else:
+        normalized = posixpath.normpath(posixpath.join("xl", target))
+    if not normalized.startswith("xl/worksheets/") or ".." in normalized.split("/"):
+        raise ValueError("workbook contains an invalid worksheet path")
+    return normalized
+
+
+def validate_xlsx_archive(zf: zipfile.ZipFile) -> None:
+    total_size = 0
+    for member in zf.infolist():
+        if member.flag_bits & 0x1:
+            raise ValueError("encrypted XLSX members are not supported")
+        total_size += member.file_size
+        if total_size > MAX_XLSX_UNCOMPRESSED_BYTES:
+            raise ValueError("XLSX uncompressed content exceeds 256 MiB")
+
+
+def parse_xlsx_xml(raw: bytes, member_name: str) -> ET.Element:
+    uppercase = raw[:4096].upper()
+    if b"<!DOCTYPE" in uppercase or b"<!ENTITY" in uppercase:
+        raise ValueError(f"XLSX member {member_name} contains a forbidden XML declaration")
+    return ET.fromstring(raw)
 
 
 def list_xlsx_sheets(path: Path) -> list[dict[str, Any]]:
     with zipfile.ZipFile(path) as zf:
+        validate_xlsx_archive(zf)
         shared_strings = read_shared_strings(zf)
         sheets = workbook_sheets(zf)
         for sheet in sheets:
@@ -444,6 +495,14 @@ def correct_short_links(text: str) -> str:
 
 
 def row_key(row_id: str, recipient: str, corrected_text: str) -> str:
+    digest = hashlib.sha256(
+        "\0".join((row_id, recipient, corrected_text)).encode("utf-8")
+    ).hexdigest()
+    return f"v2|{digest}"
+
+
+def legacy_row_key(row_id: str, recipient: str, corrected_text: str) -> str:
+    """Recognize old state entries without writing embedded phone numbers again."""
     digest = hashlib.sha256(corrected_text.encode("utf-8")).hexdigest()[:16]
     return f"{row_id}|{recipient}|{digest}"
 
@@ -467,9 +526,20 @@ def load_sent_keys(path: Path) -> set[str]:
 
 
 def append_attempt(path: Path, attempt: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
+    with open_private_append(path) as f:
         f.write(json.dumps(attempt, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def masked_phone(value: str) -> str:
+    compact = re.sub(r"\s+", "", value)
+    return "***" + compact[-4:] if len(compact) >= 4 else "[invalid]"
+
+
+def message_metadata(value: str) -> dict[str, Any]:
+    return {
+        "message_length": len(value),
+        "message_sha256": hashlib.sha256(value.encode("utf-8")).hexdigest(),
+    }
 
 
 def tehran_now() -> datetime:
@@ -512,7 +582,7 @@ def http_json(
 
 
 def get_token(timeout: float) -> str:
-    query = urllib.parse.urlencode(
+    form_body = urllib.parse.urlencode(
         {
             "systemName": PAYAM_SMS["system_name"],
             "username": PAYAM_SMS["username"],
@@ -520,16 +590,28 @@ def get_token(timeout: float) -> str:
             "scope": PAYAM_SMS["scope"] or "webservice",
             "grant_type": PAYAM_SMS["grant_type"] or "password",
         }
-    )
-    url = PAYAM_SMS["token_url"] + "?" + query
-    headers = {}
+    ).encode("ascii")
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
     if PAYAM_SMS["root_access_token"].strip():
         headers["Authorization"] = "Basic " + PAYAM_SMS["root_access_token"].strip()
 
-    status, parsed, raw = http_json("POST", url, None, headers, timeout)
+    request = urllib.request.Request(
+        PAYAM_SMS["token_url"], data=form_body, method="POST", headers=headers
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = response.status
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        exc.read()
+        raise RuntimeError(f"PayamSMS token HTTP {exc.code}") from exc
     if status < 200 or status >= 300:
-        raise RuntimeError(f"PayamSMS token HTTP {status}: {raw.strip()}")
-    token = (parsed or {}).get("access_token", "")
+        raise RuntimeError(f"PayamSMS token HTTP {status}")
+    try:
+        parsed = json.loads(raw) if raw.strip() else None
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("PayamSMS token response was not valid JSON") from exc
+    token = parsed.get("access_token", "") if isinstance(parsed, dict) else ""
     if not token:
         raise RuntimeError("PayamSMS token response did not contain access_token")
     return token
@@ -594,26 +676,27 @@ def build_candidates(
         row_id = col(row, args.row_id_col) or str(row_number)
         recipient = col(row, args.recipient_col)
         sender = (args.sender or col(row, args.sender_col)).strip()
-        if not recipient:
+        if not re.fullmatch(r"\+?[0-9]{7,16}", recipient):
             LOGGER.warning(
-                "matching row has empty recipient row_number=%s row_id=%s columns=%d text_col=%d sender_col=%d recipient_col=%d first_columns=%s",
+                "skipping matching row with invalid recipient row_number=%s columns=%d",
                 row_number,
-                row_id,
                 len(row),
-                args.text_col,
-                args.sender_col,
-                args.recipient_col,
-                row[: min(len(row), 8)],
             )
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9+_-]{2,32}", sender):
+            LOGGER.warning(
+                "skipping matching row with invalid sender row_number=%s",
+                row_number,
+            )
+            continue
         key = row_key(row_id, recipient, corrected_text)
-        if key in sent_keys:
+        if key in sent_keys or legacy_row_key(row_id, recipient, corrected_text) in sent_keys:
             skipped_sent_count += 1
             continue
         if len(candidates) >= selection_limit:
             continue
         candidate = {
             "row_number": row_number,
-            "row_id": row_id,
             "row_key": key,
             "sender": sender,
             "recipient": recipient,
@@ -623,13 +706,12 @@ def build_candidates(
         }
         candidates.append(candidate)
         LOGGER.info(
-            "selected row_number=%s row_id=%s recipient=%s sender=%s changed=%s message=%s",
+            "selected row_number=%s recipient=%s changed=%s message_sha256=%s message_length=%d",
             row_number,
-            row_id,
-            recipient,
-            sender,
+            masked_phone(recipient),
             candidate["changed"],
-            corrected_text,
+            message_metadata(corrected_text)["message_sha256"],
+            len(corrected_text),
         )
     LOGGER.info(
         "matched rows=%d skipped_already_sent=%d eligible_non_sent=%d limit=%d",
@@ -649,13 +731,32 @@ def validate_send_config() -> None:
     ]
     if missing:
         raise SystemExit(
-            "Fill PAYAM_SMS hardcoded secrets before --send. Missing: "
+            "Set required PAYAM_SMS_* environment variables before --send. Missing: "
             + ", ".join(missing)
         )
+    for key in ("token_url", "send_url"):
+        try:
+            parsed = urllib.parse.urlparse(PAYAM_SMS[key])
+            port = parsed.port
+        except ValueError as exc:
+            raise SystemExit(f"PAYAM_SMS {key} is invalid") from exc
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+            or (port is not None and not 1 <= port <= 65535)
+        ):
+            raise SystemExit(
+                f"PAYAM_SMS {key} must be an absolute HTTPS URL without userinfo, query, or fragment"
+            )
 
 
 def main() -> int:
     args = parse_args()
+    os.umask(0o077)
     setup_logging(args.log_file, args.log_level)
     if args.limit < 0:
         raise SystemExit("--limit must be >= 0")
@@ -663,8 +764,16 @@ def main() -> int:
         raise SystemExit("--test-row must be >= 1")
     if args.send_date_delay_seconds < 0:
         raise SystemExit("--send-date-delay-seconds must be >= 0")
+    if args.timeout <= 0:
+        raise SystemExit("--timeout must be greater than zero")
+    if args.test_phone and not re.fullmatch(r"\+?[0-9]{7,16}", args.test_phone.strip()):
+        raise SystemExit("--test-phone must contain 7 to 16 digits with an optional leading +")
 
     input_path = Path(args.input_path)
+    if not input_path.is_file():
+        raise SystemExit(f"Input file does not exist or is not regular: {input_path}")
+    if input_path.stat().st_size > MAX_INPUT_BYTES:
+        raise SystemExit("Input file exceeds the 512 MiB safety limit")
     if args.list_sheets:
         if input_path.suffix.lower() != ".xlsx":
             raise SystemExit("--list-sheets only works with .xlsx files")
@@ -693,19 +802,17 @@ def main() -> int:
             )
         original = candidates[args.test_row - 1]
         test_item = dict(original)
-        test_item["original_recipient"] = original["recipient"]
         test_item["recipient"] = args.test_phone.strip()
         test_item["row_key"] = "test|" + row_key(
-            original["row_id"], test_item["recipient"], test_item["corrected_text"]
+            original["row_key"], test_item["recipient"], test_item["corrected_text"]
         )
         candidates = [test_item]
         LOGGER.info(
-            "test-phone mode selected source_row_number=%s row_id=%s original_recipient=%s test_recipient=%s message=%s",
+            "test-phone mode selected source_row_number=%s original_recipient=%s test_recipient=%s message_sha256=%s",
             original["row_number"],
-            original["row_id"],
-            original["recipient"],
-            test_item["recipient"],
-            test_item["corrected_text"],
+            masked_phone(original["recipient"]),
+            masked_phone(test_item["recipient"]),
+            message_metadata(test_item["corrected_text"])["message_sha256"],
         )
 
     print(
@@ -725,14 +832,25 @@ def main() -> int:
     if not args.send:
         for item in candidates:
             LOGGER.info(
-                "dry-run row_number=%s row_id=%s recipient=%s sender=%s message=%s",
+                "dry-run row_number=%s recipient=%s changed=%s message_sha256=%s message_length=%d",
                 item["row_number"],
-                item["row_id"],
-                item["recipient"],
-                item["sender"],
-                item["corrected_text"],
+                masked_phone(item["recipient"]),
+                item["changed"],
+                message_metadata(item["corrected_text"])["message_sha256"],
+                len(item["corrected_text"]),
             )
-            print(json.dumps(item, ensure_ascii=False))
+            print(
+                json.dumps(
+                    {
+                        "row_number": item["row_number"],
+                        "row_key": item["row_key"],
+                        "recipient": masked_phone(item["recipient"]),
+                        "changed": item["changed"],
+                        **message_metadata(item["corrected_text"]),
+                    },
+                    ensure_ascii=False,
+                )
+            )
         LOGGER.info("dry-run complete selected_rows=%d", len(candidates))
         return 0
 
@@ -747,18 +865,20 @@ def main() -> int:
             "attempted_at": datetime.now(timezone.utc)
             .isoformat(timespec="seconds")
             .replace("+00:00", "Z"),
-            **item,
+            "row_number": item["row_number"],
+            "row_key": item["row_key"],
+            "recipient": masked_phone(item["recipient"]),
+            "changed": item["changed"],
+            **message_metadata(item["corrected_text"]),
         }
         try:
             LOGGER.info(
-                "sending row_number=%s row_id=%s recipient=%s sender=%s message=%s",
+                "sending row_number=%s recipient=%s message_sha256=%s",
                 item["row_number"],
-                item["row_id"],
-                item["recipient"],
-                item["sender"],
-                item["corrected_text"],
+                masked_phone(item["recipient"]),
+                message_metadata(item["corrected_text"])["message_sha256"],
             )
-            ok, status, parsed, raw, send_date = send_sms(
+            ok, status, _parsed, raw, send_date = send_sms(
                 token=token,
                 sender=item["sender"],
                 recipient=item["recipient"],
@@ -771,8 +891,7 @@ def main() -> int:
                 {
                     "ok": ok,
                     "http_status": status,
-                    "response": parsed,
-                    "raw_response": raw,
+                    "provider_response_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                     "payamsms_send_date": send_date,
                     "payamsms_send_date_timezone": "Asia/Tehran",
                     "payamsms_send_date_delay_seconds": args.send_date_delay_seconds,
@@ -781,42 +900,35 @@ def main() -> int:
             if not ok:
                 exit_code = 1
                 LOGGER.error(
-                    "send failed row_number=%s row_id=%s recipient=%s send_date_tehran=%s http_status=%s response=%s",
+                    "send failed row_number=%s recipient=%s send_date_tehran=%s http_status=%s",
                     item["row_number"],
-                    item["row_id"],
-                    item["recipient"],
+                    masked_phone(item["recipient"]),
                     send_date,
                     status,
-                    parsed if parsed is not None else raw,
                 )
             else:
                 LOGGER.info(
-                    "send succeeded row_number=%s row_id=%s recipient=%s send_date_tehran=%s http_status=%s response=%s",
+                    "send succeeded row_number=%s recipient=%s send_date_tehran=%s http_status=%s",
                     item["row_number"],
-                    item["row_id"],
-                    item["recipient"],
+                    masked_phone(item["recipient"]),
                     send_date,
                     status,
-                    parsed if parsed is not None else raw,
                 )
         except Exception as exc:
-            attempt.update({"ok": False, "error": str(exc)})
+            attempt.update({"ok": False, "error_type": type(exc).__name__})
             LOGGER.exception(
-                "send exception row_number=%s row_id=%s recipient=%s",
+                "send exception row_number=%s recipient=%s",
                 item["row_number"],
-                item["row_id"],
-                item["recipient"],
+                masked_phone(item["recipient"]),
             )
             exit_code = 1
         if args.test_phone:
             attempt["test_phone_mode"] = True
             LOGGER.info(
-                "test-phone mode: not recording this attempt in sent-state log row_id=%s recipient=%s",
-                item["row_id"],
-                item["recipient"],
+                "test-phone mode: recording audit without marking original row recipient=%s",
+                masked_phone(item["recipient"]),
             )
-        else:
-            append_attempt(sent_log, attempt)
+        append_attempt(sent_log, attempt)
         print(json.dumps(attempt, ensure_ascii=False))
         time.sleep(SEND_DELAY_SECONDS)
 
