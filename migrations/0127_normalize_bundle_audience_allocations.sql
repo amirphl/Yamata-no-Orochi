@@ -46,6 +46,24 @@ ALTER TABLE bundle_audience_selections
     ADD COLUMN IF NOT EXISTS campaign_id INTEGER REFERENCES campaigns(id),
     ADD COLUMN IF NOT EXISTS audience_count BIGINT NOT NULL DEFAULT 0;
 
+-- Older schedulers could persist more than one processed row when a campaign
+-- was retried. Keep those rows (and the delivery/status history that references
+-- them), but identify the newest row using the same id-descending rule as the
+-- application repository. New inserts default to the current row.
+ALTER TABLE processed_campaigns
+    ADD COLUMN IF NOT EXISTS is_current BOOLEAN NOT NULL DEFAULT TRUE;
+
+WITH ranked_processed AS (
+    SELECT id,
+           ROW_NUMBER() OVER (PARTITION BY campaign_id ORDER BY id DESC) AS position
+    FROM processed_campaigns
+)
+UPDATE processed_campaigns AS processed
+SET is_current = (ranked.position = 1)
+FROM ranked_processed AS ranked
+WHERE processed.id = ranked.id
+  AND processed.is_current IS DISTINCT FROM (ranked.position = 1);
+
 DO $$
 BEGIN
     IF EXISTS (
@@ -63,7 +81,34 @@ UPDATE bundle_audience_selections AS selection
 SET campaign_id = processed.campaign_id
 FROM processed_campaigns AS processed
 WHERE processed.bundle_audience_selection_id = selection.id
+  AND processed.is_current
   AND selection.campaign_id IS NULL;
+
+-- A retried legacy campaign can reference several immutable snapshots. Retain
+-- every snapshot and its processed-campaign reference, but reserve campaign_id
+-- for the canonical/current allocation so future retries are idempotent.
+WITH ranked_selections AS (
+    SELECT selection.id,
+           ROW_NUMBER() OVER (
+               PARTITION BY selection.campaign_id
+               ORDER BY
+                   EXISTS (
+                       SELECT 1
+                       FROM processed_campaigns AS processed
+                       WHERE processed.bundle_audience_selection_id = selection.id
+                         AND processed.is_current
+                   ) DESC,
+                   selection.created_at DESC,
+                   selection.id DESC
+           ) AS position
+    FROM bundle_audience_selections AS selection
+    WHERE selection.campaign_id IS NOT NULL
+)
+UPDATE bundle_audience_selections AS selection
+SET campaign_id = NULL
+FROM ranked_selections AS ranked
+WHERE selection.id = ranked.id
+  AND ranked.position > 1;
 
 DO $$
 BEGIN
@@ -93,23 +138,6 @@ BEGIN
         ALTER TABLE bundle_audience_selections
             ADD CONSTRAINT bundle_audience_selection_count_nonnegative
             CHECK (audience_count >= 0) NOT VALID;
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conrelid = 'bundle_audience_selections'::regclass
-          AND conname = 'bundle_audience_selection_campaign_required'
-    ) AND NOT (
-        SELECT attnotnull
-        FROM pg_attribute
-        WHERE attrelid = 'bundle_audience_selections'::regclass
-          AND attname = 'campaign_id'
-          AND NOT attisdropped
-    ) THEN
-        -- Retain any orphaned legacy snapshots for audit, while preventing new
-        -- allocations without an idempotency identity.
-        ALTER TABLE bundle_audience_selections
-            ADD CONSTRAINT bundle_audience_selection_campaign_required
-            CHECK (campaign_id IS NOT NULL) NOT VALID;
     END IF;
 END $$;
 
@@ -203,17 +231,41 @@ BEGIN
     END IF;
 END $$;
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conrelid = 'bundle_audience_selections'::regclass
+          AND conname = 'bundle_audience_selection_campaign_required'
+    ) AND NOT (
+        SELECT attnotnull
+        FROM pg_attribute
+        WHERE attrelid = 'bundle_audience_selections'::regclass
+          AND attname = 'campaign_id'
+          AND NOT attisdropped
+    ) THEN
+        -- Retain orphaned and superseded legacy snapshots for audit, while
+        -- preventing new allocations without an idempotency identity. Add this
+        -- only after the legacy rows have received their normalized counts;
+        -- NOT VALID constraints still apply to subsequent row updates.
+        ALTER TABLE bundle_audience_selections
+            ADD CONSTRAINT bundle_audience_selection_campaign_required
+            CHECK (campaign_id IS NOT NULL) NOT VALID;
+    END IF;
+END $$;
+
 ALTER TABLE bundle_audience_selections
     ALTER COLUMN audience_count DROP DEFAULT;
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_processed_campaigns_campaign_id
-    ON processed_campaigns (campaign_id);
+    ON processed_campaigns (campaign_id)
+    WHERE is_current;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_sent_bale_messages_processed_tracking
     ON sent_bale_messages (processed_campaign_id, tracking_id);
--- The unique campaign checkpoint index subsumes the earlier normal and
--- materialized-only lookups.
+-- The partial unique campaign checkpoint index subsumes only the earlier
+-- materialized-current lookup. Keep the normal campaign index because legacy
+-- non-current rows remain queryable for delivery and status history.
 DROP INDEX IF EXISTS idx_processed_campaigns_capacity_reservation_materialized;
-DROP INDEX IF EXISTS idx_processed_campaigns_campaign_id;
 -- The composite unique index has the same processed-campaign prefix.
 DROP INDEX IF EXISTS idx_sent_bale_messages_processed_campaign_id;
 
