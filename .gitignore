@@ -219,6 +219,19 @@ tramp
 deployment-history/
 rollback/
 
+# Local review, security-scan, and deployment-input artifacts
+/.codex
+/__debug_bin*
+/dast-reports/
+/backup code sentry
+/Jazebeh QA pouria.xlsx
+/SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT
+/SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT
+/rubicafunctions.R
+/tags.sql
+/remaining.md
+/zap.md
+
 # Security scanning results
 trivy-results.json
 security-scan.json
