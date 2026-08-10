@@ -1,5 +1,11 @@
 BEGIN;
 
+-- Superseded legacy snapshots intentionally retain a NULL campaign_id. Remove
+-- the new-write guard before updating those rows to reconstruct audience_ids;
+-- NOT VALID constraints still apply to row updates.
+ALTER TABLE bundle_audience_selections
+    DROP CONSTRAINT IF EXISTS bundle_audience_selection_campaign_required;
+
 ALTER TABLE bundle_audience_selections
     ADD COLUMN IF NOT EXISTS audience_ids BIGINT[] NOT NULL DEFAULT '{}';
 
@@ -26,8 +32,10 @@ DROP TABLE IF EXISTS bundle_audience_selection_members;
 DROP INDEX IF EXISTS uk_bundle_aud_sel_campaign;
 DROP INDEX IF EXISTS uk_bundle_aud_sel_id_bundle;
 
+ALTER TABLE processed_campaigns
+    DROP COLUMN IF EXISTS is_current;
+
 ALTER TABLE bundle_audience_selections
-    DROP CONSTRAINT IF EXISTS bundle_audience_selection_campaign_required,
     DROP CONSTRAINT IF EXISTS bundle_audience_selection_count_nonnegative,
     DROP CONSTRAINT IF EXISTS bundle_audience_selections_campaign_id_fkey,
     DROP CONSTRAINT IF EXISTS bundle_audience_selections_customer_id_fkey,
