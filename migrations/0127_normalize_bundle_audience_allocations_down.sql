@@ -34,6 +34,8 @@ DROP INDEX IF EXISTS uk_bundle_aud_sel_id_bundle;
 
 ALTER TABLE processed_campaigns
     DROP COLUMN IF EXISTS is_current;
+ALTER TABLE sent_bale_messages
+    DROP COLUMN IF EXISTS is_current;
 
 ALTER TABLE bundle_audience_selections
     DROP CONSTRAINT IF EXISTS bundle_audience_selection_count_nonnegative,
