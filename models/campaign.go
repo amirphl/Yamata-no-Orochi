@@ -9,6 +9,7 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -252,6 +253,19 @@ type Campaign struct {
 
 	// Number of targeted audiences
 	NumAudience *uint64 `gorm:"type:bigint" json:"num_audience,omitempty"`
+
+	// SampleSizePerTag is required only for Smart Targeting Test campaigns.
+	// NumAudience is a derived compatibility snapshot for that combination;
+	// pricing and runtime selection derive their authoritative counts from the
+	// persisted satisfied-tag intent below.
+	SampleSizePerTag *uint64 `gorm:"type:bigint" json:"sample_size_per_tag,omitempty"`
+	// SmartTargetingTestSatisfiedTagIDs stores preview results in the user's
+	// selection order. It never stores provisionally sampled audience IDs.
+	SmartTargetingTestSatisfiedTagIDs pq.Int64Array `gorm:"type:integer[];not null;default:'{}'" json:"smart_targeting_test_satisfied_tag_ids,omitempty"`
+	// SmartTargetingTestSamplingInputHash invalidates the preview when the
+	// ordered tags, Bundle, sample size, or score classes change.
+	SmartTargetingTestSamplingInputHash   *string    `gorm:"type:char(64)" json:"-"`
+	SmartTargetingTestSamplingPreviewedAt *time.Time `json:"smart_targeting_test_sampling_previewed_at,omitempty"`
 
 	BundleID *uint         `gorm:"index:idx_campaigns_bundle_id" json:"bundle_id,omitempty"`
 	Phase    CampaignPhase `gorm:"type:campaign_phase;not null;default:'execution'" json:"phase"`
