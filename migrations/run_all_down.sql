@@ -5,6 +5,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0128_smart_targeting_phase_preparation_down.sql...'
+\i migrations/0128_smart_targeting_phase_preparation_down.sql
+
 \echo 'Running 0127_normalize_bundle_audience_allocations_down.sql...'
 \i migrations/0127_normalize_bundle_audience_allocations_down.sql
 
