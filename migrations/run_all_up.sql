@@ -392,5 +392,8 @@
 \echo 'Running 0127_normalize_bundle_audience_allocations.sql...'
 \i migrations/0127_normalize_bundle_audience_allocations.sql
 
+\echo 'Running 0128_smart_targeting_phase_preparation.sql...'
+\i migrations/0128_smart_targeting_phase_preparation.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
