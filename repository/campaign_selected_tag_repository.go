@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
@@ -17,6 +18,23 @@ var ErrCampaignSelectedTagsNotEditable = errors.New("campaign selected tags cann
 
 type CampaignSelectedTagRepositoryImpl struct {
 	db *gorm.DB
+}
+
+type campaignSelectedTagSnapshot struct {
+	TagID          uint
+	DisplayTitle   *string
+	AudienceCount  *int64
+	BundleFitScore *float64
+}
+
+func invalidateCampaignSmartTargetingTestPreview(db *gorm.DB, campaignID uint) error {
+	return db.Model(&models.Campaign{}).Where("id = ?", campaignID).Updates(map[string]any{
+		"smart_targeting_test_satisfied_tag_ids":     gorm.Expr("ARRAY[]::integer[]"),
+		"smart_targeting_test_sampling_input_hash":   nil,
+		"smart_targeting_test_sampling_previewed_at": nil,
+		"num_audience": uint64(0),
+		"updated_at":   utils.UTCNow(),
+	}).Error
 }
 
 func NewCampaignSelectedTagRepository(db *gorm.DB) CampaignSelectedTagRepository {
@@ -187,8 +205,12 @@ func (r *CampaignSelectedTagRepositoryImpl) ListAvailableTagIDs(ctx context.Cont
 
 func (r *CampaignSelectedTagRepositoryImpl) ListSelected(ctx context.Context, campaignID uint) ([]*models.CampaignSelectedTag, error) {
 	rows := make([]*models.CampaignSelectedTag, 0)
-	err := r.getDB(ctx).Where("campaign_id = ?", campaignID).Order("tag_id ASC").Find(&rows).Error
+	err := orderedCampaignSelectedTagsQuery(r.getDB(ctx), campaignID).Find(&rows).Error
 	return rows, err
+}
+
+func orderedCampaignSelectedTagsQuery(db *gorm.DB, campaignID uint) *gorm.DB {
+	return db.Where("campaign_id = ?", campaignID).Order("selection_order ASC, id ASC")
 }
 
 func (r *CampaignSelectedTagRepositoryImpl) Summary(ctx context.Context, campaignID uint) (*models.CampaignSelectedTagSummary, error) {
@@ -236,13 +258,7 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 		return ErrCampaignSelectedTagsNotEditable
 	}
 
-	type snapshot struct {
-		TagID          uint
-		DisplayTitle   *string
-		AudienceCount  *int64
-		BundleFitScore *float64
-	}
-	snapshots := make([]snapshot, 0, len(tagIDs))
+	snapshots := make([]campaignSelectedTagSnapshot, 0, len(tagIDs))
 	if len(tagIDs) > 0 {
 		err := availableSmartTagsQuery(db, bundleID).
 			Select(`available_tags.tag_id,
@@ -264,6 +280,16 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 			}
 		}
 	}
+	current, err := r.ListSelected(ctx, campaignID)
+	if err != nil {
+		return err
+	}
+	if sameOrderedCampaignSelectedTags(current, tagIDs) {
+		return nil
+	}
+	if err := invalidateCampaignSmartTargetingTestPreview(db, campaignID); err != nil {
+		return err
+	}
 
 	if err := db.Where("campaign_id = ?", campaignID).Delete(&models.CampaignSelectedTag{}).Error; err != nil {
 		return err
@@ -272,11 +298,47 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 		return nil
 	}
 
-	now := utils.UTCNow()
-	rows := make([]*models.CampaignSelectedTag, 0, len(snapshots))
+	rows, err := buildCampaignSelectedTagRows(campaignID, bundleID, selectedByCustomerID, tagIDs, snapshots, utils.UTCNow())
+	if err != nil {
+		return err
+	}
+	return db.CreateInBatches(rows, 500).Error
+}
+
+func sameOrderedCampaignSelectedTags(current []*models.CampaignSelectedTag, tagIDs []uint) bool {
+	if len(current) != len(tagIDs) {
+		return false
+	}
+	for position, row := range current {
+		if row == nil || row.TagID != tagIDs[position] || row.SelectionOrder != position {
+			return false
+		}
+	}
+	return true
+}
+
+// buildCampaignSelectedTagRows joins unordered database snapshots back to the
+// exact caller-supplied tag order. Snapshot queries use IN predicates and must
+// never be trusted to retain request order.
+func buildCampaignSelectedTagRows(
+	campaignID, bundleID, selectedByCustomerID uint,
+	tagIDs []uint,
+	snapshots []campaignSelectedTagSnapshot,
+	now time.Time,
+) ([]*models.CampaignSelectedTag, error) {
+	snapshotByTag := make(map[uint]campaignSelectedTagSnapshot, len(snapshots))
 	for _, item := range snapshots {
+		snapshotByTag[item.TagID] = item
+	}
+	rows := make([]*models.CampaignSelectedTag, 0, len(snapshots))
+	for position, tagID := range tagIDs {
+		item, ok := snapshotByTag[tagID]
+		if !ok {
+			return nil, ErrInvalidCampaignSelectedTags
+		}
 		rows = append(rows, &models.CampaignSelectedTag{
 			CampaignID: campaignID, BundleID: bundleID, TagID: item.TagID,
+			SelectionOrder:                position,
 			BundlePersonaFitScoreSnapshot: item.BundleFitScore,
 			TagDisplayTitleSnapshot:       item.DisplayTitle,
 			TagAudienceCountSnapshot:      item.AudienceCount,
@@ -288,9 +350,13 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 			CreatedAt:               now, UpdatedAt: now,
 		})
 	}
-	return db.CreateInBatches(rows, 500).Error
+	return rows, nil
 }
 
 func (r *CampaignSelectedTagRepositoryImpl) Clear(ctx context.Context, campaignID uint) error {
-	return r.getDB(ctx).Where("campaign_id = ?", campaignID).Delete(&models.CampaignSelectedTag{}).Error
+	db := r.getDB(ctx)
+	if err := db.Where("campaign_id = ?", campaignID).Delete(&models.CampaignSelectedTag{}).Error; err != nil {
+		return err
+	}
+	return invalidateCampaignSmartTargetingTestPreview(db, campaignID)
 }
