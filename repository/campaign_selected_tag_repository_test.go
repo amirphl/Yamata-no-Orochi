@@ -1,9 +1,13 @@
 package repository
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/models"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
@@ -79,5 +83,74 @@ func TestAvailableSmartTagsQueryPrefersScoreSnapshotWithCatalogFallback(t *testi
 		if variable != uint(42) {
 			t.Fatalf("bundle bind %d = %#v, want 42", i, variable)
 		}
+	}
+}
+
+func TestBuildCampaignSelectedTagRowsPreservesRequestOrder(t *testing.T) {
+	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	snapshots := []campaignSelectedTagSnapshot{
+		{TagID: 2},
+		{TagID: 5},
+		{TagID: 9},
+	}
+
+	rows, err := buildCampaignSelectedTagRows(17, 3, 7, []uint{9, 2, 5}, snapshots, now)
+	if err != nil {
+		t.Fatalf("build selected-tag rows: %v", err)
+	}
+	gotIDs := make([]uint, 0, len(rows))
+	gotPositions := make([]int, 0, len(rows))
+	for _, row := range rows {
+		gotIDs = append(gotIDs, row.TagID)
+		gotPositions = append(gotPositions, row.SelectionOrder)
+	}
+	if want := []uint{9, 2, 5}; !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("persisted tag IDs = %v, want %v", gotIDs, want)
+	}
+	if want := []int{0, 1, 2}; !reflect.DeepEqual(gotPositions, want) {
+		t.Fatalf("selection positions = %v, want %v", gotPositions, want)
+	}
+
+	if _, err := buildCampaignSelectedTagRows(17, 3, 7, []uint{9, 4}, snapshots, now); !errors.Is(err, ErrInvalidCampaignSelectedTags) {
+		t.Fatalf("missing snapshot error = %v, want ErrInvalidCampaignSelectedTags", err)
+	}
+}
+
+func TestOrderedCampaignSelectedTagsQueryUsesPersistedOrder(t *testing.T) {
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN: "host=localhost user=test dbname=test sslmode=disable",
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("open dry-run database: %v", err)
+	}
+
+	var rows []*models.CampaignSelectedTag
+	statement := orderedCampaignSelectedTagsQuery(db, 17).Find(&rows).Statement
+	if statement.Error != nil {
+		t.Fatalf("build ordered selected-tag query: %v", statement.Error)
+	}
+	if sql := statement.SQL.String(); !strings.Contains(sql, "ORDER BY selection_order ASC, id ASC") {
+		t.Fatalf("selected-tag query does not preserve persisted order:\n%s", sql)
+	}
+}
+
+func TestSameOrderedCampaignSelectedTags(t *testing.T) {
+	current := []*models.CampaignSelectedTag{
+		{TagID: 9, SelectionOrder: 0},
+		{TagID: 2, SelectionOrder: 1},
+		{TagID: 5, SelectionOrder: 2},
+	}
+	if !sameOrderedCampaignSelectedTags(current, []uint{9, 2, 5}) {
+		t.Fatal("identical ordered selection must be treated as unchanged")
+	}
+	if sameOrderedCampaignSelectedTags(current, []uint{2, 9, 5}) {
+		t.Fatal("reordered selection must be treated as changed")
+	}
+	if sameOrderedCampaignSelectedTags(current, []uint{9, 2}) {
+		t.Fatal("shorter selection must be treated as changed")
+	}
+	current[1].SelectionOrder = 7
+	if sameOrderedCampaignSelectedTags(current, []uint{9, 2, 5}) {
+		t.Fatal("invalid persisted positions must not bypass replacement")
 	}
 }
