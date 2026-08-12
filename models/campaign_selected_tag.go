@@ -7,9 +7,10 @@ import "time"
 // complete set in one transaction.
 type CampaignSelectedTag struct {
 	ID                            uint64   `gorm:"primaryKey" json:"id"`
-	CampaignID                    uint     `gorm:"not null;uniqueIndex:uk_campaign_selected_tags_campaign_tag,priority:1;index:idx_campaign_selected_tags_campaign" json:"campaign_id"`
+	CampaignID                    uint     `gorm:"not null;uniqueIndex:uk_campaign_selected_tags_campaign_tag,priority:1;uniqueIndex:uk_campaign_selected_tags_campaign_order,priority:1;index:idx_campaign_selected_tags_campaign" json:"campaign_id"`
 	BundleID                      uint     `gorm:"not null;index:idx_campaign_selected_tags_bundle_tag,priority:1" json:"bundle_id"`
 	TagID                         uint     `gorm:"not null;uniqueIndex:uk_campaign_selected_tags_campaign_tag,priority:2;index:idx_campaign_selected_tags_bundle_tag,priority:2" json:"tag_id"`
+	SelectionOrder                int      `gorm:"not null;check:campaign_selected_tags_selection_order_nonnegative,selection_order >= 0;uniqueIndex:uk_campaign_selected_tags_campaign_order,priority:2" json:"selection_order"`
 	BundlePersonaFitScoreSnapshot *float64 `gorm:"type:numeric(5,2)" json:"bundle_persona_fit_score_snapshot"`
 	TagDisplayTitleSnapshot       *string  `gorm:"type:text" json:"tag_display_title_snapshot"`
 	TagAudienceCountSnapshot      *int64   `gorm:"type:bigint" json:"tag_audience_count_snapshot"`
