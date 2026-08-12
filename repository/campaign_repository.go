@@ -31,7 +31,9 @@ func NewCampaignRepository(db *gorm.DB) CampaignRepository {
 const statisticsWithoutTrackingResults = "campaigns.id, campaigns.uuid, campaigns.customer_id, campaigns.hidden, campaigns.status, " +
 	"campaigns.created_at, campaigns.updated_at, campaigns.spec, campaigns.comment, " +
 	"(campaigns.statistics - 'trackingResults') AS statistics, campaigns.num_audience, " +
-	"campaigns.bundle_id, campaigns.phase"
+	"campaigns.bundle_id, campaigns.phase, campaigns.sample_size_per_tag, " +
+	"campaigns.smart_targeting_test_satisfied_tag_ids, campaigns.smart_targeting_test_sampling_input_hash, " +
+	"campaigns.smart_targeting_test_sampling_previewed_at"
 
 // ByID retrieves an campaign by ID
 func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Campaign, error) {
