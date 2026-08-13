@@ -170,6 +170,7 @@ func (r *BaleStatusResultRepositoryImpl) TrackingResultsByCampaign(ctx context.C
 				FROM sent_bale_messages AS sbm
 				WHERE sbm.processed_campaign_id = bsr.processed_campaign_id
 					AND sbm.tracking_id = bsr.tracking_id
+					AND sbm.is_current
 				ORDER BY sbm.id DESC
 				LIMIT 1
 			) AS sbm ON TRUE`).
