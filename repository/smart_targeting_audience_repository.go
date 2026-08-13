@@ -9,17 +9,20 @@ import (
 	"gorm.io/gorm"
 )
 
-// SmartTargetingAudienceQuery is platform-independent by design. Capacity
-// jobs count this population; schedulers select it only when execution starts.
+// SmartTargetingAudienceQuery is platform-independent by default. Capacity
+// jobs leave AllowedColors empty, while schedulers may apply platform-specific
+// delivery eligibility when selecting the final audience.
 type SmartTargetingAudienceQuery struct {
-	BundleID     uint
-	TagIDs       []int64
-	ScoreClasses []string
+	BundleID      uint
+	TagIDs        []int64
+	ScoreClasses  []string
+	AllowedColors []string
 }
 
 type SmartTargetingAudienceRepository interface {
 	CalculateCapacity(ctx context.Context, query SmartTargetingAudienceQuery) (*SmartTargetingAudienceCapacity, error)
 	SelectCandidates(ctx context.Context, query SmartTargetingAudienceQuery, limit int64) ([]*models.AudienceProfile, error)
+	SelectRandomForTag(ctx context.Context, query SmartTargetingAudienceQuery, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error)
 }
 
 type SmartTargetingAudienceCapacity struct {
@@ -42,11 +45,12 @@ func (r *smartTargetingAudienceRepository) getDB(ctx context.Context) *gorm.DB {
 
 const smartTargetingBasePopulationCTE = `
 WITH tagged_population AS (
-    SELECT ap.id, ap.uid, ap.phone_number, ap.normalized_score
+    SELECT ap.id, ap.uid, ap.phone_number, ap.tags, ap.normalized_score
     FROM audience_profiles AS ap
     WHERE ap.tags && ?::integer[]
       AND ap.phone_number IS NOT NULL
       AND BTRIM(ap.phone_number) <> ''
+      AND (?::boolean OR ap.color = ANY(?::text[]))
 ), candidate_population AS (
     SELECT tagged.*
     FROM tagged_population AS tagged
@@ -81,6 +85,19 @@ func smartTargetingAllClasses(classes []string) bool {
 	return len(classes) == 3 && classes[0] == "A" && classes[1] == "B" && classes[2] == "C"
 }
 
+func smartTargetingPopulationArgs(query SmartTargetingAudienceQuery) []any {
+	colors := query.AllowedColors
+	if colors == nil {
+		colors = []string{}
+	}
+	return []any{
+		pq.Array(query.TagIDs),
+		len(colors) == 0,
+		pq.Array(colors),
+		query.BundleID,
+	}
+}
+
 func (r *smartTargetingAudienceRepository) CalculateCapacity(ctx context.Context, query SmartTargetingAudienceQuery) (*SmartTargetingAudienceCapacity, error) {
 	if query.BundleID == 0 || len(query.TagIDs) == 0 || len(query.ScoreClasses) == 0 {
 		return nil, fmt.Errorf("invalid smart-targeting audience count query")
@@ -90,15 +107,16 @@ func (r *smartTargetingAudienceRepository) CalculateCapacity(ctx context.Context
 		sql := smartTargetingBasePopulationCTE + `
 SELECT (SELECT COUNT(*) FROM tagged_population) AS raw_unique_count,
        (SELECT COUNT(*) FROM candidate_population) AS eligible_unique_count`
-		err := r.getDB(ctx).Raw(sql, pq.Array(query.TagIDs), query.BundleID).Scan(&capacity).Error
+		err := r.getDB(ctx).Raw(sql, smartTargetingPopulationArgs(query)...).Scan(&capacity).Error
 		return &capacity, err
 	}
 	sql := smartTargetingPopulationCTE + `
 SELECT (SELECT COUNT(*) FROM tagged_population) AS raw_unique_count,
        COUNT(*) FILTER (WHERE (?::boolean OR score_class = ANY(?::text[]))) AS eligible_unique_count
 FROM classified`
-	err := r.getDB(ctx).Raw(sql, pq.Array(query.TagIDs), query.BundleID,
-		smartTargetingAllClasses(query.ScoreClasses), pq.Array(query.ScoreClasses)).Scan(&capacity).Error
+	args := append(smartTargetingPopulationArgs(query),
+		smartTargetingAllClasses(query.ScoreClasses), pq.Array(query.ScoreClasses))
+	err := r.getDB(ctx).Raw(sql, args...).Scan(&capacity).Error
 	return &capacity, err
 }
 
@@ -109,20 +127,60 @@ func (r *smartTargetingAudienceRepository) SelectCandidates(ctx context.Context,
 	var rows []*models.AudienceProfile
 	if smartTargetingAllClasses(query.ScoreClasses) {
 		sql := smartTargetingBasePopulationCTE + `
-SELECT id, uid, phone_number
+SELECT id, uid, phone_number, tags, normalized_score
 FROM candidate_population
-ORDER BY id DESC
+ORDER BY normalized_score DESC NULLS LAST, id ASC
 LIMIT ?`
-		err := r.getDB(ctx).Raw(sql, pq.Array(query.TagIDs), query.BundleID, limit).Scan(&rows).Error
+		args := append(smartTargetingPopulationArgs(query), limit)
+		err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error
 		return rows, err
 	}
 	sql := smartTargetingPopulationCTE + `
-SELECT id, uid, phone_number
+SELECT id, uid, phone_number, tags, normalized_score
 FROM classified
 WHERE (?::boolean OR score_class = ANY(?::text[]))
-ORDER BY id DESC
+ORDER BY normalized_score DESC NULLS LAST, id ASC
 LIMIT ?`
-	err := r.getDB(ctx).Raw(sql, pq.Array(query.TagIDs), query.BundleID,
-		smartTargetingAllClasses(query.ScoreClasses), pq.Array(query.ScoreClasses), limit).Scan(&rows).Error
+	args := append(smartTargetingPopulationArgs(query),
+		smartTargetingAllClasses(query.ScoreClasses), pq.Array(query.ScoreClasses), limit)
+	err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error
+	return rows, err
+}
+
+// SelectRandomForTag applies the same union-wide score classification used by
+// exact capacity, then samples only one tag. The exclusion list contains only
+// audiences allocated to earlier satisfied tags, so an insufficient tag does
+// not consume candidates needed by later tags.
+func (r *smartTargetingAudienceRepository) SelectRandomForTag(ctx context.Context, query SmartTargetingAudienceQuery, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error) {
+	if query.BundleID == 0 || len(query.TagIDs) == 0 || len(query.ScoreClasses) == 0 || tagID <= 0 || limit <= 0 {
+		return nil, fmt.Errorf("invalid smart-targeting per-tag sample query")
+	}
+	if excludeAudienceIDs == nil {
+		excludeAudienceIDs = []int64{}
+	}
+	var rows []*models.AudienceProfile
+	if smartTargetingAllClasses(query.ScoreClasses) {
+		sql := smartTargetingBasePopulationCTE + `
+SELECT id, uid, phone_number, tags, normalized_score
+FROM candidate_population
+WHERE ?::integer = ANY(tags)
+  AND NOT (id = ANY(?::bigint[]))
+ORDER BY RANDOM()
+LIMIT ?`
+		args := append(smartTargetingPopulationArgs(query), tagID, pq.Array(excludeAudienceIDs), limit)
+		err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error
+		return rows, err
+	}
+	sql := smartTargetingPopulationCTE + `
+SELECT id, uid, phone_number, tags, normalized_score
+FROM classified
+WHERE (?::boolean OR score_class = ANY(?::text[]))
+  AND ?::integer = ANY(tags)
+  AND NOT (id = ANY(?::bigint[]))
+ORDER BY RANDOM()
+LIMIT ?`
+	args := append(smartTargetingPopulationArgs(query),
+		smartTargetingAllClasses(query.ScoreClasses), pq.Array(query.ScoreClasses), tagID, pq.Array(excludeAudienceIDs), limit)
+	err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error
 	return rows, err
 }
