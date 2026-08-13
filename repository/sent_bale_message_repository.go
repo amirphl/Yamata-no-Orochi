@@ -32,8 +32,19 @@ func (r *SentBaleMessageRepositoryImpl) ByID(ctx context.Context, id uint) (*mod
 }
 
 func (r *SentBaleMessageRepositoryImpl) ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentBaleMessage, error) {
-	filter := models.SentBaleMessageFilter{ProcessedCampaignID: &processedCampaignID}
-	return r.ByFilter(ctx, filter, "id ASC", limit, offset)
+	db := r.getDB(ctx)
+	query := db.Where("processed_campaign_id = ? AND is_current", processedCampaignID).Order("id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	var rows []*models.SentBaleMessage
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
 }
 
 func (r *SentBaleMessageRepositoryImpl) ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentBaleMessage, error) {
@@ -59,7 +70,7 @@ func (r *SentBaleMessageRepositoryImpl) ListByTrackingIDs(ctx context.Context, p
 	db := r.getDB(ctx)
 	rows := make([]*models.SentBaleMessage, 0, len(trackingIDs))
 	if err := db.
-		Where("processed_campaign_id = ? AND tracking_id IN ?", processedCampaignID, normalizedTrackingIDs).
+		Where("processed_campaign_id = ? AND is_current AND tracking_id IN ?", processedCampaignID, normalizedTrackingIDs).
 		Order("id ASC").
 		Find(&rows).Error; err != nil {
 		return nil, err
@@ -88,17 +99,17 @@ func (r *SentBaleMessageRepositoryImpl) TrackingResultsFromSentRows(ctx context.
 			sbm.status,
 			sbm.server_id,
 			sbm.error_code,
-			sbm.description`).
+				sbm.description`).
 		Joins(`
 			INNER JOIN (
 				SELECT tracking_id, MAX(id) AS latest_id
 				FROM sent_bale_messages
-				WHERE processed_campaign_id = ?
+				WHERE processed_campaign_id = ? AND is_current
 				GROUP BY tracking_id
 			) AS latest
 				ON latest.latest_id = sbm.id`, processedCampaignID).
 		Joins(`LEFT JOIN audience_profiles AS ap ON sbm.phone_number <> '' AND ap.phone_number = sbm.phone_number`).
-		Where("sbm.processed_campaign_id = ?", processedCampaignID).
+		Where("sbm.processed_campaign_id = ? AND sbm.is_current", processedCampaignID).
 		Order("sbm.tracking_id ASC").
 		Scan(&rows).Error; err != nil {
 		return nil, err
@@ -150,6 +161,9 @@ func (r *SentBaleMessageRepositoryImpl) applyFilter(db *gorm.DB, f models.SentBa
 	}
 	if f.ProcessedCampaignID != nil {
 		db = db.Where("processed_campaign_id = ?", *f.ProcessedCampaignID)
+	}
+	if f.IsCurrent != nil {
+		db = db.Where("is_current = ?", *f.IsCurrent)
 	}
 	if f.PhoneNumber != nil {
 		db = db.Where("phone_number = ?", *f.PhoneNumber)
@@ -205,6 +219,7 @@ func (r *SentBaleMessageRepositoryImpl) Exists(ctx context.Context, filter model
 
 func (r *SentBaleMessageRepositoryImpl) UpdateSendResultByTrackingIDs(
 	ctx context.Context,
+	processedCampaignID uint,
 	updates []SentBaleSendResultUpdate,
 ) (err error) {
 	if len(updates) == 0 {
@@ -302,11 +317,10 @@ func (r *SentBaleMessageRepositoryImpl) UpdateSendResultByTrackingIDs(
 	for _, u := range normalized {
 		trackingIDs = append(trackingIDs, u.TrackingID)
 	}
-	args = append(args, trackingIDs, trackingIDs)
+	args = append(args, processedCampaignID, trackingIDs)
 
 	query := "UPDATE sent_bale_messages SET " + strings.Join(setClauses, ", ") +
-		" WHERE tracking_id IN ? AND id IN (" +
-		"SELECT MAX(id) FROM sent_bale_messages WHERE tracking_id IN ? GROUP BY tracking_id)"
+		" WHERE processed_campaign_id = ? AND is_current AND tracking_id IN ?"
 	err = db.Exec(query, args...).Error
 	return err
 }
