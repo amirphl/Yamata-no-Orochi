@@ -31,14 +31,16 @@ func (r *ProcessedCampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*m
 }
 
 func (r *ProcessedCampaignRepositoryImpl) ByCampaignID(ctx context.Context, campaignID uint) (*models.ProcessedCampaign, error) {
-	rows, err := r.ByFilter(ctx, models.ProcessedCampaignFilter{CampaignID: &campaignID}, "id DESC", 1, 0)
+	db := r.getDB(ctx)
+	var row models.ProcessedCampaign
+	err := db.Where("campaign_id = ? AND is_current", campaignID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return rows[0], nil
+	return &row, nil
 }
 
 func (r *ProcessedCampaignRepositoryImpl) applyFilter(db *gorm.DB, f models.ProcessedCampaignFilter) *gorm.DB {
@@ -47,6 +49,9 @@ func (r *ProcessedCampaignRepositoryImpl) applyFilter(db *gorm.DB, f models.Proc
 	}
 	if f.CampaignID != nil {
 		db = db.Where("campaign_id = ?", *f.CampaignID)
+	}
+	if f.IsCurrent != nil {
+		db = db.Where("is_current = ?", *f.IsCurrent)
 	}
 	if f.CreatedAfter != nil {
 		db = db.Where("created_at >= ?", *f.CreatedAfter)
@@ -141,7 +146,6 @@ func (r *ProcessedCampaignRepositoryImpl) UpdateMeta(ctx context.Context, pc *mo
 	updates := map[string]any{
 		"last_audience_id":             pc.LastAudienceID,
 		"statistics":                   pc.Statistics,
-		"audience_selection_id":        pc.AudienceSelectionID,
 		"bundle_audience_selection_id": pc.BundleAudienceSelectionID,
 		"updated_at":                   pc.UpdatedAt,
 	}
