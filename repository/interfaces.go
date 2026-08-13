@@ -416,7 +416,7 @@ type SentBaleMessageRepository interface {
 	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentBaleMessage, error)
 	ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentBaleMessage, error)
 	TrackingResultsFromSentRows(ctx context.Context, processedCampaignID uint) ([]BaleTrackingResult, error)
-	UpdateSendResultByTrackingIDs(ctx context.Context, updates []SentBaleSendResultUpdate) error
+	UpdateSendResultByTrackingIDs(ctx context.Context, processedCampaignID uint, updates []SentBaleSendResultUpdate) error
 }
 
 // SentSplusMessageRepository defines operations for sent Splus message rows.
