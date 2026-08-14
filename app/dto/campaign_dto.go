@@ -33,6 +33,8 @@ type CreateCampaignRequest struct {
 	BundleID *uint   `json:"bundle_id" validate:"required,min=1"`
 	Phase    *string `json:"phase" validate:"required,max=255"`
 
+	SampleSizePerTag *uint64 `json:"sample_size_per_tag,omitempty" validate:"omitempty,gt=0"`
+
 	AudienceGrades []string `json:"audience_grades,omitempty" validate:"omitempty,dive,oneof=A B C"`
 
 	TargetAudienceExcelFileUUID *string `json:"target_audience_excel_file_uuid,omitempty" validate:"omitempty,uuid4"`
@@ -75,6 +77,8 @@ type UpdateCampaignRequest struct {
 
 	BundleID *uint   `json:"bundle_id,omitempty" validate:"omitempty,min=1"`
 	Phase    *string `json:"phase,omitempty" validate:"omitempty,max=255"`
+
+	SampleSizePerTag *uint64 `json:"sample_size_per_tag,omitempty" validate:"omitempty,gt=0"`
 
 	AudienceGrades []string `json:"audience_grades,omitempty" validate:"omitempty,dive,oneof=A B C"`
 
@@ -173,6 +177,8 @@ type GetCampaignResponse struct {
 	BundleID    *uint   `json:"bundle_id,omitempty"`
 	BundleTitle *string `json:"bundle_title,omitempty"`
 	Phase       *string `json:"phase,omitempty"`
+
+	SampleSizePerTag *uint64 `json:"sample_size_per_tag,omitempty"`
 
 	AudienceGrades []string `json:"audience_grades"`
 
@@ -324,6 +330,7 @@ type AdminGetCampaignResponse struct {
 	TotalClicks           *int64         `json:"total_clicks,omitempty"`
 	ClickRate             *float64       `json:"click_rate,omitempty"`
 	NumAudience           *uint64        `json:"num_audience,omitempty"`
+	SampleSizePerTag      *uint64        `json:"sample_size_per_tag,omitempty"`
 	CustomerFullName      *string        `json:"customer_full_name,omitempty"`
 	AgencyFullName        *string        `json:"agency_full_name,omitempty"`
 
@@ -453,9 +460,12 @@ type BotGetCampaignResponse struct {
 	Budget             *uint64                          `json:"budget,omitempty" validate:"omitempty"`
 	Comment            *string                          `json:"comment,omitempty" validate:"omitempty"`
 	NumAudiences       *uint64                          `json:"num_audiences"`
+	SampleSizePerTag   *uint64                          `json:"sample_size_per_tag,omitempty"`
 
 	BundleID *uint   `json:"bundle_id,omitempty"`
 	Phase    *string `json:"phase,omitempty" validate:"omitempty"`
+
+	SmartTargetingTestSatisfiedTagIDs []uint `json:"smart_targeting_test_satisfied_tag_ids,omitempty"`
 
 	AudienceGrades []string `json:"audience_grades"`
 
@@ -479,6 +489,9 @@ type BotListCampaignsResponse struct {
 }
 
 type AudienceSpecItem struct {
+	Layer1Category    string   `json:"layer1_category"`
+	Layer2Category    string   `json:"layer2_category"`
+	Layer3Category    string   `json:"layer3_category"`
 	Tags              []string `json:"tags"`
 	AvailableAudience int      `json:"available_audience"`
 	DistinctUsers     int64    `json:"distinct_users"`
