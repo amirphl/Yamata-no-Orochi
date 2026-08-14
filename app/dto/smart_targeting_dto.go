@@ -113,3 +113,25 @@ type SmartTargetingCapacityCalculationResponse struct {
 	ErrorCode             *string    `json:"error_code,omitempty"`
 	ErrorMessage          *string    `json:"error_message,omitempty"`
 }
+
+type SmartTargetingTestSamplingPreviewRequest struct {
+	CustomerID   uint   `json:"-"`
+	CampaignUUID string `json:"-"`
+}
+
+type SmartTargetingTestSamplingTagResult struct {
+	TagID          uint  `json:"tag_id"`
+	SelectionOrder int   `json:"selection_order"`
+	Satisfied      bool  `json:"satisfied"`
+	AvailableCount int64 `json:"available_count"`
+}
+
+type SmartTargetingTestSamplingPreviewResponse struct {
+	SampleSizePerTag       uint64                                `json:"sample_size_per_tag"`
+	TagSamplingOrder       []uint                                `json:"tag_sampling_order"`
+	SatisfiedTags          []SmartTargetingTestSamplingTagResult `json:"satisfied_tags"`
+	UnsatisfiedTags        []SmartTargetingTestSamplingTagResult `json:"unsatisfied_tags"`
+	SatisfiedTagCount      int                                   `json:"satisfied_tag_count"`
+	EffectiveAudienceCount uint64                                `json:"effective_audience_count"`
+	CampaignCost           uint64                                `json:"campaign_cost"`
+}
