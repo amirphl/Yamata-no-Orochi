@@ -222,7 +222,6 @@ func selectedSmartTagIDs(ctx context.Context, selectionRepo repository.CampaignS
 			ids = append(ids, row.TagID)
 		}
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	if len(ids) == 0 {
 		return nil, ErrSmartTargetingTagsRequired
 	}
@@ -234,6 +233,14 @@ func tagIDsToInt64(ids []uint) pq.Int64Array {
 	for i, id := range ids {
 		result[i] = int64(id)
 	}
+	return result
+}
+
+// Exact-capacity snapshots describe a tag set, so their array representation
+// is canonical even though campaign selection and sampling retain user order.
+func canonicalSmartTargetingCapacityTagIDs(ids []uint) pq.Int64Array {
+	result := tagIDsToInt64(ids)
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
 	return result
 }
 
@@ -300,6 +307,7 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 				// source. Persisting the request here means later edits are visible
 				// to polling, cost, approval, and scheduler validity checks.
 				lockedCampaign.Spec.AudienceGrades = append([]string(nil), effectiveClasses...)
+				clearCampaignSmartTargetingTestSamplingPreviewFields(&lockedCampaign)
 				if err := f.campaignRepo.Update(txCtx, lockedCampaign); err != nil {
 					return err
 				}
@@ -351,7 +359,7 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 			CustomerID:            lockedCampaign.CustomerID,
 			Platform:              platform,
 			RequestedByCustomerID: req.CustomerID,
-			SelectedTagIDs:        tagIDsToInt64(ids),
+			SelectedTagIDs:        canonicalSmartTargetingCapacityTagIDs(ids),
 			SelectedTagsHash:      tagHash,
 			InputHash:             inputHash,
 			SelectedScoreClasses:  pq.StringArray(effectiveClasses),
@@ -365,6 +373,16 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 		}
 		if err := f.calculationRepo.Save(txCtx, calculation); err != nil {
 			return err
+		}
+		// A new exact-capacity generation means the population snapshot used by
+		// an earlier Test preview is no longer authoritative, even when the
+		// campaign's tags and score classes are unchanged. Require the caller to
+		// preview again before finalization; reusable/current generations above
+		// deliberately keep the existing preview intact.
+		if invalidateSmartTargetingTestPreviewForNewCapacityGeneration(&lockedCampaign) {
+			if err := f.campaignRepo.Update(txCtx, lockedCampaign); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -385,6 +403,14 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 	}
 	_ = metadata
 	return capacityDTO(calculation, reused, false), nil
+}
+
+func invalidateSmartTargetingTestPreviewForNewCapacityGeneration(campaign *models.Campaign) bool {
+	if campaign == nil || !campaign.IsEditable() || !campaign.Spec.UsesSmartTargeting() || campaign.Phase != models.CampaignPhaseTest {
+		return false
+	}
+	clearCampaignSmartTargetingTestSamplingPreviewFields(campaign)
+	return true
 }
 
 func (f *SmartTargetingCapacityFlowImpl) GetCurrent(ctx context.Context, customerID uint, campaignUUID string) (*dto.SmartTargetingCapacityCalculationResponse, error) {
