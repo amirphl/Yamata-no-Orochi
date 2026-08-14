@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"math"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -290,7 +289,7 @@ func (s *SmartTargetingFlowImpl) GetSelection(ctx context.Context, customerID ui
 }
 
 // normalizeSelectedTagIDs enforces the selection cardinality and ID invariants,
-// rejects duplicates, and returns a sorted copy without mutating caller input.
+// rejects duplicates, and returns a copy in the exact caller-supplied order.
 func normalizeSelectedTagIDs(ids []uint) ([]uint, error) {
 	if len(ids) == 0 {
 		return nil, ErrSmartTargetingTagsRequired
@@ -298,15 +297,16 @@ func normalizeSelectedTagIDs(ids []uint) ([]uint, error) {
 	if len(ids) > maxSmartTargetingSelections {
 		return nil, ErrSmartTargetingCountInvalid
 	}
-	normalized := slices.Clone(ids)
+	normalized := append([]uint(nil), ids...)
+	seen := make(map[uint]struct{}, len(normalized))
 	for _, id := range normalized {
 		if id == 0 {
 			return nil, ErrSmartTargetingTagInvalid
 		}
-	}
-	slices.Sort(normalized)
-	if len(slices.Compact(slices.Clone(normalized))) != len(normalized) {
-		return nil, ErrSmartTargetingTagInvalid
+		if _, exists := seen[id]; exists {
+			return nil, ErrSmartTargetingTagInvalid
+		}
+		seen[id] = struct{}{}
 	}
 	return normalized, nil
 }
