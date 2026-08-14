@@ -96,6 +96,12 @@ var (
 	ErrSmartTargetingScoreUnavailable           = errors.New("bundle persona fit score is unavailable")
 	ErrSmartTargetingSearchTooLong              = errors.New("smart targeting search must not exceed 200 characters")
 	ErrSmartTargetingCountInvalid               = errors.New("automatic selection count must be between 1 and 10000")
+	ErrSmartTargetingSampleSizeRequired         = errors.New("sample_size_per_tag is required for Smart Targeting Test campaigns")
+	ErrSmartTargetingSampleSizeInvalid          = errors.New("sample_size_per_tag must be a positive integer")
+	ErrSmartTargetingTestPreviewRequired        = errors.New("a current Smart Targeting Test sampling preview is required")
+	ErrSmartTargetingTestNoSatisfiedTags        = errors.New("no selected Smart Targeting tag can satisfy sample_size_per_tag")
+	ErrSmartTargetingTestAudienceCountOverflow  = errors.New("Smart Targeting Test audience count exceeds the supported range")
+	ErrCampaignCostOverflow                     = errors.New("campaign cost exceeds the supported range")
 
 	ErrCampaignNotWaitingForApproval          = errors.New("campaign is not waiting for approval")
 	ErrCampaignNotApproved                    = errors.New("campaign is not approved")
