@@ -101,6 +101,7 @@ type AdminCustomerCampaignItem struct {
 	TotalClicks                 *int64         `json:"total_clicks,omitempty"`
 	ClickRate                   float64        `json:"click_rate"`
 	NumAudience                 *uint64        `json:"num_audience,omitempty"`
+	SampleSizePerTag            *uint64        `json:"sample_size_per_tag,omitempty"`
 	CustomerFullName            *string        `json:"customer_full_name,omitempty"`
 	AgencyFullName              *string        `json:"agency_full_name,omitempty"`
 	TargetAudienceExcelFileUUID *string        `json:"target_audience_excel_file_uuid,omitempty"`
