@@ -110,7 +110,7 @@ func TestNormalizeSelectedTagIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []uint{2, 5, 9}
+	want := []uint{9, 2, 5}
 	for i := range want {
 		if ids[i] != want[i] {
 			t.Fatalf("got %v, want %v", ids, want)
@@ -124,6 +124,34 @@ func TestNormalizeSelectedTagIDs(t *testing.T) {
 	}
 	if _, err := normalizeSelectedTagIDs([]uint{0}); !errors.Is(err, ErrSmartTargetingTagInvalid) {
 		t.Fatalf("expected invalid-tag error, got %v", err)
+	}
+}
+
+func TestCanonicalSmartTargetingCapacityTagIDsDoesNotChangeSelectionOrder(t *testing.T) {
+	selected := []uint{9, 2, 5}
+	canonical := canonicalSmartTargetingCapacityTagIDs(selected)
+	if len(canonical) != 3 || canonical[0] != 2 || canonical[1] != 5 || canonical[2] != 9 {
+		t.Fatalf("canonical capacity IDs = %v, want [2 5 9]", canonical)
+	}
+	if selected[0] != 9 || selected[1] != 2 || selected[2] != 5 {
+		t.Fatalf("selection order mutated to %v", selected)
+	}
+}
+
+func TestSelectionResponsePreservesRepositoryOrder(t *testing.T) {
+	response := selectionResponse([]*models.CampaignSelectedTag{
+		{TagID: 9, SelectionOrder: 0},
+		{TagID: 2, SelectionOrder: 1},
+		{TagID: 5, SelectionOrder: 2},
+	}, &models.CampaignSelectedTagSummary{SelectedTagCount: 3})
+	want := []uint{9, 2, 5}
+	if len(response.SelectedTagIDs) != len(want) {
+		t.Fatalf("selected tag IDs = %v, want %v", response.SelectedTagIDs, want)
+	}
+	for i := range want {
+		if response.SelectedTagIDs[i] != want[i] {
+			t.Fatalf("selected tag IDs = %v, want %v", response.SelectedTagIDs, want)
+		}
 	}
 }
 
