@@ -157,4 +157,62 @@ func TestCalculationExpiryCoversScheduledExecution(t *testing.T) {
 	}
 }
 
+func TestNewCapacityGenerationInvalidatesOnlySmartTargetingTestPreview(t *testing.T) {
+	method := models.CampaignAudienceTargetingSmart
+	numAudience := uint64(200)
+	hash := "preview-hash"
+	previewedAt := time.Now().UTC()
+	testCampaign := &models.Campaign{
+		Spec:                                  models.CampaignSpec{AudienceTargetingMethod: &method},
+		Status:                                models.CampaignStatusInitiated,
+		Phase:                                 models.CampaignPhaseTest,
+		NumAudience:                           &numAudience,
+		SmartTargetingTestSatisfiedTagIDs:     pq.Int64Array{11, 22},
+		SmartTargetingTestSamplingInputHash:   &hash,
+		SmartTargetingTestSamplingPreviewedAt: &previewedAt,
+	}
+	if !invalidateSmartTargetingTestPreviewForNewCapacityGeneration(testCampaign) {
+		t.Fatal("Smart Targeting Test preview was not invalidated")
+	}
+	if testCampaign.NumAudience == nil || *testCampaign.NumAudience != 0 ||
+		len(testCampaign.SmartTargetingTestSatisfiedTagIDs) != 0 ||
+		testCampaign.SmartTargetingTestSamplingInputHash != nil ||
+		testCampaign.SmartTargetingTestSamplingPreviewedAt != nil {
+		t.Fatalf("stale preview fields remain: %#v", testCampaign)
+	}
+
+	executionCampaign := &models.Campaign{
+		Spec:                                  models.CampaignSpec{AudienceTargetingMethod: &method},
+		Status:                                models.CampaignStatusInitiated,
+		Phase:                                 models.CampaignPhaseExecution,
+		NumAudience:                           &numAudience,
+		SmartTargetingTestSatisfiedTagIDs:     pq.Int64Array{11, 22},
+		SmartTargetingTestSamplingInputHash:   &hash,
+		SmartTargetingTestSamplingPreviewedAt: &previewedAt,
+	}
+	if invalidateSmartTargetingTestPreviewForNewCapacityGeneration(executionCampaign) {
+		t.Fatal("Execution campaign was treated as a Test preview")
+	}
+	if executionCampaign.NumAudience == nil || *executionCampaign.NumAudience != numAudience {
+		t.Fatal("Execution audience count was modified")
+	}
+
+	finalizedTestCampaign := &models.Campaign{
+		Spec:                                  models.CampaignSpec{AudienceTargetingMethod: &method},
+		Status:                                models.CampaignStatusWaitingForApproval,
+		Phase:                                 models.CampaignPhaseTest,
+		NumAudience:                           &numAudience,
+		SmartTargetingTestSatisfiedTagIDs:     pq.Int64Array{11, 22},
+		SmartTargetingTestSamplingInputHash:   &hash,
+		SmartTargetingTestSamplingPreviewedAt: &previewedAt,
+	}
+	if invalidateSmartTargetingTestPreviewForNewCapacityGeneration(finalizedTestCampaign) {
+		t.Fatal("finalized Test billing intent was invalidated by a capacity refresh")
+	}
+	if finalizedTestCampaign.NumAudience == nil || *finalizedTestCampaign.NumAudience != numAudience ||
+		len(finalizedTestCampaign.SmartTargetingTestSatisfiedTagIDs) != 2 {
+		t.Fatal("finalized Test sampling intent was modified")
+	}
+}
+
 func floatPtr(value float64) *float64 { return &value }
