@@ -246,6 +246,7 @@ func (s *AdminCampaignFlowImpl) ListCampaigns(ctx context.Context, filter dto.Ad
 			TotalClicks:        &totalClicks,
 			ClickRate:          clickRate,
 			NumAudience:        c.NumAudience,
+			SampleSizePerTag:   c.SampleSizePerTag,
 			CustomerFullName:   formatCampaignPartyFullName(c.Customer),
 			AgencyFullName:     formatCampaignAgencyFullName(c.Customer),
 
@@ -381,6 +382,7 @@ func (s *AdminCampaignFlowImpl) GetCampaign(ctx context.Context, id uint) (*dto.
 		TotalClicks:           &totalClicks,
 		ClickRate:             clickRate,
 		NumAudience:           c.NumAudience,
+		SampleSizePerTag:      c.SampleSizePerTag,
 		CustomerFullName:      formatCampaignPartyFullName(c.Customer),
 		AgencyFullName:        formatCampaignAgencyFullName(c.Customer),
 
@@ -532,7 +534,20 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 			if err != nil {
 				return err
 			}
-			if exact.UsableUniqueAudienceCount < 0 || campaign.NumAudience == nil || *campaign.NumAudience > uint64(exact.UsableUniqueAudienceCount) {
+			var requiredAudience uint64
+			if campaign.Phase == models.CampaignPhaseTest {
+				intent, intentErr := currentSmartTargetingTestSamplingIntent(txCtx, s.selectedTagRepo, campaign, true)
+				if intentErr != nil {
+					return intentErr
+				}
+				requiredAudience = intent.effective
+				campaign.NumAudience = utils.ToPtr(requiredAudience)
+			} else if campaign.NumAudience != nil {
+				requiredAudience = *campaign.NumAudience
+			} else {
+				return ErrSmartTargetingExactCapacityRequired
+			}
+			if exact.UsableUniqueAudienceCount < 0 || requiredAudience > uint64(exact.UsableUniqueAudienceCount) {
 				return ErrSmartTargetingExactCapacityRequired
 			}
 		}
