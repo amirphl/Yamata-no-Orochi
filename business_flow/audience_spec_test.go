@@ -62,6 +62,9 @@ func TestBuildAudienceSpecFromRowsSMSCapacity(t *testing.T) {
 		t.Fatalf("buildAudienceSpecFromRows returned error: %v", err)
 	}
 	leaf := spec["level1"]["level2"].Items["level3"]
+	if leaf.Layer1Category != "level1" || leaf.Layer2Category != "level2" || leaf.Layer3Category != "level3" {
+		t.Fatalf("category fields were not preserved: %#v", leaf)
+	}
 	if leaf.AvailableAudience != 400 {
 		t.Fatalf("SMS capacity = %d, want white(300) + pink(301)/3 = 400", leaf.AvailableAudience)
 	}
