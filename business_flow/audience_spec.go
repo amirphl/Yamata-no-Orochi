@@ -20,13 +20,14 @@ import (
 const audienceSpecCacheTTL = 5 * time.Minute
 
 func audienceSpecPlatformCacheKey(cacheConfig config.CacheConfig, platform string) string {
-	return redisKey(cacheConfig, fmt.Sprintf("%s:v3:%s", utils.AudienceSpecCacheKey, platform))
+	return redisKey(cacheConfig, fmt.Sprintf("%s:v4:%s", utils.AudienceSpecCacheKey, platform))
 }
 
 func obsoleteAudienceSpecPlatformCacheKeys(cacheConfig config.CacheConfig, platform string) []string {
 	return []string{
 		redisKey(cacheConfig, fmt.Sprintf("%s:%s", utils.AudienceSpecCacheKey, platform)),
 		redisKey(cacheConfig, fmt.Sprintf("%s:v2:%s", utils.AudienceSpecCacheKey, platform)),
+		redisKey(cacheConfig, fmt.Sprintf("%s:v3:%s", utils.AudienceSpecCacheKey, platform)),
 	}
 }
 
@@ -212,6 +213,9 @@ func buildAudienceSpecFromRows(rows []repository.AudienceSpecSourceRow, platform
 			level2Node.Items = make(map[string]dto.AudienceSpecItem)
 		}
 		level2Node.Items[path[2]] = dto.AudienceSpecItem{
+			Layer1Category:    path[0],
+			Layer2Category:    path[1],
+			Layer3Category:    path[2],
 			Tags:              tags,
 			AvailableAudience: leaf.capacity,
 			DistinctUsers:     leaf.distinctUsers,
