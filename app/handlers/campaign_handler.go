@@ -44,6 +44,32 @@ type CampaignHandlerInterface interface {
 	StartSmartTargetingCapacityCalculation(c fiber.Ctx) error
 	GetSmartTargetingCapacityCalculation(c fiber.Ctx) error
 	GetSmartTargetingCapacityCalculationByID(c fiber.Ctx) error
+	PreviewSmartTargetingTestSampling(c fiber.Ctx) error
+}
+
+// PreviewSmartTargetingTestSampling calculates ordered, all-or-nothing per-tag
+// samples. It never persists audience IDs; scheduler preparation is final.
+// @Summary Preview Smart Targeting Test sampling
+// @Tags Campaigns
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned Smart Targeting Test campaign UUID" format(uuid)
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingTestSamplingPreviewResponse}
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview [post]
+func (h *CampaignHandler) PreviewSmartTargetingTestSampling(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/test-sampling-preview", 150*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.PreviewSmartTargetingTestSampling(ctx, &dto.SmartTargetingTestSamplingPreviewRequest{
+		CustomerID: customerID, CampaignUUID: c.Params("uuid"),
+	}, businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent")))
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to preview Smart Targeting Test sampling", "SMART_TARGETING_TEST_PREVIEW_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting Test sampling preview calculated successfully", result)
 }
 
 // CampaignHandler handles campaign-related HTTP requests
@@ -1290,6 +1316,9 @@ func (h *CampaignHandler) setupCustomValidations() {
 }
 
 func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaultStatus int, defaultMessage, defaultCode string) error {
+	var businessErr *businessflow.BusinessError
+	_ = errors.As(err, &businessErr)
+
 	if errors.Is(err, businessflow.ErrCampaignUUIDRequired) || errors.Is(err, businessflow.ErrCampaignUUIDInvalid) {
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Campaign UUID is invalid", "INVALID_CAMPAIGN_UUID", nil)
 	}
@@ -1298,6 +1327,24 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 	}
 	if errors.Is(err, businessflow.ErrBundleAccessDenied) {
 		return h.ErrorResponse(c, fiber.StatusForbidden, "Bundle access denied", "BUNDLE_ACCESS_DENIED", nil)
+	}
+	if errors.Is(err, businessflow.ErrSmartTargetingSampleSizeRequired) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, businessflow.ErrSmartTargetingSampleSizeRequired.Error(), "SMART_TARGETING_SAMPLE_SIZE_REQUIRED", nil)
+	}
+	if errors.Is(err, businessflow.ErrSmartTargetingSampleSizeInvalid) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, businessflow.ErrSmartTargetingSampleSizeInvalid.Error(), "SMART_TARGETING_SAMPLE_SIZE_INVALID", nil)
+	}
+	if errors.Is(err, businessflow.ErrSmartTargetingTestPreviewRequired) {
+		return h.ErrorResponse(c, fiber.StatusConflict, businessflow.ErrSmartTargetingTestPreviewRequired.Error(), "SMART_TARGETING_TEST_PREVIEW_REQUIRED", nil)
+	}
+	if errors.Is(err, businessflow.ErrSmartTargetingTestNoSatisfiedTags) {
+		return h.ErrorResponse(c, fiber.StatusConflict, businessflow.ErrSmartTargetingTestNoSatisfiedTags.Error(), "SMART_TARGETING_TEST_NO_SATISFIED_TAGS", nil)
+	}
+	if errors.Is(err, businessflow.ErrSmartTargetingTestAudienceCountOverflow) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, businessflow.ErrSmartTargetingTestAudienceCountOverflow.Error(), "SMART_TARGETING_TEST_AUDIENCE_COUNT_OVERFLOW", nil)
+	}
+	if errors.Is(err, businessflow.ErrCampaignCostOverflow) {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, businessflow.ErrCampaignCostOverflow.Error(), "CAMPAIGN_COST_OVERFLOW", nil)
 	}
 	if errors.Is(err, businessflow.ErrSmartTargetingTagsRequired) ||
 		errors.Is(err, businessflow.ErrSmartTargetingTagInvalid) ||
@@ -1308,19 +1355,19 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 		errors.Is(err, businessflow.ErrSmartTargetingCountInvalid) ||
 		errors.Is(err, businessflow.ErrCampaignAudienceTargetingMethodInvalid) {
 		code := defaultCode
-		if be, ok := err.(*businessflow.BusinessError); ok && be.Code != "" {
-			code = be.Code
+		if businessErr != nil && businessErr.Code != "" {
+			code = businessErr.Code
 		}
 		return h.ErrorResponse(c, fiber.StatusBadRequest, err.Error(), code, nil)
 	}
 	if errors.Is(err, businessflow.ErrInvalidState) {
 		message, code := "Another request is already in progress", "INVALID_STATE"
-		if be, ok := err.(*businessflow.BusinessError); ok {
-			if be.Message != "" {
-				message = be.Message
+		if businessErr != nil {
+			if businessErr.Message != "" {
+				message = businessErr.Message
 			}
-			if be.Code != "" {
-				code = be.Code
+			if businessErr.Code != "" {
+				code = businessErr.Code
 			}
 		}
 		return h.ErrorResponse(c, fiber.StatusConflict, message, code, nil)
@@ -1351,7 +1398,16 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 		return h.ErrorResponse(c, fiber.StatusConflict, "Campaign is not approved", "CAMPAIGN_NOT_APPROVED", nil)
 	}
 	if businessflow.IsInsufficientCampaignCapacity(err) {
-		return h.ErrorResponse(c, fiber.StatusConflict, "Insufficient campaign capacity", "INSUFFICIENT_CAPACITY", nil)
+		message, code := "Insufficient campaign capacity", "INSUFFICIENT_CAPACITY"
+		if businessErr != nil {
+			if businessErr.Message != "" {
+				message = businessErr.Message
+			}
+			if businessErr.Code != "" {
+				code = businessErr.Code
+			}
+		}
+		return h.ErrorResponse(c, fiber.StatusConflict, message, code, nil)
 	}
 	if businessflow.IsInsufficientFunds(err) {
 		return h.ErrorResponse(c, fiber.StatusConflict, "Insufficient funds", "INSUFFICIENT_FUNDS", nil)
@@ -1477,8 +1533,12 @@ func (h *CampaignHandler) handleCampaignFlowError(c fiber.Ctx, err error, defaul
 		return h.ErrorResponse(c, fiber.StatusBadRequest, "Page price not found", "PAGE_PRICE_NOT_FOUND", nil)
 	}
 
-	if be, ok := err.(*businessflow.BusinessError); ok && be.Code != "" {
-		return h.ErrorResponse(c, defaultStatus, defaultMessage, be.Code, nil)
+	if businessErr != nil && businessErr.Code != "" {
+		message := defaultMessage
+		if businessErr.Message != "" {
+			message = businessErr.Message
+		}
+		return h.ErrorResponse(c, defaultStatus, message, businessErr.Code, nil)
 	}
 	return h.ErrorResponse(c, defaultStatus, defaultMessage, defaultCode, nil)
 }
