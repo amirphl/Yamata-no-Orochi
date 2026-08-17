@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/config"
@@ -18,6 +20,10 @@ const (
 	payamRetryBaseDelay   = 1 * time.Second
 	payamRetryMaxDelay    = 2 * time.Minute
 	payamRetryMaxAttempts = 5 // 0 means unlimited retries until success or context cancellation.
+
+	// A status request that is rejected with 401 gets at most three total
+	// attempts: the original request and two requests with refreshed tokens.
+	payamStatusUnauthorizedMaxAttempts = 3
 )
 
 func payamRetryBackoffDelay(attempt int) time.Duration {
@@ -76,6 +82,21 @@ type PayamStatusFetchResult struct {
 	RawResponse *string
 }
 
+type payamHTTPStatusError struct {
+	operation  string
+	statusCode int
+	body       string
+}
+
+func (e *payamHTTPStatusError) Error() string {
+	return fmt.Sprintf("payamsms %s http status: %d, body: %s", e.operation, e.statusCode, strings.TrimSpace(e.body))
+}
+
+func isPayamUnauthorizedError(err error) bool {
+	var statusErr *payamHTTPStatusError
+	return errors.As(err, &statusErr) && statusErr.statusCode == http.StatusUnauthorized
+}
+
 type PayamSMSClient interface {
 	SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error)
 	GetToken(ctx context.Context) (string, error)
@@ -85,6 +106,12 @@ type PayamSMSClient interface {
 type httpPayamSMSClient struct {
 	cfg    config.PayamSMSConfig
 	client *http.Client
+
+	refreshMu   sync.Mutex
+	tokenMu     sync.RWMutex
+	accessToken string
+
+	statusUnauthorizedRetryDelay func(attempt int) time.Duration
 }
 
 func newHTTPPayamSMSClient(cfg config.PayamSMSConfig) *httpPayamSMSClient {
@@ -96,8 +123,9 @@ func newHTTPPayamSMSClientWithClient(cfg config.PayamSMSConfig, client *http.Cli
 		client = newHTTPClient(60 * time.Second)
 	}
 	return &httpPayamSMSClient{
-		cfg:    cfg,
-		client: client,
+		cfg:                          cfg,
+		client:                       client,
+		statusUnauthorizedRetryDelay: payamRetryBackoffDelay,
 	}
 }
 
@@ -182,6 +210,18 @@ func (c *httpPayamSMSClient) sendBatchOnce(ctx context.Context, sender string, i
 
 // GetToken fetches a fresh OAuth2 bearer token from PayamSMS with exponential backoff retries.
 func (c *httpPayamSMSClient) GetToken(ctx context.Context) (string, error) {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+
+	token, err := c.getTokenWithRetry(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.storeToken(token)
+	return token, nil
+}
+
+func (c *httpPayamSMSClient) getTokenWithRetry(ctx context.Context) (string, error) {
 	var (
 		token string
 		err   error
@@ -199,6 +239,42 @@ func (c *httpPayamSMSClient) GetToken(ctx context.Context) (string, error) {
 		}
 	}
 	return token, err
+}
+
+func (c *httpPayamSMSClient) storeToken(token string) {
+	c.tokenMu.Lock()
+	c.accessToken = token
+	c.tokenMu.Unlock()
+}
+
+func (c *httpPayamSMSClient) currentToken(fallback string) string {
+	c.tokenMu.RLock()
+	token := c.accessToken
+	c.tokenMu.RUnlock()
+	if token != "" {
+		return token
+	}
+	return fallback
+}
+
+// refreshTokenAfterUnauthorized avoids duplicate refreshes when concurrent
+// requests discover that the same token has expired. A token refreshed by one
+// request is reused by the others and by subsequent status jobs.
+func (c *httpPayamSMSClient) refreshTokenAfterUnauthorized(ctx context.Context, rejectedToken string) (string, error) {
+	c.refreshMu.Lock()
+	defer c.refreshMu.Unlock()
+
+	currentToken := c.currentToken("")
+	if currentToken != "" && currentToken != rejectedToken {
+		return currentToken, nil
+	}
+
+	token, err := c.getTokenWithRetry(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.storeToken(token)
+	return token, nil
 }
 
 func (c *httpPayamSMSClient) getTokenOnce(ctx context.Context) (string, error) {
@@ -255,8 +331,42 @@ func (c *httpPayamSMSClient) getTokenOnce(ctx context.Context) (string, error) {
 	return out.AccessToken, nil
 }
 
-// FetchStatus retrieves delivery statuses for the given tracking IDs with exponential backoff retries.
+// FetchStatus retrieves delivery statuses for the given tracking IDs with
+// exponential backoff retries. When the provider rejects an expired access
+// token, it obtains a new one with the configured root token, retains it for
+// subsequent jobs, and retries the status request at most twice (three total
+// status attempts).
 func (c *httpPayamSMSClient) FetchStatus(ctx context.Context, token string, trackingIDs []string) (PayamStatusFetchResult, error) {
+	token = c.currentToken(token)
+	var out PayamStatusFetchResult
+	for attempt := 0; attempt < payamStatusUnauthorizedMaxAttempts; attempt++ {
+		var err error
+		out, err = c.fetchStatusWithRetry(ctx, token, trackingIDs)
+		if !isPayamUnauthorizedError(err) {
+			return out, err
+		}
+		if attempt+1 >= payamStatusUnauthorizedMaxAttempts {
+			return out, err
+		}
+
+		delay := payamRetryBackoffDelay(attempt)
+		if c.statusUnauthorizedRetryDelay != nil {
+			delay = c.statusUnauthorizedRetryDelay(attempt)
+		}
+		if sleepErr := sleepWithContext(ctx, delay); sleepErr != nil {
+			return out, ctx.Err()
+		}
+
+		refreshedToken, refreshErr := c.refreshTokenAfterUnauthorized(ctx, token)
+		if refreshErr != nil {
+			return out, fmt.Errorf("payamsms status token refresh after 401: %w", refreshErr)
+		}
+		token = refreshedToken
+	}
+	return out, nil
+}
+
+func (c *httpPayamSMSClient) fetchStatusWithRetry(ctx context.Context, token string, trackingIDs []string) (PayamStatusFetchResult, error) {
 	var (
 		out PayamStatusFetchResult
 		err error
@@ -317,7 +427,11 @@ func (c *httpPayamSMSClient) fetchStatusOnce(ctx context.Context, token string, 
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return result, fmt.Errorf("payamsms status http status: %d, body: %s", resp.StatusCode, strings.TrimSpace(rawResponse))
+		return result, &payamHTTPStatusError{
+			operation:  "status",
+			statusCode: resp.StatusCode,
+			body:       rawResponse,
+		}
 	}
 
 	if err := json.Unmarshal(bodyBytes, &result.Items); err != nil {
