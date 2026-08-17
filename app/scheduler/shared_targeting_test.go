@@ -19,6 +19,42 @@ func (missingSchedulerStatsRepository) FetchPercentiles(context.Context, *string
 	return nil, nil
 }
 
+type processedCampaignStatsRepositoryStub struct {
+	repository.ProcessedCampaignRepository
+	updated *models.ProcessedCampaign
+}
+
+func (s *processedCampaignStatsRepositoryStub) UpdateMeta(_ context.Context, campaign *models.ProcessedCampaign) error {
+	copy := *campaign
+	s.updated = &copy
+	return nil
+}
+
+func TestPreparedCampaignStatisticsPersistsExplicitZeroAudienceSnapshot(t *testing.T) {
+	repo := &processedCampaignStatsRepositoryStub{}
+	processed := &models.ProcessedCampaign{ID: 19}
+	updateCalled := false
+	stats, err := preparedCampaignStatistics(t.Context(), repo, processed, 0, func(context.Context, uint) (map[string]any, error) {
+		updateCalled = true
+		return nil, nil
+	})
+	if err != nil {
+		t.Fatalf("persist zero-audience statistics: %v", err)
+	}
+	if updateCalled {
+		t.Fatal("provider aggregation must not run for an empty prepared audience")
+	}
+	if repo.updated == nil || len(repo.updated.Statistics) == 0 {
+		t.Fatal("zero-audience statistics were not persisted to the processed campaign")
+	}
+	if sent, ok := stats["aggregatedTotalSent"].(int64); !ok || sent != 0 {
+		t.Fatalf("aggregatedTotalSent = %#v, want int64(0)", stats["aggregatedTotalSent"])
+	}
+	if !shouldPushPreparedCampaignStatistics(stats, 0) {
+		t.Fatal("explicit zero-audience statistics must be pushed to the campaign service")
+	}
+}
+
 func TestUsesExcelAudienceTargetingBackwardCompatibilityAndPriority(t *testing.T) {
 	excelUUID := "4a54766e-4330-4cff-8658-bcd3c742b469"
 
@@ -80,21 +116,6 @@ func TestCampaignIgnoresAudienceGradesOnlyForTag17358(t *testing.T) {
 	}
 }
 
-func TestHashTagsUsesCanonicalSetSemantics(t *testing.T) {
-	want := hashTags([]string{"7", "9"})
-	for _, tags := range [][]string{
-		{"9", "7"},
-		{" 7 ", "9", "7"},
-	} {
-		if got := hashTags(tags); got != want {
-			t.Fatalf("hashTags(%q) = %q, want canonical hash %q", tags, got, want)
-		}
-	}
-	if got := hashTags([]string{" ", ""}); got != "" {
-		t.Fatalf("blank tags hash = %q, want empty", got)
-	}
-}
-
 func TestParseCampaignTagIDsRejectsInvalidAndDeduplicates(t *testing.T) {
 	_, ids, err := parseCampaignTagIDs(dto.BotGetCampaignResponse{ID: 10, Tags: []string{"7", "7", "9"}})
 	if err != nil {
@@ -148,6 +169,27 @@ func TestRequireExactAudienceCountRejectsPartialSelection(t *testing.T) {
 	}
 }
 
+func TestShouldPushCurrentProcessedCampaignStatistics(t *testing.T) {
+	positive := map[string]any{"aggregatedTotalSent": int64(1)}
+	zero := map[string]any{"aggregatedTotalSent": int64(0)}
+
+	if shouldPushCurrentProcessedCampaignStatistics(nil, positive) {
+		t.Fatal("nil processed campaign must not publish statistics")
+	}
+	if shouldPushCurrentProcessedCampaignStatistics(&models.ProcessedCampaign{IsCurrent: false}, positive) {
+		t.Fatal("historical processed campaign must not publish statistics")
+	}
+	if shouldPushCurrentProcessedCampaignStatistics(&models.ProcessedCampaign{IsCurrent: true}, nil) {
+		t.Fatal("nil statistics must not be published")
+	}
+	if shouldPushCurrentProcessedCampaignStatistics(&models.ProcessedCampaign{IsCurrent: true}, zero) {
+		t.Fatal("zero-sent statistics must not be published")
+	}
+	if !shouldPushCurrentProcessedCampaignStatistics(&models.ProcessedCampaign{IsCurrent: true}, positive) {
+		t.Fatal("current processed campaign with sent messages must publish statistics")
+	}
+}
+
 func TestExcelTargetingPreservesReusableEmptyAudienceBehavior(t *testing.T) {
 	result, err := fetchAudiencePhonesByUIDs(
 		context.Background(),
@@ -162,7 +204,7 @@ func TestExcelTargetingPreservesReusableEmptyAudienceBehavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("empty reusable Excel audience unexpectedly failed: %v", err)
 	}
-	if result == nil || len(result.IDs) != 0 || result.AudienceSelectionID != nil || result.BundleAudienceSelectionID != nil {
+	if result == nil || len(result.IDs) != 0 || result.BundleAudienceSelectionID != nil {
 		t.Fatalf("Excel targeting must remain outside selection caches: %#v", result)
 	}
 }
@@ -182,7 +224,7 @@ func TestExcelTargetingCanReuseAudienceAcrossBundleCampaigns(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Excel selection attempt %d failed: %v", attempt+1, err)
 		}
-		if len(result.IDs) != 1 || result.IDs[0] != 91 || result.AudienceSelectionID != nil || result.BundleAudienceSelectionID != nil {
+		if len(result.IDs) != 1 || result.IDs[0] != 91 || result.BundleAudienceSelectionID != nil {
 			t.Fatalf("Excel selection attempt %d unexpectedly entered selection cache: %#v", attempt+1, result)
 		}
 	}
@@ -223,28 +265,19 @@ func TestStandardScoreResolutionOnlyRequiresStatisticsForRestrictedGrades(t *tes
 	}
 }
 
-func TestSelectionIDsForCampaignEnforcesSelectionScope(t *testing.T) {
+func TestBundleSelectionIDFromAudienceResult(t *testing.T) {
 	ptr := func(value uint) *uint { return &value }
-	bundleID := uint(42)
 
 	tests := []struct {
-		name           string
-		campaign       dto.BotGetCampaignResponse
-		result         *AudiencePhonesResult
-		wantAudienceID *uint
-		wantBundleID   *uint
-		wantErr        bool
+		name    string
+		result  *AudiencePhonesResult
+		wantID  *uint
+		wantErr bool
 	}{
 		{
-			name:           "non-bundle selection",
-			result:         &AudiencePhonesResult{AudienceSelectionID: ptr(11)},
-			wantAudienceID: ptr(11),
-		},
-		{
-			name:         "bundle selection",
-			campaign:     dto.BotGetCampaignResponse{BundleID: &bundleID},
-			result:       &AudiencePhonesResult{BundleAudienceSelectionID: ptr(22)},
-			wantBundleID: ptr(22),
+			name:   "valid selection",
+			result: &AudiencePhonesResult{BundleAudienceSelectionID: ptr(22)},
+			wantID: ptr(22),
 		},
 		{
 			name:    "nil result",
@@ -252,68 +285,31 @@ func TestSelectionIDsForCampaignEnforcesSelectionScope(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "non-bundle missing selection",
+			name:    "missing selection",
 			result:  &AudiencePhonesResult{},
 			wantErr: true,
 		},
 		{
-			name:    "non-bundle zero selection",
-			result:  &AudiencePhonesResult{AudienceSelectionID: ptr(0)},
+			name:    "zero selection",
+			result:  &AudiencePhonesResult{BundleAudienceSelectionID: ptr(0)},
 			wantErr: true,
-		},
-		{
-			name:    "non-bundle carrying bundle selection",
-			result:  &AudiencePhonesResult{BundleAudienceSelectionID: ptr(22)},
-			wantErr: true,
-		},
-		{
-			name:    "non-bundle carrying both selections",
-			result:  &AudiencePhonesResult{AudienceSelectionID: ptr(11), BundleAudienceSelectionID: ptr(22)},
-			wantErr: true,
-		},
-		{
-			name:     "bundle missing selection",
-			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
-			result:   &AudiencePhonesResult{},
-			wantErr:  true,
-		},
-		{
-			name:     "bundle zero selection",
-			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
-			result:   &AudiencePhonesResult{BundleAudienceSelectionID: ptr(0)},
-			wantErr:  true,
-		},
-		{
-			name:     "bundle carrying non-bundle selection",
-			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
-			result:   &AudiencePhonesResult{AudienceSelectionID: ptr(11)},
-			wantErr:  true,
-		},
-		{
-			name:     "bundle carrying both selections",
-			campaign: dto.BotGetCampaignResponse{BundleID: &bundleID},
-			result:   &AudiencePhonesResult{AudienceSelectionID: ptr(11), BundleAudienceSelectionID: ptr(22)},
-			wantErr:  true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			audienceID, bundleSelectionID, err := selectionIDsForCampaign(tt.campaign, tt.result)
+			selectionID, err := bundleSelectionIDFromAudienceResult(tt.result)
 			if tt.wantErr {
 				if err == nil {
-					t.Fatal("expected selection scope validation to fail")
+					t.Fatal("expected bundle selection validation to fail")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("selection scope validation failed: %v", err)
+				t.Fatalf("bundle selection validation failed: %v", err)
 			}
-			if !equalOptionalUint(audienceID, tt.wantAudienceID) {
-				t.Fatalf("audience selection id = %v, want %v", audienceID, tt.wantAudienceID)
-			}
-			if !equalOptionalUint(bundleSelectionID, tt.wantBundleID) {
-				t.Fatalf("bundle audience selection id = %v, want %v", bundleSelectionID, tt.wantBundleID)
+			if !equalOptionalUint(selectionID, tt.wantID) {
+				t.Fatalf("bundle audience selection id = %v, want %v", selectionID, tt.wantID)
 			}
 		})
 	}
