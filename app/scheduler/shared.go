@@ -3,8 +3,7 @@ package scheduler
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
-	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -58,10 +57,77 @@ type AudiencePhonesResult struct {
 	IDs                       []int64
 	UIDs                      []string
 	Codes                     []string
-	AudienceSelectionID       *uint
 	BundleAudienceSelectionID *uint
 	MatchedUIDs               []string
 	UnmatchedUIDs             []string
+}
+
+func zeroAudienceCampaignStatistics() map[string]any {
+	return map[string]any{
+		"aggregatedTotalRecords":          int64(0),
+		"aggregatedTotalSent":             int64(0),
+		"aggregatedTotalParts":            int64(0),
+		"aggregatedTotalDeliveredParts":   int64(0),
+		"aggregatedTotalUnDeliveredParts": int64(0),
+		"aggregatedTotalUnKnownParts":     int64(0),
+		"updatedAt":                       utils.UTCNow().Format(time.RFC3339),
+	}
+}
+
+// preparedCampaignStatistics gives a zero-recipient best-effort Test run the
+// same durable statistics shape as a delivered run. Refund reconciliation
+// reads the campaign copy of these values, so an explicit zero must be pushed
+// instead of being represented by a missing statistics object.
+func preparedCampaignStatistics(
+	ctx context.Context,
+	repo repository.ProcessedCampaignRepository,
+	processed *models.ProcessedCampaign,
+	preparedAudienceCount int,
+	update func(context.Context, uint) (map[string]any, error),
+) (map[string]any, error) {
+	if preparedAudienceCount > 0 {
+		if update == nil || processed == nil {
+			return nil, errors.New("processed campaign statistics updater is unavailable")
+		}
+		return update(ctx, processed.ID)
+	}
+	if repo == nil || processed == nil {
+		return nil, errors.New("processed campaign is unavailable for zero-audience statistics")
+	}
+	stats := zeroAudienceCampaignStatistics()
+	data, err := json.Marshal(stats)
+	if err != nil {
+		return nil, err
+	}
+	processed.Statistics = data
+	processed.UpdatedAt = utils.UTCNow()
+	if err := repo.UpdateMeta(ctx, processed); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func shouldPushPreparedCampaignStatistics(stats map[string]any, preparedAudienceCount int) bool {
+	if stats == nil {
+		return false
+	}
+	if preparedAudienceCount == 0 {
+		return true
+	}
+	sent, ok := stats["aggregatedTotalSent"].(int64)
+	return ok && sent > 0
+}
+
+// shouldPushCurrentProcessedCampaignStatistics prevents a late status job for
+// a retained historical attempt from overwriting the elected campaign's
+// statistics. Historical jobs may still update their own processed row and
+// delivery/status records; only the campaign-level publication is suppressed.
+func shouldPushCurrentProcessedCampaignStatistics(pc *models.ProcessedCampaign, stats map[string]any) bool {
+	if pc == nil || !pc.IsCurrent || stats == nil {
+		return false
+	}
+	sent, ok := stats["aggregatedTotalSent"].(int64)
+	return ok && sent > 0
 }
 
 // releaseUnpreparedCampaignOnFailure returns a failed scheduler claim to the
@@ -96,32 +162,16 @@ func recoverStaleUnpreparedCampaigns(ctx context.Context, db *gorm.DB, logger *l
 	}
 }
 
-// selectionIDsForCampaign validates that a non-Excel audience result carries
-// the selection ID for the campaign's actual scope. Keeping the two ID types
-// distinct prevents an ID from one selection table being persisted as a
-// foreign key to the other.
-func selectionIDsForCampaign(c dto.BotGetCampaignResponse, result *AudiencePhonesResult) (*uint, *uint, error) {
+// bundleSelectionIDFromAudienceResult validates that a non-Excel audience
+// result carries the persisted bundle selection used for the campaign.
+func bundleSelectionIDFromAudienceResult(result *AudiencePhonesResult) (*uint, error) {
 	if result == nil {
-		return nil, nil, errors.New("audience result is nil")
+		return nil, errors.New("audience result is nil")
 	}
-
-	if c.BundleID != nil {
-		if result.AudienceSelectionID != nil {
-			return nil, nil, errors.New("bundle campaign returned a non-bundle audience selection id")
-		}
-		if result.BundleAudienceSelectionID == nil || *result.BundleAudienceSelectionID == 0 {
-			return nil, nil, errors.New("bundle campaign returned no valid bundle audience selection id")
-		}
-		return nil, result.BundleAudienceSelectionID, nil
+	if result.BundleAudienceSelectionID == nil || *result.BundleAudienceSelectionID == 0 {
+		return nil, errors.New("campaign returned no valid bundle audience selection id")
 	}
-
-	if result.BundleAudienceSelectionID != nil {
-		return nil, nil, errors.New("non-bundle campaign returned a bundle audience selection id")
-	}
-	if result.AudienceSelectionID == nil || *result.AudienceSelectionID == 0 {
-		return nil, nil, errors.New("non-bundle campaign returned no valid audience selection id")
-	}
-	return result.AudienceSelectionID, nil, nil
+	return result.BundleAudienceSelectionID, nil
 }
 
 func initSchedulerLogger(name string) (*log.Logger, *os.File, error) {
@@ -680,32 +730,6 @@ func retryBackoffDelay(attempt int, base, max time.Duration) time.Duration {
 		}
 	}
 	return d
-}
-
-func hashTags(tags []string) string {
-	if len(tags) == 0 {
-		return ""
-	}
-	// Tags have set semantics. Canonicalizing them here prevents equivalent
-	// campaign payloads (for example ["7", "7"] and [" 7 "]) from using
-	// different audience-selection histories and selecting the same recipients
-	// again.
-	unique := make(map[string]struct{}, len(tags))
-	for _, tag := range tags {
-		if tag = strings.TrimSpace(tag); tag != "" {
-			unique[tag] = struct{}{}
-		}
-	}
-	if len(unique) == 0 {
-		return ""
-	}
-	canonical := make([]string, 0, len(unique))
-	for tag := range unique {
-		canonical = append(canonical, tag)
-	}
-	sort.Strings(canonical)
-	h := sha1.Sum([]byte(strings.Join(canonical, ",")))
-	return hex.EncodeToString(h[:])
 }
 
 func checkedAudienceQueryLimit(count int64) (int, error) {
