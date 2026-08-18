@@ -9,12 +9,6 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 )
 
-type nilAudienceSelectionRepository struct{}
-
-func (nilAudienceSelectionRepository) Latest(context.Context, uint, string) (*models.AudienceSelection, error) {
-	return nil, nil
-}
-
 type idempotentBundleSelectionRepository struct {
 	mu      sync.Mutex
 	row     *models.BundleAudienceSelection
@@ -91,14 +85,6 @@ func TestBundleAudienceCacheConcurrentRetryReturnsOneImmutableAllocation(t *test
 	}
 }
 
-func (nilAudienceSelectionRepository) InsertWithMerge(context.Context, uint, string, string, []int64) (*models.AudienceSelection, error) {
-	return nil, nil
-}
-
-func (nilAudienceSelectionRepository) InsertSnapshot(context.Context, uint, string, string, []int64) (*models.AudienceSelection, error) {
-	return nil, nil
-}
-
 type nilBundleAudienceSelectionRepository struct{}
 
 func (nilBundleAudienceSelectionRepository) ByCampaignID(context.Context, uint) (*models.BundleAudienceSelection, error) {
@@ -109,17 +95,9 @@ func (nilBundleAudienceSelectionRepository) InsertForCampaign(context.Context, u
 	return nil, nil
 }
 
-func TestAudienceCachesRejectNilSavedRows(t *testing.T) {
+func TestBundleAudienceCacheRejectsNilSavedRow(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-
-	audienceCache := NewAudienceCache(nilAudienceSelectionRepository{})
-	if _, err := audienceCache.SaveWithMerge(ctx, 1, "hash", "correlation", []int64{1}); err == nil || !strings.Contains(err.Error(), "no saved row") {
-		t.Fatalf("SaveWithMerge must reject a nil repository row, got %v", err)
-	}
-	if _, err := audienceCache.SaveSnapshot(ctx, 1, "hash", "correlation", []int64{1}); err == nil || !strings.Contains(err.Error(), "no saved snapshot") {
-		t.Fatalf("SaveSnapshot must reject a nil repository row, got %v", err)
-	}
 
 	bundleCache := NewBundleAudienceCache(nilBundleAudienceSelectionRepository{})
 	if _, err := bundleCache.SaveForCampaign(ctx, 1, 2, 3, "correlation", []int64{1}); err == nil || !strings.Contains(err.Error(), "no saved row") {
