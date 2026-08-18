@@ -82,7 +82,7 @@ func (s *stubSentBaleMessageRepo) TrackingResultsFromSentRows(ctx context.Contex
 	return nil, nil
 }
 
-func (s *stubSentBaleMessageRepo) UpdateSendResultByTrackingIDs(ctx context.Context, updates []repository.SentBaleSendResultUpdate) error {
+func (s *stubSentBaleMessageRepo) UpdateSendResultByTrackingIDs(ctx context.Context, processedCampaignID uint, updates []repository.SentBaleSendResultUpdate) error {
 	return nil
 }
 
