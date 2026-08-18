@@ -55,7 +55,6 @@ type BaleCampaignScheduler struct {
 
 	schedulerName string
 
-	audienceCache       *AudienceCache
 	bundleAudienceCache *BundleAudienceCache
 }
 
@@ -75,6 +74,7 @@ func NewBaleCampaignScheduler(
 	baleCfg config.BaleConfig,
 	botCfg config.BotConfig,
 	adminCfg config.AdminConfig,
+	messageSendMockEnabled bool,
 ) *BaleCampaignScheduler {
 	if interval <= 0 {
 		interval = time.Minute
@@ -100,8 +100,7 @@ func NewBaleCampaignScheduler(
 		baleCfg:             baleCfg,
 		botCfg:              botCfg,
 		botClient:           newHTTPBotClient(botCfg),
-		baleClient:          newHTTPBaleClient(baleCfg),
-		audienceCache:       NewAudienceCache(repository.NewAudienceSelectionRepository(db)),
+		baleClient:          maybeMockBaleClient(newHTTPBaleClient(baleCfg), messageSendMockEnabled),
 		bundleAudienceCache: NewBundleAudienceCache(repository.NewBundleAudienceSelectionRepository(db)),
 		schedulerName:       "bale",
 	}
@@ -261,8 +260,8 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 	if err != nil {
 		return fmt.Errorf("resolve Bale bot id for campaign id=%d: %w", c.ID, err)
 	}
-	if c.NumAudiences == nil || *c.NumAudiences <= 0 {
-		return fmt.Errorf("campaign id=%d has no audiences", c.ID)
+	if _, err := schedulerConfiguredAudienceCount(c); err != nil {
+		return err
 	}
 
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
@@ -282,7 +281,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		uids                      []string
 		codes                     []string
 		unmatchedUID              []string
-		audienceSelectionID       *uint
 		bundleAudienceSelectionID *uint
 	)
 	if usesExcelAudienceTargeting(c) {
@@ -319,11 +317,10 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			audienceResult *AudiencePhonesResult
 			err            error
 		)
-		if c.BundleID != nil {
-			audienceResult, err = s.fetchBaleAudiencePhonesByBundle(ctx, c, jazzAccessToken, correlationID)
-		} else {
-			audienceResult, err = s.fetchBaleAudiencePhones(ctx, c, jazzAccessToken, correlationID)
+		if c.BundleID == nil || *c.BundleID == 0 {
+			return fmt.Errorf("campaign id=%d has no bundle", c.ID)
 		}
+		audienceResult, err = s.fetchBaleAudiencePhonesByBundle(ctx, c, jazzAccessToken, correlationID)
 		if err != nil {
 			return fmt.Errorf("fetch audience phones for campaign id=%d: %w", c.ID, err)
 		}
@@ -331,15 +328,11 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		ids = audienceResult.IDs
 		uids = audienceResult.UIDs
 		codes = audienceResult.Codes
-		audienceSelectionID, bundleAudienceSelectionID, err = selectionIDsForCampaign(c, audienceResult)
+		bundleAudienceSelectionID, err = bundleSelectionIDFromAudienceResult(audienceResult)
 		if err != nil {
 			return fmt.Errorf("resolve selection id for campaign id=%d: %w", c.ID, err)
 		}
-		if audienceSelectionID != nil {
-			s.logger.Printf("Bale scheduler: campaign id=%d fetched %d phones (audience_selection_id=%d)", c.ID, len(phones), *audienceSelectionID)
-		} else {
-			s.logger.Printf("Bale scheduler: campaign id=%d fetched %d phones (bundle_audience_selection_id=%d)", c.ID, len(phones), *bundleAudienceSelectionID)
-		}
+		s.logger.Printf("Bale scheduler: campaign id=%d fetched %d phones (bundle_audience_selection_id=%d)", c.ID, len(phones), *bundleAudienceSelectionID)
 	}
 
 	if len(ids) != len(phones) {
@@ -365,7 +358,6 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 			AudienceIDs:               pq.Int64Array{},
 			AudienceCodes:             []string{},
 			LastAudienceID:            nil,
-			AudienceSelectionID:       audienceSelectionID,
 			BundleAudienceSelectionID: bundleAudienceSelectionID,
 			Statistics:                nil,
 		}
@@ -399,7 +391,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 	}
 
 	var fileID *string
-	if c.MediaUUID != nil {
+	if len(phones) > 0 && c.MediaUUID != nil {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("context expired before uploading media for campaign id=%d: %w", c.ID, err)
 		}
@@ -509,7 +501,7 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		}
 
 		if len(sendUpdates) > 0 {
-			if updateErr := s.sentRepo.UpdateSendResultByTrackingIDs(ctx, sendUpdates); updateErr != nil {
+			if updateErr := s.sentRepo.UpdateSendResultByTrackingIDs(ctx, pc.ID, sendUpdates); updateErr != nil {
 				s.logger.Printf("Bale scheduler: failed to batch update sent_bale provider fields for campaign id=%d: %v", c.ID, updateErr)
 				// NOTE: Error silent here; not returning to avoid blocking further processing
 			}
@@ -525,12 +517,12 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 		}
 	}
 
-	stats, err := s.updateProcessedCampaignStats(ctx, pc.ID)
+	stats, err := preparedCampaignStatistics(ctx, s.pcRepo, pc, len(phones), s.updateProcessedCampaignStats)
 	if err != nil {
 		return fmt.Errorf("update stats for campaign id=%d: %w", c.ID, err)
 	}
 
-	if stats != nil && stats["aggregatedTotalSent"] != nil && stats["aggregatedTotalSent"].(int64) > 0 {
+	if shouldPushPreparedCampaignStatistics(stats, len(phones)) {
 		if err := s.botClient.PushCampaignStatistics(ctx, c.ID, stats); err != nil {
 			return fmt.Errorf("push statistics for campaign id=%d: %w", c.ID, err)
 		}
@@ -543,14 +535,16 @@ func (s *BaleCampaignScheduler) processBaleCampaign(ctx context.Context, jazzAcc
 	}
 	s.logger.Printf("Bale scheduler: campaign id=%d moved to executed", c.ID)
 
-	go func(campaignID uint, uids, codes []string) {
-		pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
-		defer cancel()
-		if err := s.botClient.PushCampaignAudienceUIDs(pushCtx, campaignID, uids, codes); err != nil {
-			s.logger.Printf("Bale scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err)
-			s.notifyAdmin(fmt.Sprintf("Bale Scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err))
-		}
-	}(c.ID, uids, codes)
+	if len(uids) > 0 {
+		go func(campaignID uint, uids, codes []string) {
+			pushCtx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
+			if err := s.botClient.PushCampaignAudienceUIDs(pushCtx, campaignID, uids, codes); err != nil {
+				s.logger.Printf("Bale scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err)
+				s.notifyAdmin(fmt.Sprintf("Bale Scheduler: push audience UIDs failed for campaign id=%d: %v", campaignID, err))
+			}
+		}(c.ID, uids, codes)
+	}
 
 	return nil
 }
@@ -604,148 +598,6 @@ func (s *BaleCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dt
 	}
 	s.logger.Printf("resolveScoreConstraint: campaign id=%d grades=%v p33=%.4f p66=%.4f", c.ID, c.AudienceGrades, percentiles.P33, percentiles.P66)
 	return gradesToScoreConstraint(c.AudienceGrades, percentiles.P33, percentiles.P66), nil
-}
-
-func (s *BaleCampaignScheduler) fetchBaleAudiencePhones(
-	ctx context.Context,
-	c dto.BotGetCampaignResponse,
-	jazzAccessToken string,
-	correlationID string,
-) (*AudiencePhonesResult, error) {
-	numAudiences := int64(0)
-	if c.NumAudiences != nil {
-		numAudiences = int64(*c.NumAudiences)
-	}
-	executionTags := campaignExecutionTags(c)
-	s.logger.Printf("fetchBaleAudiencePhones start: campaign_id=%d customer_id=%d num_audiences=%d tags_length=%d correlation_id=%s", c.ID, c.CustomerID, numAudiences, len(executionTags), correlationID)
-
-	if numAudiences <= 0 {
-		return nil, fmt.Errorf("campaign num_audiences must be positive")
-	}
-
-	executionTags, tagIDs, err := resolveActiveCampaignTagIDs(ctx, s.tagRepo, c)
-	if err != nil {
-		s.logger.Printf("fetchBaleAudiencePhones tags resolution failed: campaign_id=%d err=%v", c.ID, err)
-		return nil, err
-	}
-	s.logger.Printf("fetchBaleAudiencePhones tags resolved: campaign_id=%d requested=%d resolved=%d", c.ID, len(executionTags), len(tagIDs))
-
-	scoreConstraint, err := s.resolveScoreConstraint(ctx, c)
-	if err != nil {
-		s.logger.Printf("fetchBaleAudiencePhones resolve score constraint failed: campaign_id=%d err=%v", c.ID, err)
-		return nil, err
-	}
-
-	tagsHash := hashTags(executionTags)
-	selection, err := s.audienceCache.Latest(ctx, c.CustomerID, tagsHash)
-	if err != nil {
-		s.logger.Printf("fetchBaleAudiencePhones latest selection failed: campaign_id=%d customer_id=%d tags_hash=%s err=%v", c.ID, c.CustomerID, tagsHash, err)
-		return nil, err
-	}
-	if selection != nil {
-		s.logger.Printf("fetchBaleAudiencePhones selection hit: campaign_id=%d selection_id=%d prior_ids_length=%d", c.ID, selection.ID, len(selection.IDs))
-	} else {
-		s.logger.Printf("fetchBaleAudiencePhones selection miss: campaign_id=%d", c.ID)
-	}
-
-	selectAudiences := func(exclude map[int64]struct{}) ([]string, []int64, []string, error) {
-		return s.selectBaleTagAudiences(ctx, c.ID, tagIDs, numAudiences, exclude, nil, scoreConstraint)
-	}
-
-	// First attempt excluding prior picks for this customer/tags
-	var exclude map[int64]struct{}
-	if selection != nil && selection.IDs != nil {
-		exclude = selection.IDs
-	}
-	phones, ids, uids, err := selectAudiences(exclude)
-	if err != nil {
-		return nil, err
-	}
-	s.logger.Printf("fetchBaleAudiencePhones selected (with exclusions): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
-
-	resetUsed := false
-	if int64(len(phones)) < numAudiences {
-		// Not enough fresh; retry from scratch without exclusions
-		resetUsed = true
-		phones, ids, uids, err = selectAudiences(nil)
-		if err != nil {
-			return nil, err
-		}
-		s.logger.Printf("fetchBaleAudiencePhones selected (reset): campaign_id=%d selected=%d requested=%d", c.ID, len(phones), numAudiences)
-	}
-	if err := requireAudienceMatch(c.ID, tagIDs, len(ids)); err != nil {
-		return nil, err
-	}
-
-	// Persist selection history with correlation id and merged audience IDs
-	var sel *AudienceSelection
-	if resetUsed {
-		sel, err = s.audienceCache.SaveSnapshot(ctx, c.CustomerID, tagsHash, correlationID, ids)
-	} else {
-		sel, err = s.audienceCache.SaveWithMerge(ctx, c.CustomerID, tagsHash, correlationID, ids)
-	}
-	if err != nil {
-		s.logger.Printf("fetchBaleAudiencePhones selection save failed: campaign_id=%d err=%v reset=%t", c.ID, err, resetUsed)
-		return nil, err
-	}
-	s.logger.Printf("fetchBaleAudiencePhones selection saved: campaign_id=%d selection_id=%d reset=%t selected=%d", c.ID, sel.ID, resetUsed, len(ids))
-
-	if !hasCampaignAdLink(c.AdLink) {
-		s.logger.Printf("fetchBaleAudiencePhones skipped short links generation: campaign_id=%d ad_link=empty", c.ID)
-		s.logger.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d ad_link=empty", c.ID, len(phones), len(phones), sel.ID)
-		return &AudiencePhonesResult{
-			Phones:              phones,
-			IDs:                 ids,
-			UIDs:                uids,
-			Codes:               make([]string, len(phones)),
-			AudienceSelectionID: utils.ToPtr(sel.ID),
-		}, nil
-	}
-
-	// For new campaigns without a short link domain, skip AllocateShortLinks.
-	// buildBaleMessageBody will replace {uid} directly in the ad link.
-	if c.ShortLinkDomain == nil || strings.TrimSpace(*c.ShortLinkDomain) == "" {
-		s.logger.Printf("fetchBaleAudiencePhones skipped short links generation: campaign_id=%d short_link_domain=empty", c.ID)
-		s.logger.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d short_link_domain=empty", c.ID, len(phones), len(phones), sel.ID)
-		return &AudiencePhonesResult{
-			Phones:              phones,
-			IDs:                 ids,
-			UIDs:                uids,
-			Codes:               make([]string, len(phones)),
-			AudienceSelectionID: utils.ToPtr(sel.ID),
-		}, nil
-	}
-
-	// Generate sequential UIDs via bot API and persist short links centrally
-	items := make([]dto.PhoneWithAdLink, len(phones))
-	for i, p := range phones {
-		adLink := c.AdLink
-		if adLink != nil && strings.Contains(*adLink, "{uid}") {
-			resolved := strings.ReplaceAll(*adLink, "{uid}", uids[i])
-			adLink = &resolved
-		}
-		items[i] = dto.PhoneWithAdLink{Phone: p, AdLink: adLink}
-	}
-	codes, err := s.botClient.AllocateShortLinks(ctx, jazzAccessToken, &dto.BotAllocateShortLinksRequest{
-		CampaignID:      c.ID,
-		Items:           items,
-		ShortLinkDomain: *c.ShortLinkDomain,
-	})
-	if err != nil {
-		s.logger.Printf("fetchBaleAudiencePhones allocate short links failed: campaign_id=%d selected=%d err=%v", c.ID, len(phones), err)
-		return nil, err
-	}
-	if len(codes) != len(phones) {
-		return nil, fmt.Errorf("allocate short links length mismatch for campaign id=%d: phones=%d codes=%d", c.ID, len(phones), len(codes))
-	}
-	s.logger.Printf("fetchBaleAudiencePhones success: campaign_id=%d selected=%d codes_length=%d selection_id=%d", c.ID, len(phones), len(codes), sel.ID)
-	return &AudiencePhonesResult{
-		Phones:              phones,
-		IDs:                 ids,
-		UIDs:                uids,
-		Codes:               codes,
-		AudienceSelectionID: utils.ToPtr(sel.ID),
-	}, nil
 }
 
 // selectBaleTagAudiences fetches audience profiles matching tagIDs, skipping any IDs in exclude,
@@ -809,16 +661,12 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhonesByBundle(
 	correlationID string,
 ) (*AudiencePhonesResult, error) {
 	bundleID := *c.BundleID
-	numAudiences := int64(0)
-	if c.NumAudiences != nil {
-		numAudiences = int64(*c.NumAudiences)
+	numAudiences, err := schedulerConfiguredAudienceCount(c)
+	if err != nil {
+		return nil, err
 	}
 	s.logger.Printf("fetchBaleAudiencePhonesByBundle start: campaign_id=%d customer_id=%d bundle_id=%d num_audiences=%d correlation_id=%s",
 		c.ID, c.CustomerID, bundleID, numAudiences, correlationID)
-
-	if numAudiences <= 0 {
-		return nil, fmt.Errorf("campaign num_audiences must be positive")
-	}
 
 	executionTags, tagIDs, err := resolveActiveCampaignTagIDs(ctx, s.tagRepo, c)
 	if err != nil {
@@ -858,12 +706,21 @@ func (s *BaleCampaignScheduler) fetchBaleAudiencePhonesByBundle(
 	}
 	s.logger.Printf("fetchBaleAudiencePhonesByBundle selected: campaign_id=%d bundle_id=%d selected=%d requested=%d",
 		c.ID, bundleID, len(phones), numAudiences)
-	if err := requireExactAudienceCount(c.ID, numAudiences, len(ids)); err != nil {
+	if err := validateSchedulerSelectedAudienceCount(c, numAudiences, len(ids)); err != nil {
 		return nil, err
 	}
 
 	s.logger.Printf("fetchBaleAudiencePhonesByBundle selection saved: campaign_id=%d bundle_id=%d selection_id=%d selected=%d",
 		c.ID, bundleID, selectionID, len(ids))
+	if len(phones) == 0 {
+		return &AudiencePhonesResult{
+			Phones:                    phones,
+			IDs:                       ids,
+			UIDs:                      uids,
+			Codes:                     []string{},
+			BundleAudienceSelectionID: utils.ToPtr(selectionID),
+		}, nil
+	}
 
 	if !hasCampaignAdLink(c.AdLink) {
 		s.logger.Printf("fetchBaleAudiencePhonesByBundle skipped short links: campaign_id=%d ad_link=empty", c.ID)
@@ -1170,7 +1027,7 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		if len(sendUpdates) == 0 {
 			s.logger.Printf("handleStatusJob: all status items filtered out (no valid server_id or matched row) for job_id=%d processed_campaign_id=%d", job.ID, job.ProcessedCampaignID)
 		}
-		if err := s.sentRepo.UpdateSendResultByTrackingIDs(txCtx, sendUpdates); err != nil {
+		if err := s.sentRepo.UpdateSendResultByTrackingIDs(txCtx, job.ProcessedCampaignID, sendUpdates); err != nil {
 			return err
 		}
 		if err := s.resRepo.SaveBatch(txCtx, statusRows); err != nil {
@@ -1199,7 +1056,7 @@ func (s *BaleCampaignScheduler) handleStatusJob(ctx context.Context, job *models
 		if pc == nil {
 			return fmt.Errorf("processed campaign not found for processed campaign id=%d", job.ProcessedCampaignID)
 		}
-		if stats["aggregatedTotalSent"] != nil && stats["aggregatedTotalSent"].(int64) > 0 {
+		if shouldPushCurrentProcessedCampaignStatistics(pc, stats) {
 			if err := s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats); err != nil {
 				return err
 			}
@@ -1435,7 +1292,7 @@ func (s *BaleCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx con
 		Select(`
 			COUNT(*) AS total,
 			COALESCE(SUM(CASE WHEN LOWER(BTRIM(status::text)) = 'successful' THEN 1 ELSE 0 END), 0) AS successful`).
-		Where("processed_campaign_id = ?", pc.ID).
+		Where("processed_campaign_id = ? AND is_current", pc.ID).
 		Scan(&agg).Error; err != nil {
 		return nil, err
 	}
