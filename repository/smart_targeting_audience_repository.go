@@ -10,14 +10,14 @@ import (
 	"gorm.io/gorm"
 )
 
-// SmartTargetingAudienceQuery is platform-independent by default. Capacity
-// jobs leave AllowedColors empty, while schedulers may apply platform-specific
-// delivery eligibility when selecting the final audience.
+// SmartTargetingAudienceQuery describes the eligibility rules shared by exact
+// capacity, Test preview, and final selection. AllowedColors is empty for
+// platforms without a delivery-color restriction.
 type SmartTargetingAudienceQuery struct {
 	BundleID uint
 	// ApplyBundleAudienceExclusions enables the manually populated, bundle-
-	// scoped exclusion list. Capacity and preview callers leave it false; the
-	// final Smart Targeting Test scheduler enables it.
+	// scoped exclusion list for Smart Targeting Test capacity, preview, and
+	// final selection.
 	ApplyBundleAudienceExclusions bool
 	TagIDs                        []int64
 	ScoreClasses                  []string
@@ -74,6 +74,12 @@ WITH tagged_population AS (
           FROM bundle_audience_selection_members AS used
           WHERE used.bundle_id = ? AND used.audience_id = tagged.id
       )
+      AND (?::boolean OR NOT EXISTS (
+          SELECT 1
+          FROM bundle_audience_exclusions AS bundle_exclusion
+          WHERE bundle_exclusion.bundle_id = ?
+            AND bundle_exclusion.audience_id = tagged.id
+      ))
 )`
 
 // Execution selection needs delivery columns. Capacity and score-bound work
@@ -95,6 +101,12 @@ WITH tagged_population AS (
           FROM bundle_audience_selection_members AS used
           WHERE used.bundle_id = ? AND used.audience_id = tagged.id
       )
+      AND (?::boolean OR NOT EXISTS (
+          SELECT 1
+          FROM bundle_audience_exclusions AS bundle_exclusion
+          WHERE bundle_exclusion.bundle_id = ?
+            AND bundle_exclusion.audience_id = tagged.id
+      ))
 )`
 
 const smartTargetingClassifiedPopulationCTE = `, percentile_bounds AS (
@@ -134,6 +146,8 @@ func smartTargetingPopulationArgs(query SmartTargetingAudienceQuery) []any {
 		pq.Array(query.TagIDs),
 		len(colors) == 0,
 		pq.Array(colors),
+		query.BundleID,
+		!query.ApplyBundleAudienceExclusions,
 		query.BundleID,
 	}
 }

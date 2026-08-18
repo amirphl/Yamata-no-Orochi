@@ -166,6 +166,9 @@ func TestSmartTargetingTestSamplingAudienceQueryRestrictsSMSColors(t *testing.T)
 		t.Fatal(err)
 	}
 	query := smartTargetingTestSamplingAudienceQuery(bundleID, []int64{9}, input)
+	if !query.ApplyBundleAudienceExclusions {
+		t.Fatal("Smart Targeting Test sampling must apply Bundle audience exclusions")
+	}
 	if len(query.AllowedColors) != 2 || query.AllowedColors[0] != "white" || query.AllowedColors[1] != "pink" {
 		t.Fatalf("SMS sampling allowed colors = %v, want [white pink]", query.AllowedColors)
 	}

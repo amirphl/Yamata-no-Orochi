@@ -48,11 +48,17 @@ func TestSmartTargetingCapacityHashIsOrderIndependent(t *testing.T) {
 	if first == smartTargetingTagHash(19, []uint{2, 7, 9}) {
 		t.Fatal("campaign ID must participate in the tag hash")
 	}
-	if smartTargetingInputHash(first, []string{"A", "B"}) == smartTargetingInputHash(first, []string{"A", "C"}) {
+	if smartTargetingInputHash(first, []string{"A", "B"}, models.CampaignPlatformSMS, false) == smartTargetingInputHash(first, []string{"A", "C"}, models.CampaignPlatformSMS, false) {
 		t.Fatal("score classes must participate in the input hash")
 	}
-	if smartTargetingInputHash(first, []string{"A", "B"}) != smartTargetingInputHash(first, []string{"A", "B"}) {
+	if smartTargetingInputHash(first, []string{"A", "B"}, models.CampaignPlatformSMS, false) != smartTargetingInputHash(first, []string{"A", "B"}, " SMS ", false) {
 		t.Fatal("equal targeting inputs must produce equal hashes")
+	}
+	if smartTargetingInputHash(first, []string{"A", "B"}, models.CampaignPlatformSMS, false) == smartTargetingInputHash(first, []string{"A", "B"}, models.CampaignPlatformBale, false) {
+		t.Fatal("platform must participate in the input hash")
+	}
+	if smartTargetingInputHash(first, []string{"A", "B"}, models.CampaignPlatformSMS, false) == smartTargetingInputHash(first, []string{"A", "B"}, models.CampaignPlatformSMS, true) {
+		t.Fatal("Bundle-exclusion eligibility must participate in the input hash")
 	}
 }
 
@@ -79,6 +85,35 @@ func TestSmartTargetingScoreClassBoundaries(t *testing.T) {
 	}
 	if got := smartTargetingScoreClass(floatPtr(11), &p33, &p33); got != "A" {
 		t.Fatalf("equal-boundary score class = %q, want A", got)
+	}
+}
+
+func TestSmartTargetingCapacityAudienceQueryUsesSnapshotEligibility(t *testing.T) {
+	calculation := &models.CampaignTargetingCapacityCalculation{
+		BundleID:                      3,
+		Platform:                      models.CampaignPlatformSMS,
+		ApplyBundleAudienceExclusions: true,
+		SelectedTagIDs:                pq.Int64Array{2, 9},
+		SelectedScoreClasses:          pq.StringArray{"A", "C"},
+	}
+	query := smartTargetingCapacityAudienceQuery(calculation)
+	if query.BundleID != 3 || !query.ApplyBundleAudienceExclusions || !reflect.DeepEqual(query.TagIDs, []int64{2, 9}) || !reflect.DeepEqual(query.ScoreClasses, []string{"A", "C"}) || !reflect.DeepEqual(query.AllowedColors, []string{"white", "pink"}) {
+		t.Fatalf("capacity audience query = %#v", query)
+	}
+}
+
+func TestSmartTargetingCapacityAppliesBundleExclusionsOnlyToTestPhase(t *testing.T) {
+	method := models.CampaignAudienceTargetingSmart
+	campaign := &models.Campaign{
+		Phase: models.CampaignPhaseTest,
+		Spec:  models.CampaignSpec{AudienceTargetingMethod: &method},
+	}
+	if !smartTargetingCapacityAppliesBundleExclusions(campaign) {
+		t.Fatal("Smart Targeting Test capacity must apply Bundle exclusions")
+	}
+	campaign.Phase = models.CampaignPhaseExecution
+	if smartTargetingCapacityAppliesBundleExclusions(campaign) {
+		t.Fatal("Smart Targeting execution capacity must not apply Test-only Bundle exclusions")
 	}
 }
 

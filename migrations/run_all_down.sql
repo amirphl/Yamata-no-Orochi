@@ -5,6 +5,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0136_version_smart_targeting_capacity_eligibility_down.sql...'
+\i migrations/0136_version_smart_targeting_capacity_eligibility_down.sql
+
+\echo 'Running 0135_external_short_link_sync_down.sql...'
+\i migrations/0135_external_short_link_sync_down.sql
+
 \echo 'Running 0134_create_bundle_audience_exclusions_down.sql...'
 \i migrations/0134_create_bundle_audience_exclusions_down.sql
 

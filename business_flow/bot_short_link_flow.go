@@ -25,10 +25,15 @@ type BotShortLinkFlow interface {
 type BotShortLinkFlowImpl struct {
 	shortRepo repository.ShortLinkRepository
 	db        *gorm.DB
+	publisher ShortLinkMappingPublisher
 }
 
-func NewBotShortLinkFlow(shortRepo repository.ShortLinkRepository, db *gorm.DB) BotShortLinkFlow {
-	return &BotShortLinkFlowImpl{shortRepo: shortRepo, db: db}
+func NewBotShortLinkFlow(shortRepo repository.ShortLinkRepository, db *gorm.DB, publishers ...ShortLinkMappingPublisher) BotShortLinkFlow {
+	var publisher ShortLinkMappingPublisher
+	if len(publishers) > 0 {
+		publisher = publishers[0]
+	}
+	return &BotShortLinkFlowImpl{shortRepo: shortRepo, db: db, publisher: publisher}
 }
 
 func (s *BotShortLinkFlowImpl) CreateShortLink(ctx context.Context, req *dto.BotCreateShortLinkRequest) (*dto.BotCreateShortLinkResponse, error) {
@@ -60,6 +65,9 @@ func (s *BotShortLinkFlowImpl) CreateShortLink(ctx context.Context, req *dto.Bot
 	}
 	if err := s.shortRepo.Save(ctx, row); err != nil {
 		return nil, NewBusinessError("BOT_CREATE_SHORT_LINK_FAILED", "Failed to create short link", err)
+	}
+	if err := publishShortLinkMappings(ctx, s.shortRepo, s.publisher, []*models.ShortLink{row}); err != nil {
+		return nil, NewBusinessError("EXTERNAL_SHORT_LINK_UPLOAD_FAILED", "External short-link mapping was not acknowledged", err)
 	}
 	return &dto.BotCreateShortLinkResponse{
 		Message: "Short link created",
@@ -103,6 +111,9 @@ func (s *BotShortLinkFlowImpl) CreateShortLinks(ctx context.Context, req *dto.Bo
 		return s.shortRepo.SaveBatch(txCtx, rows)
 	}); err != nil {
 		return nil, NewBusinessError("BOT_CREATE_SHORT_LINKS_FAILED", "Failed to create short links", err)
+	}
+	if err := publishShortLinkMappings(ctx, s.shortRepo, s.publisher, rows); err != nil {
+		return nil, NewBusinessError("EXTERNAL_SHORT_LINK_UPLOAD_FAILED", "External short-link mappings were not acknowledged", err)
 	}
 
 	out := make([]dto.ShortLinkDTO, 0, len(rows))
@@ -183,6 +194,11 @@ func (s *BotShortLinkFlowImpl) GenerateAndCreateShortLinks(ctx context.Context, 
 		return s.shortRepo.SaveBatch(txCtx, rows)
 	}); err != nil {
 		return nil, NewBusinessError("BOT_CREATE_SHORT_LINKS_FAILED", "Failed to create short links", err)
+	}
+	if err := publishShortLinkMappings(ctx, s.shortRepo, s.publisher, rows); err != nil {
+		// No code is returned to the campaign scheduler until every mapping is
+		// durably acknowledged by the external redirect service.
+		return nil, NewBusinessError("EXTERNAL_SHORT_LINK_UPLOAD_FAILED", "External short-link mappings were not acknowledged", err)
 	}
 
 	return codes, nil

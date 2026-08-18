@@ -1,0 +1,22 @@
+# PostgreSQL only. The Python application runs directly under systemd.
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: external_shortlink
+      POSTGRES_USER: external_shortlink
+      POSTGRES_PASSWORD: CHANGE_ME
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - external_shortlink_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U external_shortlink -d external_shortlink"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  external_shortlink_postgres:
+

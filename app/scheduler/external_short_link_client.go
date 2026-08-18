@@ -1,0 +1,208 @@
+package scheduler
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+
+	"github.com/amirphl/Yamata-no-Orochi/config"
+	"github.com/amirphl/Yamata-no-Orochi/models"
+)
+
+type ExternalShortLinkClickPage struct {
+	Clicks      []models.ExternalShortLinkClick `json:"clicks"`
+	NextAfterID int64                           `json:"next_after_id"`
+	HasMore     bool                            `json:"has_more"`
+}
+
+// ExternalShortLinkAPI is shared by the campaign publication gate and the two background workers.
+type ExternalShortLinkAPI interface {
+	UploadMappings(ctx context.Context, links []*models.ShortLink) error
+	FetchClicks(ctx context.Context, afterID int64, limit int) (*ExternalShortLinkClickPage, error)
+	AcknowledgeClicks(ctx context.Context, throughClickID int64) error
+}
+
+type HTTPExternalShortLinkClient struct {
+	baseURL          string
+	token            string
+	mappingBatchSize int
+	client           *http.Client
+}
+
+func NewExternalShortLinkClient(cfg config.ExternalShortLinkConfig) (*HTTPExternalShortLinkClient, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	parsedBaseURL, err := url.Parse(baseURL)
+	if err != nil || parsedBaseURL.Host == "" || (parsedBaseURL.Scheme != "https" && !(cfg.AllowInsecureHTTP && parsedBaseURL.Scheme == "http")) {
+		return nil, fmt.Errorf("external short-link base URL is invalid or insecure")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12}
+	if cfg.CAFile != "" {
+		pem, err := os.ReadFile(cfg.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read external short-link CA: %w", err)
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("external short-link CA file contains no certificates")
+		}
+		tlsConfig.RootCAs = roots
+	}
+	if cfg.ClientCertFile != "" || cfg.ClientKeyFile != "" {
+		certificate, err := tls.LoadX509KeyPair(cfg.ClientCertFile, cfg.ClientKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load external short-link client certificate: %w", err)
+		}
+		tlsConfig.Certificates = []tls.Certificate{certificate}
+	}
+	transport.TLSClientConfig = tlsConfig
+	return &HTTPExternalShortLinkClient{
+		baseURL:          baseURL,
+		token:            cfg.APIToken,
+		mappingBatchSize: cfg.MappingBatchSize,
+		client:           &http.Client{Timeout: cfg.RequestTimeout, Transport: transport},
+	}, nil
+}
+
+func (c *HTTPExternalShortLinkClient) endpoint(path string) string {
+	return c.baseURL + path
+}
+
+func (c *HTTPExternalShortLinkClient) request(ctx context.Context, method, path string, body any, out any) error {
+	var reader io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshal external short-link request: %w", err)
+		}
+		reader = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint(path), reader)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		message, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("external short-link %s %s returned %d: %s", method, path, resp.StatusCode, strings.TrimSpace(string(message)))
+	}
+	if out == nil {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return nil
+	}
+	decoder := json.NewDecoder(io.LimitReader(resp.Body, 64*1024*1024))
+	if err := decoder.Decode(out); err != nil {
+		return fmt.Errorf("decode external short-link response: %w", err)
+	}
+	return nil
+}
+
+type externalMappingUpload struct {
+	Links []externalMapping `json:"links"`
+}
+
+type externalMapping struct {
+	Code            string  `json:"code"`
+	LongURL         string  `json:"long_url"`
+	ShortURL        string  `json:"short_url"`
+	SourceLinkID    uint    `json:"source_link_id"`
+	CampaignID      *uint   `json:"campaign_id,omitempty"`
+	ClientID        *uint   `json:"client_id,omitempty"`
+	ScenarioID      *uint   `json:"scenario_id,omitempty"`
+	ScenarioName    *string `json:"scenario_name,omitempty"`
+	PhoneNumber     *string `json:"phone_number,omitempty"`
+	SourceCreatedAt string  `json:"source_created_at,omitempty"`
+	SourceUpdatedAt string  `json:"source_updated_at,omitempty"`
+}
+
+func (c *HTTPExternalShortLinkClient) UploadMappings(ctx context.Context, links []*models.ShortLink) error {
+	if len(links) == 0 {
+		return nil
+	}
+	batchSize := c.mappingBatchSize
+	if batchSize <= 0 || batchSize > 10000 {
+		batchSize = 5000
+	}
+	for start := 0; start < len(links); start += batchSize {
+		end := min(start+batchSize, len(links))
+		payload := externalMappingUpload{Links: make([]externalMapping, 0, end-start)}
+		for _, link := range links[start:end] {
+			if link == nil {
+				return fmt.Errorf("external mapping at offset %d is nil", start)
+			}
+			mapping := externalMapping{
+				Code:         link.UID,
+				LongURL:      link.LongLink,
+				ShortURL:     link.ShortLink,
+				SourceLinkID: link.ID,
+				CampaignID:   link.CampaignID,
+				ClientID:     link.ClientID,
+				ScenarioID:   link.ScenarioID,
+				ScenarioName: link.ScenarioName,
+				PhoneNumber:  link.PhoneNumber,
+			}
+			if !link.CreatedAt.IsZero() {
+				mapping.SourceCreatedAt = link.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+			}
+			if !link.UpdatedAt.IsZero() {
+				mapping.SourceUpdatedAt = link.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+			}
+			payload.Links = append(payload.Links, mapping)
+		}
+		var response struct {
+			Persisted int `json:"persisted"`
+		}
+		if err := c.request(ctx, http.MethodPost, "/api/v1/links/batch", payload, &response); err != nil {
+			return fmt.Errorf("upload mapping chunk [%d,%d): %w", start, end, err)
+		}
+		if response.Persisted != len(payload.Links) {
+			return fmt.Errorf("upload mapping chunk [%d,%d): acknowledged %d of %d mappings", start, end, response.Persisted, len(payload.Links))
+		}
+	}
+	return nil
+}
+
+func (c *HTTPExternalShortLinkClient) FetchClicks(ctx context.Context, afterID int64, limit int) (*ExternalShortLinkClickPage, error) {
+	query := url.Values{}
+	query.Set("after_id", strconv.FormatInt(afterID, 10))
+	query.Set("limit", strconv.Itoa(limit))
+	var page ExternalShortLinkClickPage
+	if err := c.request(ctx, http.MethodGet, "/api/v1/clicks?"+query.Encode(), nil, &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
+}
+
+func (c *HTTPExternalShortLinkClient) AcknowledgeClicks(ctx context.Context, throughClickID int64) error {
+	var response struct {
+		ThroughClickID int64 `json:"through_click_id"`
+	}
+	if err := c.request(ctx, http.MethodPost, "/api/v1/clicks/ack", map[string]int64{"through_click_id": throughClickID}, &response); err != nil {
+		return err
+	}
+	if response.ThroughClickID < throughClickID {
+		return fmt.Errorf("external acknowledgement stopped at %d, expected at least %d", response.ThroughClickID, throughClickID)
+	}
+	return nil
+}

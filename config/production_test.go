@@ -162,3 +162,31 @@ func TestValidateCryptoConfigRequiresOxapayKeyWhenCryptoEnabled(t *testing.T) {
 		t.Fatalf("validateCryptoConfig() errors = %v, want missing OXA_API_KEY error", errors)
 	}
 }
+
+func TestValidateExternalShortLinkConfig(t *testing.T) {
+	valid := ExternalShortLinkConfig{
+		Enabled:             true,
+		BaseURL:             "https://links.example.com",
+		APIToken:            strings.Repeat("x", 32),
+		RequestTimeout:      30 * time.Second,
+		MappingSyncInterval: time.Minute,
+		ClickSyncInterval:   5 * time.Minute,
+		MappingBatchSize:    5000,
+		ClickPageSize:       10000,
+		MaxClickPagesPerRun: 100,
+	}
+	if errors := validateExternalShortLinkConfig(valid); len(errors) != 0 {
+		t.Fatalf("valid external short-link config errors = %v", errors)
+	}
+
+	invalid := valid
+	invalid.BaseURL = "http://links.example.com"
+	invalid.APIToken = "short"
+	errors := validateExternalShortLinkConfig(invalid)
+	if len(errors) != 2 {
+		t.Fatalf("invalid external short-link config errors = %v, want HTTPS and token errors", errors)
+	}
+	if errors := validateExternalShortLinkConfig(ExternalShortLinkConfig{}); len(errors) != 0 {
+		t.Fatalf("disabled external short-link config errors = %v", errors)
+	}
+}

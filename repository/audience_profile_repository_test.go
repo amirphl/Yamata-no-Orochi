@@ -119,3 +119,32 @@ func TestCampaignCandidatesExcludeBundleUsageWithoutPlatformFilter(t *testing.T)
 		t.Fatalf("bundle candidate query contains a platform-dependent filter:\n%s", sql)
 	}
 }
+
+func TestAudienceProfileScoreConstraintSupportsDisjointGradeBoundaries(t *testing.T) {
+	t.Parallel()
+	db := newAudienceProfileDryRunDB(t)
+	repo := &AudienceProfileRepositoryImpl{}
+	p33, p66 := 24.0, 29.6
+
+	tests := []struct {
+		name       string
+		constraint *models.NormalizedScoreConstraint
+		wantSQL    string
+	}{
+		{name: "A", constraint: &models.NormalizedScoreConstraint{GT: &p66}, wantSQL: "normalized_score > $1"},
+		{name: "B", constraint: &models.NormalizedScoreConstraint{GT: &p33, LTE: &p66}, wantSQL: "normalized_score > $1 AND normalized_score <= $2"},
+		{name: "A or C", constraint: &models.NormalizedScoreConstraint{LTE: &p33, OrGT: &p66}, wantSQL: "normalized_score <= $1 OR normalized_score > $2"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var rows []*models.AudienceProfile
+			statement := repo.applyFilter(db.Model(&models.AudienceProfile{}), models.AudienceProfileFilter{NormalizedScore: tt.constraint}).Find(&rows).Statement
+			if statement.Error != nil {
+				t.Fatalf("build score query: %v", statement.Error)
+			}
+			if sql := statement.SQL.String(); !strings.Contains(sql, tt.wantSQL) {
+				t.Fatalf("score query does not contain %q:\n%s", tt.wantSQL, sql)
+			}
+		})
+	}
+}

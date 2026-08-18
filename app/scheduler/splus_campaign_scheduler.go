@@ -269,7 +269,7 @@ func (s *SplusCampaignScheduler) processSplusCampaign(ctx context.Context, jazzA
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
 		return fmt.Errorf("move campaign id=%d to running: %w", c.ID, err)
 	}
-	// defer releaseUnpreparedCampaignOnFailure(s.db, s.logger, "Splus", c.ID, &err)
+	defer releaseUnpreparedCampaignOnFailure(s.db, s.logger, "Splus", c.ID, &err)
 	s.logger.Printf("Splus scheduler: campaign id=%d moved to running", c.ID)
 
 	// Fetch audience data OUTSIDE any DB transaction.
@@ -610,10 +610,6 @@ func buildSplusStatusResultMetadata(item SplusStatusResponse, normalizedStatus m
 
 func (s *SplusCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error) {
 	if usesSmartAudienceTargeting(c) {
-		return nil, nil
-	}
-	if campaignIgnoresAudienceGrades(c) {
-		s.logger.Printf("resolveScoreConstraint: campaign id=%d tag_id=%d bypasses audience grade filter", c.ID, audienceGradeExemptTagID)
 		return nil, nil
 	}
 	if !gradesNeedScoreFilter(c.AudienceGrades) {

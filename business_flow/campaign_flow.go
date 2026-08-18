@@ -86,6 +86,7 @@ type CampaignFlowImpl struct {
 	rubikaConfig            config.RubikaConfig
 	splusConfig             config.SplusConfig
 	irHTTPSProxy            string
+	shortLinkPublisher      ShortLinkMappingPublisher
 	rc                      *redis.Client
 	db                      *gorm.DB
 }
@@ -139,7 +140,12 @@ func NewCampaignFlow(
 	rubikaConfig config.RubikaConfig,
 	splusConfig config.SplusConfig,
 	irHTTPSProxy string,
+	shortLinkPublishers ...ShortLinkMappingPublisher,
 ) CampaignFlow {
+	var shortLinkPublisher ShortLinkMappingPublisher
+	if len(shortLinkPublishers) > 0 {
+		shortLinkPublisher = shortLinkPublishers[0]
+	}
 	return &CampaignFlowImpl{
 		campaignRepo:            campaignRepo,
 		bundleRepo:              bundleRepo,
@@ -171,6 +177,7 @@ func NewCampaignFlow(
 		rubikaConfig:            rubikaConfig,
 		splusConfig:             splusConfig,
 		irHTTPSProxy:            irHTTPSProxy,
+		shortLinkPublisher:      shortLinkPublisher,
 		rc:                      rc,
 		db:                      db,
 	}

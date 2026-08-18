@@ -224,6 +224,9 @@ func (s *CampaignFlowImpl) resolveCampaignTestLink(
 	if err := s.shortLinkRepo.Save(ctx, shortLinkRow); err != nil {
 		return nil, err
 	}
+	if err := publishShortLinkMappings(ctx, s.shortLinkRepo, s.shortLinkPublisher, []*models.ShortLink{shortLinkRow}); err != nil {
+		return nil, fmt.Errorf("publish campaign test short link: %w", err)
+	}
 
 	return &shortLink, nil
 }

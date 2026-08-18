@@ -1,6 +1,6 @@
--- Bundle-scoped opt-out list for final Smart Targeting Test audience
--- selection. The natural pair key both prevents duplicates and supports the
--- scheduler's bundle_id + audience_id anti-join.
+-- Bundle-scoped opt-out list for Smart Targeting Test audience eligibility.
+-- The natural pair key both prevents duplicates and supports the
+-- capacity/preview/scheduler bundle_id + audience_id anti-join.
 
 BEGIN;
 
@@ -18,6 +18,6 @@ CREATE INDEX IF NOT EXISTS idx_bundle_audience_exclusions_audience
     ON bundle_audience_exclusions (audience_id);
 
 COMMENT ON TABLE bundle_audience_exclusions IS
-    'Audience IDs excluded from final Smart Targeting Test selection for a bundle';
+    'Audience IDs excluded from Smart Targeting Test eligibility for a bundle';
 
 COMMIT;

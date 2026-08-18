@@ -178,7 +178,7 @@ func (r *capacitySchedulerTestRepo) LatestByInput(context.Context, uint, string)
 	return nil, nil
 }
 
-func (r *capacitySchedulerTestRepo) CurrentForExecution(context.Context, uint, uint, []int64, []string, int, time.Time) (*models.CampaignTargetingCapacityCalculation, error) {
+func (r *capacitySchedulerTestRepo) CurrentForExecution(context.Context, uint, uint, string, bool, []int64, []string, int, time.Time) (*models.CampaignTargetingCapacityCalculation, error) {
 	return nil, nil
 }
 

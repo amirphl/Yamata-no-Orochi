@@ -35,8 +35,8 @@ corrective migration so every environment retains the same append-only history.
 
 ## Aggregate manifests
 
-[`run_all_up.sql`](run_all_up.sql) includes all 134 up files in filename order.
-[`run_all_down.sql`](run_all_down.sql) includes all 133 available down files
+[`run_all_up.sql`](run_all_up.sql) includes all 138 up files in filename order.
+[`run_all_down.sql`](run_all_down.sql) includes all 137 available down files
 once. Its order is the reverse filename order except for the existing
 `0034`/`0035` swap; treat the checked-in manifest order as canonical and review
 dependencies before changing it.
@@ -237,6 +237,9 @@ every production change.
 | `0131` | PostgreSQL query observability, redundant audience-index removal, and large-table autovacuum/statistics tuning |
 | `0132` | Durable, scheduler-driven Smart Targeting Test Campaign tag CTR reports and materialized Bundle/tag summaries |
 | `0133` | Independent Smart Targeting Test sampling allocation fingerprints, decoupling preview jobs from exact-capacity generations |
+| `0134` | Bundle-scoped audience exclusions for Smart Targeting Test eligibility |
+| `0135` | Durable external short-link publication and synchronization state |
+| `0136` | Versioned exact-capacity eligibility with platform colors and Test Bundle exclusions |
 
 ## Current schema areas
 

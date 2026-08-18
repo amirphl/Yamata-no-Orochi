@@ -136,10 +136,12 @@ Polling responses expose:
 
 Count fields are present only for a current calculated generation, so missing
 is distinct from a real zero. A calculation is current only while its selected
-tags, score classes, algorithm/input fingerprint, Bundle allocation
-fingerprint, and expiry still match. Generations normally expire after 24
-hours; a scheduled campaign extends expiry to at least 24 hours after its
-scheduled time.
+tags, score classes, platform eligibility, Test Bundle-exclusion mode,
+algorithm/input fingerprint, Bundle allocation fingerprint, and expiry still
+match. SMS generations count only white/pink audiences. Smart Targeting Test
+generations also exclude the Bundle audience-exclusion list. Generations
+normally expire after 24 hours; a scheduled campaign extends expiry to at
+least 24 hours after its scheduled time.
 
 Changing selection or score classes makes previous results stale. Approved and
 not-yet-materialized campaign allocations are deducted to close the
@@ -222,10 +224,11 @@ never higher. Billing retains the finalized preview intent and existing
 sent-count reconciliation refunds the unsent difference; an all-skipped run
 records zero delivery for full reconciliation.
 
-Preview excludes audiences already materialized by earlier Bundle campaigns.
-Approved campaigns do not yet have concrete audience IDs, so their future
-per-tag allocations cannot be reserved by preview; scheduler preparation under
-the Bundle lock is the final availability decision.
+Preview excludes audiences already materialized by earlier Bundle campaigns
+and audiences in the Bundle exclusion list. Approved campaigns do not yet have
+concrete audience IDs, so their future per-tag allocations cannot be reserved
+by preview; scheduler preparation under the Bundle lock is the final
+availability decision.
 
 ## Execution-phase ordering
 

@@ -413,5 +413,11 @@
 \echo 'Running 0134_create_bundle_audience_exclusions.sql...'
 \i migrations/0134_create_bundle_audience_exclusions.sql
 
+\echo 'Running 0135_external_short_link_sync.sql...'
+\i migrations/0135_external_short_link_sync.sql
+
+\echo 'Running 0136_version_smart_targeting_capacity_eligibility.sql...'
+\i migrations/0136_version_smart_targeting_capacity_eligibility.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 

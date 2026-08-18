@@ -13,7 +13,7 @@ func TestSmartTargetingPopulationUsesOptionalParameterizedColorFilter(t *testing
 			t.Fatalf("capacity population unexpectedly contains %q:\n%s", forbidden, smartTargetingPopulationCTE)
 		}
 	}
-	for _, required := range []string{"bundle_audience_selection_members", "used.bundle_id", "used.audience_id", "percentile_disc", "ap.color = any(?::text[])"} {
+	for _, required := range []string{"bundle_audience_selection_members", "used.bundle_id", "used.audience_id", "bundle_audience_exclusions", "bundle_exclusion.bundle_id", "bundle_exclusion.audience_id", "percentile_disc", "ap.color = any(?::text[])"} {
 		if !strings.Contains(query, required) {
 			t.Fatalf("capacity population is missing %q:\n%s", required, smartTargetingPopulationCTE)
 		}
@@ -31,17 +31,26 @@ func TestSmartTargetingPopulationUsesOptionalParameterizedColorFilter(t *testing
 	}
 }
 
-func TestSmartTargetingPopulationArgsDisableEmptyColorFilter(t *testing.T) {
+func TestSmartTargetingPopulationArgsControlOptionalEligibilityFilters(t *testing.T) {
 	args := smartTargetingPopulationArgs(SmartTargetingAudienceQuery{TagIDs: []int64{7}, BundleID: 3})
 	if disabled, ok := args[1].(bool); !ok || !disabled {
 		t.Fatalf("empty allowed colors produced disabled=%#v, want true", args[1])
 	}
+	if disabled, ok := args[4].(bool); !ok || !disabled {
+		t.Fatalf("default Bundle exclusions produced disabled=%#v, want true", args[4])
+	}
 
 	args = smartTargetingPopulationArgs(SmartTargetingAudienceQuery{
-		TagIDs: []int64{7}, BundleID: 3, AllowedColors: []string{"white", "pink"},
+		TagIDs: []int64{7}, BundleID: 3, AllowedColors: []string{"white", "pink"}, ApplyBundleAudienceExclusions: true,
 	})
 	if disabled, ok := args[1].(bool); !ok || disabled {
 		t.Fatalf("SMS allowed colors produced disabled=%#v, want false", args[1])
+	}
+	if disabled, ok := args[4].(bool); !ok || disabled {
+		t.Fatalf("enabled Bundle exclusions produced disabled=%#v, want false", args[4])
+	}
+	if len(args) != 6 || args[3] != uint(3) || args[5] != uint(3) {
+		t.Fatalf("population arguments = %#v, want colors and Bundle eligibility inputs", args)
 	}
 }
 

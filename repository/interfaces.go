@@ -511,7 +511,10 @@ type ShortLinkRepository interface {
 	Repository[models.ShortLink, models.ShortLinkFilter]
 	ByID(ctx context.Context, id uint) (*models.ShortLink, error)
 	ByUID(ctx context.Context, uid string) (*models.ShortLink, error)
+	ByUIDs(ctx context.Context, uids []string) ([]*models.ShortLink, error)
 	DeleteTestLinksOlderThan(ctx context.Context, age time.Duration) error
+	ListPendingExternalPublication(ctx context.Context, limit int) ([]*models.ShortLink, error)
+	MarkExternallyPublished(ctx context.Context, uids []string, publishedAt time.Time) error
 	ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error)
 	ListWithClicksDetailsByScenario(ctx context.Context, scenarioID uint, orderBy string) ([]*ShortLinkWithClick, error)
 	ListWithClicksDetailsByScenarioRange(ctx context.Context, scenarioFrom, scenarioTo uint, orderBy string) ([]*ShortLinkWithClick, error)
@@ -519,6 +522,12 @@ type ShortLinkRepository interface {
 	ListWithClicksDetailsByScenarioNameLike(ctx context.Context, pattern string, orderBy string) ([]*ShortLinkWithClick, error)
 	GetLastScenarioID(ctx context.Context) (uint, error)
 	GetMaxUIDSince(ctx context.Context, since time.Time) (string, error)
+}
+
+// ExternalShortLinkSyncRepository atomically imports external clicks and advances their cursor.
+type ExternalShortLinkSyncRepository interface {
+	Cursor(ctx context.Context, source string) (int64, error)
+	ImportPage(ctx context.Context, source string, clicks []models.ExternalShortLinkClick, throughClickID int64) error
 }
 
 // ShortLinkClickRepository defines operations for short link clicks

@@ -520,15 +520,21 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 		if campaign.Spec.ScheduleAt == nil || campaign.Spec.ScheduleAt.Before(utils.UTCNow()) {
 			return ErrScheduleTimeTooSoon
 		}
-		if campaign.Spec.UsesSmartTargeting() {
-			if campaign.BundleID == nil || s.capacityCalculationRepo == nil {
-				return ErrSmartTargetingExactCapacityRequired
+		// Every non-Excel campaign consumes the shared Bundle audience ledger.
+		// Capacity workers take a SHARE lock on the same Bundle row, so both
+		// standard and Smart Targeting approvals must take the UPDATE lock before
+		// establishing a new unmaterialized reservation.
+		if !campaign.Spec.UsesExcelTargeting() {
+			if campaign.BundleID == nil || *campaign.BundleID == 0 {
+				return ErrBundleNotFound
 			}
-			// Approvals for one bundle share this lock. After one approval commits,
-			// the next request observes its changed allocation fingerprint and
-			// cannot reserve the same exact capacity.
 			if err := repository.LockBundleForUpdate(txCtx, *campaign.BundleID); err != nil {
 				return err
+			}
+		}
+		if campaign.Spec.UsesSmartTargeting() {
+			if s.capacityCalculationRepo == nil {
+				return ErrSmartTargetingExactCapacityRequired
 			}
 			exact, err := CurrentSmartTargetingCapacity(txCtx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, campaign)
 			if err != nil {

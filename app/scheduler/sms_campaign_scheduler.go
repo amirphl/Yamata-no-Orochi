@@ -270,7 +270,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
 		return fmt.Errorf("move campaign id=%d to running: %w", c.ID, err)
 	}
-	// defer releaseUnpreparedCampaignOnFailure(s.db, s.logger, "SMS", c.ID, &err)
+	defer releaseUnpreparedCampaignOnFailure(s.db, s.logger, "SMS", c.ID, &err)
 	s.logger.Printf("SMS scheduler: campaign id=%d moved to running", c.ID)
 
 	// Fetch audience data OUTSIDE any DB transaction.
@@ -554,10 +554,6 @@ func (s *SMSCampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse)
 // restricted grade set fails closed when percentile statistics are missing.
 func (s *SMSCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error) {
 	if usesSmartAudienceTargeting(c) {
-		return nil, nil
-	}
-	if campaignIgnoresAudienceGrades(c) {
-		s.logger.Printf("resolveScoreConstraint: campaign id=%d tag_id=%d bypasses audience grade filter", c.ID, audienceGradeExemptTagID)
 		return nil, nil
 	}
 	if !gradesNeedScoreFilter(c.AudienceGrades) {

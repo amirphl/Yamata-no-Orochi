@@ -152,10 +152,11 @@ func currentSmartTargetingTestSamplingIntent(ctx context.Context, selectedTagRep
 
 func smartTargetingTestSamplingAudienceQuery(bundleID uint, tagIDs []int64, input *smartTargetingTestSamplingInput) repository.SmartTargetingAudienceQuery {
 	return repository.SmartTargetingAudienceQuery{
-		BundleID:      bundleID,
-		TagIDs:        tagIDs,
-		ScoreClasses:  input.classes,
-		AllowedColors: input.allowedColors,
+		BundleID:                      bundleID,
+		ApplyBundleAudienceExclusions: true,
+		TagIDs:                        tagIDs,
+		ScoreClasses:                  input.classes,
+		AllowedColors:                 input.allowedColors,
 	}
 }
 

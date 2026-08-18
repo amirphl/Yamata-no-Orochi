@@ -35,6 +35,7 @@ type ProductionConfig struct {
 	Splus              SplusConfig              `json:"splus"`
 	Bot                BotConfig                `json:"bot"`
 	Scheduler          SchedulerConfig          `json:"scheduler"`
+	ExternalShortLink  ExternalShortLinkConfig  `json:"external_short_link"`
 	Crypto             CryptoConfig             `json:"crypto"`
 	Message            MessageConfig            `json:"message"`
 	SmartTagEvaluation SmartTagEvaluationConfig `json:"smart_tag_evaluation"`
@@ -412,6 +413,23 @@ type SchedulerConfig struct {
 	TagTestPerformanceSchedulerBatchSize       int           `json:"tag_test_performance_scheduler_batch_size"`
 }
 
+// ExternalShortLinkConfig controls outbound mapping publication and inbound click synchronization.
+type ExternalShortLinkConfig struct {
+	Enabled             bool          `json:"enabled"`
+	BaseURL             string        `json:"base_url"`
+	APIToken            string        `json:"api_token"`
+	ClientCertFile      string        `json:"client_cert_file"`
+	ClientKeyFile       string        `json:"client_key_file"`
+	CAFile              string        `json:"ca_file"`
+	AllowInsecureHTTP   bool          `json:"allow_insecure_http"`
+	RequestTimeout      time.Duration `json:"request_timeout"`
+	MappingSyncInterval time.Duration `json:"mapping_sync_interval"`
+	ClickSyncInterval   time.Duration `json:"click_sync_interval"`
+	MappingBatchSize    int           `json:"mapping_batch_size"`
+	ClickPageSize       int           `json:"click_page_size"`
+	MaxClickPagesPerRun int           `json:"max_click_pages_per_run"`
+}
+
 func loadSchedulerConfig() SchedulerConfig {
 	capacitySchedulerEnabled := getEnvBool("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", false)
 	return SchedulerConfig{
@@ -731,6 +749,21 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			APIDomain: getEnvString("BOT_API_DOMAIN", ""),
 		},
 		Scheduler: loadSchedulerConfig(),
+		ExternalShortLink: ExternalShortLinkConfig{
+			Enabled:             getEnvBool("EXTERNAL_SHORTLINK_ENABLED", false),
+			BaseURL:             getEnvString("EXTERNAL_SHORTLINK_BASE_URL", ""),
+			APIToken:            getEnvString("EXTERNAL_SHORTLINK_API_TOKEN", ""),
+			ClientCertFile:      getEnvString("EXTERNAL_SHORTLINK_CLIENT_CERT_FILE", ""),
+			ClientKeyFile:       getEnvString("EXTERNAL_SHORTLINK_CLIENT_KEY_FILE", ""),
+			CAFile:              getEnvString("EXTERNAL_SHORTLINK_CA_FILE", ""),
+			AllowInsecureHTTP:   getEnvBool("EXTERNAL_SHORTLINK_ALLOW_INSECURE_HTTP", false),
+			RequestTimeout:      getEnvDuration("EXTERNAL_SHORTLINK_REQUEST_TIMEOUT", 30*time.Second),
+			MappingSyncInterval: getEnvDuration("EXTERNAL_SHORTLINK_MAPPING_SYNC_INTERVAL", time.Minute),
+			ClickSyncInterval:   getEnvDuration("EXTERNAL_SHORTLINK_CLICK_SYNC_INTERVAL", 5*time.Minute),
+			MappingBatchSize:    getEnvInt("EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE", 5000),
+			ClickPageSize:       getEnvInt("EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE", 10000),
+			MaxClickPagesPerRun: getEnvInt("EXTERNAL_SHORTLINK_MAX_CLICK_PAGES_PER_RUN", 1000),
+		},
 		Crypto: CryptoConfig{
 			Enabled:         getEnvBool("CRYPTO_ENABLED", true),
 			DefaultPlatform: getEnvString("CRYPTO_DEFAULT_PLATFORM", "oxapay"),
@@ -1100,6 +1133,8 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 		}
 	}
 
+	errors = append(errors, validateExternalShortLinkConfig(cfg.ExternalShortLink)...)
+
 	if cfg.SmartTagEvaluation.Enabled {
 		if cfg.SmartTagEvaluation.OpenAI.Model == "" {
 			errors = append(errors, "SMART_TAG_EVALUATION_OPENAI_MODEL is required when smart tag evaluation is enabled")
@@ -1205,6 +1240,38 @@ func validateCryptoConfig(cfg CryptoConfig) []string {
 		if cfg.Oxapay.APIKey == "" {
 			errors = append(errors, "OXA_API_KEY is required when oxapay is default platform")
 		}
+	}
+	return errors
+}
+
+func validateExternalShortLinkConfig(cfg ExternalShortLinkConfig) []string {
+	if !cfg.Enabled {
+		return nil
+	}
+	var errors []string
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		errors = append(errors, "EXTERNAL_SHORTLINK_BASE_URL is required when external short links are enabled")
+	} else if !cfg.AllowInsecureHTTP && !strings.HasPrefix(strings.ToLower(baseURL), "https://") {
+		errors = append(errors, "EXTERNAL_SHORTLINK_BASE_URL must use HTTPS")
+	}
+	if len(cfg.APIToken) < 32 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_API_TOKEN must contain at least 32 characters")
+	}
+	if (cfg.ClientCertFile == "") != (cfg.ClientKeyFile == "") {
+		errors = append(errors, "EXTERNAL_SHORTLINK_CLIENT_CERT_FILE and CLIENT_KEY_FILE must be configured together")
+	}
+	if cfg.RequestTimeout <= 0 || cfg.MappingSyncInterval <= 0 || cfg.ClickSyncInterval <= 0 {
+		errors = append(errors, "external short-link timeouts and intervals must be positive")
+	}
+	if cfg.MappingBatchSize <= 0 || cfg.MappingBatchSize > 10000 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE must be between 1 and 10000")
+	}
+	if cfg.ClickPageSize <= 0 || cfg.ClickPageSize > 10000 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE must be between 1 and 10000")
+	}
+	if cfg.MaxClickPagesPerRun <= 0 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_MAX_CLICK_PAGES_PER_RUN must be positive")
 	}
 	return errors
 }

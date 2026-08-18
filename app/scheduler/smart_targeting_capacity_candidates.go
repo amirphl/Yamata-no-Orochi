@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const schedulerSmartTargetingCapacityVersion = 2
+const schedulerSmartTargetingCapacityVersion = 3
 
 // selectAndReserveExactSmartTargetingCandidates performs selection only after
 // the scheduler has claimed a campaign for execution. Capacity generations
@@ -85,7 +85,19 @@ func selectAndReserveExactSmartTargetingCandidates(
 		capacityTagIDs := append([]int64(nil), tagIDs...)
 		sort.Slice(capacityTagIDs, func(i, j int) bool { return capacityTagIDs[i] < capacityTagIDs[j] })
 		calculationRepo := repository.NewCampaignTargetingCapacityRepository(txDB)
-		calculation, err := calculationRepo.CurrentForExecution(txCtx, campaign.ID, *campaign.BundleID, capacityTagIDs, classes, schedulerSmartTargetingCapacityVersion, time.Now().UTC())
+		platform := strings.ToLower(strings.TrimSpace(campaign.Platform))
+		applyBundleAudienceExclusions := isSmartTargetingTestCampaign(campaign)
+		calculation, err := calculationRepo.CurrentForExecution(
+			txCtx,
+			campaign.ID,
+			*campaign.BundleID,
+			platform,
+			applyBundleAudienceExclusions,
+			capacityTagIDs,
+			classes,
+			schedulerSmartTargetingCapacityVersion,
+			time.Now().UTC(),
+		)
 		if err != nil {
 			return err
 		}
