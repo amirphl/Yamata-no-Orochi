@@ -587,7 +587,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Initialize CryptoPaymentFlow (providers registry)
 	providers := map[string]services.CryptoPaymentProvider{}
-	if cfg.Crypto.Oxapay.BaseURL != "" && cfg.Crypto.Oxapay.APIKey != "" {
+	if cfg.Crypto.Enabled && cfg.Crypto.Oxapay.BaseURL != "" && cfg.Crypto.Oxapay.APIKey != "" {
 		providers["oxapay"] = services.NewOxapayClient(
 			cfg.Crypto.Oxapay.BaseURL,
 			cfg.Crypto.Oxapay.APIKey,
@@ -811,6 +811,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			cfg.PayamSMS,
 			cfg.Bot,
 			cfg.Admin,
+			cfg.Scheduler.MessageSendMockEnabled,
 		)
 		stopSMSScheduler := smsSched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopSMSScheduler)
@@ -832,6 +833,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			cfg.Bale,
 			cfg.Bot,
 			cfg.Admin,
+			cfg.Scheduler.MessageSendMockEnabled,
 		)
 		stopBaleScheduler := baleSched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopBaleScheduler)
@@ -853,6 +855,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			cfg.Rubika,
 			cfg.Bot,
 			cfg.Admin,
+			cfg.Scheduler.MessageSendMockEnabled,
 		)
 		stopRubikaScheduler := rubikaSched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopRubikaScheduler)
@@ -874,6 +877,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			cfg.Splus,
 			cfg.Bot,
 			cfg.Admin,
+			cfg.Scheduler.MessageSendMockEnabled,
 		)
 		stopSplusScheduler := splusSched.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopSplusScheduler)
@@ -891,17 +895,19 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		stopFuncs = append(stopFuncs, stopSmartTagScheduler)
 	}
 
-	// Exact Smart Targeting capacity requests are durable database jobs. This
-	// worker is intentionally independent of AI tag evaluation configuration.
-	capacityScheduler := scheduler.NewSmartTargetingCapacityScheduler(
-		smartTargetingCapacityFlow,
-		capacityCalculationRepo,
-		log.Default(),
-		5*time.Second,
-		2,
-	)
-	stopCapacityScheduler := capacityScheduler.Start(context.Background())
-	stopFuncs = append(stopFuncs, stopCapacityScheduler)
+	if cfg.Scheduler.SmartTargetingCapacitySchedulerEnabled {
+		// Exact Smart Targeting capacity requests are durable database jobs. This
+		// worker is intentionally independent of AI tag evaluation configuration.
+		capacityScheduler := scheduler.NewSmartTargetingCapacityScheduler(
+			smartTargetingCapacityFlow,
+			capacityCalculationRepo,
+			log.Default(),
+			5*time.Second,
+			2,
+		)
+		stopCapacityScheduler := capacityScheduler.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopCapacityScheduler)
+	}
 
 	// Create application struct from FiberRouter
 	fiberRouter := appRouter.(*router.FiberRouter)
