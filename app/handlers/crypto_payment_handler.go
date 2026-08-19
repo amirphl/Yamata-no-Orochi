@@ -41,6 +41,9 @@ func NewCryptoPaymentHandler(flow businessflow.CryptoPaymentFlow, cfg *config.Pr
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/crypto/payments/request [post]
 func (h *CryptoPaymentHandler) CreateRequest(c fiber.Ctx) error {
+	if !h.cfg.Crypto.Enabled {
+		return cryptoPaymentsDisabled(c)
+	}
 	var req dto.CreateCryptoPaymentRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(dto.APIResponse{Success: false, Message: "Invalid request body", Error: dto.ErrorDetail{Code: "INVALID_REQUEST"}})
@@ -74,6 +77,9 @@ func (h *CryptoPaymentHandler) CreateRequest(c fiber.Ctx) error {
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/crypto/payments/{uuid}/status [get]
 func (h *CryptoPaymentHandler) GetStatus(c fiber.Ctx) error {
+	if !h.cfg.Crypto.Enabled {
+		return cryptoPaymentsDisabled(c)
+	}
 	uuid := c.Params("uuid")
 	customerID, ok := c.Locals("customer_id").(uint)
 	if !ok {
@@ -102,6 +108,9 @@ func (h *CryptoPaymentHandler) GetStatus(c fiber.Ctx) error {
 // @Failure 500 {object} dto.APIResponse
 // @Router /api/v1/crypto/payments/verify [post]
 func (h *CryptoPaymentHandler) ManualVerify(c fiber.Ctx) error {
+	if !h.cfg.Crypto.Enabled {
+		return cryptoPaymentsDisabled(c)
+	}
 	var req dto.ManualVerifyCryptoDepositRequest
 	if err := c.Bind().JSON(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(dto.APIResponse{Success: false, Message: "Invalid request body", Error: dto.ErrorDetail{Code: "INVALID_REQUEST"}})
@@ -132,6 +141,9 @@ func (h *CryptoPaymentHandler) ManualVerify(c fiber.Ctx) error {
 // @Success 200 {string} string "OK"
 // @Router /api/v1/crypto/providers/{platform}/callback [post]
 func (h *CryptoPaymentHandler) Webhook(c fiber.Ctx) error {
+	if !h.cfg.Crypto.Enabled {
+		return c.Status(fiber.StatusNotFound).SendString("NOT_SUPPORTED")
+	}
 	platform := c.Params("platform")
 	meta := businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent"))
 	switch platform {
@@ -146,6 +158,14 @@ func (h *CryptoPaymentHandler) Webhook(c fiber.Ctx) error {
 	default:
 		return c.Status(fiber.StatusNotFound).SendString("NOT_SUPPORTED")
 	}
+}
+
+func cryptoPaymentsDisabled(c fiber.Ctx) error {
+	return c.Status(fiber.StatusServiceUnavailable).JSON(dto.APIResponse{
+		Success: false,
+		Message: "Crypto payments are disabled",
+		Error:   dto.ErrorDetail{Code: "CRYPTO_PAYMENTS_DISABLED"},
+	})
 }
 
 func (h *CryptoPaymentHandler) requestCtx(c fiber.Ctx, endpoint string) context.Context {
