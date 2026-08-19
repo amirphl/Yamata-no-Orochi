@@ -67,3 +67,52 @@ func TestOptionalOpenAIEnvironmentValues(t *testing.T) {
 		}
 	})
 }
+
+func TestLoadSchedulerConfigReadsSmartTargetingCapacitySchedulerFlag(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		t.Setenv("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", "")
+		if loadSchedulerConfig().SmartTargetingCapacitySchedulerEnabled {
+			t.Fatal("SmartTargetingCapacitySchedulerEnabled = true, want false")
+		}
+	})
+
+	t.Run("enabled explicitly", func(t *testing.T) {
+		t.Setenv("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", "true")
+		if !loadSchedulerConfig().SmartTargetingCapacitySchedulerEnabled {
+			t.Fatal("SmartTargetingCapacitySchedulerEnabled = false, want true")
+		}
+	})
+}
+
+func TestLoadSchedulerConfigReadsMessageSendMockFlag(t *testing.T) {
+	t.Run("disabled by default", func(t *testing.T) {
+		t.Setenv("CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED", "")
+		if loadSchedulerConfig().MessageSendMockEnabled {
+			t.Fatal("MessageSendMockEnabled = true, want false")
+		}
+	})
+
+	t.Run("enabled explicitly", func(t *testing.T) {
+		t.Setenv("CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED", "true")
+		if !loadSchedulerConfig().MessageSendMockEnabled {
+			t.Fatal("MessageSendMockEnabled = false, want true")
+		}
+	})
+}
+
+func TestValidateCryptoConfigAllowsDisabledCryptoWithoutProviderCredentials(t *testing.T) {
+	if errors := validateCryptoConfig(CryptoConfig{Enabled: false}); len(errors) != 0 {
+		t.Fatalf("validateCryptoConfig() errors = %v, want none", errors)
+	}
+}
+
+func TestValidateCryptoConfigRequiresOxapayKeyWhenCryptoEnabled(t *testing.T) {
+	errors := validateCryptoConfig(CryptoConfig{
+		Enabled:         true,
+		DefaultPlatform: "oxapay",
+		Oxapay:          OxapayConfig{BaseURL: "https://api.oxapay.com"},
+	})
+	if len(errors) != 1 || !strings.Contains(errors[0], "OXA_API_KEY is required") {
+		t.Fatalf("validateCryptoConfig() errors = %v, want missing OXA_API_KEY error", errors)
+	}
+}
