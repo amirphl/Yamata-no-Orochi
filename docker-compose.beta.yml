@@ -1,3 +1,4 @@
+name: yamata-no-orochi
 networks:
   yamata-network-beta:
     driver: bridge
@@ -462,6 +463,7 @@ services:
       SMART_TAG_EVALUATION_BATCHING_MAX_PARALLEL_BATCHES: ${SMART_TAG_EVALUATION_BATCHING_MAX_PARALLEL_BATCHES}
 
       # Crypto Configuration
+      CRYPTO_ENABLED: ${CRYPTO_ENABLED:-true}
       CRYPTO_DEFAULT_PLATFORM: ${CRYPTO_DEFAULT_PLATFORM}
       CRYPTO_SUPPORTED_COINS: ${CRYPTO_SUPPORTED_COINS}
       OXA_BASE_URL: ${OXA_BASE_URL}
