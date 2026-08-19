@@ -344,6 +344,7 @@ type BotConfig struct {
 }
 
 type CryptoConfig struct {
+	Enabled         bool         `json:"enabled"`
 	DefaultPlatform string       `json:"default_platform"`
 	SupportedCoins  []string     `json:"supported_coins"`
 	Oxapay          OxapayConfig `json:"oxapay"`
@@ -400,9 +401,21 @@ type SplusConfig struct {
 }
 
 type SchedulerConfig struct {
-	CampaignExecutionEnabled  bool          `json:"campaign_execution_enabled"`
-	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
-	MessageSendDelay          time.Duration `json:"message_send_delay"`
+	CampaignExecutionEnabled               bool          `json:"campaign_execution_enabled"`
+	CampaignExecutionInterval              time.Duration `json:"campaign_execution_interval"`
+	MessageSendDelay                       time.Duration `json:"message_send_delay"`
+	MessageSendMockEnabled                 bool          `json:"message_send_mock_enabled"`
+	SmartTargetingCapacitySchedulerEnabled bool          `json:"smart_targeting_capacity_scheduler_enabled"`
+}
+
+func loadSchedulerConfig() SchedulerConfig {
+	return SchedulerConfig{
+		CampaignExecutionEnabled:               getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
+		CampaignExecutionInterval:              getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
+		MessageSendDelay:                       getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
+		MessageSendMockEnabled:                 getEnvBool("CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED", false),
+		SmartTargetingCapacitySchedulerEnabled: getEnvBool("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", false),
+	}
 }
 
 type MessageConfig struct {
@@ -706,12 +719,9 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			Password:  getEnvString("BOT_PASSWORD", ""),
 			APIDomain: getEnvString("BOT_API_DOMAIN", ""),
 		},
-		Scheduler: SchedulerConfig{
-			CampaignExecutionEnabled:  getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
-			CampaignExecutionInterval: getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
-			MessageSendDelay:          getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
-		},
+		Scheduler: loadSchedulerConfig(),
 		Crypto: CryptoConfig{
+			Enabled:         getEnvBool("CRYPTO_ENABLED", true),
 			DefaultPlatform: getEnvString("CRYPTO_DEFAULT_PLATFORM", "oxapay"),
 			SupportedCoins:  getEnvStringSlice("CRYPTO_SUPPORTED_COINS", []string{"ETH", "DOGE", "XRP", "BNB"}),
 			Oxapay: OxapayConfig{
@@ -1149,18 +1159,7 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 		errors = append(errors, "SYSTEM_SHEBA_NUMBER is invalid")
 	}
 
-	// Crypto config: only oxapay is supported.
-	if cfg.Crypto.DefaultPlatform != "oxapay" {
-		errors = append(errors, "CRYPTO_DEFAULT_PLATFORM must be oxapay")
-	}
-	if cfg.Crypto.DefaultPlatform == "oxapay" {
-		if cfg.Crypto.Oxapay.BaseURL == "" {
-			errors = append(errors, "OXA_BASE_URL is required when oxapay is default platform")
-		}
-		if cfg.Crypto.Oxapay.APIKey == "" {
-			errors = append(errors, "OXA_API_KEY is required when oxapay is default platform")
-		}
-	}
+	errors = append(errors, validateCryptoConfig(cfg.Crypto)...)
 
 	// Return validation errors if any
 	if len(errors) > 0 {
@@ -1168,4 +1167,24 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 	}
 
 	return nil
+}
+
+func validateCryptoConfig(cfg CryptoConfig) []string {
+	if !cfg.Enabled {
+		return nil
+	}
+
+	var errors []string
+	if cfg.DefaultPlatform != "oxapay" {
+		errors = append(errors, "CRYPTO_DEFAULT_PLATFORM must be oxapay")
+	}
+	if cfg.DefaultPlatform == "oxapay" {
+		if cfg.Oxapay.BaseURL == "" {
+			errors = append(errors, "OXA_BASE_URL is required when oxapay is default platform")
+		}
+		if cfg.Oxapay.APIKey == "" {
+			errors = append(errors, "OXA_API_KEY is required when oxapay is default platform")
+		}
+	}
+	return errors
 }
