@@ -55,6 +55,9 @@ class BuildAudienceSpecTests(unittest.TestCase):
         )
 
         leaf = spec["one"]["two"]["items"]["three"]
+        self.assertEqual(leaf["layer1_category"], "one")
+        self.assertEqual(leaf["layer2_category"], "two")
+        self.assertEqual(leaf["layer3_category"], "three")
         self.assertEqual(leaf["tags"], ["3", "20"])
         self.assertEqual(leaf["available_audience"], 42)
         self.assertEqual(leaf["white_users"], 42)
@@ -110,11 +113,11 @@ class BuildAudienceSpecTests(unittest.TestCase):
             )
 
     def test_redis_key_exactly_matches_go_prefix_behavior(self):
-        self.assertEqual(redis_key("yamata:", "sms"), "yamata::audience_spec:cache:v3:sms")
-        self.assertEqual(redis_key("", "sms"), "yamata:audience_spec:cache:v3:sms")
+        self.assertEqual(redis_key("yamata:", "sms"), "yamata::audience_spec:cache:v4:sms")
+        self.assertEqual(redis_key("", "sms"), "yamata:audience_spec:cache:v4:sms")
         self.assertEqual(
             redis_lock_key("yamata:", "sms"),
-            "yamata::audience_spec:rebuild-lock:v3:sms",
+            "yamata::audience_spec:rebuild-lock:v4:sms",
         )
 
     def test_required_test_leaf_is_included_with_tag_17358(self):
@@ -159,7 +162,7 @@ class _FakeLock:
 
 class _FakeRedisClient:
     def __init__(self):
-        self.values = {"yamata::audience_spec:cache:v3:sms": b'{"old":true}'}
+        self.values = {"yamata::audience_spec:cache:v4:sms": b'{"old":true}'}
         self.locks = {}
         self.closed = False
         self.expiries = {}
@@ -229,14 +232,14 @@ class StoreInRedisTests(unittest.TestCase):
                 )
 
             redis_backups = list(Path(directory).glob("audience_spec_sms_*.json"))
-            self.assertEqual(keys, ["yamata::audience_spec:cache:v3:sms"])
+            self.assertEqual(keys, ["yamata::audience_spec:cache:v4:sms"])
             self.assertEqual(len(redis_backups), 1)
             self.assertEqual(redis_backups[0].read_bytes(), b'{"old":true}')
             self.assertEqual(
-                client.values["yamata::audience_spec:cache:v3:sms"], b'{"new":true}'
+                client.values["yamata::audience_spec:cache:v4:sms"], b'{"new":true}'
             )
-            self.assertEqual(client.expiries["yamata::audience_spec:cache:v3:sms"], 300)
-            lock = client.locks["yamata::audience_spec:rebuild-lock:v3:sms"]
+            self.assertEqual(client.expiries["yamata::audience_spec:cache:v4:sms"], 300)
+            lock = client.locks["yamata::audience_spec:rebuild-lock:v4:sms"]
             self.assertTrue(lock.acquired)
             self.assertTrue(lock.released)
             self.assertTrue(client.closed)
