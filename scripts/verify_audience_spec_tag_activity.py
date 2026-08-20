@@ -120,6 +120,16 @@ def extract_redis_tag_locations(
                 path = f"{platform} / {level1} / {level2} / {level3}"
                 if not isinstance(level3, str) or not isinstance(leaf, dict):
                     raise VerificationError(f"invalid level3 leaf at {path}")
+                expected_levels = {
+                    "layer1_category": level1,
+                    "layer2_category": level2,
+                    "layer3_category": level3,
+                }
+                for field, expected in expected_levels.items():
+                    if leaf.get(field) != expected:
+                        raise VerificationError(
+                            f"{field} must match its hierarchy key at {path}"
+                        )
                 tags = leaf.get("tags")
                 if not isinstance(tags, list) or not tags:
                     raise VerificationError(f"tags must be a non-empty list at {path}")
