@@ -9,8 +9,11 @@ from verify_audience_spec_tag_activity import (
 TEST_TAG_ID = 13358
 
 
-def leaf(tags, available=501):
+def leaf(tags, available=501, levels=("L1", "L2", "L3")):
     value = {
+        "layer1_category": levels[0],
+        "layer2_category": levels[1],
+        "layer3_category": levels[2],
         "tags": tags,
         "available_audience": available,
         "white_users": available,
@@ -55,7 +58,7 @@ class VerifyAudienceSpecTagActivityTests(unittest.TestCase):
 
         report = build_verification_report(
             specs,
-            {"sms": "yamata::audience_spec:cache:v3:sms"},
+            {"sms": "yamata::audience_spec:cache:v4:sms"},
             file_tags,
             database_tags,
         )
@@ -80,7 +83,10 @@ class VerifyAudienceSpecTagActivityTests(unittest.TestCase):
                 "L1-test": {
                     "L2-test": {
                         "items": {
-                            "L3-test": leaf([str(TEST_TAG_ID)])
+                            "L3-test": leaf(
+                                [str(TEST_TAG_ID)],
+                                levels=("L1-test", "L2-test", "L3-test"),
+                            )
                         }
                     }
                 }
@@ -109,7 +115,10 @@ class VerifyAudienceSpecTagActivityTests(unittest.TestCase):
                 "L1-test": {
                     "L2-test": {
                         "items": {
-                            "L3-test": leaf([str(TEST_TAG_ID)])
+                            "L3-test": leaf(
+                                [str(TEST_TAG_ID)],
+                                levels=("L1-test", "L2-test", "L3-test"),
+                            )
                         }
                     }
                 }
@@ -143,6 +152,23 @@ class VerifyAudienceSpecTagActivityTests(unittest.TestCase):
                         "L2": {
                             "items": {
                                 "L3": leaf(["not-an-id"], 1)
+                            }
+                        }
+                    }
+                },
+                "sms",
+            )
+
+    def test_leaf_hierarchy_fields_must_match_map_keys(self):
+        invalid_leaf = leaf(["1"])
+        invalid_leaf["layer3_category"] = "different"
+        with self.assertRaisesRegex(VerificationError, "must match its hierarchy key"):
+            extract_redis_tag_locations(
+                {
+                    "L1": {
+                        "L2": {
+                            "items": {
+                                "L3": invalid_leaf,
                             }
                         }
                     }
