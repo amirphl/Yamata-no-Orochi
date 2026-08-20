@@ -289,3 +289,4 @@ data/
 scripts/update-audience-spec.sh
 .gocache/
 .golangci-cache/
+.gomodcache/
