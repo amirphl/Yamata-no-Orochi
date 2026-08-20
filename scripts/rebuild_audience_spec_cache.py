@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Rebuild the Yamata audience-spec Redis cache from JSON exports.
 
-The cache value has the same shape produced by BotCampaignFlowImpl:
+The cache value has the same shape produced by CampaignFlowImpl:
 
-    level1 -> level2 -> {"items": {level3: {"tags": [...],
+    level1 -> level2 -> {"items": {level3: {"layer1_category": level1,
+                                             "layer2_category": level2,
+                                             "layer3_category": level3,
+                                             "tags": [...],
                                              "available_audience": N}}}
 
 Tag values are stringified ``tags.id`` values.  This is intentional: campaign
@@ -118,9 +121,7 @@ def _positive_int(row: Mapping[str, Any], field: str, label: str, index: int) ->
     return value
 
 
-def _nonnegative_int(
-    row: Mapping[str, Any], field: str, label: str, index: int
-) -> int:
+def _nonnegative_int(row: Mapping[str, Any], field: str, label: str, index: int) -> int:
     value = row.get(field)
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise InputValidationError(
@@ -282,10 +283,11 @@ def build_audience_spec(
             continue
         stat_values = latest_stats[levels][1]
         available_audience = _audience_capacity(stat_values, platform)
-        level2_node = spec.setdefault(level1, {}).setdefault(
-            level2, {"items": {}}
-        )
+        level2_node = spec.setdefault(level1, {}).setdefault(level2, {"items": {}})
         level2_node["items"][level3] = {
+            "layer1_category": level1,
+            "layer2_category": level2,
+            "layer3_category": level3,
             "tags": [str(tag_id) for tag_id in tag_ids],
             "available_audience": available_audience,
             **stat_values,
@@ -309,13 +311,13 @@ def build_audience_spec(
 def redis_key(prefix: str, platform: str) -> str:
     """Match business_flow.redisKey exactly, including configured punctuation."""
     effective_prefix = prefix if prefix else "yamata"
-    return f"{effective_prefix}:audience_spec:cache:v3:{platform}"
+    return f"{effective_prefix}:audience_spec:cache:v4:{platform}"
 
 
 def redis_lock_key(prefix: str, platform: str) -> str:
     """Return the maintenance lock used to serialize concurrent rebuild scripts."""
     effective_prefix = prefix if prefix else "yamata"
-    return f"{effective_prefix}:audience_spec:rebuild-lock:v3:{platform}"
+    return f"{effective_prefix}:audience_spec:rebuild-lock:v4:{platform}"
 
 
 def _json_bytes(value: Mapping[str, Any]) -> bytes:
@@ -430,7 +432,9 @@ def store_in_redis(
             ):
                 raise RuntimeError("Redis did not acknowledge every audience-spec SET")
 
-            cache_keys = [redis_key(prefix, platform) for platform in selected_platforms]
+            cache_keys = [
+                redis_key(prefix, platform) for platform in selected_platforms
+            ]
             stored_payloads = client.mget(cache_keys)
             for platform, cache_key, stored in zip(
                 selected_platforms, cache_keys, stored_payloads, strict=True
@@ -471,7 +475,9 @@ def _env_int(name: str) -> int | None:
     try:
         value = int(raw)
     except ValueError as exc:
-        raise InputValidationError(f"environment variable {name} must be an integer") from exc
+        raise InputValidationError(
+            f"environment variable {name} must be an integer"
+        ) from exc
     if value < 0:
         raise InputValidationError(
             f"environment variable {name} must be greater than or equal to zero"
@@ -599,7 +605,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if args.dry_run:
             for platform in args.platforms:
-                print(f"Dry run: would replace Redis key {redis_key(args.redis_prefix, platform)}")
+                print(
+                    f"Dry run: would replace Redis key {redis_key(args.redis_prefix, platform)}"
+                )
             return 0
 
         backup_directory = None if args.no_backup else args.backup_directory
