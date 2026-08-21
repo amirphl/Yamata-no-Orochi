@@ -520,6 +520,17 @@ main() {
 		print_error "Campaign execution is managed by the isolated scheduler container"
 		exit 1
 	fi
+	if [ "${SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED:-}" != "true" ]; then
+		print_error "SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED must remain true in .env.beta"
+		print_error "Exact Smart Targeting capacity jobs are managed by the main API instance"
+		exit 1
+	fi
+	if [ "${SMART_TAG_EVALUATION_ENABLED:-}" != "true" ] ||
+		[ "${SMART_TAG_EVALUATION_SCHEDULER_ENABLED:-}" != "true" ]; then
+		print_error "Smart-tag evaluation and its scheduler must remain enabled in .env.beta"
+		print_error "Smart-tag scoring jobs are managed by the main API instance"
+		exit 1
+	fi
 
 	# Start core services (excluding app-beta)
 	stop_application_writers
