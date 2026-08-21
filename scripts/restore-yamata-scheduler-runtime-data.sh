@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Restore the canonical scheduler-runtime dump while preserving audience_profiles.
-# Selection members, status/runtime tables, audience-spec sources, and sequence
-# counters are included.
+# Selection members, Smart Targeting attribution, status/runtime tables,
+# audience-spec sources, and sequence counters are included.
 # sent_rubika_messages is excluded because it is absent from the source dataset.
 # Usage: restore-yamata-scheduler-runtime-data.sh DUMP_FILE [PROJECT_DIR]
 
@@ -17,6 +17,7 @@ TABLES=(
 	audience_selections
 	bundle_audience_selections
 	bundle_audience_selection_members
+	campaign_audience_tag_attributions
 	bale_status_results
 	rubika_status_results
 	campaign_status_jobs
@@ -128,6 +129,20 @@ bundle_column="$(
 [[ "$bundle_column" == 1 ]] ||
 	die "Migration 0123 is missing: processed_campaigns.bundle_audience_selection_id does not exist"
 
+normalized_schema_columns="$(
+	"${DOCKER[@]}" exec "$POSTGRES_CONTAINER" psql -X -At \
+		-U "$DB_USER" -d "$DB_NAME" \
+		-c "SELECT COUNT(*) FROM information_schema.columns
+		    WHERE table_schema='public'
+		      AND (table_name, column_name) IN (
+		        ('processed_campaigns', 'is_current'),
+		        ('sent_bale_messages', 'is_current'),
+		        ('bundle_audience_selection_members', 'selection_order')
+		      );"
+)"
+[[ "$normalized_schema_columns" == 3 ]] ||
+	die "Migrations through 0128 must be applied before restoring scheduler runtime data"
+
 log "Starting atomic import while preserving audience_profiles"
 {
 	printf 'TRUNCATE TABLE public.sequence_counters;\n'
@@ -149,6 +164,7 @@ BEGIN
         'audience_selections',
 	        'bundle_audience_selections',
 	        'bundle_audience_selection_members',
+	        'campaign_audience_tag_attributions',
         'bale_status_results',
         'rubika_status_results',
         'campaign_status_jobs',
@@ -169,6 +185,50 @@ BEGIN
     END LOOP;
 END
 $sequence_reset$;
+
+DO $restore_validation$
+BEGIN
+    IF EXISTS (
+        SELECT campaign_id
+        FROM public.processed_campaigns
+        GROUP BY campaign_id
+        HAVING COUNT(*) FILTER (WHERE is_current) <> 1
+    ) THEN
+        RAISE EXCEPTION 'restored processed campaigns have an invalid current-row election';
+    END IF;
+    IF EXISTS (
+        SELECT processed_campaign_id, tracking_id
+        FROM public.sent_bale_messages
+        GROUP BY processed_campaign_id, tracking_id
+        HAVING COUNT(*) FILTER (WHERE is_current) <> 1
+    ) THEN
+        RAISE EXCEPTION 'restored Bale messages have an invalid current-row election';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM public.bundle_audience_selections AS selection
+        WHERE selection.audience_count <> (
+            SELECT COUNT(*)
+            FROM public.bundle_audience_selection_members AS member
+            WHERE member.selection_id = selection.id
+        )
+    ) THEN
+        RAISE EXCEPTION 'restored bundle allocation counts do not match the member ledger';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM public.campaign_audience_tag_attributions AS attribution
+        LEFT JOIN public.bundle_audience_selection_members AS member
+          ON member.selection_id = attribution.bundle_audience_selection_id
+         AND member.bundle_id = attribution.bundle_id
+         AND member.audience_id = attribution.audience_id
+         AND member.selection_order = attribution.selection_order
+        WHERE member.id IS NULL
+    ) THEN
+        RAISE EXCEPTION 'restored campaign audience attribution does not match the member ledger';
+    END IF;
+END
+$restore_validation$;
 SQL
 } | "${DOCKER[@]}" exec -i "$POSTGRES_CONTAINER" \
 	psql -X -v ON_ERROR_STOP=1 --single-transaction -U "$DB_USER" -d "$DB_NAME"
