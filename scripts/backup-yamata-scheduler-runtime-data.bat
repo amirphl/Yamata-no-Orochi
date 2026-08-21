@@ -37,6 +37,7 @@ if exist "%DUMP_FILE%" (
   -t public.audience_selections ^
   -t public.bundle_audience_selections ^
   -t public.bundle_audience_selection_members ^
+  -t public.campaign_audience_tag_attributions ^
   -t public.bale_status_results ^
   -t public.rubika_status_results ^
   -t public.campaign_status_jobs ^
