@@ -168,14 +168,28 @@ check_application_writers_stopped() {
 
 # Function to check if database exists
 check_database_exists() {
-    if "${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d postgres \
-        -v db_name="$DB_NAME" -tAc "SELECT 1 FROM pg_database WHERE datname = :'db_name'" | grep -q 1; then
+    local result
+
+    # psql does not perform variable interpolation on SQL passed with -c. Feed
+    # the query over stdin so :'db_name' is safely quoted by psql instead of
+    # reaching PostgreSQL as invalid syntax. Treat query failures separately
+    # from a successful query that returns no row.
+    if ! result=$(
+        printf '%s\n' "SELECT 1 FROM pg_database WHERE datname = :'db_name';" |
+            "${DOCKER[@]}" exec -i yamata-postgres-beta \
+                psql -X -v ON_ERROR_STOP=1 -v db_name="$DB_NAME" -U "$DB_USER" -d postgres -tA
+    ); then
+        print_error "Failed to query PostgreSQL for database '$DB_NAME'"
+        return 2
+    fi
+
+    if [ "$result" = "1" ]; then
         print_status "Database '$DB_NAME' already exists"
         return 0
-    else
-        print_status "Database '$DB_NAME' does not exist"
-        return 1
     fi
+
+    print_status "Database '$DB_NAME' does not exist"
+    return 1
 }
 
 # Function to apply migrations
@@ -385,10 +399,19 @@ main() {
     check_application_writers_stopped
     
     # Check if database exists — never create it; a missing DB is a fatal error
-    if ! check_database_exists; then
-        print_error "Database '$DB_NAME' does not exist. Create it manually before running this script."
-        exit 1
-    fi
+    local database_check_status=0
+    check_database_exists || database_check_status=$?
+    case "$database_check_status" in
+        0) ;;
+        1)
+            print_error "Database '$DB_NAME' does not exist. Create it manually before running this script."
+            exit 1
+            ;;
+        *)
+            print_error "Could not determine whether database '$DB_NAME' exists; no migrations were run."
+            exit "$database_check_status"
+            ;;
+    esac
     
     # Show migration status before asking for confirmation
     show_migration_status
