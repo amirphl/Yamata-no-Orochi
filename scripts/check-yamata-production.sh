@@ -41,10 +41,25 @@ for container in \
 	log "$container: running"
 done
 
+# PostgreSQL parallel queries allocate POSIX dynamic shared-memory segments.
+# Reject Docker's 64 MiB default (and other undersized deployments) before a
+# large audience query discovers the problem in production.
+readonly MIN_POSTGRES_SHM_BYTES=$((2 * 1024 * 1024 * 1024))
+postgres_shm_bytes="$("${DOCKER[@]}" inspect -f '{{.HostConfig.ShmSize}}' yamata-postgres-beta)"
+[[ "$postgres_shm_bytes" =~ ^[0-9]+$ ]] ||
+	die "Could not determine yamata-postgres-beta shared-memory size"
+((postgres_shm_bytes >= MIN_POSTGRES_SHM_BYTES)) ||
+	die "yamata-postgres-beta /dev/shm is undersized (${postgres_shm_bytes} bytes; require at least ${MIN_POSTGRES_SHM_BYTES})"
+log "yamata-postgres-beta /dev/shm: $((postgres_shm_bytes / 1024 / 1024 / 1024)) GiB"
+
 [[ "$(env_value yamata-app-beta CAMPAIGN_EXECUTION_ENABLED)" == false ]] ||
 	die "yamata-app-beta must have CAMPAIGN_EXECUTION_ENABLED=false"
 [[ "$(env_value yamata-campaign-scheduler-beta CAMPAIGN_EXECUTION_ENABLED)" == true ]] ||
 	die "yamata-campaign-scheduler-beta must have CAMPAIGN_EXECUTION_ENABLED=true"
+[[ "$(env_value yamata-app-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == true ]] ||
+	die "Exact Smart Targeting capacity scheduling must be enabled in yamata-app-beta"
+[[ "$(env_value yamata-campaign-scheduler-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == false ]] ||
+	die "Exact Smart Targeting capacity scheduling must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-campaign-scheduler-beta BOT_API_DOMAIN)" == http://app-beta:8080 ]] ||
 	die "Scheduler BOT_API_DOMAIN must be http://app-beta:8080"
 [[ "$(env_value yamata-campaign-scheduler-beta SERVER_HOST)" == 127.0.0.1 ]] ||
@@ -53,6 +68,10 @@ done
 	die "Smart-tag evaluation must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-campaign-scheduler-beta SMART_TAG_EVALUATION_SCHEDULER_ENABLED)" == false ]] ||
 	die "Smart-tag scheduling must be disabled in the campaign scheduler"
+[[ "$(env_value yamata-app-beta SMART_TAG_EVALUATION_ENABLED)" == true ]] ||
+	die "Smart-tag evaluation must be enabled in yamata-app-beta"
+[[ "$(env_value yamata-app-beta SMART_TAG_EVALUATION_SCHEDULER_ENABLED)" == true ]] ||
+	die "Smart-tag scheduling must be enabled in yamata-app-beta"
 [[ -n "$(env_value yamata-app-beta BOT_USERNAME)" ]] || die "BOT_USERNAME is empty"
 [[ -n "$(env_value yamata-app-beta BOT_PASSWORD)" ]] || die "BOT_PASSWORD is empty"
 
@@ -119,10 +138,78 @@ schema_checks="$("${DOCKER[@]}" exec yamata-postgres-beta sh -lc \
 	 SELECT to_regclass('\''public.campaign_targeting_capacity_calculations'\'') IS NOT NULL;
 		 SELECT to_regclass('\''public.src_reference'\'') IS NOT NULL;
 		 SELECT to_regclass('\''public.idx_audience_profiles_campaign_id_phone'\'') IS NOT NULL;
-		 SELECT to_regclass('\''public.bundle_audience_selection_members'\'') IS NOT NULL;
-		 SELECT to_regclass('\''public.uk_processed_campaigns_campaign_id'\'') IS NOT NULL;
-		 SELECT to_regclass('\''public.idx_processed_campaigns_capacity_reservation_materialized'\'') IS NULL;"')"
-[[ "$schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Required migrations through 0127 are incomplete"
+	 SELECT to_regclass('\''public.bundle_audience_selection_members'\'') IS NOT NULL;
+	 SELECT EXISTS (
+	   SELECT 1 FROM information_schema.columns
+	   WHERE table_schema='\''public'\''
+	     AND table_name='\''processed_campaigns'\''
+	     AND column_name='\''is_current'\''
+	 );
+	 SELECT EXISTS (
+	   SELECT 1 FROM information_schema.columns
+	   WHERE table_schema='\''public'\''
+	     AND table_name='\''sent_bale_messages'\''
+	     AND column_name='\''is_current'\''
+	 );
+	 SELECT NOT EXISTS (
+	   SELECT 1 FROM information_schema.columns
+	   WHERE table_schema='\''public'\''
+	     AND table_name='\''bundle_audience_selections'\''
+	     AND column_name='\''audience_ids'\''
+	 );
+	 SELECT COALESCE((
+	   SELECT indisunique AND pg_get_expr(indpred, indrelid) = '\''is_current'\''
+	   FROM pg_index
+	   WHERE indexrelid=to_regclass('\''public.uk_processed_campaigns_campaign_id'\'')
+	 ), FALSE);
+	 SELECT COALESCE((
+	   SELECT indisunique AND pg_get_expr(indpred, indrelid) = '\''is_current'\''
+	   FROM pg_index
+	   WHERE indexrelid=to_regclass('\''public.uk_sent_bale_messages_processed_tracking'\'')
+	 ), FALSE);
+	 SELECT NOT EXISTS (
+	   SELECT campaign_id FROM processed_campaigns
+	   GROUP BY campaign_id
+	   HAVING COUNT(*) FILTER (WHERE is_current) <> 1
+	 );
+	 SELECT NOT EXISTS (
+	   SELECT processed_campaign_id, tracking_id FROM sent_bale_messages
+	   GROUP BY processed_campaign_id, tracking_id
+	   HAVING COUNT(*) FILTER (WHERE is_current) <> 1
+	 );
+	 SELECT NOT EXISTS (
+	   SELECT 1 FROM bundle_audience_selections AS selection
+	   WHERE selection.audience_count <> (
+	     SELECT COUNT(*) FROM bundle_audience_selection_members AS member
+	     WHERE member.selection_id=selection.id
+	   )
+	 );
+	 SELECT EXISTS (
+	   SELECT 1 FROM pg_constraint
+	   WHERE conrelid='\''public.bundle_audience_selection_members'\''::regclass
+	     AND conname='\''fk_bundle_aud_sel_member_selection_bundle'\''
+	 );
+	 SELECT to_regclass('\''public.idx_processed_campaigns_capacity_reservation_materialized'\'') IS NULL;
+	 SELECT EXISTS (
+	   SELECT 1 FROM information_schema.columns
+	   WHERE table_schema='\''public'\''
+	     AND table_name='\''campaigns'\''
+	     AND column_name='\''sample_size_per_tag'\''
+	 );
+	 SELECT EXISTS (
+	   SELECT 1 FROM information_schema.columns
+	   WHERE table_schema='\''public'\''
+	     AND table_name='\''campaign_selected_tags'\''
+	     AND column_name='\''selection_order'\''
+	 );
+	 SELECT EXISTS (
+	   SELECT 1 FROM information_schema.columns
+	   WHERE table_schema='\''public'\''
+	     AND table_name='\''bundle_audience_selection_members'\''
+	     AND column_name='\''selection_order'\''
+	 );
+	 SELECT to_regclass('\''public.campaign_audience_tag_attributions'\'') IS NOT NULL;"')"
+[[ "$schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Required migrations through 0128 are incomplete or inconsistent"
 
 [[ -x "$PROJECT_DIR/scripts/check-yamata-certificates.sh" ]] ||
 	die "Missing certificate checker in $PROJECT_DIR/scripts"
