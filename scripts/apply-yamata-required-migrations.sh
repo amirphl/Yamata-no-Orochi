@@ -57,6 +57,38 @@ apply_file() {
 		psql -X -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" <"$migration_file"
 }
 
+advance_migration_tracker() {
+	local verified_migration="$1"
+	local tracking_file="$PROJECT_DIR/.migration_tracker_beta"
+	local tracker_value="$verified_migration"
+	local existing_value=""
+	local temporary=""
+
+	if [[ -e "$tracking_file" ]]; then
+		[[ ! -L "$tracking_file" ]] || die "Refusing symlinked migration tracker"
+		[[ -f "$tracking_file" ]] || die "Migration tracker is not a regular file"
+		IFS= read -r existing_value <"$tracking_file" || true
+		[[ "$existing_value" =~ ^[0-9]{4}_[A-Za-z0-9_]+\.sql$ ]] ||
+			die "Migration tracker is empty or malformed"
+		[[ "$(awk 'END { print NR }' "$tracking_file")" -eq 1 ]] ||
+			die "Migration tracker must contain exactly one filename"
+		[[ -f "$PROJECT_DIR/migrations/$existing_value" ]] ||
+			die "Migration tracker references an unavailable migration: $existing_value"
+
+		# The general migrator may already have advanced beyond the subset this
+		# helper verifies. Never move its valid tracker backward.
+		if [[ "$existing_value" > "$tracker_value" ]]; then
+			tracker_value="$existing_value"
+		fi
+	fi
+
+	temporary="$(mktemp "$PROJECT_DIR/.migration_tracker_beta.XXXXXX")"
+	printf '%s\n' "$tracker_value" >"$temporary"
+	chmod 600 "$temporary"
+	mv -f -- "$temporary" "$tracking_file"
+	log "Migration tracker is at $tracker_value"
+}
+
 [[ "$(psql_scalar "SELECT to_regclass('public.audience_profiles') IS NOT NULL;")" == t ]] ||
 	die "Missing public.audience_profiles"
 [[ "$(psql_scalar "SELECT to_regclass('public.bundle_audience_selections') IS NOT NULL;")" == t ]] ||
@@ -80,6 +112,7 @@ apply_file "$PROJECT_DIR/migrations/0124_index_smart_targeting_capacity_reservat
 apply_file "$PROJECT_DIR/migrations/0125_create_src_reference.sql"
 apply_file "$PROJECT_DIR/migrations/0126_optimize_campaign_audience_selection.sql"
 apply_file "$PROJECT_DIR/migrations/0127_normalize_bundle_audience_allocations.sql"
+apply_file "$PROJECT_DIR/migrations/0128_smart_targeting_phase_preparation.sql"
 
 constraint_exists="$(psql_scalar "
 	SELECT EXISTS (
@@ -99,14 +132,103 @@ constraint_exists="$(psql_scalar "
 	die "Migration 0126 is incomplete: optimized audience lookup index is missing"
 [[ "$(psql_scalar "SELECT to_regclass('public.bundle_audience_selection_members') IS NOT NULL;")" == t ]] ||
 	die "Migration 0127 is incomplete: bundle_audience_selection_members is missing"
-[[ "$(psql_scalar "SELECT to_regclass('public.uk_processed_campaigns_campaign_id') IS NOT NULL;")" == t ]] ||
-	die "Migration 0127 is incomplete: processed campaign uniqueness is missing"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='processed_campaigns'
+		  AND column_name='is_current'
+	);")" == t ]] ||
+	die "Migration 0127 is incomplete: processed campaign current-row marker is missing"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='sent_bale_messages'
+		  AND column_name='is_current'
+	);")" == t ]] ||
+	die "Migration 0127 is incomplete: Bale current-row marker is missing"
+[[ "$(psql_scalar "
+	SELECT NOT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='bundle_audience_selections'
+		  AND column_name='audience_ids'
+	);")" == t ]] ||
+	die "Migration 0127 is incomplete: legacy bundle audience arrays still exist"
+[[ "$(psql_scalar "
+	SELECT COALESCE((
+		SELECT indisunique AND pg_get_expr(indpred, indrelid) = 'is_current'
+		FROM pg_index
+		WHERE indexrelid=to_regclass('public.uk_processed_campaigns_campaign_id')
+	), FALSE);")" == t ]] ||
+	die "Migration 0127 is incomplete: current processed campaign uniqueness is missing"
+[[ "$(psql_scalar "
+	SELECT COALESCE((
+		SELECT indisunique AND pg_get_expr(indpred, indrelid) = 'is_current'
+		FROM pg_index
+		WHERE indexrelid=to_regclass('public.uk_sent_bale_messages_processed_tracking')
+	), FALSE);")" == t ]] ||
+	die "Migration 0127 is incomplete: current Bale tracking uniqueness is missing"
+[[ "$(psql_scalar "
+	SELECT NOT EXISTS (
+		SELECT campaign_id FROM processed_campaigns
+		GROUP BY campaign_id
+		HAVING COUNT(*) FILTER (WHERE is_current) <> 1
+	);")" == t ]] ||
+	die "Migration 0127 is inconsistent: a processed campaign has no current checkpoint"
+[[ "$(psql_scalar "
+	SELECT NOT EXISTS (
+		SELECT processed_campaign_id, tracking_id FROM sent_bale_messages
+		GROUP BY processed_campaign_id, tracking_id
+		HAVING COUNT(*) FILTER (WHERE is_current) <> 1
+	);")" == t ]] ||
+	die "Migration 0127 is inconsistent: a Bale tracking checkpoint has no current row"
+[[ "$(psql_scalar "
+	SELECT NOT EXISTS (
+		SELECT 1 FROM bundle_audience_selections AS selection
+		WHERE selection.audience_count <> (
+			SELECT COUNT(*) FROM bundle_audience_selection_members AS member
+			WHERE member.selection_id=selection.id
+		)
+	);")" == t ]] ||
+	die "Migration 0127 is inconsistent: allocation counts do not match the member ledger"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM pg_constraint
+		WHERE conrelid='public.bundle_audience_selection_members'::regclass
+		  AND conname='fk_bundle_aud_sel_member_selection_bundle'
+	);")" == t ]] ||
+	die "Migration 0127 is incomplete: selection/bundle ledger integrity is missing"
 [[ "$(psql_scalar "SELECT to_regclass('public.idx_processed_campaigns_capacity_reservation_materialized') IS NULL;")" == t ]] ||
 	die "Migration 0127 is incomplete: obsolete capacity reservation index still exists"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='campaigns'
+		  AND column_name='sample_size_per_tag'
+	);")" == t ]] ||
+	die "Migration 0128 is incomplete: campaigns.sample_size_per_tag is missing"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='campaign_selected_tags'
+		  AND column_name='selection_order'
+	);")" == t ]] ||
+	die "Migration 0128 is incomplete: campaign_selected_tags.selection_order is missing"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='bundle_audience_selection_members'
+		  AND column_name='selection_order'
+	);")" == t ]] ||
+	die "Migration 0128 is incomplete: bundle audience selection order is missing"
+[[ "$(psql_scalar "SELECT to_regclass('public.campaign_audience_tag_attributions') IS NOT NULL;")" == t ]] ||
+	die "Migration 0128 is incomplete: campaign_audience_tag_attributions is missing"
 
-tracker_temporary="$(mktemp "$PROJECT_DIR/.migration_tracker_beta.XXXXXX")"
-printf '%s\n' '0127_normalize_bundle_audience_allocations.sql' >"$tracker_temporary"
-chmod 600 "$tracker_temporary"
-mv -f -- "$tracker_temporary" "$PROJECT_DIR/.migration_tracker_beta"
+advance_migration_tracker '0128_smart_targeting_phase_preparation.sql'
 
 log "Required schema is ready"
