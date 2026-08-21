@@ -49,12 +49,27 @@ readonly DOCKER
 [[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$SOURCE_CONTAINER")" == "true" ]] ||
 	die "Source backend is not running: $SOURCE_CONTAINER"
 
-MAIN_CAMPAIGN_SETTING="$(
+source_env_value() {
+	local key="$1"
 	"${DOCKER[@]}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SOURCE_CONTAINER" |
-		awk -F= '$1 == "CAMPAIGN_EXECUTION_ENABLED" { value=substr($0, index($0, "=")+1) } END { print value }'
-)"
+		awk -F= -v key="$key" '$1 == key { value=substr($0, index($0, "=")+1) } END { print value }'
+}
+
+MAIN_CAMPAIGN_SETTING="$(source_env_value CAMPAIGN_EXECUTION_ENABLED)"
 [[ "${MAIN_CAMPAIGN_SETTING,,}" == "false" ]] ||
 	die "$SOURCE_CONTAINER must have CAMPAIGN_EXECUTION_ENABLED=false (found: ${MAIN_CAMPAIGN_SETTING:-unset})"
+
+MAIN_CAPACITY_SETTING="$(source_env_value SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)"
+[[ "${MAIN_CAPACITY_SETTING,,}" == "true" ]] ||
+	die "$SOURCE_CONTAINER must have SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true (found: ${MAIN_CAPACITY_SETTING:-unset})"
+
+MAIN_TAG_EVALUATION_SETTING="$(source_env_value SMART_TAG_EVALUATION_ENABLED)"
+[[ "${MAIN_TAG_EVALUATION_SETTING,,}" == "true" ]] ||
+	die "$SOURCE_CONTAINER must have SMART_TAG_EVALUATION_ENABLED=true (found: ${MAIN_TAG_EVALUATION_SETTING:-unset})"
+
+MAIN_TAG_SCHEDULER_SETTING="$(source_env_value SMART_TAG_EVALUATION_SCHEDULER_ENABLED)"
+[[ "${MAIN_TAG_SCHEDULER_SETTING,,}" == "true" ]] ||
+	die "$SOURCE_CONTAINER must have SMART_TAG_EVALUATION_SCHEDULER_ENABLED=true (found: ${MAIN_TAG_SCHEDULER_SETTING:-unset})"
 
 NETWORK="$(
 	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
@@ -135,6 +150,8 @@ trap cleanup EXIT
 		BEGIN {
 			override["BOT_API_DOMAIN"] = 1
 			override["CAMPAIGN_EXECUTION_ENABLED"] = 1
+			override["CRYPTO_ENABLED"] = 1
+			override["SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED"] = 1
 			override["SMART_TAG_EVALUATION_ENABLED"] = 1
 			override["SMART_TAG_EVALUATION_SCHEDULER_ENABLED"] = 1
 			override["SERVER_HOST"] = 1
@@ -186,6 +203,8 @@ trap cleanup EXIT
 
 cat >>"$RUNTIME_ENV" <<'EOF'
 CAMPAIGN_EXECUTION_ENABLED=true
+CRYPTO_ENABLED=false
+SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=false
 SMART_TAG_EVALUATION_ENABLED=false
 SMART_TAG_EVALUATION_SCHEDULER_ENABLED=false
 SERVER_HOST=127.0.0.1
@@ -220,6 +239,7 @@ log "Starting $CONTAINER_NAME from $IMAGE on $NETWORK"
 "${DOCKER[@]}" run -d \
 	--name "$CONTAINER_NAME" \
 	--hostname "$CONTAINER_NAME" \
+	--shm-size 1g \
 	--restart unless-stopped \
 	--stop-timeout 60 \
 	--network "$NETWORK" \
