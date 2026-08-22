@@ -35,6 +35,18 @@ load_yamata_env_file "$PROJECT_ROOT/.env.beta"
 	printf '[deploy-production] ERROR: CAMPAIGN_EXECUTION_ENABLED must be false in .env.beta\n' >&2
 	exit 1
 }
+[[ "${SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED:-}" == true ]] || {
+	printf '[deploy-production] ERROR: SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED must be true in .env.beta\n' >&2
+	exit 1
+}
+[[ "${SMART_TAG_EVALUATION_ENABLED:-}" == true ]] || {
+	printf '[deploy-production] ERROR: SMART_TAG_EVALUATION_ENABLED must be true in .env.beta\n' >&2
+	exit 1
+}
+[[ "${SMART_TAG_EVALUATION_SCHEDULER_ENABLED:-}" == true ]] || {
+	printf '[deploy-production] ERROR: SMART_TAG_EVALUATION_SCHEDULER_ENABLED must be true in .env.beta\n' >&2
+	exit 1
+}
 
 cd "$PROJECT_ROOT"
 "$SCRIPT_DIR/deploy-beta.sh" "$@"
