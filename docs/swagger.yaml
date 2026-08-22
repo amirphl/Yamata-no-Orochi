@@ -340,6 +340,8 @@ definitions:
         type: string
       platform_settings_id:
         type: integer
+      sample_size_per_tag:
+        type: integer
       scheduleat:
         type: string
       segment_price_factor:
@@ -609,6 +611,8 @@ definitions:
       platform_base_price:
         type: integer
       platform_settings_id:
+        type: integer
+      sample_size_per_tag:
         type: integer
       scheduleat:
         type: string
@@ -1259,6 +1263,12 @@ definitions:
         type: integer
       good_white:
         type: integer
+      layer1_category:
+        type: string
+      layer2_category:
+        type: string
+      layer3_category:
+        type: string
       pink_users:
         type: integer
       scored_users:
@@ -1514,6 +1524,8 @@ definitions:
         $ref: '#/definitions/dto.BotCampaignPlatformSettingsSpec'
       platform_settings_id:
         type: integer
+      sample_size_per_tag:
+        type: integer
       scheduleat:
         type: string
       selected_tags:
@@ -1524,6 +1536,10 @@ definitions:
         type: string
       short_link_domain:
         type: string
+      smart_targeting_test_satisfied_tag_ids:
+        items:
+          type: integer
+        type: array
       status:
         type: string
       tags:
@@ -1928,6 +1944,8 @@ definitions:
       platform_settings_id:
         minimum: 1
         type: integer
+      sample_size_per_tag:
+        type: integer
       scheduleat:
         type: string
       selected_tag_ids:
@@ -2258,6 +2276,8 @@ definitions:
         type: integer
       platform_settings_name:
         type: string
+      sample_size_per_tag:
+        type: integer
       scheduleat:
         type: string
       segment_price_factor:
@@ -3005,6 +3025,40 @@ definitions:
         description: Reason                *string  `json:"reason"`
         type: number
     type: object
+  dto.SmartTargetingTestSamplingPreviewResponse:
+    properties:
+      campaign_cost:
+        type: integer
+      effective_audience_count:
+        type: integer
+      sample_size_per_tag:
+        type: integer
+      satisfied_tag_count:
+        type: integer
+      satisfied_tags:
+        items:
+          $ref: '#/definitions/dto.SmartTargetingTestSamplingTagResult'
+        type: array
+      tag_sampling_order:
+        items:
+          type: integer
+        type: array
+      unsatisfied_tags:
+        items:
+          $ref: '#/definitions/dto.SmartTargetingTestSamplingTagResult'
+        type: array
+    type: object
+  dto.SmartTargetingTestSamplingTagResult:
+    properties:
+      available_count:
+        type: integer
+      satisfied:
+        type: boolean
+      selection_order:
+        type: integer
+      tag_id:
+        type: integer
+    type: object
   dto.StartSmartTargetingCapacityCalculationRequest:
     properties:
       score_classes:
@@ -3319,6 +3373,8 @@ definitions:
         type: string
       platform_settings_id:
         minimum: 1
+        type: integer
+      sample_size_per_tag:
         type: integer
       scheduleat:
         type: string
@@ -6971,6 +7027,32 @@ paths:
       security:
       - BearerAuth: []
       summary: List Smart Targeting tags
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview:
+    post:
+      parameters:
+      - description: Owned Smart Targeting Test campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingTestSamplingPreviewResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Preview Smart Targeting Test sampling
       tags:
       - Campaigns
   /api/v1/campaigns/{uuid}/test-send:
