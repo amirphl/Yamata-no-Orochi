@@ -6199,6 +6199,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Preview Smart Targeting Test sampling",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned Smart Targeting Test campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingTestSamplingPreviewResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/campaigns/{uuid}/test-send": {
             "post": {
                 "description": "Send a best-effort test message for a campaign to a target phone number",
@@ -8923,6 +8969,9 @@ const docTemplate = `{
                 "platform_settings_id": {
                     "type": "integer"
                 },
+                "sample_size_per_tag": {
+                    "type": "integer"
+                },
                 "scheduleat": {
                     "type": "string"
                 },
@@ -9328,6 +9377,9 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "platform_settings_id": {
+                    "type": "integer"
+                },
+                "sample_size_per_tag": {
                     "type": "integer"
                 },
                 "scheduleat": {
@@ -10303,6 +10355,15 @@ const docTemplate = `{
                 "good_white": {
                     "type": "integer"
                 },
+                "layer1_category": {
+                    "type": "string"
+                },
+                "layer2_category": {
+                    "type": "string"
+                },
+                "layer3_category": {
+                    "type": "string"
+                },
                 "pink_users": {
                     "type": "integer"
                 },
@@ -10679,6 +10740,9 @@ const docTemplate = `{
                 "platform_settings_id": {
                     "type": "integer"
                 },
+                "sample_size_per_tag": {
+                    "type": "integer"
+                },
                 "scheduleat": {
                     "type": "string"
                 },
@@ -10693,6 +10757,12 @@ const docTemplate = `{
                 },
                 "short_link_domain": {
                     "type": "string"
+                },
+                "smart_targeting_test_satisfied_tag_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 },
                 "status": {
                     "type": "string"
@@ -11289,6 +11359,9 @@ const docTemplate = `{
                     "type": "integer",
                     "minimum": 1
                 },
+                "sample_size_per_tag": {
+                    "type": "integer"
+                },
                 "scheduleat": {
                     "type": "string"
                 },
@@ -11775,6 +11848,9 @@ const docTemplate = `{
                 },
                 "platform_settings_name": {
                     "type": "string"
+                },
+                "sample_size_per_tag": {
+                    "type": "integer"
                 },
                 "scheduleat": {
                     "type": "string"
@@ -12888,6 +12964,58 @@ const docTemplate = `{
                 }
             }
         },
+        "dto.SmartTargetingTestSamplingPreviewResponse": {
+            "type": "object",
+            "properties": {
+                "campaign_cost": {
+                    "type": "integer"
+                },
+                "effective_audience_count": {
+                    "type": "integer"
+                },
+                "sample_size_per_tag": {
+                    "type": "integer"
+                },
+                "satisfied_tag_count": {
+                    "type": "integer"
+                },
+                "satisfied_tags": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.SmartTargetingTestSamplingTagResult"
+                    }
+                },
+                "tag_sampling_order": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "unsatisfied_tags": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dto.SmartTargetingTestSamplingTagResult"
+                    }
+                }
+            }
+        },
+        "dto.SmartTargetingTestSamplingTagResult": {
+            "type": "object",
+            "properties": {
+                "available_count": {
+                    "type": "integer"
+                },
+                "satisfied": {
+                    "type": "boolean"
+                },
+                "selection_order": {
+                    "type": "integer"
+                },
+                "tag_id": {
+                    "type": "integer"
+                }
+            }
+        },
         "dto.StartSmartTargetingCapacityCalculationRequest": {
             "type": "object",
             "properties": {
@@ -13332,6 +13460,9 @@ const docTemplate = `{
                 "platform_settings_id": {
                     "type": "integer",
                     "minimum": 1
+                },
+                "sample_size_per_tag": {
+                    "type": "integer"
                 },
                 "scheduleat": {
                     "type": "string"
