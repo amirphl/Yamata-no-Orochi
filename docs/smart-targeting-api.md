@@ -1,26 +1,212 @@
-# Smart Targeting tag selection API
+# Smart Targeting API
 
-All endpoints require customer authentication and verify campaign or bundle ownership.
+All endpoints require customer JWT authentication and enforce campaign or
+Bundle ownership. Routes use the `/api/v1` prefix and return the common
+`APIResponse` envelope.
 
-- `GET /api/v1/bundles/{id}/smart-targeting/tags` provides the paginated table before a campaign exists, so campaign creation can submit selected IDs atomically.
-- `GET /api/v1/campaigns/{uuid}/smart-targeting/tags` accepts `search`, `sort_by`, `sort_direction`, `page`, and `page_size` (or `limit`). Supported sort fields are `tag_capacity`, `bundle_persona_fit_score`, `test_phase_avg_ctr`, and `overall_avg_ctr`. The response includes the complete `selected_tag_ids` set and selection summary in addition to the current page.
-- `GET /api/v1/campaigns/{uuid}/smart-targeting/selection` returns the complete persisted selection and raw-capacity sum.
-- `PUT /api/v1/campaigns/{uuid}/smart-targeting/selection` accepts `{"tag_ids":[1,2]}` and atomically replaces the complete set.
-- `POST /api/v1/campaigns/{uuid}/smart-targeting/selection/auto` accepts `count`, `search`, `sort_by`, and `sort_direction`. It selects from the entire filtered order, not the visible page, and replaces the complete set. If `count` exceeds the number of matching available tags, all matching tags are selected. Counts above 10,000 are rejected.
+## Endpoint summary
 
-Campaign create/update payloads accept `audience_targeting_method` with these values:
+| Method and path | Purpose |
+|---|---|
+| `GET /bundles/{id}/smart-targeting/tags` | Browse a Bundle’s selectable tags before a campaign exists. |
+| `GET /campaigns/{uuid}/smart-targeting/tags` | Browse tags plus the campaign’s complete selection state. |
+| `GET /campaigns/{uuid}/smart-targeting/selection` | Read the ordered persisted selection. |
+| `PUT /campaigns/{uuid}/smart-targeting/selection` | Atomically replace the complete ordered selection. |
+| `POST /campaigns/{uuid}/smart-targeting/selection/auto` | Select from the complete filtered/sorted result. |
+| `POST /campaigns/{uuid}/smart-targeting/capacity-calculations` | Start or reuse an asynchronous exact-capacity generation. |
+| `GET /campaigns/{uuid}/smart-targeting/capacity-calculations` | Read the current/latest generation state. |
+| `GET /campaigns/{uuid}/smart-targeting/capacity-calculations/{calculation_id}` | Read one historical generation. |
+| `POST /campaigns/{uuid}/smart-targeting/test-sampling-preview` | Preview and persist Test-phase sampling intent. |
 
-- `smart_targeting`: requires at least one active `selected_tag_ids` value. `level1`, `level2s`, and `level3s` may be omitted or empty and are not used for audience selection.
-- `excel`: requires `target_audience_excel_file_uuid`; levels and standard `tags` are not used for audience selection.
-- `standard`: uses `level1`, `level2s`, `level3s`, and `tags`.
+The path column above omits the shared `/api/v1` prefix for readability.
 
-The field remains optional for backward compatibility. A payload or legacy campaign with an Excel UUID and no method is treated as `excel`; otherwise a missing method is treated as `standard`. Targeting precedence is Smart, Excel, then Standard.
+## Tag browsing and selection
 
-The selectable tag source is resolved per bundle:
+Both tag-list endpoints accept:
 
-- When `current_bundle_tag_scores` contains rows, that complete latest-successful-evaluation snapshot is authoritative. Tag name, display title, audience persona, audience capacity, evaluation run ID, fit score, fit level, relation type, and reason all come from the same snapshot. Later edits to `tags` do not change this view.
-- When it contains no rows—even if an evaluation status row exists—the API falls back to active rows in `tags`. Evaluation run ID and score fields are then null.
+- `search`: case-insensitive tag name/display-title search, maximum 200
+  characters;
+- `sort_by`: `tag_capacity`, `bundle_persona_fit_score`,
+  `test_phase_avg_ctr`, or `overall_avg_ctr`;
+- `sort_direction`: `asc` or `desc`;
+- `page`: positive page number, default 1;
+- `page_size`: 1–100, default 20; `limit` is a compatibility alias and is
+  ignored when `page_size` is supplied.
 
-The two sources are never partially merged. This avoids presenting a mixture of tag metadata captured at different times. Search covers both tag name and display title. An unevaluated bundle uses tag ID ascending as the deterministic order; an evaluated bundle defaults to fit score descending with tag ID ascending as the tie-breaker. CTR fields remain null in this version.
+`bundle_persona_fit_score` requires a completed Bundle evaluation. CTR fields
+remain null until those metrics are populated.
 
-Selection validation, automatic selection, and the snapshots persisted in `campaign_selected_tags` use the same effective source. `selected_raw_capacity` is the sum of those selected tag capacity snapshots. It does not attempt to deduplicate audiences across tags.
+The effective tag source is resolved per Bundle:
+
+- if the Bundle has a current completed smart-tag evaluation, the complete
+  score snapshot supplies tag metadata, capacity, fit score, and explanation
+  fields;
+- otherwise, active live `tags` rows are used and evaluation fields are null.
+
+Sources are never partially merged. An unevaluated Bundle defaults to tag ID
+ascending. An evaluated Bundle defaults to fit score descending with tag ID as
+the stable tie-breaker.
+
+The campaign-scoped list returns `selected_tag_ids` for the entire selection,
+not just the current page, plus `selected_tag_count` and
+`selected_raw_capacity`. The ID array retains the customer’s selection order
+independently of the table’s current search, sort, and pagination. The Bundle
+endpoint has no campaign selection and returns an empty selection summary.
+
+Replace a selection with:
+
+```json
+{
+  "tag_ids": [42, 7, 19]
+}
+```
+
+The array must contain 1–10,000 unique, non-zero IDs available from the
+Bundle’s effective source. Order is significant. Replacement is permitted only
+while the campaign is editable, uses `smart_targeting`, and belongs to the
+authenticated customer. Validation and replacement occur atomically.
+
+Automatic selection accepts:
+
+```json
+{
+  "count": 100,
+  "search": "optional filter",
+  "sort_by": "tag_capacity",
+  "sort_direction": "desc"
+}
+```
+
+It selects from the entire filtered order, not a visible page, and replaces the
+complete selection. If fewer rows match than requested, all matching rows are
+selected. `count` must be between 1 and 10,000.
+
+`selected_raw_capacity` sums the capacity snapshot stored for each selected
+tag. It does not deduplicate audiences shared across tags and is not the exact
+usable capacity.
+
+## Exact capacity calculations
+
+Start a generation with an empty body to use the campaign’s persisted
+`audience_grades`, or override the campaign’s score-class selection while it is
+editable:
+
+```json
+{
+  "score_classes": ["A", "B"]
+}
+```
+
+Allowed classes are A, B, and C, case-insensitive on this endpoint. Duplicates
+or unknown classes are rejected. An empty effective class selection means all
+three classes.
+
+The start endpoint responds with HTTP 202. Calculations are asynchronous and
+must be executed by a process with
+`SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true`. Duplicate starts for the
+same inputs reuse or report the active generation rather than creating
+parallel work.
+
+Polling responses expose:
+
+- `status`: `not_calculated`, `calculating`, `calculated`, `failed`, `stale`, or
+  `expired` as applicable;
+- `is_current` and `recalculation_required`;
+- selected classes/tag count and timestamps;
+- `raw_audience_count`;
+- `eligible_unique_audience_count_before_approved_campaign_deduction`;
+- `approved_campaign_audience_deduction`;
+- `usable_unique_audience_count`;
+- sanitized error code/message for failed work.
+
+Count fields are present only for a current calculated generation, so missing
+is distinct from a real zero. A calculation is current only while its selected
+tags, score classes, algorithm/input fingerprint, Bundle allocation
+fingerprint, and expiry still match. Generations normally expire after 24
+hours; a scheduled campaign extends expiry to at least 24 hours after its
+scheduled time.
+
+Changing selection or score classes makes previous results stale. Approved and
+not-yet-materialized campaign allocations are deducted to close the
+approval-to-scheduler reservation gap. Cost, approval, Test preview, and
+Execution preparation require a current exact capacity and can return a
+pending/recalculation conflict.
+
+## Campaign fields
+
+Campaign create/update accepts:
+
+```json
+{
+  "audience_targeting_method": "smart_targeting",
+  "bundle_id": 12,
+  "phase": "test",
+  "selected_tag_ids": [42, 7, 19],
+  "sample_size_per_tag": 100,
+  "audience_grades": ["A", "B"]
+}
+```
+
+`audience_targeting_method` values are:
+
+- `standard`: existing level/category/tag filters;
+- `smart_targeting`: Bundle-scoped selected tag IDs and exact capacity;
+- `excel`: uploaded target audience file.
+
+For create, `selected_tag_ids` is persisted atomically with the campaign. On
+update, omission preserves the selection while an explicitly supplied array
+replaces it. Only Smart Targeting accepts selected tag IDs.
+
+## Test-phase sampling
+
+A Smart Targeting campaign with `phase: "test"` requires a positive
+`sample_size_per_tag`; there is no default. `budget` and a caller-supplied
+audience count do not override the derived Test count.
+
+Before previewing, create a current exact-capacity generation. The preview then
+processes selected tag IDs in persisted order:
+
+1. randomly choose exactly `sample_size_per_tag` currently eligible audiences
+   for the tag;
+2. if the full sample is unavailable, mark the tag unsatisfied and consume no
+   partial sample;
+3. exclude audiences assigned to each earlier satisfied tag, so first
+   successful attribution wins;
+4. calculate `effective_audience_count = satisfied_tag_count ×
+   sample_size_per_tag` and the campaign cost.
+
+The response contains the complete sampling order, ordered satisfied and
+unsatisfied results, each tag’s available count, sample size, effective count,
+and cost.
+
+Preview persists only satisfied tag IDs in user order, an input fingerprint,
+the preview timestamp, and the derived compatibility value `num_audience`.
+Audience IDs are never preview state. The fingerprint covers the campaign,
+Bundle, ordered selection, sample size, and score classes. Editing those inputs
+or starting a new capacity generation invalidates editable preview intent.
+
+Finalization requires a current preview with at least one satisfied tag. At
+scheduler time, only persisted satisfied tags are attempted, in the same order,
+and each is sampled again while holding the Bundle lock. A tag that no longer
+has a full sample is skipped. Delivery can therefore be lower than preview but
+never higher. Billing retains the finalized preview intent and existing
+sent-count reconciliation refunds the unsent difference; an all-skipped run
+records zero delivery for full reconciliation.
+
+Preview excludes audiences already materialized by earlier Bundle campaigns.
+Approved campaigns do not yet have concrete audience IDs, so their future
+per-tag allocations cannot be reserved by preview; scheduler preparation under
+the Bundle lock is the final availability decision.
+
+## Execution-phase ordering
+
+For `phase: "execution"`, `sample_size_per_tag` has no effect. Requested
+audience count must not exceed the current exact usable capacity. Eligible
+audiences are prepared by `normalized_score DESC`, null scores last, with
+audience ID as the stable tie-breaker. That exact order is persisted and used
+for sending.
+
+For Test and Execution, preparation writes immutable
+campaign/audience/assigned-tag rows to
+`campaign_audience_tag_attributions`. CTR aggregation from this attribution is
+not implemented by the current feature.
