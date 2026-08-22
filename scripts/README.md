@@ -8,9 +8,9 @@ The complete ordered procedure is in
 | `deploy-beta.sh` | Deploy the Compose API stack; requires API campaign execution to remain disabled |
 | `deploy-production-beta.sh` | Canonical release command; deploys API then recreates isolated campaign workers |
 | `deploy-campaign-scheduler-beta.sh` | Recreates the private, restartable campaign-worker container from the running API environment |
-| `apply-yamata-required-migrations.sh` | Idempotently applies required schema changes through current head 0127 |
+| `apply-yamata-required-migrations.sh` | Idempotently applies required schema changes through current head 0128 |
 | `restore-yamata-audience-profiles.sh` | Atomically restores an `audience_profiles`-only PostgreSQL 17 plain dump |
-| `restore-yamata-scheduler-runtime-data.sh` | Atomically restores the exact scheduler table set, normalized selection members, audience-spec sources, and sequence counters |
+| `restore-yamata-scheduler-runtime-data.sh` | Atomically restores the exact scheduler table set, normalized selection members, audience/tag attribution, audience-spec sources, and sequence counters |
 | `run-yamata-data-restore.sh` | Starts either large restore in the background with systemd/journal progress |
 | `tune-yamata-restore.sh` | Enables/resets temporary PostgreSQL checkpoint tuning |
 | `check-yamata-certificates.sh` | Validates existing certificate/key files; never issues or renews |
@@ -18,7 +18,7 @@ The complete ordered procedure is in
 | `install-yamata-operations.sh` | Installs restore/check helpers in `/usr/local/sbin` |
 | `backup-yamata-audience-profiles.bat` | Creates the Windows PostgreSQL 17 audience-only plain dump |
 | `backup-yamata-scheduler-runtime-data.bat` | Creates the Windows PostgreSQL 17 scheduler-table plain dump |
-| `rebuild_audience_spec_cache.py` | Rebuilds the short-lived v3 audience-spec Redis cache from validated exports |
+| `rebuild_audience_spec_cache.py` | Rebuilds the short-lived v4 audience-spec Redis cache from validated exports |
 | `verify_audience_spec_tag_activity.py` | Verifies cached tag IDs and capacities against JSON and PostgreSQL |
 | `extract_pg_dump_copy.py` | Internal allowlist filter used by both selective restore scripts |
 
@@ -54,6 +54,8 @@ substitution, or unresolved placeholders copied from `env.template`.
 Key rules:
 
 - Keep `CAMPAIGN_EXECUTION_ENABLED=false` in `.env.beta` and the API container.
+- Keep exact-capacity and smart-tag scheduling enabled in the API container;
+  the isolated campaign scheduler overrides both to `false`.
 - Run `deploy-production-beta.sh` after every image or environment change.
 - Stop `yamata-app-beta` and `yamata-campaign-scheduler-beta` during selective imports.
 - Restore audience profiles before scheduler runtime data.
