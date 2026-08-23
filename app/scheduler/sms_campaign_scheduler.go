@@ -451,15 +451,19 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		}
 		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) saved, sending to SMS provider", c.ID, start, end)
 
-		batchResponses, batchErr := s.smsClient.SendBatch(ctx, sender, items)
+		batchResult, batchErr := s.smsClient.SendBatch(ctx, sender, items)
 		if batchErr != nil {
 			s.logger.Printf("SMS scheduler: send batch [%d,%d) failed for campaign id=%d: %v", start, end, c.ID, batchErr)
 			// TODO: How to handle this error? Retry sending? Skip to next batch?
 		}
+		if auditErr := s.persistPayamSMSSendResponse(ctx, pc.ID, items, batchResult, batchErr); auditErr != nil {
+			s.logger.Printf("SMS scheduler: failed to persist PayamSMS send response for campaign id=%d batch [%d,%d): %v", c.ID, start, end, auditErr)
+			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: failed to persist PayamSMS send response for campaign id=%d: %v", c.ID, auditErr))
+		}
 
-		responseByTrackingID := make(map[string]*PayamSMSResponseItem, len(batchResponses))
-		for i := range batchResponses {
-			resp := batchResponses[i]
+		responseByTrackingID := make(map[string]*PayamSMSResponseItem, len(batchResult.Items))
+		for i := range batchResult.Items {
+			resp := batchResult.Items[i]
 			trackingID := strings.TrimSpace(resp.TrackingID)
 			if trackingID == "" {
 				continue
@@ -467,7 +471,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			respCopy := resp
 			responseByTrackingID[trackingID] = &respCopy
 		}
-		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) SMS provider responded: sent=%d responses=%d", c.ID, start, end, len(items), len(batchResponses))
+		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) SMS provider responded: sent=%d responses=%d", c.ID, start, end, len(items), len(batchResult.Items))
 
 		sendUpdates := make([]repository.SentSMSProviderUpdate, 0, len(items))
 		for _, item := range items {
@@ -1159,6 +1163,64 @@ func (s *SMSCampaignScheduler) notifyAdmin(message string) {
 			_ = s.notifier.SendSMS(context.Background(), mobile, msg, nil)
 		}
 	}(message)
+}
+
+func buildPayamSMSSendResponse(
+	processedCampaignID uint,
+	items []PayamSMSItem,
+	result PayamSMSSendResult,
+	sendErr error,
+) (*models.PayamSMSSendResponse, error) {
+	trackingIDs := make(pq.StringArray, 0, len(items))
+	for _, item := range items {
+		if trackingID := strings.TrimSpace(item.TrackingID); trackingID != "" {
+			trackingIDs = append(trackingIDs, trackingID)
+		}
+	}
+
+	headers := result.ResponseHeaders
+	if headers == nil {
+		headers = make(map[string][]string)
+	}
+	responseHeaders, err := json.Marshal(headers)
+	if err != nil {
+		return nil, fmt.Errorf("marshal PayamSMS response headers: %w", err)
+	}
+
+	var errorMessage *string
+	if sendErr != nil {
+		message := sendErr.Error()
+		errorMessage = &message
+	}
+
+	return &models.PayamSMSSendResponse{
+		ProcessedCampaignID: processedCampaignID,
+		TrackingIDs:         trackingIDs,
+		HTTPStatusCode:      result.HTTPStatusCode,
+		ResponseHeaders:     responseHeaders,
+		ResponseBody:        result.RawResponse,
+		Error:               errorMessage,
+		AttemptCount:        result.AttemptCount,
+	}, nil
+}
+
+// persistPayamSMSSendResponse deliberately detaches the audit write from a
+// canceled campaign context. A timeout/transport cancellation is itself one of
+// the failures this table is intended to preserve.
+func (s *SMSCampaignScheduler) persistPayamSMSSendResponse(
+	ctx context.Context,
+	processedCampaignID uint,
+	items []PayamSMSItem,
+	result PayamSMSSendResult,
+	sendErr error,
+) error {
+	row, err := buildPayamSMSSendResponse(processedCampaignID, items, result, sendErr)
+	if err != nil {
+		return err
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	return s.db.WithContext(persistCtx).Create(row).Error
 }
 
 func buildSMSProviderUpdate(trackingID string, resp *PayamSMSResponseItem, sendErr error) repository.SentSMSProviderUpdate {
