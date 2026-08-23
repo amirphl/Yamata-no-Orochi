@@ -1,444 +1,176 @@
-# 🚀 Production Deployment Guide - Docker Compose
+# Production deployment
 
-This guide covers deploying Yamata no Orochi to production using Docker Compose with Nginx reverse proxy.
+The supported deployment is the checked-in beta Docker Compose stack. The
+canonical release command starts the API-owned workers, recreates the isolated
+campaign scheduler, and runs topology checks.
 
-## 📋 Prerequisites
+For migration to a new host, restoring Docker volumes, or importing the large
+audience/scheduler dumps, follow
+[`../PRODUCTION_MIGRATION.md`](../PRODUCTION_MIGRATION.md) instead. Its ordering
+and downtime rules take precedence over this fresh-deployment guide.
 
-### Required Software
-- **Docker**: Version 20.10+ 
-- **Docker Compose**: Version 2.0+
-- **Git**: For source code management
-- **OpenSSL**: For SSL certificate generation
-- **Domain**: A registered domain pointing to your server
+## Deployed topology
 
-### Server Requirements
-- **RAM**: Minimum 4GB, Recommended 8GB+
-- **CPU**: Minimum 2 cores, Recommended 4+ cores  
-- **Storage**: Minimum 20GB free space
-- **OS**: Ubuntu 20.04+ / CentOS 8+ / Debian 11+
+`docker-compose.beta.yml` defines:
 
----
+- PostgreSQL 15 and Redis 8 for the application;
+- a PostgreSQL backup container;
+- the Go API and nginx edge proxy;
+- GlitchTip with a separate PostgreSQL and Redis;
+- an nginx-to-Sentry forwarder and certificate monitor;
+- Prometheus, Grafana, PostgreSQL exporter, node exporter, and cAdvisor;
+- the frontend image.
 
-## 🏗️ Architecture Overview
+Only nginx publishes host ports 80 and 443. The API, databases, Redis,
+monitoring services, and standalone campaign scheduler stay on the private
+Docker network. The checked-in network uses `172.30.0.0/24`, so that subnet must
+be available on the host.
 
-```
-Internet → Nginx (443/80) → Go App (8080) → PostgreSQL (5432)
-                         → Redis (6379)
-                         → Prometheus (9091)
-                         → Grafana (3000)
-```
+## Prerequisites
 
-### Services Included:
-- **Nginx**: Reverse proxy with SSL termination
-- **Go Application**: Main API service
-- **PostgreSQL**: Primary database with optimized configuration
-- **Redis**: Caching and session storage
-- **Prometheus**: Metrics collection
-- **Grafana**: Monitoring dashboards
+- A Linux host with Docker Engine and Docker Compose v2.
+- Git, Python 3, `envsubst` (usually from `gettext-base`), OpenSSL, `sed`,
+  `find`, and `mktemp`.
+- DNS records for the main, API, monitoring, and Sentry hostnames.
+- Existing, valid certificates at the paths referenced by
+  `docker/nginx/sites-available/yamata-beta.conf`. Deployment validates
+  certificates but never issues or renews them.
+- Enough memory and disk for both PostgreSQL services, Redis services,
+  observability services, images, uploads, logs, backups, and WAL. Size these
+  from measured data; the repository does not claim a universal minimum.
 
----
+On Debian/Ubuntu, the non-Docker utilities can be installed with:
 
-## 🚀 Quick Start
-
-### 1. Clone and Setup
 ```bash
-git clone https://github.com/your-username/yamata-no-orochi.git
-cd yamata-no-orochi
+sudo apt-get update
+sudo apt-get install -y git python3 gettext-base openssl
+docker info
+docker compose version
 ```
 
-### 2. Configure Domains and Environment
+## Prepare the repository
 
-**Option A: Automated Domain Configuration (Recommended)**
+Clone or update the repository on the server and create a protected
+`.env.beta`:
+
 ```bash
-# Interactive domain setup
-./scripts/configure-domains.sh
-
-# Or command line setup
-./scripts/configure-domains.sh production example.com api.example.com monitoring.example.com admin@example.com
+cd /srv/yamata
+cp env.template .env.beta
+chmod 600 .env.beta
 ```
 
-**Option B: Manual Configuration**
+Replace all placeholders and review the complete variable groups in
+[`PRODUCTION_CONFIGURATION.md`](PRODUCTION_CONFIGURATION.md). The deployment
+loader rejects unresolved provisioning placeholders and symlinked environment
+files.
+
+Production requires this worker split in `.env.beta`:
+
+```env
+CAMPAIGN_EXECUTION_ENABLED=false
+SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true
+SMART_TAG_EVALUATION_ENABLED=true
+SMART_TAG_EVALUATION_SCHEDULER_ENABLED=true
+CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED=false
+```
+
+Also provide both root-level smart-tag prompt files. The deployment script
+checks them and makes them readable by the non-root container user.
+
+## Fresh deployment
+
+For an empty/new application database, run:
+
 ```bash
-# Copy environment template
-cp env.production.template .env.production
-
-# Edit with your actual values
-nano .env.production
+cd /srv/yamata
+./scripts/deploy-production-beta.sh --domain example.com
 ```
 
-**Required Variables:**
+The wrapper performs these operations:
+
+1. validates `.env.beta` and the required worker ownership;
+2. validates pre-provisioned TLS certificates and renders nginx configuration;
+3. builds/starts the Compose dependencies;
+4. stops application writers and applies migrations through schema head `0128`;
+5. starts and health-checks `yamata-app-beta`;
+6. recreates `yamata-campaign-scheduler-beta` from the API image and effective
+   environment, with campaign-only worker overrides;
+7. runs `scripts/check-yamata-production.sh`.
+
+Do not use that fresh-database path to restore a migrated production database.
+The migration runbook deliberately restores and imports data before enabling
+the scheduler.
+
+## Verify the deployment
+
 ```bash
-# Domain Configuration - CUSTOMIZE FOR YOUR DEPLOYMENT
-DOMAIN=your-domain.com
-API_DOMAIN=api.your-domain.com  
-MONITORING_DOMAIN=monitoring.your-domain.com
-CERTBOT_EMAIL=admin@your-domain.com
-
-# Security Configuration
-DB_PASSWORD=your_secure_database_password
-JWT_SECRET_KEY=your_256_bit_jwt_secret_key_here
-SMS_API_KEY=your_sms_provider_api_key
-EMAIL_PASSWORD=your_email_service_password
+docker compose --env-file .env.beta -f docker-compose.beta.yml ps
+./scripts/check-yamata-production.sh /srv/yamata
+curl --fail https://example.com/api/v1/health
+curl --fail https://api.example.com/api/v1/health
+docker logs --tail 100 yamata-app-beta
+docker logs --tail 100 yamata-campaign-scheduler-beta
 ```
 
-### 3. Deploy
+Expected worker settings:
+
+| Container | Campaign execution | Exact-capacity scheduler | Smart-tag scheduler |
+|---|---:|---:|---:|
+| `yamata-app-beta` | `false` | `true` | `true` |
+| `yamata-campaign-scheduler-beta` | `true` | `false` | `false` |
+
+The scheduler has no published port. Its bot callback base is the internal
+`http://app-beta:8080`; port 443 belongs to nginx, not the API container.
+
+## Updates and environment changes
+
+Always use the production wrapper after changing application code, images, or
+`.env.beta`:
+
 ```bash
-# Run the automated deployment script
-./scripts/deploy-docker-compose.sh
+cd /srv/yamata
+git pull --ff-only
+./scripts/deploy-production-beta.sh --domain example.com
 ```
 
-That's it! 🎉 Your application will be available at:
-- **Main Site**: https://your-domain.com
-- **API**: https://api.your-domain.com
-- **Health Check**: https://your-domain.com/health
+A container restart does not reload environment variables. The wrapper
+recreates the isolated scheduler so it receives the API’s new effective
+configuration while retaining the required worker overrides.
 
----
+Run database migrations only while both writer containers are stopped. See
+[`../migrations/README.md`](../migrations/README.md) and prefer the deployment
+or required-migrations scripts over ad hoc `psql` execution.
 
-## 🔧 Manual Deployment Steps
+## Operations
 
-If you prefer to deploy manually or understand each step:
+Install the maintained host helpers when provisioning a server:
 
-### Step 1: Environment Setup
 ```bash
-# Create .env.production file
-cat > .env.production <<EOF
-DB_NAME=yamata_no_orochi
-DB_USER=yamata_user
-DB_PASSWORD=your_secure_password_here
-JWT_SECRET_KEY=your_256_bit_secret_key_here
-# ... other variables
-EOF
-
-# Secure the environment file
-chmod 600 .env.production
+chmod +x scripts/*.sh
+./scripts/install-yamata-operations.sh
 ```
 
-### Step 2: SSL Certificates
-```bash
-# Option A: Let's Encrypt (Recommended)
-./scripts/deploy-docker-compose.sh --ssl-only
-
-# Option B: Self-signed (Development/Testing)
-mkdir -p docker/nginx/ssl
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-    -keyout docker/nginx/ssl/privkey.pem \
-    -out docker/nginx/ssl/fullchain.pem \
-    -subj "/CN=your-domain.com"
-```
-
-### Step 3: Deploy Services
-```bash
-# Build and start all services
-docker-compose -f docker-compose.production.yml up -d
-
-# Check service status
-docker-compose -f docker-compose.production.yml ps
-```
-
-### Step 4: Initialize Database
-```bash
-# Run migrations (automatic on first start)
-docker-compose -f docker-compose.production.yml logs postgres
-
-# Verify database connection
-docker-compose -f docker-compose.production.yml exec postgres \
-    psql -U yamata_user -d yamata_no_orochi -c "SELECT version();"
-```
-
----
-
-## 🔒 Security Configuration
-
-### Firewall Setup
-```bash
-# Ubuntu/Debian
-sudo ufw allow 22/tcp   # SSH
-sudo ufw allow 80/tcp   # HTTP
-sudo ufw allow 443/tcp  # HTTPS
-sudo ufw enable
-
-# CentOS/RHEL
-sudo firewall-cmd --permanent --add-service=ssh
-sudo firewall-cmd --permanent --add-service=http
-sudo firewall-cmd --permanent --add-service=https
-sudo firewall-cmd --reload
-```
-
-### Docker Security
-- All containers run as non-root users
-- Read-only root filesystems where possible
-- Security-hardened configurations
-- Resource limits enforced
-
-### Network Security
-- Private Docker network (172.20.0.0/24)
-- Services only accessible via Nginx
-- Rate limiting configured at multiple levels
-- Security headers enforced
-
----
-
-## 📊 Monitoring & Logging
-
-### Grafana Dashboard
-```bash
-# Access Grafana (Internal only)
-http://localhost:3000
-# Default: admin / admin (change on first login)
-```
-
-### Prometheus Metrics
-```bash
-# Access Prometheus (Internal only)
-http://localhost:9091
-```
-
-### Log Management
-```bash
-# View application logs
-docker-compose -f docker-compose.production.yml logs -f app
-
-# View Nginx access logs
-docker-compose -f docker-compose.production.yml logs -f nginx
-
-# View all service logs
-docker-compose -f docker-compose.production.yml logs -f
-```
-
-### Log Rotation
-Automatic log rotation is configured via logrotate:
-- Daily rotation
-- 7 days retention
-- Compression enabled
-
----
-
-## 🔄 Management Commands
-
-### Service Management
-```bash
-# Start services
-docker-compose -f docker-compose.production.yml up -d
-
-# Stop services
-docker-compose -f docker-compose.production.yml down
-
-# Restart specific service
-docker-compose -f docker-compose.production.yml restart app
-
-# View service status
-docker-compose -f docker-compose.production.yml ps
-
-# Scale app service
-docker-compose -f docker-compose.production.yml up -d --scale app=3
-```
-
-### Updates and Maintenance
-```bash
-# Update application
-git pull origin main
-docker-compose -f docker-compose.production.yml build app
-docker-compose -f docker-compose.production.yml up -d app
-
-# Update all services
-docker-compose -f docker-compose.production.yml pull
-docker-compose -f docker-compose.production.yml up -d
-
-# Database backup
-docker-compose -f docker-compose.production.yml exec postgres \
-    pg_dump -U yamata_user yamata_no_orochi > backup_$(date +%Y%m%d).sql
-
-# Database restore
-docker-compose -f docker-compose.production.yml exec -T postgres \
-    psql -U yamata_user yamata_no_orochi < backup_20240101.sql
-```
-
----
-
-## 🏥 Health Checks & Troubleshooting
-
-### Health Check Endpoints
-```bash
-# Application health
-curl https://your-domain.com/health
-
-# API documentation
-curl https://api.your-domain.com/api/v1/docs
-
-# Nginx status
-curl http://localhost/nginx_status
-```
-
-### Common Issues
-
-#### 1. SSL Certificate Issues
-```bash
-# Check certificate validity
-openssl x509 -in docker/nginx/ssl/fullchain.pem -text -noout
-
-# Renew Let's Encrypt certificates
-./scripts/deploy-docker-compose.sh --ssl-only
-```
-
-#### 2. Database Connection Issues
-```bash
-# Check PostgreSQL logs
-docker-compose -f docker-compose.production.yml logs postgres
-
-# Test database connection
-docker-compose -f docker-compose.production.yml exec app \
-    /usr/local/bin/yamata-no-orochi health
-```
-
-#### 3. Application Not Starting
-```bash
-# Check application logs
-docker-compose -f docker-compose.production.yml logs app
-
-# Check environment variables
-docker-compose -f docker-compose.production.yml exec app env | grep -E "(DB_|JWT_)"
-
-# Restart application
-docker-compose -f docker-compose.production.yml restart app
-```
-
-#### 4. High Memory Usage
-```bash
-# Check container resource usage
-docker stats
-
-# Check service memory limits
-docker-compose -f docker-compose.production.yml config | grep -A5 -B5 memory
-```
-
----
-
-## 🔧 Performance Tuning
-
-### PostgreSQL Optimization
-The included configuration is optimized for production:
-- Connection pooling (200 max connections)
-- Memory settings (256MB shared buffers)
-- WAL configuration for performance
-- Query logging for slow queries (>1s)
-
-### Redis Configuration
-- Memory limit: 256MB with LRU eviction
-- Persistence: AOF + RDB snapshots
-- Optimized for caching workloads
-
-### Nginx Performance
-- Gzip compression enabled
-- Static file caching
-- Keep-alive connections
-- Worker process optimization
-
----
-
-## 📈 Scaling Considerations
-
-### Horizontal Scaling
-```bash
-# Scale application instances
-docker-compose -f docker-compose.production.yml up -d --scale app=3
-```
-
-### Load Balancing
-Nginx is configured with `least_conn` load balancing for multiple app instances.
-
-### Database Scaling
-- Read replicas can be added
-- Connection pooling configured
-- Prepared for external database services
-
----
-
-## 🔐 Backup Strategy
-
-### Automated Backups
-```bash
-# Create backup script
-cat > backup.sh <<'EOF'
-#!/bin/bash
-BACKUP_DIR="/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
-
-# Database backup
-docker-compose -f docker-compose.production.yml exec -T postgres \
-    pg_dump -U yamata_user yamata_no_orochi | gzip > "$BACKUP_DIR/db_backup_$DATE.sql.gz"
-
-# Application logs backup
-docker-compose -f docker-compose.production.yml logs --no-color > "$BACKUP_DIR/logs_$DATE.log"
-
-# Cleanup old backups (keep 7 days)
-find "$BACKUP_DIR" -name "*.gz" -mtime +7 -delete
-find "$BACKUP_DIR" -name "*.log" -mtime +7 -delete
-EOF
-
-chmod +x backup.sh
-
-# Add to crontab for daily backups
-echo "0 2 * * * /path/to/backup.sh" | crontab -
-```
-
----
-
-## 🚦 Migration from Kubernetes
-
-If you later want to migrate to Kubernetes, the Docker Compose setup makes it easier:
-
-1. Container images are already built and tested
-2. Environment variables are externalized
-3. Service dependencies are well-defined
-4. Health checks are implemented
-5. Resource limits are configured
-
-Use the existing `deployments/k8s/production.yaml` when ready.
-
----
-
-## 📞 Support & Troubleshooting
-
-### Getting Help
-1. Check this documentation first
-2. Review application logs
-3. Check the security checklist: `PRODUCTION_SECURITY_CHECKLIST.md`
-4. Open an issue on the repository
-
-### Emergency Contacts
-```
-Application Team: dev@yamata-no-orochi.com
-Infrastructure: ops@yamata-no-orochi.com
-Security Issues: security@yamata-no-orochi.com
-```
-
-### Rollback Procedure
-```bash
-# Quick rollback to previous version
-git checkout HEAD~1
-docker-compose -f docker-compose.production.yml build app
-docker-compose -f docker-compose.production.yml up -d app
-
-# Database rollback (use backup)
-docker-compose -f docker-compose.production.yml exec -T postgres \
-    psql -U yamata_user yamata_no_orochi < backup_previous.sql
-```
-
----
-
-## ✅ Post-Deployment Checklist
-
-- [ ] Application accessible via HTTPS
-- [ ] API endpoints responding correctly
-- [ ] Database connections working
-- [ ] SSL certificates valid and auto-renewing
-- [ ] Monitoring dashboards accessible
-- [ ] Log rotation configured
-- [ ] Firewall rules in place
-- [ ] Backup strategy implemented
-- [ ] DNS records configured
-- [ ] Rate limiting working
-- [ ] Security headers present
-- [ ] Performance acceptable
-
-**🎉 Congratulations! Your Yamata no Orochi API is now running in production!** 
+The helper inventory and safety rules are documented in
+[`../scripts/README.md`](../scripts/README.md). Important policies are:
+
+- use `deploy-production-beta.sh` for releases;
+- do not run audience and scheduler-runtime imports concurrently;
+- stop the API and scheduler for selective imports;
+- treat plain database dumps as untrusted input;
+- keep certificate renewal separate—the deployed monitor only checks and
+  alerts;
+- keep backups encrypted and test restoration regularly.
+
+## Troubleshooting
+
+- If certificate validation fails, check the rendered hostnames and the
+  `fullchain.pem`, `privkey.pem`, and chain files under `/etc/letsencrypt`.
+- If the API is unhealthy, inspect PostgreSQL/Redis health first, then
+  `yamata-app-beta` logs and startup configuration validation errors.
+- If an environment change is absent from the scheduler, rerun the production
+  wrapper; do not only restart the container.
+- If a migration or import failed, leave both writers stopped, diagnose the
+  first error, and follow the recovery instructions in the migration runbook.
+- If HTTPS is accidentally directed to `172.30.0.20`, remove that mapping. The
+  API listens on HTTP port 8080 internally; nginx is `172.30.0.30` in the
+  checked-in stack.
