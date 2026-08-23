@@ -1,236 +1,200 @@
-# 🔒 Production Security Checklist
+# Production security checklist
 
-## ✅ Pre-Deployment Security Checklist
+Use this checklist with the active beta Compose deployment. It distinguishes
+controls already present in the repository from controls that still require
+host, provider, or organizational work. A checked box must reflect the deployed
+environment, not merely the existence of a configuration field.
 
-### 🛡️ **Infrastructure Security**
+## Before deployment
 
-#### **1. Server Hardening**
-- [ ] **OS Security Updates**: All security patches applied
-- [ ] **Firewall Configuration**: Only necessary ports open (80, 443, 22)
-- [ ] **SSH Security**: Key-based authentication, disable root login
-- [ ] **User Permissions**: Non-root user for application, minimal privileges
-- [ ] **File Permissions**: Correct ownership and permissions (0644 files, 0755 directories)
-- [ ] **System Monitoring**: Log monitoring and intrusion detection enabled
+### Host and network
 
-#### **2. Network Security**
-- [ ] **HTTPS Only**: TLS 1.3 minimum, valid SSL certificates
-- [ ] **Load Balancer**: WAF enabled, DDoS protection
-- [ ] **Private Networks**: Database and cache in private subnet
-- [ ] **Network Segmentation**: Proper VPC/security group configuration
-- [ ] **CDN/Proxy**: CloudFlare or similar for additional protection
-- [ ] **DNS Security**: DNSSEC enabled, secure DNS providers
+- [ ] Apply supported OS, Docker Engine, Compose, and package security updates.
+- [ ] Restrict SSH to authorized keys and operators; disable password/root login
+  where operationally appropriate.
+- [ ] Permit only required inbound traffic. The Yamata stack should publish
+  only TCP 80/443; expose SSH through the host’s controlled management path.
+- [ ] Confirm PostgreSQL, Redis, Grafana, Prometheus, exporters, the API, and
+  the campaign scheduler are not directly published.
+- [ ] Confirm Docker subnet `172.30.0.0/24` does not conflict with host, VPN, or
+  upstream networks.
+- [ ] Protect Docker socket access as root-equivalent and review membership of
+  the `docker` group.
 
-#### **3. Database Security**
-- [ ] **Connection Security**: SSL/TLS required for all connections
-- [ ] **Authentication**: Strong passwords, certificate-based auth preferred
-- [ ] **Access Control**: Minimal privileges, separate read/write users
-- [ ] **Network Isolation**: Database not accessible from internet
-- [ ] **Backup Security**: Encrypted backups, secure storage
-- [ ] **Audit Logging**: All database queries logged and monitored
+### Secrets and identities
 
----
+- [ ] Keep `.env.beta` a regular file with mode `0600`; never commit it.
+- [ ] Replace every `env.template` placeholder. The production parser rejects
+  the known `$domain`, `$db_password`, and related provisioning placeholders.
+- [ ] Use unique, high-entropy JWT, database, Redis, GlitchTip, Grafana, bot,
+  payment, SMS, and messaging credentials.
+- [ ] Verify system/tax UUIDs, mobiles, emails, wallets, and Sheba identity
+  values against the intended production records.
+- [ ] Store backups, environment files, provider tokens, private keys, and
+  prompt-related API keys in an approved encrypted secret/backup system.
+- [ ] Establish credential rotation and emergency revocation procedures.
 
-### 🔐 **Application Security**
+### TLS and DNS
 
-#### **4. Authentication & Authorization**
-- [ ] **Password Policy**: Min 8 chars, complexity requirements enforced
-- [ ] **Password Hashing**: bcrypt with cost factor ≥12
-- [ ] **JWT Security**: Strong secret keys (≥256 bits), short expiration
-- [ ] **Session Management**: Secure cookies, HTTP-only, SameSite=Strict
-- [ ] **Rate Limiting**: 5 auth attempts/minute, progressive delays
-- [ ] **Account Lockout**: Temporary lockout after failed attempts
+- [ ] Provision valid certificates for every hostname referenced by the
+  rendered nginx configuration before deployment.
+- [ ] Run `scripts/check-yamata-certificates.sh`; it validates but does not issue
+  or renew certificates.
+- [ ] Configure an authorized renewal mechanism outside this repository and
+  test it before expiry.
+- [ ] Keep `yamata-cert-monitor-beta` alerts configured; monitoring is not a
+  substitute for renewal.
+- [ ] Review DNS ownership, registrar MFA, DNSSEC support, and cutover/rollback
+  TTLs.
 
-#### **5. Input Validation & Sanitization**
-- [ ] **Request Validation**: All inputs validated using go-playground/validator
-- [ ] **SQL Injection**: GORM used properly, no raw SQL with user input
-- [ ] **XSS Prevention**: All output escaped, CSP headers configured
-- [ ] **File Upload**: Not implemented (secure if added later)
-- [ ] **Request Size**: Body size limited to 4MB
-- [ ] **Content Type**: Strict content-type validation
+### Database and data
 
-#### **6. API Security**
-- [ ] **CORS Policy**: Restrictive origins list, no wildcards
-- [ ] **Security Headers**: Helmet middleware with all headers
-- [ ] **Rate Limiting**: Global (1000/min) and auth-specific (5/min)
-- [ ] **API Versioning**: Versioned endpoints (/api/v1/)
-- [ ] **Error Handling**: No sensitive info in error responses
-- [ ] **Request Tracing**: Unique request IDs for audit trails
+- [ ] Use strong SCRAM credentials and keep PostgreSQL private.
+- [ ] Encrypt disks and backup destinations; encrypt backup transfers.
+- [ ] Test both full-stack restoration and any selective data restore used in
+  operations.
+- [ ] Grant export/repair roles only the required tables and operations.
+- [ ] Treat PostgreSQL dumps as untrusted. Use the checked-in restore tools,
+  which allowlist `COPY` sections, rather than executing arbitrary dump SQL.
+- [ ] Define retention and deletion rules for audience identifiers, phone
+  numbers, campaign data, logs, and backups.
 
----
+## Application and edge checks
 
-### 📊 **Data Protection**
+### Authentication and authorization
 
-#### **7. Data Security**
-- [ ] **Encryption at Rest**: Database and backups encrypted
-- [ ] **Encryption in Transit**: TLS for all data transmission
-- [ ] **PII Protection**: Personal data properly classified and protected
-- [ ] **Data Retention**: Clear retention policies implemented
-- [ ] **Data Backup**: Regular encrypted backups, tested restoration
-- [ ] **Data Deletion**: Secure deletion procedures for sensitive data
+- [ ] `JWT_SECRET_KEY` is at least 32 characters and differs between
+  environments.
+- [ ] Access and refresh TTLs match the approved session policy.
+- [ ] Customer, admin, and bot credentials cannot be used across the wrong
+  authentication surface.
+- [ ] Admin routes enforce both admin authentication and the central permission
+  registry.
+- [ ] Maker-checker permissions and privileged admin operations have been
+  exercised in a staging environment.
+- [ ] OTP bypass and forwarding lists contain only approved numbers and are
+  empty when not required.
 
-#### **8. Secrets Management**
-- [ ] **Environment Variables**: All secrets in env vars, not code
-- [ ] **Secret Rotation**: Regular rotation of API keys, JWT secrets
-- [ ] **Access Control**: Secrets accessible only to authorized users
-- [ ] **Secret Storage**: Vault or similar secret management system
-- [ ] **Code Repository**: No secrets committed to version control
-- [ ] **Container Images**: No secrets baked into images
+### Request controls
 
----
+- [ ] Review the actual hard-coded Fiber CORS allowlist in
+  `app/router/routes.go`; changing `CORS_ALLOWED_ORIGINS` alone does not change
+  it today.
+- [ ] Review Fiber’s hard-coded limits (2,000 API and 20 auth requests/minute)
+  and nginx’s stricter zones (100 API, 5 auth, and 200 general requests/minute
+  per IP), including burst behavior.
+- [ ] Confirm proxy headers can only arrive through trusted nginx paths and
+  test the effective client IP used for limiting and audit logs.
+- [ ] Confirm nginx rejects proxy methods, absolute-form URIs, suspicious
+  proxy headers, dot files, backup/config extensions, and server-status probes.
+- [ ] Review upload limits: 100 MiB for media and bot audience uploads, 50 MiB
+  for admin short-link CSV, and 10 MiB as nginx’s general default.
+- [ ] Validate uploaded media type, storage permissions, malware policy, and
+  retention with representative files.
 
-### 🔍 **Monitoring & Logging**
+### Headers and transport
 
-#### **9. Security Monitoring**
-- [ ] **Audit Logging**: All security events logged to audit_log table
-- [ ] **Access Logging**: HTTP access logs with request IDs
-- [ ] **Error Logging**: Structured JSON logging with severity levels
-- [ ] **Security Events**: Failed logins, rate limit hits, unusual patterns
-- [ ] **Log Retention**: Logs retained for compliance requirements (90+ days)
-- [ ] **Log Security**: Logs protected from tampering, encrypted storage
+- [ ] Verify HTTP redirects to HTTPS and no application service is exposed over
+  plain HTTP outside the Docker network.
+- [ ] Verify the negotiated TLS versions/ciphers. Nginx currently permits TLS
+  1.2 and 1.3; `TLS_MIN_VERSION` is not the nginx source of truth.
+- [ ] Verify HSTS, CSP, frame, content-type, referrer, permissions, and
+  cross-origin headers on the actual main, API, monitoring, and Sentry routes.
+- [ ] Reconcile the edge and Fiber header policies where they differ; test the
+  final header seen by clients.
 
-#### **10. Incident Response**
-- [ ] **Alerting**: Real-time alerts for security events
-- [ ] **Monitoring Dashboard**: Security metrics and KPIs visible
-- [ ] **Response Plan**: Documented incident response procedures
-- [ ] **Contact List**: Security team contacts readily available
-- [ ] **Backup Communication**: Out-of-band communication channels
-- [ ] **Forensics**: Log analysis tools and procedures ready
+### Containers and dependencies
 
----
+- [ ] Build from the reviewed release commit and record image digests.
+- [ ] Scan Go modules, Python dependencies, base images, and frontend images.
+- [ ] Confirm the API runs as `appuser`, uses a read-only root filesystem,
+  mounts only required writable volumes/tmpfs paths, and has
+  `no-new-privileges`.
+- [ ] Review every service without `read_only`, `cap_drop`, a non-root user, or
+  explicit resource limits. The Compose stack is not uniformly hardened.
+- [ ] Pin or formally accept floating images such as the current
+  `glitchtip/glitchtip:latest` before production use.
+- [ ] Confirm prompt files and nginx/database configuration bind mounts are
+  read-only and contain no secrets that belong in environment/secret storage.
 
-### ⚙️ **Configuration Security**
+## Worker and operational safety
 
-#### **11. Application Configuration**
-- [ ] **Security Headers**: CSP, HSTS, X-Frame-Options configured
-- [ ] **CORS Settings**: Production domains only, no localhost
-- [ ] **Rate Limits**: Appropriate limits for production traffic
-- [ ] **Timeouts**: Reasonable timeouts to prevent resource exhaustion
-- [ ] **Resource Limits**: Memory and CPU limits configured
-- [ ] **Debug Mode**: Debug mode disabled in production
+- [ ] `yamata-app-beta` has campaign execution off, exact-capacity scheduling
+  on, and smart-tag scheduling on.
+- [ ] `yamata-campaign-scheduler-beta` has campaign execution on and both other
+  schedulers off.
+- [ ] `CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED=false` in production.
+- [ ] The scheduler has no published ports and uses
+  `http://app-beta:8080` for its internal bot client.
+- [ ] Deployments use `scripts/deploy-production-beta.sh`; a raw restart is not
+  accepted as an environment reload.
+- [ ] Migrations and selective restores stop both writer containers.
+- [ ] Destructive repair tools are dry-run by default or require an explicit
+  reviewed apply flag.
 
-#### **12. Third-Party Services**
-- [ ] **SMS Provider**: Secure API credentials, rate limiting
-- [ ] **Email Provider**: Secure SMTP, SPF/DKIM configured
-- [ ] **Monitoring**: Application monitoring configured
-- [ ] **Error Tracking**: Error tracking service configured
-- [ ] **Dependency Updates**: All dependencies updated, vulnerability scanning
-- [ ] **License Compliance**: All dependencies properly licensed
+## Logging, monitoring, and response
 
----
+- [ ] Request IDs appear in access/application logs and can be followed across
+  the edge and API.
+- [ ] GlitchTip/Sentry DSN, environment, release, and server names distinguish
+  API and campaign scheduler events.
+- [ ] Logs redact tokens, passwords, phone numbers, dump contents, and provider
+  response bodies where required by policy.
+- [ ] Log and metric volumes have retention, capacity alerts, and tamper/access
+  controls.
+- [ ] PostgreSQL, Redis, API, nginx, certificate, queue/worker, disk, backup,
+  and provider failure alerts have owners and tested escalation paths.
+- [ ] Incident response, breach notification, forensic preservation, service
+  rollback, and credential rotation runbooks have named owners.
 
-### 🚀 **Deployment Security**
+## Verification commands
 
-#### **13. Container Security**
-- [ ] **Base Images**: Official, minimal base images used
-- [ ] **Non-Root User**: Application runs as non-root user (UID 1000)
-- [ ] **Read-Only Filesystem**: Root filesystem mounted read-only
-- [ ] **No Privileged Access**: No privileged or CAP_* capabilities
-- [ ] **Resource Limits**: CPU and memory limits set
-- [ ] **Health Checks**: Proper liveness and readiness probes
+Replace `example.com` and `/srv/yamata` with the deployed values.
 
-#### **14. Kubernetes Security**
-- [ ] **RBAC**: Minimal RBAC permissions configured
-- [ ] **Network Policies**: Network segmentation enforced
-- [ ] **Pod Security**: Pod security standards enforced
-- [ ] **Secrets**: Kubernetes secrets used for sensitive data
-- [ ] **Service Accounts**: Dedicated service account with minimal permissions
-- [ ] **Image Scanning**: Container images scanned for vulnerabilities
-
----
-
-### 📋 **Compliance & Governance**
-
-#### **15. Data Protection Compliance**
-- [ ] **GDPR Compliance**: Data subject rights implemented
-- [ ] **Privacy Policy**: Clear privacy policy published
-- [ ] **Data Processing**: Legal basis for data processing documented
-- [ ] **Consent Management**: User consent properly captured
-- [ ] **Data Portability**: User data export capability
-- [ ] **Right to Erasure**: User data deletion capability
-
-#### **16. Security Documentation**
-- [ ] **Security Policies**: Written security policies and procedures
-- [ ] **Architecture Documentation**: Security architecture documented
-- [ ] **Runbooks**: Incident response and operational runbooks
-- [ ] **Security Training**: Team trained on security best practices
-- [ ] **Regular Reviews**: Security reviews scheduled quarterly
-- [ ] **Penetration Testing**: Annual penetration testing planned
-
----
-
-## ⚡ **Quick Verification Commands**
-
-### **TLS/SSL Check**
 ```bash
-# Check TLS configuration
-openssl s_client -connect api.yamata-no-orochi.com:443 -servername api.yamata-no-orochi.com
-
-# Check certificate
-curl -I https://api.yamata-no-orochi.com/api/v1/health
+/srv/yamata/scripts/check-yamata-production.sh /srv/yamata
+docker compose --env-file /srv/yamata/.env.beta \
+  -f /srv/yamata/docker-compose.beta.yml ps
+curl --fail --show-error https://example.com/api/v1/health
+curl --head https://example.com/
+openssl s_client -connect example.com:443 -servername example.com </dev/null
 ```
 
-### **Security Headers Check**
+Inspect the published ports and security settings:
+
 ```bash
-# Check security headers
-curl -I https://api.yamata-no-orochi.com/api/v1/health | grep -E "(Strict-Transport-Security|X-Frame-Options|X-Content-Type-Options|Content-Security-Policy)"
+docker ps --format 'table {{.Names}}\t{{.Ports}}'
+docker inspect yamata-app-beta \
+  --format 'User={{.Config.User}} Readonly={{.HostConfig.ReadonlyRootfs}} SecurityOpt={{json .HostConfig.SecurityOpt}}'
+docker exec yamata-app-beta printenv CAMPAIGN_EXECUTION_ENABLED
+docker exec yamata-campaign-scheduler-beta printenv CAMPAIGN_EXECUTION_ENABLED
 ```
 
-### **Rate Limiting Check**
+Check response headers without assuming configuration fields are wired:
+
 ```bash
-# Test rate limiting
-for i in {1..15}; do curl -w "%{http_code}\n" -s -o /dev/null https://api.yamata-no-orochi.com/api/v1/auth/signup; done
+curl --silent --dump-header - --output /dev/null https://example.com/
+curl --silent --dump-header - --output /dev/null \
+  https://api.example.com/api/v1/health
 ```
 
-### **Database Security Check**
-```sql
--- Check database connections
-SELECT usename, application_name, client_addr, state 
-FROM pg_stat_activity 
-WHERE datname = 'yamata_no_orochi';
+## Known implementation caveats
 
--- Check SSL connections
-SELECT ssl, count(*) FROM pg_stat_ssl GROUP BY ssl;
-```
+- Several `SecurityConfig` fields are parsed and validated but are not passed
+  into the current router middleware. Review `app/router/routes.go` and nginx
+  files for effective CORS, headers, and rate limits.
+- The repository has no production Kubernetes deployment; Kubernetes-specific
+  controls are out of scope until manifests and an operating model exist.
+- Configuration parsing silently falls back to defaults for malformed numeric,
+  Boolean, duration, and optional float values. Verify effective container
+  values after deployment.
+- Swagger endpoints are disabled when `APP_ENV=production`, but the checked-in
+  generated files may still be present inside build contexts or source
+  checkouts. Do not expose source directories through the web server.
+- Compliance status cannot be inferred from code. Privacy, retention, consent,
+  access review, incident response, and regulatory obligations need separate
+  evidence and ownership.
 
----
-
-## 🎯 **Production Readiness Score**
-
-**Calculate your security readiness:**
-
-- ✅ **90-100% Complete**: **READY FOR PRODUCTION**
-- ⚠️ **80-89% Complete**: Minor fixes needed
-- 🚨 **70-79% Complete**: Significant security gaps
-- ❌ **<70% Complete**: **NOT READY - Security Review Required**
-
-**Current Status: [ ] / 16 categories complete**
-
----
-
-## 🆘 **Emergency Contacts**
-
-```
-Security Team Lead: [security@yamata-no-orochi.com]
-DevOps Team: [devops@yamata-no-orochi.com]
-Incident Response: [incident@yamata-no-orochi.com]
-Management Escalation: [cto@yamata-no-orochi.com]
-
-24/7 Security Hotline: [+98-XXX-XXXX]
-Cloud Provider Support: [AWS/Azure/GCP Support]
-```
-
----
-
-## 📚 **Security Resources**
-
-- [OWASP API Security Top 10](https://owasp.org/www-project-api-security/)
-- [NIST Cybersecurity Framework](https://www.nist.gov/cyberframework)
-- [CIS Controls](https://www.cisecurity.org/controls/)
-- [Go Security Guide](https://github.com/OWASP/Go-SCP)
-- [Kubernetes Security](https://kubernetes.io/docs/concepts/security/)
-
----
-
-**Last Updated**: [Insert Date]  
-**Next Review**: [Insert Date + 3 months]  
-**Approved By**: [Security Team Lead] 
+Re-review this checklist after changes to `docker-compose.beta.yml`,
+`docker/nginx/`, `app/router/routes.go`, `config/production.go`, authentication,
+uploads, or the deployment/restore scripts.
