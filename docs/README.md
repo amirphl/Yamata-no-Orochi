@@ -2,10 +2,9 @@
 
 This directory contains the generated OpenAPI output and the deployment, configuration, security, and provider notes for the Jazebeh backend. For the project overview and local setup, start with the [root README](../README.md).
 
-> The current beta production migration and operations source of truth is
-> [`../PRODUCTION_MIGRATION.md`](../PRODUCTION_MIGRATION.md). Older generic
-> production examples below do not describe the restored Compose stack or its
-> isolated campaign scheduler.
+> The current beta production migration and restore source of truth is
+> [`../PRODUCTION_MIGRATION.md`](../PRODUCTION_MIGRATION.md). For fresh releases,
+> use the checked-in Compose deployment workflow documented below.
 
 ## Current Implementation
 
@@ -18,7 +17,7 @@ The application is a Go 1.26 service built on Fiber v3, GORM, PostgreSQL, and Re
 - Short links and click reporting, media, tickets, pricing, platform settings, admin customer management, and maker-checker access control.
 - Prometheus metrics, Grafana dashboards, structured/rotated logs, request IDs, and Sentry-compatible GlitchTip reporting.
 
-The schema head is migration `0127`. The newest schema work adds campaign-level Smart Targeting selections, normalized Bundle audience allocations, source-reference data, and optimized audience lookup indexes.
+The schema head is migration `0128`. The newest schema work adds ordered Smart Targeting Test sampling, deterministic execution ordering, and campaign audience/tag attribution on top of normalized Bundle audience allocations.
 
 ## Source of Truth
 
@@ -37,15 +36,20 @@ Use these files when documentation and implementation differ:
 
 | Document | Purpose |
 |---|---|
-| [Production deployment](PRODUCTION_DEPLOYMENT.md) | Deployment procedure and operational checks |
-| [Production configuration](PRODUCTION_CONFIGURATION.md) | Production environment and service configuration |
-| [Production security checklist](PRODUCTION_SECURITY_CHECKLIST.md) | Security review checklist |
-| [Multi-server deployment](MULTI_SERVER_DEPLOYMENT.md) | Multi-host/domain deployment notes |
-| [Bale integration](bale.md) | Bale/Najva provider notes |
+| [Production deployment](PRODUCTION_DEPLOYMENT.md) | Fresh beta Compose deployment and release operations |
+| [Production migration](../PRODUCTION_MIGRATION.md) | Canonical server move, restore, imports, and cutover |
+| [Production configuration](PRODUCTION_CONFIGURATION.md) | Current environment parsing, required values, worker ownership, and runtime caveats |
+| [Production security checklist](PRODUCTION_SECURITY_CHECKLIST.md) | Implementation-aware host, application, container, and operational review |
+| [Multi-server deployment](MULTI_SERVER_DEPLOYMENT.md) | Supported one-stack-per-host model and promotion/cutover guidance |
+| [Selective PostgreSQL backup/restore](SELECTIVE_POSTGRES_BACKUP_RESTORE_README.md) | Four-table local dataset export with phone-number anonymization |
+| [Smart Targeting API](smart-targeting-api.md) | Tag selection, exact capacity, Test sampling, and Execution ordering |
+| [Bale integration](bale.md) | Implemented Najva v2/Safir v3 client, batching, uploads, status, and retries |
 | [Migration guide](../migrations/README.md) | Current schema head, migration groups, execution, rollback, and known gaps |
 | [Pitch and architecture index](../pitch/README.md) | Board-facing and technical Mermaid documents |
 
-Deployment documents contain environment-specific examples. Verify hostnames, image versions, secrets, and service names against `docker-compose.beta.yml` and `env.template` before applying them.
+Deployment documents use `example.com` and `/srv/yamata` placeholders. Verify
+hostnames, image versions, secrets, and service names against
+`docker-compose.beta.yml` and `env.template` before applying them.
 
 ## OpenAPI and Swagger
 
@@ -134,6 +138,7 @@ Smart-tag evaluation is off by default. When enabling it:
   - `SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT`
   - `SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT`
 - Enable `SMART_TAG_EVALUATION_SCHEDULER_ENABLED` only when this process should claim queued runs.
+- Enable `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED` only when this process should claim exact Smart Targeting capacity jobs.
 
 The scheduler poll interval, maximum parallel runs, tag batch size, validation strictness, model, reasoning effort, token limit, timeout, retry count, temperature, and optional proxy are configurable through `env.template`.
 
@@ -141,7 +146,11 @@ The scheduler poll interval, maximum parallel runs, tag batch size, validation s
 
 `docker-compose.beta.yml` currently defines PostgreSQL 15, Redis 8, the Go application, nginx, a PostgreSQL backup container, GlitchTip with its PostgreSQL/Redis dependencies, an nginx Sentry forwarder, certificate monitoring, Prometheus, Grafana, PostgreSQL exporter, node exporter, cAdvisor, and the frontend image. Only nginx publishes host ports (`80` and `443`) in the checked-in compose file.
 
-Use [`scripts/deploy-beta.sh`](../scripts/deploy-beta.sh) and the production guides as references; there is no checked-in production Kubernetes manifest or generic `docker-compose.production.yml` in the current repository.
+Use
+[`scripts/deploy-production-beta.sh`](../scripts/deploy-production-beta.sh) for
+production releases; it wraps the API deployment, recreates the isolated
+campaign scheduler, and runs topology checks. There is no checked-in production
+Kubernetes manifest or generic `docker-compose.production.yml`.
 
 ## Verification
 
