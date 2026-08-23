@@ -8,13 +8,14 @@ import (
 
 func TestMockPayamSMSClientReturnsSuccessfulResponsePerItem(t *testing.T) {
 	client := maybeMockPayamSMSClient(nil, true)
-	responses, err := client.SendBatch(context.Background(), "sender", []PayamSMSItem{
+	result, err := client.SendBatch(context.Background(), "sender", []PayamSMSItem{
 		{Recipient: "09120000001", TrackingID: "101"},
 		{Recipient: "09120000002", TrackingID: "102"},
 	})
 	if err != nil {
 		t.Fatalf("SendBatch() error = %v", err)
 	}
+	responses := result.Items
 	if len(responses) != 2 {
 		t.Fatalf("len(responses) = %d, want 2", len(responses))
 	}
