@@ -2,10 +2,12 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -20,8 +22,8 @@ type stubSMSClient struct {
 	fetchStatusFn func(ctx context.Context, token string, ids []string) (PayamStatusFetchResult, error)
 }
 
-func (s *stubSMSClient) SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error) {
-	return nil, nil
+func (s *stubSMSClient) SendBatch(ctx context.Context, sender string, items []PayamSMSItem) (PayamSMSSendResult, error) {
+	return PayamSMSSendResult{}, nil
 }
 
 func (s *stubSMSClient) GetToken(ctx context.Context) (string, error) {
@@ -341,5 +343,70 @@ func TestBuildSMSProviderUpdateMissingResponse(t *testing.T) {
 	}
 	if update.Description == nil || !strings.Contains(*update.Description, "trk-3") {
 		t.Fatalf("expected missing response description to include tracking id, got=%v", update.Description)
+	}
+}
+
+func TestBuildPayamSMSSendResponsePreservesFailureDetails(t *testing.T) {
+	t.Parallel()
+
+	statusCode := http.StatusBadGateway
+	body := `{"error":"upstream unavailable"}`
+	sendErr := errors.New("payamsms sendMultiple http status: 502")
+	row, err := buildPayamSMSSendResponse(
+		77,
+		[]PayamSMSItem{{TrackingID: " tracking-1 "}, {TrackingID: "tracking-2"}},
+		PayamSMSSendResult{
+			RawResponse:     &body,
+			ResponseHeaders: http.Header{"X-Request-Id": []string{"request-1"}},
+			HTTPStatusCode:  &statusCode,
+			AttemptCount:    5,
+		},
+		sendErr,
+	)
+	if err != nil {
+		t.Fatalf("buildPayamSMSSendResponse returned an error: %v", err)
+	}
+	if row.ProcessedCampaignID != 77 || len(row.TrackingIDs) != 2 || row.TrackingIDs[0] != "tracking-1" {
+		t.Fatalf("campaign/tracking correlation mismatch: %+v", row)
+	}
+	if row.HTTPStatusCode == nil || *row.HTTPStatusCode != http.StatusBadGateway {
+		t.Fatalf("HTTP status mismatch: %v", row.HTTPStatusCode)
+	}
+	if row.ResponseBody == nil || *row.ResponseBody != body {
+		t.Fatalf("response body mismatch: %v", row.ResponseBody)
+	}
+	if row.Error == nil || *row.Error != sendErr.Error() || row.AttemptCount != 5 {
+		t.Fatalf("error/attempt details mismatch: error=%v attempts=%d", row.Error, row.AttemptCount)
+	}
+	var headers http.Header
+	if err := json.Unmarshal(row.ResponseHeaders, &headers); err != nil {
+		t.Fatalf("unmarshal response headers: %v", err)
+	}
+	if got := headers.Get("X-Request-Id"); got != "request-1" {
+		t.Fatalf("response headers mismatch: %q", got)
+	}
+}
+
+func TestBuildPayamSMSSendResponseRecordsFailureWithoutHTTPResponse(t *testing.T) {
+	t.Parallel()
+
+	sendErr := errors.New("connection refused")
+	row, err := buildPayamSMSSendResponse(
+		88,
+		[]PayamSMSItem{{TrackingID: "tracking-3"}},
+		PayamSMSSendResult{},
+		sendErr,
+	)
+	if err != nil {
+		t.Fatalf("buildPayamSMSSendResponse returned an error: %v", err)
+	}
+	if row.ResponseBody != nil || row.HTTPStatusCode != nil {
+		t.Fatalf("transport failure unexpectedly has HTTP details: %+v", row)
+	}
+	if row.Error == nil || *row.Error != sendErr.Error() {
+		t.Fatalf("transport error mismatch: %v", row.Error)
+	}
+	if string(row.ResponseHeaders) != `{}` {
+		t.Fatalf("empty response headers should be stored as an object, got=%s", row.ResponseHeaders)
 	}
 }
