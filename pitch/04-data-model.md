@@ -170,16 +170,24 @@ classDiagram
         datetime createdAt
     }
 
-    class AudienceSelection {
-        int campaignID
-        int selectionID
-        string[] matchedUIDs
-        string[] unmatchedUIDs
-        datetime createdAt
-    }
+    class BundleAudienceSelection {
+		int bundleID
+		int campaignID
+		int audienceCount
+		string correlationID
+		datetime createdAt
+	}
 
-    AudienceProfile "*" --> "*" Tag : labeled_by
-    AudienceSelection --> AudienceProfile
+	class BundleAudienceSelectionMember {
+		int selectionID
+		int bundleID
+		int audienceID
+		int selectionOrder
+	}
+
+	AudienceProfile "*" --> "*" Tag : labeled_by
+	BundleAudienceSelection --> BundleAudienceSelectionMember
+	BundleAudienceSelectionMember --> AudienceProfile
 ```
 
 ---
