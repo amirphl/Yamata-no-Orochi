@@ -1,326 +1,156 @@
-# Production Configuration Guide
+# Production configuration
 
-This guide explains how to configure the Yamata no Orochi application for production deployment.
+This document describes the configuration consumed by the current application
+and beta Compose stack. The complete variable inventory is
+[`env.template`](../env.template); parsing, defaults, and startup validation live
+in [`config/production.go`](../config/production.go).
 
-## 🔧 Configuration Overview
+## Configuration files
 
-The application uses environment variables for configuration, making it suitable for containerized deployments and cloud environments.
+The standalone Go process reads environment variables and then fills unset
+values from a repository-root `.env` file. Existing process variables win over
+`.env` values.
 
-## 📋 Environment Variables
+The production scripts use a separate `.env.beta` file. They parse it as dotenv
+data through `scripts/load_dotenv.py`; they do not execute it as shell code.
+The file must be a regular, non-symlink file and is changed to mode `0600`.
+Use one `KEY=VALUE` entry per line. Quoted values and comments are supported,
+but shell expansion and command substitution are not.
 
-### Application Environment
-- `APP_ENV`: Set to `production` for production deployments
-
-### Database Configuration
-- `DB_HOST`: Database host (e.g., `db.example.com`)
-- `DB_PORT`: Database port (default: `5432`)
-- `DB_NAME`: Database name (e.g., `yamata_production`)
-- `DB_USER`: Database username
-- `DB_PASSWORD`: Database password (required in production)
-- `DB_SSL_MODE`: SSL mode (`require`, `verify-ca`, `verify-full` for production)
-- `DB_MAX_OPEN_CONNS`: Maximum open connections (default: `25`)
-- `DB_MAX_IDLE_CONNS`: Maximum idle connections (default: `5`)
-- `DB_CONN_MAX_LIFETIME_MINUTES`: Connection lifetime (default: `15`)
-
-### Server Configuration
-- `SERVER_HOST`: Server host (use `0.0.0.0` for containerized deployments)
-- `SERVER_PORT`: Server port (default: `8080`)
-- `SERVER_READ_TIMEOUT_SECONDS`: Read timeout (default: `30`)
-- `SERVER_WRITE_TIMEOUT_SECONDS`: Write timeout (default: `30`)
-- `SERVER_IDLE_TIMEOUT_SECONDS`: Idle timeout (default: `60`)
-
-### JWT Configuration
-- `JWT_ISSUER`: JWT issuer (e.g., `yamata-orochi`)
-- `JWT_AUDIENCE`: JWT audience (e.g., `yamata-api`)
-- `JWT_ACCESS_TOKEN_TTL`: Access token lifetime (e.g., `15m`)
-- `JWT_REFRESH_TOKEN_TTL`: Refresh token lifetime (e.g., `168h`)
-
-### SMS Configuration
-- `SMS_PROVIDER`: SMS provider (`mock`, `iranian`)
-- `SMS_USERNAME`: SMS provider username
-- `SMS_PASSWORD`: SMS provider password
-- `SMS_FROM_NUMBER`: Sender phone number
-- `SMS_API_KEY`: SMS provider API key
-- `SMS_API_URL`: SMS provider API URL
-
-### Email Configuration
-- `EMAIL_HOST`: SMTP host (e.g., `smtp.gmail.com`)
-- `EMAIL_PORT`: SMTP port (e.g., `587`)
-- `EMAIL_USERNAME`: SMTP username
-- `EMAIL_PASSWORD`: SMTP password
-- `EMAIL_FROM_EMAIL`: Sender email address
-- `EMAIL_USE_TLS`: Use TLS (default: `true`)
-
-### Logging Configuration
-- `LOG_LEVEL`: Log level (`debug`, `info`, `warn`, `error`)
-- `LOG_FORMAT`: Log format (`json`, `text`)
-- `LOG_OUTPUT_PATH`: Log output path (`stdout`, file path)
-
-## 🚀 Production Deployment
-
-### 1. Environment Setup
-
-Create a `.env` file based on the template:
+To prepare a new file:
 
 ```bash
-cp config.env.template .env
+cp env.template .env.beta
+chmod 600 .env.beta
 ```
 
-Edit the `.env` file with your production values:
+Replace every provisioning placeholder such as `$domain`, `$db_password`, and
+`$jwt_secret`. The strict production loader rejects unresolved placeholders.
+Do not commit `.env`, `.env.beta`, credentials, private keys, or provider
+tokens.
+
+## Required startup values
+
+`LoadProductionConfig` validates these values on every startup:
+
+- Database: non-empty `DB_HOST`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD`, with
+  `DB_PORT` in the valid TCP port range.
+- JWT: `JWT_SECRET_KEY` of at least 32 characters, positive access/refresh
+  token TTLs, and non-empty issuer and audience. A secret is currently required
+  even when the optional RSA fields are populated.
+- System identities: valid UUIDs in `SYSTEM_USER_UUID`, `TAX_USER_UUID`,
+  `SYSTEM_WALLET_UUID`, and `TAX_WALLET_UUID`; non-empty system/tax mobiles and
+  emails; and a valid `SYSTEM_SHEBA_NUMBER`.
+- Crypto: no provider credential is needed when `CRYPTO_ENABLED=false`. When
+  enabled, `CRYPTO_DEFAULT_PLATFORM=oxapay` and non-empty `OXA_BASE_URL` and
+  `OXA_API_KEY` are required.
+- Email: because `EMAIL_HOST` defaults to a non-empty SMTP host, username,
+  password, and sender address must normally be configured.
+- SMS: `mock` needs no external credential; `payamsms` needs source number,
+  username, and password; other provider domains need an API key and source
+  number.
+- Cache: a Redis URL is required when Redis caching is enabled.
+- Smart-tag evaluation: when enabled, a model and valid scheduler, batching,
+  validation, retry, rate-limit, and timeout settings are required. Both prompt
+  files at the repository root must also be readable.
+
+Invalid numeric, Boolean, duration, or optional floating-point text currently
+falls back to the code default rather than producing a parse error. Use Go
+duration syntax (`23ms`, `30s`, `15m`, `24h`) and verify effective container
+values after deployment.
+
+## Variable groups
+
+| Group | Prefixes or principal variables | Notes |
+|---|---|---|
+| Build/runtime identity | `APP_ENV`, `VERSION`, `COMMIT_HASH`, `BUILD_TIME` | Swagger routes exist only for `development` and `local`. |
+| PostgreSQL | `DB_*`, `POSTGRES_SHM_SIZE` | Compose forces the app host to `postgres-beta`; PostgreSQL 15 uses a configurable shared-memory mount. |
+| HTTP server | `SERVER_*` | The API defaults to port 8080; the metrics listener is separate. |
+| JWT/authentication | `JWT_*`, `PASSWORD_*`, `SESSION_*` | See the required-value caveat above. |
+| Edge/security | `TLS_*`, `HSTS_*`, `CORS_*`, rate-limit and header variables | Several values are parsed but the current Fiber middleware and rendered nginx template contain their own settings; see “Runtime caveats.” |
+| Logging/observability | `LOG_*`, `METRICS_*`, `SENTRY_*` | Metrics default to port 9090 and path `/metrics`. |
+| Redis/cache | `CACHE_*`, `REDIS_PASSWORD` | Compose injects `redis://redis-beta:6379` for the app. |
+| Deployment | `DOMAIN`, `API_DOMAIN`, `MONITORING_DOMAIN`, `SENTRY_*_DOMAIN`, `CERTBOT_EMAIL`, `GRAFANA_ADMIN_PASSWORD`, backup variables | The deployment script renders nginx from the explicit domain argument. |
+| Business identities | `ADMIN_*`, `SYSTEM_*`, `TAX_*` | UUIDs must match the database identities and wallets. |
+| Messaging | `SMS_*`, `PAYAM_SMS_*`, `BALE_*`, `RUBIKA_*`, `SPLUS_*`, `MESSAGE_*` | Bale provider behavior is documented in [`bale.md`](bale.md). |
+| Payments | `ATIPAY_*`, `CRYPTO_*`, `OXA_*` | Set `CRYPTO_ENABLED=false` to disable crypto payments; only OxaPay is accepted when enabled. |
+| Bot/schedulers | `BOT_*`, `CAMPAIGN_*`, `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED` | Production deliberately splits API-owned and campaign-execution workers. |
+| Smart-tag evaluation | `SMART_TAG_EVALUATION_*`, `OPENAI_API_KEY`, `IR_HTTPS_PROXY` | The API owns these jobs in the current production topology. |
+| Certificate monitor | `CERT_ALERT_*`, `DOMAIN_MONITOR_*` | Monitoring checks and alerts; it does not issue or renew certificates. |
+
+Comma-separated values are used for string slices such as origins, supported
+coins, admin mobiles, API keys, and IP lists. `ADMIN_2FA_MOBILES` is a
+comma-separated `mobile:value` map.
+
+## Production scheduler ownership
+
+The checked-in production workflow requires the following `.env.beta` values:
 
 ```env
-APP_ENV=production
-
-# Database (use managed database service)
-DB_HOST=your-production-db.example.com
-DB_PORT=5432
-DB_NAME=yamata_production
-DB_USER=yamata_user
-DB_PASSWORD=your_very_secure_password
-DB_SSL_MODE=require
-
-# Server
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8080
-
-# JWT
-JWT_ISSUER=yamata-orochi
-JWT_AUDIENCE=yamata-api
-JWT_ACCESS_TOKEN_TTL=15m
-JWT_REFRESH_TOKEN_TTL=168h
-
-# SMS (use real provider)
-SMS_PROVIDER=iranian
-SMS_USERNAME=your_sms_username
-SMS_PASSWORD=your_sms_password
-SMS_FROM_NUMBER=+989000000000
-
-# Email (use real SMTP)
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USERNAME=your_email@gmail.com
-EMAIL_PASSWORD=your_app_password
-EMAIL_FROM_EMAIL=noreply@yamata-no-orochi.com
-
-# Logging
-LOG_LEVEL=info
-LOG_FORMAT=json
+CAMPAIGN_EXECUTION_ENABLED=false
+SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true
+SMART_TAG_EVALUATION_ENABLED=true
+SMART_TAG_EVALUATION_SCHEDULER_ENABLED=true
+CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED=false
 ```
 
-### 2. Docker Deployment
+`scripts/deploy-campaign-scheduler-beta.sh` derives a private worker from the
+running API container and overrides those responsibilities:
 
-Create a `Dockerfile`:
+| Process | Campaign execution | Exact capacity | Smart-tag evaluation |
+|---|---:|---:|---:|
+| `yamata-app-beta` | off | on | on |
+| `yamata-campaign-scheduler-beta` | on | off | off |
 
-```dockerfile
-FROM golang:1.21-alpine AS builder
+This prevents two processes from claiming the same job family. Run
+`scripts/deploy-production-beta.sh` after any image or environment change;
+restarting a container does not reload its environment.
 
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
+## Smart-tag prompt and API-key handling
 
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+When `SMART_TAG_EVALUATION_ENABLED=true`, these repository-root files are
+required and bind-mounted read-only by Compose:
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-
-COPY --from=builder /app/main .
-COPY --from=builder /app/config.env.template .
-
-EXPOSE 8080
-CMD ["./main"]
+```text
+SMART_TAG_EVALUATION_PERSONA_ANALYSIS_SYSTEM_PROMPT
+SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT
 ```
 
-Create a `docker-compose.yml` for local testing:
+`SMART_TAG_EVALUATION_OPENAI_API_KEY_ENV` names the environment variable that
+contains the API key and defaults to `OPENAI_API_KEY`. Configure the named
+variable, not the prompt files, with the credential.
 
-```yaml
-version: '3.8'
+## Runtime caveats
 
-services:
-  app:
-    build: .
-    ports:
-      - "8080:8080"
-    environment:
-      - APP_ENV=production
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=yamata_production
-      - DB_USER=yamata_user
-      - DB_PASSWORD=your_password
-      - DB_SSL_MODE=disable
-    depends_on:
-      - db
-    volumes:
-      - ./logs:/app/logs
+- TLS terminates at nginx in the beta stack; `TLS_ENABLED=false` is appropriate
+  for the internal HTTP hop. Certificate paths in the nginx template must
+  already exist under `/etc/letsencrypt`.
+- Fiber currently hard-codes its CORS allowlist, security headers, global limit
+  of 2,000 requests/minute, and auth limit of 20 requests/minute in
+  `app/router/routes.go`. Nginx defines separate per-IP zones of 100 API
+  requests/minute, 5 auth requests/minute, and 200 general requests/minute in
+  `docker/nginx/nginx.conf`. Do not assume every parsed `CORS_*`, header, or
+  rate-limit variable changes runtime middleware.
+- `SERVER_ENABLE_COMPRESSION` and its level are parsed, but the current router
+  always installs best-speed compression. Similar config-to-runtime gaps should
+  be checked against code before an operational change.
+- The app’s default body limit is 100 MiB. Nginx separately allows 100 MiB for
+  media and bot audience uploads and 50 MiB for admin short-link CSV uploads.
+- The public health endpoint is `/api/v1/health`; nginx also maps `/health` to
+  it on the main domain.
 
-  db:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_DB=yamata_production
-      - POSTGRES_USER=yamata_user
-      - POSTGRES_PASSWORD=your_password
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+## Verification
 
-volumes:
-  postgres_data:
+Validate configuration and behavior before cutover:
+
+```bash
+go test ./config ./app/router ./app/middleware
+docker compose --env-file .env.beta -f docker-compose.beta.yml config --quiet
+./scripts/deploy-production-beta.sh --domain example.com
+./scripts/check-yamata-production.sh /srv/yamata
+curl --fail https://example.com/api/v1/health
 ```
 
-### 3. Kubernetes Deployment
-
-Create `k8s/deployment.yaml`:
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: yamata-orochi
-spec:
-  replicas: 3
-  selector:
-    matchLabels:
-      app: yamata-orochi
-  template:
-    metadata:
-      labels:
-        app: yamata-orochi
-    spec:
-      containers:
-      - name: yamata-orochi
-        image: your-registry/yamata-orochi:latest
-        ports:
-        - containerPort: 8080
-        env:
-        - name: APP_ENV
-          value: "production"
-        - name: DB_HOST
-          valueFrom:
-            secretKeyRef:
-              name: db-secret
-              key: host
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: db-secret
-              key: password
-        # Add other environment variables...
-        resources:
-          requests:
-            memory: "256Mi"
-            cpu: "250m"
-          limits:
-            memory: "512Mi"
-            cpu: "500m"
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8080
-          initialDelaySeconds: 5
-          periodSeconds: 5
-```
-
-### 4. Security Considerations
-
-#### Database Security
-- Use managed database services (AWS RDS, Google Cloud SQL, etc.)
-- Enable SSL/TLS connections
-- Use strong passwords
-- Implement connection pooling
-- Regular backups
-
-#### JWT Security
-- Use strong, unique issuer and audience values
-- Set appropriate token expiration times
-- Implement token revocation
-- Use HTTPS in production
-
-#### SMS/Email Security
-- Use API keys instead of passwords where possible
-- Store credentials in secrets management systems
-- Use dedicated service accounts
-- Monitor usage and costs
-
-#### Application Security
-- Use HTTPS/TLS
-- Implement rate limiting
-- Set up monitoring and alerting
-- Regular security updates
-- Input validation and sanitization
-
-### 5. Monitoring and Logging
-
-#### Health Checks
-The application provides a health endpoint at `/health` for monitoring.
-
-#### Logging
-- Use structured logging (JSON format)
-- Send logs to centralized logging systems
-- Set appropriate log levels
-- Monitor for errors and performance issues
-
-#### Metrics
-Consider adding metrics collection:
-- Request rates and response times
-- Database connection pool usage
-- Error rates
-- Custom business metrics
-
-### 6. Environment-Specific Configurations
-
-#### Development
-```env
-APP_ENV=development
-DB_SSL_MODE=disable
-SMS_PROVIDER=mock
-LOG_LEVEL=debug
-```
-
-#### Staging
-```env
-APP_ENV=staging
-DB_SSL_MODE=require
-SMS_PROVIDER=iranian
-LOG_LEVEL=info
-```
-
-#### Production
-```env
-APP_ENV=production
-DB_SSL_MODE=verify-full
-SMS_PROVIDER=iranian
-LOG_LEVEL=warn
-```
-
-### 7. Configuration Validation
-
-The application validates configuration on startup and will fail fast if:
-- Required environment variables are missing
-- Invalid values are provided
-- Production requirements are not met
-
-### 8. Troubleshooting
-
-#### Common Issues
-1. **Database Connection**: Check host, port, credentials, and SSL settings
-2. **JWT Issues**: Verify issuer, audience, and token expiration
-3. **SMS/Email**: Test credentials and API endpoints
-4. **Port Conflicts**: Ensure the application port is available
-
-#### Debug Mode
-For troubleshooting, temporarily set:
-```env
-LOG_LEVEL=debug
-APP_ENV=development
-```
-
-This will provide more detailed logging and relaxed validation. 
+Use [`PRODUCTION_DEPLOYMENT.md`](PRODUCTION_DEPLOYMENT.md) for deployment and
+[`../PRODUCTION_MIGRATION.md`](../PRODUCTION_MIGRATION.md) for a server
+migration or restored production database.
