@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,137 @@ import (
 
 	"github.com/amirphl/Yamata-no-Orochi/config"
 )
+
+func TestPayamSendBatchRetainsImmediateResponse(t *testing.T) {
+	t.Parallel()
+
+	const rawResponse = `[{"customerId":"tracking-1","mobile":"09120000001","serverId":"server-1"}]`
+	client := newHTTPPayamSMSClientWithClient(config.PayamSMSConfig{
+		TokenURL:        "https://www.payamsms.com/auth/oauth/token",
+		RootAccessToken: "root-token",
+	}, &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.URL.Path, "/auth/oauth/token") {
+				return payamTestResponse(req, http.StatusOK, `{"access_token":"send-token"}`), nil
+			}
+			response := payamTestResponse(req, http.StatusAccepted, rawResponse)
+			response.Header.Set("X-Request-ID", "payam-request-1")
+			return response, nil
+		}),
+	})
+
+	result, err := client.SendBatch(context.Background(), "sender", []PayamSMSItem{{
+		Recipient:  "09120000001",
+		Body:       "message",
+		TrackingID: "tracking-1",
+	}})
+	if err != nil {
+		t.Fatalf("SendBatch returned an error: %v", err)
+	}
+	if result.RawResponse == nil || *result.RawResponse != rawResponse {
+		t.Fatalf("raw response mismatch: got=%v want=%q", result.RawResponse, rawResponse)
+	}
+	if result.HTTPStatusCode == nil || *result.HTTPStatusCode != http.StatusAccepted {
+		t.Fatalf("status mismatch: got=%v want=%d", result.HTTPStatusCode, http.StatusAccepted)
+	}
+	if got := result.ResponseHeaders.Get("X-Request-ID"); got != "payam-request-1" {
+		t.Fatalf("response header mismatch: got=%q", got)
+	}
+	if result.AttemptCount != 1 {
+		t.Fatalf("attempt count mismatch: got=%d want=1", result.AttemptCount)
+	}
+	if len(result.Items) != 1 || result.Items[0].TrackingID != "tracking-1" {
+		t.Fatalf("decoded items mismatch: %+v", result.Items)
+	}
+}
+
+func TestPayamSendBatchRetainsNonSuccessResponse(t *testing.T) {
+	t.Parallel()
+
+	const rawResponse = `{"error":"invalid sender"}`
+	client := newHTTPPayamSMSClientWithClient(config.PayamSMSConfig{
+		TokenURL: "https://www.payamsms.com/auth/oauth/token",
+	}, &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.URL.Path, "/auth/oauth/token") {
+				return payamTestResponse(req, http.StatusOK, `{"access_token":"send-token"}`), nil
+			}
+			response := payamTestResponse(req, http.StatusBadRequest, rawResponse)
+			response.Header.Set("X-Request-ID", "payam-request-error")
+			return response, nil
+		}),
+	})
+
+	result, err := client.SendBatch(context.Background(), "sender", []PayamSMSItem{{TrackingID: "tracking-1"}})
+	if err == nil {
+		t.Fatal("SendBatch unexpectedly succeeded")
+	}
+	if result.RawResponse == nil || *result.RawResponse != rawResponse {
+		t.Fatalf("raw error response mismatch: got=%v want=%q", result.RawResponse, rawResponse)
+	}
+	if result.HTTPStatusCode == nil || *result.HTTPStatusCode != http.StatusBadRequest {
+		t.Fatalf("status mismatch: got=%v want=%d", result.HTTPStatusCode, http.StatusBadRequest)
+	}
+	if got := result.ResponseHeaders.Get("X-Request-ID"); got != "payam-request-error" {
+		t.Fatalf("response header mismatch: got=%q", got)
+	}
+}
+
+func TestPayamSendBatchRetainsMalformedSuccessResponse(t *testing.T) {
+	t.Parallel()
+
+	const rawResponse = `{"customerId":`
+	client := newHTTPPayamSMSClientWithClient(config.PayamSMSConfig{
+		TokenURL: "https://www.payamsms.com/auth/oauth/token",
+	}, &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.URL.Path, "/auth/oauth/token") {
+				return payamTestResponse(req, http.StatusOK, `{"access_token":"send-token"}`), nil
+			}
+			response := payamTestResponse(req, http.StatusOK, rawResponse)
+			response.Header.Set("X-Request-ID", "payam-malformed")
+			return response, nil
+		}),
+	})
+
+	result, err := client.SendBatch(context.Background(), "sender", []PayamSMSItem{{TrackingID: "tracking-1"}})
+	if err == nil {
+		t.Fatal("SendBatch unexpectedly decoded a malformed response")
+	}
+	if result.RawResponse == nil || *result.RawResponse != rawResponse {
+		t.Fatalf("raw malformed response mismatch: got=%v want=%q", result.RawResponse, rawResponse)
+	}
+	if result.HTTPStatusCode == nil || *result.HTTPStatusCode != http.StatusOK {
+		t.Fatalf("status mismatch: got=%v want=%d", result.HTTPStatusCode, http.StatusOK)
+	}
+	if got := result.ResponseHeaders.Get("X-Request-ID"); got != "payam-malformed" {
+		t.Fatalf("response header mismatch: got=%q", got)
+	}
+}
+
+func TestPayamSendBatchReportsTransportFailureWithoutHTTPResponse(t *testing.T) {
+	t.Parallel()
+
+	transportErr := errors.New("broken transport")
+	client := newHTTPPayamSMSClientWithClient(config.PayamSMSConfig{
+		TokenURL: "https://www.payamsms.com/auth/oauth/token",
+	}, &http.Client{
+		Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if strings.Contains(req.URL.Path, "/auth/oauth/token") {
+				return payamTestResponse(req, http.StatusOK, `{"access_token":"send-token"}`), nil
+			}
+			return nil, transportErr
+		}),
+	})
+
+	result, err := client.SendBatch(context.Background(), "sender", []PayamSMSItem{{TrackingID: "tracking-1"}})
+	if err == nil {
+		t.Fatal("SendBatch unexpectedly succeeded")
+	}
+	if result.RawResponse != nil || result.ResponseHeaders != nil || result.HTTPStatusCode != nil {
+		t.Fatalf("transport failure unexpectedly had an HTTP response: %+v", result)
+	}
+}
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
