@@ -64,6 +64,19 @@ type PayamSMSResponseItem struct {
 	Desc       *string `json:"description"`
 }
 
+// PayamSMSSendResult retains the provider's immediate HTTP response alongside
+// the decoded per-recipient acknowledgements. RawResponse is non-nil whenever
+// an HTTP response body was received, including empty, non-2xx, and malformed
+// bodies. HTTPStatusCode and ResponseHeaders remain nil when the request failed
+// before the provider returned a response.
+type PayamSMSSendResult struct {
+	Items           []PayamSMSResponseItem
+	RawResponse     *string
+	ResponseHeaders http.Header
+	HTTPStatusCode  *int
+	AttemptCount    int
+}
+
 type PayamStatusResponse struct {
 	TrackingID            string  `json:"customerId"`
 	ServerID              *string `json:"serverId"`
@@ -98,7 +111,7 @@ func isPayamUnauthorizedError(err error) bool {
 }
 
 type PayamSMSClient interface {
-	SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error)
+	SendBatch(ctx context.Context, sender string, items []PayamSMSItem) (PayamSMSSendResult, error)
 	GetToken(ctx context.Context) (string, error)
 	FetchStatus(ctx context.Context, token string, ids []string) (PayamStatusFetchResult, error)
 }
@@ -130,19 +143,20 @@ func newHTTPPayamSMSClientWithClient(cfg config.PayamSMSConfig, client *http.Cli
 }
 
 // SendBatch sends a batch of SMS messages with exponential backoff retries.
-func (c *httpPayamSMSClient) SendBatch(ctx context.Context, sender string, items []PayamSMSItem) ([]PayamSMSResponseItem, error) {
+func (c *httpPayamSMSClient) SendBatch(ctx context.Context, sender string, items []PayamSMSItem) (PayamSMSSendResult, error) {
 	if len(items) == 0 {
-		return nil, nil
+		return PayamSMSSendResult{}, nil
 	}
 	// GetToken already retries internally; no need to re-fetch on each send retry.
 	token, err := c.GetToken(ctx)
 	if err != nil {
-		return nil, err
+		return PayamSMSSendResult{}, err
 	}
 
-	var out []PayamSMSResponseItem
+	var out PayamSMSSendResult
 	for attempt := 0; ; attempt++ {
 		out, err = c.sendBatchOnce(ctx, sender, items, token)
+		out.AttemptCount = attempt + 1
 		if !isPayamRetryableError(err) {
 			return out, err
 		}
@@ -156,7 +170,7 @@ func (c *httpPayamSMSClient) SendBatch(ctx context.Context, sender string, items
 	return out, err
 }
 
-func (c *httpPayamSMSClient) sendBatchOnce(ctx context.Context, sender string, items []PayamSMSItem, token string) ([]PayamSMSResponseItem, error) {
+func (c *httpPayamSMSClient) sendBatchOnce(ctx context.Context, sender string, items []PayamSMSItem, token string) (PayamSMSSendResult, error) {
 	payload := struct {
 		Sender   string `json:"sender"`
 		SMSItems []any  `json:"smsItems"`
@@ -181,7 +195,7 @@ func (c *httpPayamSMSClient) sendBatchOnce(ctx context.Context, sender string, i
 
 	b, err := json.Marshal(payload)
 	if err != nil {
-		return nil, fmt.Errorf("payamsms sendBatch marshal payload: %w", err)
+		return PayamSMSSendResult{}, fmt.Errorf("payamsms sendBatch marshal payload: %w", err)
 	}
 
 	// BUG FIX 2: local variable renamed from `url` to `sendURL` to stop shadowing
@@ -189,23 +203,38 @@ func (c *httpPayamSMSClient) sendBatchOnce(ctx context.Context, sender string, i
 	sendURL := "https://www.payamsms.com/panel/webservice/sendMultipleWithSrc"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return PayamSMSSendResult{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, err
+		return PayamSMSSendResult{}, err
 	}
 	defer resp.Body.Close()
+
+	statusCode := resp.StatusCode
+	bodyBytes, readErr := io.ReadAll(resp.Body)
+	rawResponse := string(bodyBytes)
+	result := PayamSMSSendResult{
+		RawResponse:     &rawResponse,
+		ResponseHeaders: resp.Header.Clone(),
+		HTTPStatusCode:  &statusCode,
+	}
+	if readErr != nil {
+		return result, fmt.Errorf("read payamsms sendMultiple response: %w", readErr)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("payamsms sendMultiple http status: %d", resp.StatusCode)
+		return result, &payamHTTPStatusError{
+			operation:  "sendMultiple",
+			statusCode: resp.StatusCode,
+			body:       rawResponse,
+		}
 	}
-	var out []PayamSMSResponseItem
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+	if err := json.Unmarshal(bodyBytes, &result.Items); err != nil {
+		return result, err
 	}
-	return out, nil
+	return result, nil
 }
 
 // GetToken fetches a fresh OAuth2 bearer token from PayamSMS with exponential backoff retries.
