@@ -1,295 +1,144 @@
-I **retrieved the full technical documentation** from the link you provided:
-🔗 [https://docs.bale.ai/safir](https://docs.bale.ai/safir) — this page contains the **Safir (Bale) messaging API documentation**. ([Bale Docs][1])
+# Bale messaging integration
 
-Below is a **complete and accurate English translation** of that documentation (structurally organized, professionally worded, and suitable for developer reference). After the documentation content you’ll find **download instructions** so you can save it as a file.
+This document describes the Bale client implemented in
+[`app/scheduler/bale_client.go`](../app/scheduler/bale_client.go), not a copy of
+the provider’s external documentation. The client presents one internal API and
+normalizes responses from the current Najva v2 service and legacy Safir v3
+service.
 
----
+## Configuration
 
-# **Safir (Bale) Messaging API — English Documentation**
+| Variable | Default | Purpose |
+|---|---|---|
+| `BALE_API_ACCESS_KEY` | empty | Required for every send, upload, and status request. |
+| `BALE_PROVIDER` | `najva` | Provider selection: `najva_v2`, `safir_v3`, or `auto`. The aliases `najva`, `v2`, `safir`, `legacy`, and `v1` are accepted. Unknown values normalize to `auto`. |
+| `BALE_NAJVA_DOMAIN` | `https://sms.najva.com` | Base URL for Najva endpoints. |
+| `BALE_LEGACY_DOMAIN` | `https://safir.bale.ai` | Base URL for Safir endpoints. |
 
-## **Introduction**
+The checked-in `env.template` selects `najva`. Keep provider credentials in
+`.env`/`.env.beta`; do not put them in this document or in command arguments.
 
-The **Safir service** provides a RESTful API for sending different types of messages via Bale’s bot infrastructure (known as “Safir”). With this service, you can send text messages, multimedia messages, OTP messages, and upload files. To access the APIs, you must include your organization’s **API Access Key** from the Bale Business panel in every request. ([Bale Docs][1])
+`auto` tries Najva first and falls back to Safir only when the Najva endpoint is
+reported as unsupported. Authentication, validation, rate-limit, server, and
+network errors do not trigger a provider switch.
 
----
+## Provider endpoints
 
-## **1. Send Message Service**
+| Operation | Najva v2 | Safir v3 |
+|---|---|---|
+| Same message to recipients | `POST /v2/sms/send` | One `POST /api/v3/send_message` per recipient |
+| Different text per recipient | `POST /v2/sms/send-p2p` | One send request per recipient |
+| Delivery status | `POST /v2/sms/status` | Not supported by this client |
+| File upload | `POST /upload-file/bale` | `POST /api/v3/upload_file` |
 
-### **Base Endpoint**
+The client supplies the configured key through the legacy and common proxy
+header forms (`api-access-key`, `x-api-key`, `apikey`, and `Authorization`). A
+missing key fails before an HTTP request is made.
 
-**URL:**
+## Internal request model
 
-```
-POST https://safir.bale.ai/api/v3/send_message
-```
-
-**Headers**
-
-| Header           | Required | Description                    |
-| ---------------- | -------- | ------------------------------ |
-| `api-access-key` | Yes      | Your Bale organization API key |
-| `Content-Type`   | Yes      | Must be `application/json`     |
-
----
-
-## **1.1 Request Body Structure**
-
-### **Top-Level Fields**
-
-| Field          | Type      | Required | Description                                                     |
-| -------------- | --------- | -------- | --------------------------------------------------------------- |
-| `request_id`   | `string`  | Optional | A unique ID used to prevent duplicate message delivery          |
-| `bot_id`       | `integer` | Yes      | The ID of the Bale bot sending the message                      |
-| `phone_number` | `string`  | Yes      | Recipient phone number with country code (e.g., `989123456789`) |
-| `message_data` | `object`  | Yes      | Message payload details                                         |
-
----
-
-### **`MessageData` Object**
-
-| Field         | Type      | Required | Description                                  |
-| ------------- | --------- | -------- | -------------------------------------------- |
-| `message`     | `object`  | No       | Regular message data                         |
-| `otp_message` | `object`  | No       | OTP (One-Time Password) message data         |
-| `is_secure`   | `boolean` | No       | If `true`, send a secure (encrypted) message |
-
----
-
-### **`Message` Object**
-
-| Field       | Type     | Required | Description                                |
-| ----------- | -------- | -------- | ------------------------------------------ |
-| `text`      | `string` | No       | Message text                               |
-| `file_id`   | `string` | No       | ID of an uploaded file                     |
-| `copy_text` | `string` | No       | Optional text users can copy with a button |
-
----
-
-### **`OTPMessage` Object**
-
-| Field | Type     | Required | Description      |
-| ----- | -------- | -------- | ---------------- |
-| `otp` | `string` | Yes      | Numeric OTP code |
-
----
-
-## **1.2 Phone Number Format**
-
-- Must start with country code (e.g., for Iran: `98`)
-- No spaces, dashes, or extra characters
-  **Valid:** `989123456789` or `+989123456789`
-  **Invalid:** `09123456789`, `989-123-456789` ([Bale Docs][1])
-
----
-
-## **1.3 Send Message Examples**
-
-### **Text Message (JSON)**
+The scheduler uses this stable structure:
 
 ```json
 {
-  "request_id": "unique_request_id_001",
-  "bot_id": 123456789,
-  "phone_number": "989123456789",
+  "request_id": "campaign-recipient-id",
+  "bot_id": 123456,
+  "phone_number": "989121234567",
   "message_data": {
     "message": {
-      "text": "Hello from Safir API"
+      "text": "Campaign content",
+      "file_id": "optional-provider-file-id",
+      "copy_text": "optional-legacy-copy-text"
     }
   }
 }
 ```
 
-### **cURL Example**
+`message_data.otp_message.otp` is also accepted by the internal type. For
+Najva, regular and OTP content are normalized to plain message text. Najva uses
+`bot_id` as its positive `sender` value and normalizes recipient phone numbers
+before sending.
+
+`request_id` is preserved in normalized responses so scheduler results can be
+matched to input rows. The legacy Safir payload also sends it to the provider.
+
+## Batching
+
+`SendBatch` removes entries with empty phone numbers and then chooses the most
+specific supported operation:
+
+1. For Najva/auto, two or more requests with the same positive bot ID, text,
+   and optional file ID use `/v2/sms/send`.
+2. Requests with the same positive bot ID/file ID but different non-empty text
+   use `/v2/sms/send-p2p`.
+3. Unsupported batch endpoints fall back to one-by-one sends.
+4. `safir_v3` always sends one request per recipient.
+
+Najva calls are capped at 9,000 recipients, intentionally below the provider’s
+10,000-item boundary. A response is normalized per recipient and includes the
+provider message ID or structured error data. Incomplete batch responses create
+an `INCOMPLETE_RESPONSE` item instead of silently dropping a recipient.
+
+## Uploads
+
+Najva uploads accept `.jpeg`, `.jpg`, `.png`, `.gif`, `.opus`, `.ogg`, and
+`.mp4`. The client enforces a 10 MiB limit, intentionally below the provider
+boundary. If the source file has no extension, the client detects a supported
+media type and creates a temporary file with the inferred extension.
+
+Safir uploads use multipart form data and return its `file_id` directly. In
+`auto`, an unsupported Najva upload endpoint can fall back to Safir.
+
+The scheduler uploads campaign media through this client and then supplies the
+returned file ID with message sends. Upload paths must refer to readable local
+files in the worker container.
+
+## Status tracking
+
+Status tracking is available only for Najva/auto. Message IDs must parse as
+integers. The client splits lookups into chunks of 900 IDs, intentionally below
+the provider’s 1,000-item boundary, and calls `/v2/sms/status` for each chunk.
+
+Known status codes are normalized as follows:
+
+| Code | Meaning |
+|---:|---|
+| 1 | in queue |
+| 2 | scheduled |
+| 4 | sent to operator |
+| 6 | failed to send to recipient |
+| 10 | delivered |
+| 11 | delivery problem |
+| 13 | canceled |
+| 14 | recipient blocked |
+| 100 | invalid or missing message ID |
+
+If a requested ID is absent from a successful provider response, the client
+adds a synthetic status `100` result. Raw response bodies are retained for
+scheduler persistence/diagnostics; access to those records should follow the
+same sensitivity policy as provider logs.
+
+## Retry behavior
+
+Send and status operations retry retryable provider/network failures with
+exponential backoff starting at one second and capped at 15 minutes. The client
+has no fixed attempt limit; the caller’s context cancellation/deadline stops
+the loop. Validation errors, permanent provider errors, and successful
+responses with non-retryable recipient failures return immediately.
+
+This makes context ownership important: worker shutdown and campaign
+cancellation must cancel in-flight contexts so a persistent provider outage
+does not hold work indefinitely.
+
+## Testing
+
+The client tests use local HTTP test servers and do not require provider
+credentials:
 
 ```bash
-curl --location 'https://safir.bale.ai/api/v3/send_message' \
-  --header 'api-access-key: <API_KEY>' \
-  --header 'Content-Type: application/json' \
-  --data '{
-    "request_id": "unique_request_id_001",
-    "bot_id": 123456789,
-    "phone_number": "989123456789",
-    "message_data": {
-      "message": {
-        "text": "Hello from Safir API"
-      }
-    }
-  }'
+go test ./app/scheduler -run 'Test.*Bale'
 ```
 
-**Response Example**
-
-````json
-{
-  "message_id": "523e6875-7c41-491b-8460-04b33039d7fc",
-  "error_data": null
-}
-``` :contentReference[oaicite:3]{index=3}
-
----
-
-## **1.4 Multimedia Messages**
-
-To send photos, videos, or documents:
-
-1. First upload the file using the **upload file service** (see Section 2).
-2. Use the returned `file_id` in the message payload.
-
-Example:
-```json
-{
-  "request_id": "unique_request_id_002",
-  "bot_id": 123456789,
-  "phone_number": "989123456789",
-  "message_data": {
-    "message": {
-      "text": "Check this image",
-      "file_id": "unique_file_id_here"
-    }
-  }
-}
-````
-
-([Bale Docs][1])
-
----
-
-## **1.5 Secure Messages**
-
-Secure messages enable encrypted content delivery. To send messages with enhanced privacy:
-
-```json
-{
-  "request_id": "secure_req_001",
-  "bot_id": 123456789,
-  "phone_number": "989123456789",
-  "message_data": {
-    "is_secure": true,
-    "message": {
-      "text": "Secure content here"
-    }
-  }
-}
-```
-
-([Bale Docs][1])
-
----
-
-## **1.6 OTP (One-Time Password) Messages**
-
-To send an OTP code:
-
-**JSON Example**
-
-```json
-{
-  "request_id": "otp_req_001",
-  "bot_id": 123456789,
-  "phone_number": "989123456789",
-  "message_data": {
-    "otp_message": {
-      "otp": "123456"
-    }
-  }
-}
-```
-
-**Response**
-
-````json
-{
-  "message_id": "BvQjaR.fIKt7kH.EXTddgYduJ2"
-}
-``` :contentReference[oaicite:6]{index=6}
-
----
-
-## **2. Upload File Service**
-
-Use this endpoint to upload files (max size ~500MB). The returned `file_id` can be used in messages.
-
-**Endpoint**
-````
-
-POST [https://safir.bale.ai/api/v3/upload_file](https://safir.bale.ai/api/v3/upload_file)
-
-````
-
-**Headers**
-| Header | Required |
-|--------|----------|
-| `api-access-key` | Yes |
-| `Content-Type` | multipart/form-data |
-
-**Form Fields**
-| Field | Type | Required |
-|-------|------|----------|
-| `file` | File | Yes |
-
-**cURL Example**
-```bash
-curl --location 'https://safir.bale.ai/api/v3/upload_file' \
-  --header 'api-access-key: <API_KEY>' \
-  --form 'file=@"/path/to/your/file.jpg"'
-````
-
-**Response**
-
-````json
-{
-  "file_id": "987141dd2672149...",
-  "error": null
-}
-``` :contentReference[oaicite:7]{index=7}
-
----
-
-## **3. Error Handling**
-
-Most APIs return an `error_data` array describing failed deliveries.
-
-### **Error Data Structure**
-| Field | Type | Description |
-|-------|------|-------------|
-| `phone_number` | String | The number with the error |
-| `code` | Integer | Error code |
-| `description` | String | Human-readable error text |
-
----
-
-## **4. Idempotency**
-
-To avoid duplicate message sends, always set a **unique `request_id`** per distinct message attempt. If the same `request_id` is resent, Safir will not send a duplicate message. :contentReference[oaicite:8]{index=8}
-
----
-
-# **Download as a File**
-
-You can download this documentation as one of the following:
-
-### 📌 Option A — Markdown (`.md`)
-1. Copy the content above.
-2. Paste into a file named:
-   `Safir_API_Documentation.md`
-
-### 📌 Option B — PDF
-1. Paste into any editor (Google Docs, Word).
-2. Export as **PDF**.
-
-### 📌 Option C — GitHub Gist
-1. Go to **https://gist.github.com**
-2. Create a new Gist and paste.
-3. Save and download.
-
----
-
-If you want, I can **generate the file for you automatically** and provide a direct download link. Just tell me which format you prefer:
-✅ Markdown `.md`
-✅ `.txt`
-✅ PDF `.pdf`
-✅ HTML `.html`
-::contentReference[oaicite:9]{index=9}
-````
-
-[1]: https://docs.bale.ai/safir "مستندات بازوی بله"
+When changing provider payloads, cover at least single send, same-message batch,
+P2P batch, upload validation, status chunking, response normalization,
+unsupported-endpoint fallback, retry classification, and context cancellation.
