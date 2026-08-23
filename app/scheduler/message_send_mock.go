@@ -27,7 +27,7 @@ type mockPayamSMSClient struct {
 	PayamSMSClient
 }
 
-func (c *mockPayamSMSClient) SendBatch(_ context.Context, _ string, items []PayamSMSItem) ([]PayamSMSResponseItem, error) {
+func (c *mockPayamSMSClient) SendBatch(_ context.Context, _ string, items []PayamSMSItem) (PayamSMSSendResult, error) {
 	responses := make([]PayamSMSResponseItem, 0, len(items))
 	for _, item := range items {
 		serverID := nextMockMessageID("sms")
@@ -39,7 +39,7 @@ func (c *mockPayamSMSClient) SendBatch(_ context.Context, _ string, items []Paya
 			Desc:       &description,
 		})
 	}
-	return responses, nil
+	return PayamSMSSendResult{Items: responses}, nil
 }
 
 func maybeMockBaleClient(client BaleClient, enabled bool) BaleClient {
