@@ -42,6 +42,7 @@ if exist "%DUMP_FILE%" (
   -t public.rubika_status_results ^
   -t public.campaign_status_jobs ^
   -t public.processed_campaigns ^
+  -t public.payam_sms_send_responses ^
   -t public.sent_bale_messages ^
   -t public.sent_sms ^
   -t public.sent_splus_messages ^
