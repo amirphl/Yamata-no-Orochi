@@ -48,7 +48,10 @@ type CampaignFlow interface {
 	ExportCampaignReport(ctx context.Context, campaignID string) ([]byte, error)
 	ExportCampaignClickReport(ctx context.Context, campaignUUID string) ([]byte, error)
 	SendCampaignTestMessage(ctx context.Context, req *dto.SendCampaignTestMessageRequest, metadata *ClientMetadata) (*dto.SendCampaignTestMessageResponse, error)
-	PreviewSmartTargetingTestSampling(ctx context.Context, req *dto.SmartTargetingTestSamplingPreviewRequest, metadata *ClientMetadata) (*dto.SmartTargetingTestSamplingPreviewResponse, error)
+	StartSmartTargetingTestSampling(ctx context.Context, req *dto.SmartTargetingTestSamplingPreviewRequest, metadata *ClientMetadata) (*dto.SmartTargetingTestSamplingCalculationResponse, error)
+	GetCurrentSmartTargetingTestSampling(ctx context.Context, customerID uint, campaignUUID string) (*dto.SmartTargetingTestSamplingCalculationResponse, error)
+	GetSmartTargetingTestSamplingByID(ctx context.Context, customerID uint, campaignUUID string, calculationID int64) (*dto.SmartTargetingTestSamplingCalculationResponse, error)
+	ExecuteSmartTargetingTestSamplingCalculation(ctx context.Context, calculationID int64, leaseStartedAt time.Time) error
 }
 
 // CampaignFlowImpl implements the campaign business flow
@@ -72,6 +75,7 @@ type CampaignFlowImpl struct {
 	shortLinkClickRepo      repository.ShortLinkClickRepository
 	selectedTagRepo         repository.CampaignSelectedTagRepository
 	capacityCalculationRepo repository.CampaignTargetingCapacityRepository
+	samplingCalculationRepo repository.CampaignTargetingTestSamplingRepository
 	audienceSpecRepo        repository.AudienceSpecRepository
 	notifier                services.NotificationService
 	adminConfig             config.AdminConfig
@@ -122,6 +126,7 @@ func NewCampaignFlow(
 	shortLinkClickRepo repository.ShortLinkClickRepository,
 	selectedTagRepo repository.CampaignSelectedTagRepository,
 	capacityCalculationRepo repository.CampaignTargetingCapacityRepository,
+	samplingCalculationRepo repository.CampaignTargetingTestSamplingRepository,
 	audienceSpecRepo repository.AudienceSpecRepository,
 	db *gorm.DB,
 	rc *redis.Client,
@@ -155,6 +160,7 @@ func NewCampaignFlow(
 		shortLinkClickRepo:      shortLinkClickRepo,
 		selectedTagRepo:         selectedTagRepo,
 		capacityCalculationRepo: capacityCalculationRepo,
+		samplingCalculationRepo: samplingCalculationRepo,
 		audienceSpecRepo:        audienceSpecRepo,
 		notifier:                notifier,
 		adminConfig:             adminConfig,
