@@ -22,6 +22,7 @@ TABLES=(
 	rubika_status_results
 	campaign_status_jobs
 	processed_campaigns
+	payam_sms_send_responses
 	sent_bale_messages
 	sent_sms
 	sent_splus_messages
@@ -141,7 +142,7 @@ normalized_schema_columns="$(
 		      );"
 )"
 [[ "$normalized_schema_columns" == 3 ]] ||
-	die "Migrations through 0128 must be applied before restoring scheduler runtime data"
+	die "Migrations through 0129 must be applied before restoring scheduler runtime data"
 
 log "Starting atomic import while preserving audience_profiles"
 {
@@ -169,6 +170,7 @@ BEGIN
         'rubika_status_results',
         'campaign_status_jobs',
         'processed_campaigns',
+	    'payam_sms_send_responses',
         'sent_bale_messages',
         'sent_sms',
         'sent_splus_messages',
