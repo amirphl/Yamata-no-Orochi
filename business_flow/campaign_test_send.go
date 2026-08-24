@@ -282,8 +282,8 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 				Body:       body,
 				TrackingID: buildProviderTestID("test-sms", campaign.CustomerID),
 			}})
-			if err == nil && len(resp) > 0 {
-				log.Printf("sendCampaignTestMessageBestEffort: PayamSMS response for campaign test send (line number: %s): %+v", lineNumber, resp)
+			if err == nil && len(resp.Items) > 0 {
+				log.Printf("sendCampaignTestMessageBestEffort: PayamSMS response for campaign test send (line number: %s): %+v", lineNumber, resp.Items)
 			}
 			return err
 		})
