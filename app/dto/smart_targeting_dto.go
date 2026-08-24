@@ -114,16 +114,19 @@ type SmartTargetingCapacityCalculationResponse struct {
 	ErrorMessage          *string    `json:"error_message,omitempty"`
 }
 
+// SmartTargetingTestSamplingPreviewRequest submits an asynchronous sampling
+// calculation for the campaign identified by the URL.
 type SmartTargetingTestSamplingPreviewRequest struct {
 	CustomerID   uint   `json:"-"`
 	CampaignUUID string `json:"-"`
 }
 
 type SmartTargetingTestSamplingTagResult struct {
-	TagID          uint  `json:"tag_id"`
-	SelectionOrder int   `json:"selection_order"`
-	Satisfied      bool  `json:"satisfied"`
-	AvailableCount int64 `json:"available_count"`
+	TagID          uint    `json:"tag_id"`
+	TagDisplayName *string `json:"tag_display_name"`
+	SelectionOrder int     `json:"selection_order"`
+	Satisfied      bool    `json:"satisfied"`
+	AvailableCount int64   `json:"available_count"`
 }
 
 type SmartTargetingTestSamplingPreviewResponse struct {
@@ -134,4 +137,29 @@ type SmartTargetingTestSamplingPreviewResponse struct {
 	SatisfiedTagCount      int                                   `json:"satisfied_tag_count"`
 	EffectiveAudienceCount uint64                                `json:"effective_audience_count"`
 	CampaignCost           uint64                                `json:"campaign_cost"`
+}
+
+// SmartTargetingTestSamplingCalculationResponse is returned by both job
+// submission and polling. Result pointers distinguish a completed zero result
+// from a calculation which has not completed.
+type SmartTargetingTestSamplingCalculationResponse struct {
+	CalculationID          int64                                 `json:"calculation_id"`
+	CampaignID             uint                                  `json:"campaign_id"`
+	BundleID               uint                                  `json:"bundle_id"`
+	Status                 string                                `json:"status"`
+	IsCurrent              bool                                  `json:"is_current"`
+	RecalculationRequired  bool                                  `json:"recalculation_required"`
+	SampleSizePerTag       uint64                                `json:"sample_size_per_tag"`
+	TagSamplingOrder       []uint                                `json:"tag_sampling_order"`
+	SelectedScoreClasses   []string                              `json:"selected_score_classes"`
+	SatisfiedTags          []SmartTargetingTestSamplingTagResult `json:"satisfied_tags,omitempty"`
+	UnsatisfiedTags        []SmartTargetingTestSamplingTagResult `json:"unsatisfied_tags,omitempty"`
+	SatisfiedTagCount      *int                                  `json:"satisfied_tag_count,omitempty"`
+	EffectiveAudienceCount *uint64                               `json:"effective_audience_count,omitempty"`
+	CampaignCost           *uint64                               `json:"campaign_cost,omitempty"`
+	CreatedAt              time.Time                             `json:"created_at"`
+	StartedAt              *time.Time                            `json:"started_at,omitempty"`
+	FinishedAt             *time.Time                            `json:"finished_at,omitempty"`
+	ErrorCode              *string                               `json:"error_code,omitempty"`
+	ErrorMessage           *string                               `json:"error_message,omitempty"`
 }
