@@ -401,11 +401,13 @@ type SplusConfig struct {
 }
 
 type SchedulerConfig struct {
-	CampaignExecutionEnabled               bool          `json:"campaign_execution_enabled"`
-	CampaignExecutionInterval              time.Duration `json:"campaign_execution_interval"`
-	MessageSendDelay                       time.Duration `json:"message_send_delay"`
-	MessageSendMockEnabled                 bool          `json:"message_send_mock_enabled"`
-	SmartTargetingCapacitySchedulerEnabled bool          `json:"smart_targeting_capacity_scheduler_enabled"`
+	CampaignExecutionEnabled  bool          `json:"campaign_execution_enabled"`
+	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
+	MessageSendDelay          time.Duration `json:"message_send_delay"`
+	MessageSendMockEnabled    bool          `json:"message_send_mock_enabled"`
+	// SmartTargetingCapacitySchedulerEnabled controls both durable Smart
+	// Targeting calculation pools: exact capacity and Test sampling.
+	SmartTargetingCapacitySchedulerEnabled bool `json:"smart_targeting_capacity_scheduler_enabled"`
 }
 
 func loadSchedulerConfig() SchedulerConfig {
