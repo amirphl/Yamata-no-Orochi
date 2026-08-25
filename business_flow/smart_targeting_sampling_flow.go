@@ -2,6 +2,8 @@ package businessflow
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -17,17 +19,18 @@ import (
 )
 
 type smartTargetingTestSample struct {
-	order       []uint
-	satisfied   []dto.SmartTargetingTestSamplingTagResult
-	unsatisfied []dto.SmartTargetingTestSamplingTagResult
-	effective   uint64
-	inputHash   string
+	results   []dto.SmartTargetingTestSamplingTagResult
+	satisfied []dto.SmartTargetingTestSamplingTagResult
+	effective uint64
 }
 
+const smartTargetingTestSamplingCalculationVersion = 1
+
 type smartTargetingTestSamplingInput struct {
-	order   []uint
-	classes []string
-	hash    string
+	order        []uint
+	displayNames map[uint]*string
+	classes      []string
+	hash         string
 }
 
 type smartTargetingTestSamplingIntent struct {
@@ -78,12 +81,17 @@ func currentSmartTargetingTestSamplingInput(ctx context.Context, selectedTagRepo
 	if len(selected) == 0 {
 		return nil, ErrSmartTargetingTagsRequired
 	}
-	input := &smartTargetingTestSamplingInput{order: make([]uint, 0, len(selected))}
-	for _, selectedTag := range selected {
-		if selectedTag == nil || selectedTag.TagID == 0 {
+	input := &smartTargetingTestSamplingInput{
+		order:        make([]uint, 0, len(selected)),
+		displayNames: make(map[uint]*string, len(selected)),
+	}
+	for position, selectedTag := range selected {
+		if selectedTag == nil || selectedTag.CampaignID != campaign.ID || selectedTag.BundleID != *campaign.BundleID ||
+			selectedTag.TagID == 0 || selectedTag.SelectionOrder != position {
 			return nil, ErrSmartTargetingTagInvalid
 		}
 		input.order = append(input.order, selectedTag.TagID)
+		input.displayNames[selectedTag.TagID] = selectedTag.TagDisplayTitleSnapshot
 	}
 	input.classes, err = normalizeSmartTargetingScoreClasses(campaign.Spec.AudienceGrades)
 	if err != nil {
@@ -138,29 +146,14 @@ func currentSmartTargetingTestSamplingIntent(ctx context.Context, selectedTagRep
 	}, nil
 }
 
-func (s *CampaignFlowImpl) calculateSmartTargetingTestSample(ctx context.Context, campaign *models.Campaign) (*smartTargetingTestSample, error) {
-	if campaign == nil || !campaign.Spec.UsesSmartTargeting() || campaign.Phase != models.CampaignPhaseTest {
-		return nil, fmt.Errorf("Smart Targeting Test campaign is required")
-	}
-	if campaign.BundleID == nil || *campaign.BundleID == 0 {
-		return nil, ErrBundleNotFound
-	}
-	if campaign.SampleSizePerTag == nil {
-		return nil, ErrSmartTargetingSampleSizeRequired
-	}
-	if *campaign.SampleSizePerTag == 0 || *campaign.SampleSizePerTag > math.MaxInt64 {
-		return nil, ErrSmartTargetingSampleSizeInvalid
-	}
-	input, err := currentSmartTargetingTestSamplingInput(ctx, s.selectedTagRepo, campaign)
-	if err != nil {
-		return nil, err
+func (s *CampaignFlowImpl) calculateSmartTargetingTestSampleForInput(ctx context.Context, bundleID uint, sampleSizePerTag uint64, input *smartTargetingTestSamplingInput) (*smartTargetingTestSample, error) {
+	if bundleID == 0 || input == nil || len(input.order) == 0 || len(input.displayNames) != len(input.order) || len(input.classes) == 0 || sampleSizePerTag == 0 || sampleSizePerTag > math.MaxInt64 {
+		return nil, ErrSmartTargetingTestPreviewRequired
 	}
 	tagIDs := make([]int64, 0, len(input.order))
 	result := &smartTargetingTestSample{
-		order:       append([]uint(nil), input.order...),
-		satisfied:   make([]dto.SmartTargetingTestSamplingTagResult, 0, len(input.order)),
-		unsatisfied: make([]dto.SmartTargetingTestSamplingTagResult, 0),
-		inputHash:   input.hash,
+		results:   make([]dto.SmartTargetingTestSamplingTagResult, 0, len(input.order)),
+		satisfied: make([]dto.SmartTargetingTestSamplingTagResult, 0, len(input.order)),
 	}
 	for _, tagID := range input.order {
 		tagIDs = append(tagIDs, int64(tagID))
@@ -171,18 +164,18 @@ func (s *CampaignFlowImpl) calculateSmartTargetingTestSample(ctx context.Context
 	// future allocations; the scheduler remains the availability source of truth.
 	excluded := make([]int64, 0)
 	audienceRepo := repository.NewSmartTargetingAudienceRepository(s.db)
-	query := repository.SmartTargetingAudienceQuery{BundleID: *campaign.BundleID, TagIDs: tagIDs, ScoreClasses: input.classes}
+	query := repository.SmartTargetingAudienceQuery{BundleID: bundleID, TagIDs: tagIDs, ScoreClasses: input.classes}
 	for position, tagID := range tagIDs {
-		rows, err := audienceRepo.SelectRandomForTag(ctx, query, tagID, excluded, int64(*campaign.SampleSizePerTag))
+		rows, err := audienceRepo.SelectRandomForTag(ctx, query, tagID, excluded, int64(sampleSizePerTag))
 		if err != nil {
 			return nil, err
 		}
 		item := dto.SmartTargetingTestSamplingTagResult{
-			TagID: uint(tagID), SelectionOrder: position, AvailableCount: int64(len(rows)),
-			Satisfied: uint64(len(rows)) == *campaign.SampleSizePerTag,
+			TagID: uint(tagID), TagDisplayName: input.displayNames[uint(tagID)], SelectionOrder: position, AvailableCount: int64(len(rows)),
+			Satisfied: uint64(len(rows)) == sampleSizePerTag,
 		}
+		result.results = append(result.results, item)
 		if !item.Satisfied {
-			result.unsatisfied = append(result.unsatisfied, item)
 			continue
 		}
 		result.satisfied = append(result.satisfied, item)
@@ -190,10 +183,11 @@ func (s *CampaignFlowImpl) calculateSmartTargetingTestSample(ctx context.Context
 			excluded = append(excluded, row.ID)
 		}
 	}
-	result.effective, err = checkedSmartTargetingTestAudienceCount(len(result.satisfied), *campaign.SampleSizePerTag)
+	effective, err := checkedSmartTargetingTestAudienceCount(len(result.satisfied), sampleSizePerTag)
 	if err != nil {
 		return nil, err
 	}
+	result.effective = effective
 	return result, nil
 }
 
@@ -224,87 +218,483 @@ func (s *CampaignFlowImpl) clearCampaignSmartTargetingTestSamplingPreview(ctx co
 	}).Error
 }
 
-func (s *CampaignFlowImpl) persistSmartTargetingTestSamplingPreview(ctx context.Context, campaignID uint, expectedRevision *time.Time, sample *smartTargetingTestSample) error {
-	if sample == nil {
-		return ErrSmartTargetingTestPreviewRequired
+func (s *CampaignFlowImpl) ownedSmartTargetingTestCampaign(ctx context.Context, customerID uint, campaignUUID string) (*models.Campaign, error) {
+	if customerID == 0 || strings.TrimSpace(campaignUUID) == "" {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_INVALID", "Invalid Smart Targeting Test sampling request", ErrCampaignNotFound)
 	}
-	return repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+	campaign, err := getCampaign(ctx, s.campaignRepo, campaignUUID, customerID)
+	if err != nil {
+		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
+	}
+	if !campaign.Spec.UsesSmartTargeting() || campaign.Phase != models.CampaignPhaseTest {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_INVALID", "Smart Targeting Test campaign is required", ErrInvalidState)
+	}
+	if campaign.BundleID == nil || *campaign.BundleID == 0 {
+		return nil, NewBusinessError("BUNDLE_NOT_FOUND", "Campaign bundle not found", ErrBundleNotFound)
+	}
+	return &campaign, nil
+}
+
+func sameCampaignRevision(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.Equal(*right)
+}
+
+// StartSmartTargetingTestSampling snapshots the current inputs and returns a
+// durable job immediately. The audience scan is performed only by the worker.
+func (s *CampaignFlowImpl) StartSmartTargetingTestSampling(ctx context.Context, req *dto.SmartTargetingTestSamplingPreviewRequest, metadata *ClientMetadata) (*dto.SmartTargetingTestSamplingCalculationResponse, error) {
+	if req == nil || s.samplingCalculationRepo == nil {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_UNAVAILABLE", "Smart Targeting Test sampling is unavailable", ErrInvalidState)
+	}
+	campaign, err := s.ownedSmartTargetingTestCampaign(ctx, req.CustomerID, req.CampaignUUID)
+	if err != nil {
+		return nil, err
+	}
+	if !campaign.IsEditable() {
+		return nil, NewBusinessError("CAMPAIGN_UPDATE_NOT_ALLOWED", "Sampling preview cannot change a finalized campaign", ErrCampaignUpdateNotAllowed)
+	}
+
+	var calculation *models.CampaignTargetingTestSamplingCalculation
+	var reused bool
+	err = repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
 		txDB := smartTargetingDB(txCtx, s.db)
-		var campaign models.Campaign
-		if err := txDB.Clauses(clause.Locking{Strength: "UPDATE"}).First(&campaign, campaignID).Error; err != nil {
+		var lockedCampaign models.Campaign
+		if err := txDB.Clauses(clause.Locking{Strength: "UPDATE"}).First(&lockedCampaign, campaign.ID).Error; err != nil {
 			return err
 		}
-		if !campaign.IsEditable() {
+		if !lockedCampaign.IsEditable() || !lockedCampaign.Spec.UsesSmartTargeting() || lockedCampaign.Phase != models.CampaignPhaseTest || lockedCampaign.BundleID == nil || *lockedCampaign.BundleID == 0 {
 			return ErrCampaignUpdateNotAllowed
 		}
-		if (expectedRevision == nil) != (campaign.UpdatedAt == nil) ||
-			(expectedRevision != nil && !campaign.UpdatedAt.Equal(*expectedRevision)) {
-			return ErrSmartTargetingTestPreviewRequired
-		}
-		input, err := currentSmartTargetingTestSamplingInput(txCtx, s.selectedTagRepo, &campaign)
+		input, err := currentSmartTargetingTestSamplingInput(txCtx, s.selectedTagRepo, &lockedCampaign)
 		if err != nil {
 			return err
 		}
-		if input.hash != sample.inputHash {
+		if err := s.selectedTagRepo.Validate(txCtx, lockedCampaign.ID, *lockedCampaign.BundleID); err != nil {
+			return err
+		}
+		if s.capacityCalculationRepo == nil {
+			return ErrSmartTargetingExactCapacityRequired
+		}
+		if _, err := CurrentSmartTargetingCapacity(txCtx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, &lockedCampaign); err != nil {
+			return err
+		}
+
+		now := time.Now().UTC()
+		active, err := s.samplingCalculationRepo.ActiveByCampaignID(txCtx, lockedCampaign.ID)
+		if err != nil {
+			return err
+		}
+		if active != nil {
+			_, _, snapshotErr := samplingInputFromCalculation(&lockedCampaign, active)
+			if active.InputHash == input.hash && sameCampaignRevision(active.CampaignUpdatedAt, lockedCampaign.UpdatedAt) && snapshotErr == nil {
+				calculation = active
+				return nil
+			}
+			if err := s.samplingCalculationRepo.Supersede(txCtx, active.ID, "SMART_TARGETING_TEST_SAMPLING_SUPERSEDED", "A newer campaign configuration replaced this sampling calculation", now); err != nil {
+				if !errors.Is(err, repository.ErrCampaignTargetingTestSamplingStateConflict) {
+					return err
+				}
+				remaining, reloadErr := s.samplingCalculationRepo.ActiveByCampaignID(txCtx, lockedCampaign.ID)
+				if reloadErr != nil {
+					return reloadErr
+				}
+				if remaining != nil {
+					calculation = remaining
+					return nil
+				}
+			}
+		}
+
+		reusable, err := s.samplingCalculationRepo.LatestCalculatedByInput(txCtx, lockedCampaign.ID, input.hash)
+		if err != nil {
+			return err
+		}
+		if reusable != nil {
+			current, err := s.isCurrentSmartTargetingTestSampling(txCtx, &lockedCampaign, reusable)
+			if err != nil {
+				return err
+			}
+			if current {
+				calculation, reused = reusable, true
+				return nil
+			}
+		}
+
+		calculation = &models.CampaignTargetingTestSamplingCalculation{
+			CampaignID: lockedCampaign.ID, BundleID: *lockedCampaign.BundleID,
+			CustomerID: lockedCampaign.CustomerID, RequestedByCustomerID: req.CustomerID,
+			SelectedTagIDs: tagIDsToInt64(input.order), InputHash: input.hash,
+			SelectedScoreClasses: pq.StringArray(input.classes), SelectedTagCount: len(input.order),
+			SampleSizePerTag: int64(*lockedCampaign.SampleSizePerTag), CampaignUpdatedAt: lockedCampaign.UpdatedAt,
+			TagResults: json.RawMessage(`[]`), Status: models.CampaignTargetingTestSamplingCalculating,
+			CalculationVersion: smartTargetingTestSamplingCalculationVersion, CreatedAt: now,
+		}
+		return s.samplingCalculationRepo.Save(txCtx, calculation)
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrSmartTargetingExactCapacityRequired):
+			return nil, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required", err)
+		case errors.Is(err, ErrSmartTargetingTagsRequired):
+			return nil, NewBusinessError("SMART_TARGETING_TAGS_REQUIRED", "Select at least one tag before calculating the Test sample", err)
+		case errors.Is(err, ErrSmartTargetingTagInvalid), errors.Is(err, repository.ErrInvalidCampaignSelectedTags):
+			return nil, NewBusinessError("SMART_TARGETING_SELECTION_INVALID", "The selected Smart Targeting tags are no longer valid", err)
+		case errors.Is(err, ErrCampaignUpdateNotAllowed):
+			return nil, NewBusinessError("CAMPAIGN_UPDATE_NOT_ALLOWED", "Sampling preview cannot change a finalized campaign", err)
+		default:
+			return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_REQUEST_FAILED", "Failed to request Smart Targeting Test sampling", err)
+		}
+	}
+	_ = metadata
+	return smartTargetingTestSamplingCalculationDTO(calculation, reused, false)
+}
+
+func (s *CampaignFlowImpl) GetCurrentSmartTargetingTestSampling(ctx context.Context, customerID uint, campaignUUID string) (*dto.SmartTargetingTestSamplingCalculationResponse, error) {
+	if s.samplingCalculationRepo == nil {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_UNAVAILABLE", "Smart Targeting Test sampling is unavailable", ErrInvalidState)
+	}
+	campaign, err := s.ownedSmartTargetingTestCampaign(ctx, customerID, campaignUUID)
+	if err != nil {
+		return nil, err
+	}
+	input, inputErr := currentSmartTargetingTestSamplingInput(ctx, s.selectedTagRepo, campaign)
+	if inputErr == nil {
+		calculated, err := s.samplingCalculationRepo.LatestCalculatedByInput(ctx, campaign.ID, input.hash)
+		if err != nil {
+			return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED", "Failed to load Smart Targeting Test sampling", err)
+		}
+		if calculated != nil {
+			current, err := s.isCurrentSmartTargetingTestSampling(ctx, campaign, calculated)
+			if err != nil {
+				return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED", "Failed to validate Smart Targeting Test sampling", err)
+			}
+			if current {
+				return smartTargetingTestSamplingCalculationDTO(calculated, true, false)
+			}
+		}
+		calculation, err := s.samplingCalculationRepo.LatestByInput(ctx, campaign.ID, input.hash)
+		if err != nil {
+			return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED", "Failed to load Smart Targeting Test sampling", err)
+		}
+		if calculation != nil {
+			return s.smartTargetingTestSamplingStatusDTO(ctx, campaign, calculation)
+		}
+	} else if !errors.Is(inputErr, ErrSmartTargetingTagsRequired) {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED", "Failed to load Smart Targeting Test sampling inputs", inputErr)
+	}
+
+	calculation, err := s.samplingCalculationRepo.LatestByCampaignID(ctx, campaign.ID)
+	if err != nil {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED", "Failed to load Smart Targeting Test sampling", err)
+	}
+	if calculation == nil {
+		classes, classErr := normalizeSmartTargetingScoreClasses(campaign.Spec.AudienceGrades)
+		if classErr != nil {
+			return nil, NewBusinessError("SMART_TARGETING_SCORE_CLASSES_INVALID", "Audience score classes are invalid", classErr)
+		}
+		response := &dto.SmartTargetingTestSamplingCalculationResponse{
+			CampaignID: campaign.ID, BundleID: *campaign.BundleID, Status: "not_calculated",
+			SelectedScoreClasses: classes,
+		}
+		if campaign.SampleSizePerTag != nil {
+			response.SampleSizePerTag = *campaign.SampleSizePerTag
+		}
+		return response, nil
+	}
+	return smartTargetingTestSamplingCalculationDTO(calculation, false, true)
+}
+
+func (s *CampaignFlowImpl) GetSmartTargetingTestSamplingByID(ctx context.Context, customerID uint, campaignUUID string, calculationID int64) (*dto.SmartTargetingTestSamplingCalculationResponse, error) {
+	if s.samplingCalculationRepo == nil {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_UNAVAILABLE", "Smart Targeting Test sampling is unavailable", ErrInvalidState)
+	}
+	campaign, err := s.ownedSmartTargetingTestCampaign(ctx, customerID, campaignUUID)
+	if err != nil {
+		return nil, err
+	}
+	calculation, err := s.samplingCalculationRepo.ByID(ctx, calculationID)
+	if err != nil {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED", "Failed to load Smart Targeting Test sampling", err)
+	}
+	if calculation == nil || calculation.CampaignID != campaign.ID {
+		return nil, NewBusinessError("SMART_TARGETING_TEST_SAMPLING_NOT_FOUND", "Smart Targeting Test sampling calculation not found", ErrCampaignNotFound)
+	}
+	return s.smartTargetingTestSamplingStatusDTO(ctx, campaign, calculation)
+}
+
+func (s *CampaignFlowImpl) smartTargetingTestSamplingStatusDTO(ctx context.Context, campaign *models.Campaign, calculation *models.CampaignTargetingTestSamplingCalculation) (*dto.SmartTargetingTestSamplingCalculationResponse, error) {
+	if calculation == nil || calculation.Status == models.CampaignTargetingTestSamplingFailed {
+		return smartTargetingTestSamplingCalculationDTO(calculation, false, false)
+	}
+	current, err := s.isCurrentSmartTargetingTestSampling(ctx, campaign, calculation)
+	if err != nil {
+		return nil, err
+	}
+	return smartTargetingTestSamplingCalculationDTO(calculation, current, calculation.Status == models.CampaignTargetingTestSamplingCalculated && !current)
+}
+
+func (s *CampaignFlowImpl) isCurrentSmartTargetingTestSampling(ctx context.Context, campaign *models.Campaign, calculation *models.CampaignTargetingTestSamplingCalculation) (bool, error) {
+	if campaign == nil || calculation == nil || calculation.CampaignID != campaign.ID || campaign.BundleID == nil || calculation.BundleID != *campaign.BundleID ||
+		calculation.Status != models.CampaignTargetingTestSamplingCalculated || calculation.CalculationVersion != smartTargetingTestSamplingCalculationVersion || calculation.FinishedAt == nil ||
+		campaign.SmartTargetingTestSamplingInputHash == nil || campaign.SmartTargetingTestSamplingPreviewedAt == nil ||
+		*campaign.SmartTargetingTestSamplingInputHash != calculation.InputHash || !campaign.SmartTargetingTestSamplingPreviewedAt.Equal(*calculation.FinishedAt) {
+		return false, nil
+	}
+	storedInput, _, err := samplingInputFromCalculation(campaign, calculation)
+	if err != nil {
+		return false, nil
+	}
+	input, err := currentSmartTargetingTestSamplingInput(ctx, s.selectedTagRepo, campaign)
+	if err != nil {
+		if errors.Is(err, ErrSmartTargetingTestPreviewRequired) || errors.Is(err, ErrSmartTargetingTagsRequired) {
+			return false, nil
+		}
+		return false, err
+	}
+	if input.hash != calculation.InputHash || storedInput.hash != input.hash {
+		return false, nil
+	}
+	if err := s.selectedTagRepo.Validate(ctx, campaign.ID, *campaign.BundleID); err != nil {
+		if errors.Is(err, repository.ErrInvalidCampaignSelectedTags) {
+			return false, nil
+		}
+		return false, err
+	}
+	if s.capacityCalculationRepo == nil {
+		return false, nil
+	}
+	if _, err := CurrentSmartTargetingCapacity(ctx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, campaign); err != nil {
+		if errors.Is(err, ErrSmartTargetingExactCapacityRequired) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func samplingInputFromCalculation(campaign *models.Campaign, calculation *models.CampaignTargetingTestSamplingCalculation) (*smartTargetingTestSamplingInput, uint64, error) {
+	if campaign == nil || calculation == nil || calculation.CampaignID != campaign.ID || calculation.CalculationVersion != smartTargetingTestSamplingCalculationVersion || calculation.SampleSizePerTag <= 0 ||
+		campaign.BundleID == nil || *campaign.BundleID != calculation.BundleID || campaign.SampleSizePerTag == nil || *campaign.SampleSizePerTag != uint64(calculation.SampleSizePerTag) ||
+		calculation.SelectedTagCount <= 0 || calculation.SelectedTagCount != len(calculation.SelectedTagIDs) {
+		return nil, 0, ErrSmartTargetingTestPreviewRequired
+	}
+	order := make([]uint, len(calculation.SelectedTagIDs))
+	seen := make(map[uint]struct{}, len(calculation.SelectedTagIDs))
+	for i, rawID := range calculation.SelectedTagIDs {
+		if rawID <= 0 || uint64(rawID) > uint64(^uint(0)) {
+			return nil, 0, ErrSmartTargetingTagInvalid
+		}
+		tagID := uint(rawID)
+		if _, exists := seen[tagID]; exists {
+			return nil, 0, ErrSmartTargetingTagInvalid
+		}
+		seen[tagID] = struct{}{}
+		order[i] = tagID
+	}
+	classes, err := normalizeSmartTargetingScoreClasses([]string(calculation.SelectedScoreClasses))
+	if err != nil || !sameSmartTargetingScoreClasses(classes, []string(calculation.SelectedScoreClasses)) {
+		return nil, 0, ErrSmartTargetingScoreClassesInvalid
+	}
+	hash, err := smartTargetingTestSamplingHash(campaign, order, classes)
+	if err != nil || hash != calculation.InputHash {
+		return nil, 0, ErrSmartTargetingTestPreviewRequired
+	}
+	return &smartTargetingTestSamplingInput{order: order, classes: classes, hash: hash}, uint64(calculation.SampleSizePerTag), nil
+}
+
+// ExecuteSmartTargetingTestSamplingCalculation performs the expensive scan and
+// atomically publishes both the job result and campaign sampling intent.
+func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx context.Context, calculationID int64, leaseStartedAt time.Time) (err error) {
+	calculation, err := s.samplingCalculationRepo.ByID(ctx, calculationID)
+	if err != nil {
+		return err
+	}
+	if calculation == nil || calculation.Status != models.CampaignTargetingTestSamplingCalculating || calculation.StartedAt == nil || !calculation.StartedAt.Equal(leaseStartedAt) {
+		return nil
+	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("Smart Targeting Test sampling worker panicked: %v", recovered)
+		}
+		if err == nil {
+			return
+		}
+		failCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = s.samplingCalculationRepo.Fail(failCtx, calculation.ID, leaseStartedAt, "SMART_TARGETING_TEST_SAMPLING_CALCULATION_FAILED", "Smart Targeting Test sampling could not be completed", time.Now().UTC())
+	}()
+
+	campaign, err := s.campaignRepo.ByID(ctx, calculation.CampaignID)
+	if err != nil {
+		return err
+	}
+	if campaign == nil || !campaign.IsEditable() || !sameCampaignRevision(campaign.UpdatedAt, calculation.CampaignUpdatedAt) {
+		return ErrSmartTargetingTestPreviewRequired
+	}
+	_, sampleSizePerTag, err := samplingInputFromCalculation(campaign, calculation)
+	if err != nil {
+		return err
+	}
+	currentInput, err := currentSmartTargetingTestSamplingInput(ctx, s.selectedTagRepo, campaign)
+	if err != nil || currentInput.hash != calculation.InputHash {
+		if err != nil {
+			return err
+		}
+		return ErrSmartTargetingTestPreviewRequired
+	}
+	if err := s.selectedTagRepo.Validate(ctx, campaign.ID, calculation.BundleID); err != nil {
+		return err
+	}
+	if _, err := CurrentSmartTargetingCapacity(ctx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, campaign); err != nil {
+		return err
+	}
+
+	sample, err := s.calculateSmartTargetingTestSampleForInput(ctx, calculation.BundleID, sampleSizePerTag, currentInput)
+	if err != nil {
+		return err
+	}
+	pricePerMessage, _, err := s.computeCostInputs(ctx, *campaign, nil)
+	if err != nil {
+		return err
+	}
+	cost, err := checkedCampaignCost(pricePerMessage, sample.effective)
+	if err != nil {
+		return err
+	}
+	if customer, lookupErr := getCustomer(ctx, s.customerRepo, calculation.CustomerID); lookupErr == nil && s.adminConfig.HasMobile(customer.RepresentativeMobile) {
+		cost = 0
+	}
+	tagResults, err := json.Marshal(sample.results)
+	if err != nil {
+		return err
+	}
+
+	return repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		txDB := smartTargetingDB(txCtx, s.db)
+		var lockedCampaign models.Campaign
+		if err := txDB.Clauses(clause.Locking{Strength: "UPDATE"}).First(&lockedCampaign, calculation.CampaignID).Error; err != nil {
+			return err
+		}
+		if !lockedCampaign.IsEditable() || !sameCampaignRevision(lockedCampaign.UpdatedAt, calculation.CampaignUpdatedAt) {
 			return ErrSmartTargetingTestPreviewRequired
+		}
+		currentInput, err := currentSmartTargetingTestSamplingInput(txCtx, s.selectedTagRepo, &lockedCampaign)
+		if err != nil || currentInput.hash != calculation.InputHash {
+			if err != nil {
+				return err
+			}
+			return ErrSmartTargetingTestPreviewRequired
+		}
+		// Approval and audience materialization take an UPDATE lock on the
+		// Bundle. Holding a SHARE lock makes the exact-capacity fingerprint and
+		// campaign preview publication one atomic view of Bundle allocations.
+		if err := repository.LockBundleForShare(txCtx, *lockedCampaign.BundleID); err != nil {
+			return err
+		}
+		if err := s.selectedTagRepo.Validate(txCtx, lockedCampaign.ID, *lockedCampaign.BundleID); err != nil {
+			return err
+		}
+		if _, err := CurrentSmartTargetingCapacity(txCtx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, &lockedCampaign); err != nil {
+			return err
 		}
 		satisfied := make(pq.Int64Array, 0, len(sample.satisfied))
 		for _, item := range sample.satisfied {
 			satisfied = append(satisfied, int64(item.TagID))
 		}
-		now := time.Now().UTC()
-		return txDB.Model(&models.Campaign{}).Where("id = ?", campaign.ID).Updates(map[string]any{
+		finishedAt := time.Now().UTC()
+		if err := txDB.Model(&models.Campaign{}).Where("id = ?", lockedCampaign.ID).Updates(map[string]any{
 			"smart_targeting_test_satisfied_tag_ids":     satisfied,
-			"smart_targeting_test_sampling_input_hash":   sample.inputHash,
-			"smart_targeting_test_sampling_previewed_at": now,
-			"num_audience": sample.effective,
-			"updated_at":   utils.UTCNow(),
-		}).Error
+			"smart_targeting_test_sampling_input_hash":   calculation.InputHash,
+			"smart_targeting_test_sampling_previewed_at": finishedAt,
+			"num_audience": sample.effective, "updated_at": utils.UTCNow(),
+		}).Error; err != nil {
+			return err
+		}
+		return s.samplingCalculationRepo.Complete(txCtx, calculation.ID, leaseStartedAt, tagResults, len(sample.satisfied), int64(sample.effective), cost, finishedAt)
 	})
 }
 
-func (s *CampaignFlowImpl) PreviewSmartTargetingTestSampling(ctx context.Context, req *dto.SmartTargetingTestSamplingPreviewRequest, metadata *ClientMetadata) (*dto.SmartTargetingTestSamplingPreviewResponse, error) {
-	if req == nil || req.CustomerID == 0 || req.CampaignUUID == "" {
-		return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_INVALID", "Invalid Smart Targeting Test preview request", ErrCampaignNotFound)
+func smartTargetingTestSamplingCalculationDTO(calculation *models.CampaignTargetingTestSamplingCalculation, current, recalculationRequired bool) (*dto.SmartTargetingTestSamplingCalculationResponse, error) {
+	if calculation == nil {
+		return &dto.SmartTargetingTestSamplingCalculationResponse{Status: "not_calculated"}, nil
 	}
-	campaign, err := getCampaign(ctx, s.campaignRepo, req.CampaignUUID, req.CustomerID)
-	if err != nil {
-		return nil, NewBusinessError("CAMPAIGN_LOOKUP_FAILED", "Failed to lookup campaign", err)
+	if calculation.SampleSizePerTag <= 0 {
+		return nil, ErrSmartTargetingSampleSizeInvalid
 	}
-	if !campaign.Spec.UsesSmartTargeting() || campaign.Phase != models.CampaignPhaseTest {
-		return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_INVALID", "Smart Targeting Test campaign is required", ErrInvalidState)
+	if calculation.SelectedTagCount <= 0 || calculation.SelectedTagCount != len(calculation.SelectedTagIDs) {
+		return nil, ErrSmartTargetingTestPreviewRequired
 	}
-	if !campaign.IsEditable() {
-		return nil, NewBusinessError("CAMPAIGN_UPDATE_NOT_ALLOWED", "Sampling preview cannot change a finalized campaign", ErrCampaignUpdateNotAllowed)
+	order := make([]uint, len(calculation.SelectedTagIDs))
+	seen := make(map[uint]struct{}, len(calculation.SelectedTagIDs))
+	for i, rawID := range calculation.SelectedTagIDs {
+		if rawID <= 0 || uint64(rawID) > uint64(^uint(0)) {
+			return nil, ErrSmartTargetingTagInvalid
+		}
+		tagID := uint(rawID)
+		if _, exists := seen[tagID]; exists {
+			return nil, ErrSmartTargetingTagInvalid
+		}
+		seen[tagID] = struct{}{}
+		order[i] = tagID
 	}
-	if _, err := CurrentSmartTargetingCapacity(ctx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, &campaign); err != nil {
-		return nil, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required", err)
+	response := &dto.SmartTargetingTestSamplingCalculationResponse{
+		CalculationID: calculation.ID, CampaignID: calculation.CampaignID, BundleID: calculation.BundleID,
+		Status: string(calculation.Status), IsCurrent: current, RecalculationRequired: recalculationRequired,
+		SampleSizePerTag: uint64(calculation.SampleSizePerTag), TagSamplingOrder: order,
+		SelectedScoreClasses: append([]string(nil), calculation.SelectedScoreClasses...),
+		CreatedAt:            calculation.CreatedAt, StartedAt: calculation.StartedAt, FinishedAt: calculation.FinishedAt,
 	}
-	sample, err := s.calculateSmartTargetingTestSample(ctx, &campaign)
-	if err != nil {
-		return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_FAILED", "Failed to calculate Smart Targeting Test sample", err)
+	if recalculationRequired {
+		response.Status = "stale"
 	}
-	pricePerMessage, _, err := s.computeCostInputs(ctx, campaign, metadata)
-	if err != nil {
+	if calculation.Status == models.CampaignTargetingTestSamplingFailed {
+		response.ErrorCode, response.ErrorMessage = calculation.ErrorCode, calculation.ErrorMessage
+	}
+	// A completed generation can become stale when campaign inputs or Bundle
+	// allocations change. Match exact-capacity polling and never expose stale
+	// counts as usable sampling output.
+	if calculation.Status != models.CampaignTargetingTestSamplingCalculated || !current {
+		return response, nil
+	}
+	var results []dto.SmartTargetingTestSamplingTagResult
+	if err := json.Unmarshal(calculation.TagResults, &results); err != nil {
 		return nil, err
 	}
-	cost, err := checkedCampaignCost(pricePerMessage, sample.effective)
-	if err != nil {
-		return nil, err
+	if len(results) != len(order) || calculation.SatisfiedTagCount < 0 || calculation.SatisfiedTagCount > len(results) {
+		return nil, ErrSmartTargetingTestPreviewRequired
 	}
-	if customer, lookupErr := getCustomer(ctx, s.customerRepo, req.CustomerID); lookupErr == nil && s.adminConfig.HasMobile(customer.RepresentativeMobile) {
-		cost = 0
+	response.SatisfiedTags = make([]dto.SmartTargetingTestSamplingTagResult, 0, calculation.SatisfiedTagCount)
+	response.UnsatisfiedTags = make([]dto.SmartTargetingTestSamplingTagResult, 0, len(results)-calculation.SatisfiedTagCount)
+	actualSatisfied := 0
+	for position, item := range results {
+		if item.TagID != order[position] || item.SelectionOrder != position || item.AvailableCount < 0 ||
+			uint64(item.AvailableCount) > uint64(calculation.SampleSizePerTag) || item.Satisfied != (item.AvailableCount == calculation.SampleSizePerTag) {
+			return nil, ErrSmartTargetingTestPreviewRequired
+		}
+		if item.Satisfied {
+			actualSatisfied++
+			response.SatisfiedTags = append(response.SatisfiedTags, item)
+		} else {
+			response.UnsatisfiedTags = append(response.UnsatisfiedTags, item)
+		}
 	}
-	if err := s.persistSmartTargetingTestSamplingPreview(ctx, campaign.ID, campaign.UpdatedAt, sample); err != nil {
-		return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_PERSIST_FAILED", "Failed to persist Smart Targeting Test sampling intent", err)
+	if actualSatisfied != calculation.SatisfiedTagCount {
+		return nil, ErrSmartTargetingTestPreviewRequired
 	}
-	return &dto.SmartTargetingTestSamplingPreviewResponse{
-		SampleSizePerTag:       *campaign.SampleSizePerTag,
-		TagSamplingOrder:       sample.order,
-		SatisfiedTags:          sample.satisfied,
-		UnsatisfiedTags:        sample.unsatisfied,
-		SatisfiedTagCount:      len(sample.satisfied),
-		EffectiveAudienceCount: sample.effective,
-		CampaignCost:           cost,
-	}, nil
+	if calculation.EffectiveAudienceCount < 0 {
+		return nil, ErrSmartTargetingTestAudienceCountOverflow
+	}
+	expectedEffective, err := checkedSmartTargetingTestAudienceCount(actualSatisfied, uint64(calculation.SampleSizePerTag))
+	if err != nil || expectedEffective != uint64(calculation.EffectiveAudienceCount) {
+		return nil, ErrSmartTargetingTestPreviewRequired
+	}
+	satisfiedCount := calculation.SatisfiedTagCount
+	effective := uint64(calculation.EffectiveAudienceCount)
+	cost := calculation.CampaignCost
+	response.SatisfiedTagCount = &satisfiedCount
+	response.EffectiveAudienceCount = &effective
+	response.CampaignCost = &cost
+	return response, nil
 }
