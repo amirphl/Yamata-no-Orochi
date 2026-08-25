@@ -45,31 +45,82 @@ type CampaignHandlerInterface interface {
 	GetSmartTargetingCapacityCalculation(c fiber.Ctx) error
 	GetSmartTargetingCapacityCalculationByID(c fiber.Ctx) error
 	PreviewSmartTargetingTestSampling(c fiber.Ctx) error
+	GetSmartTargetingTestSampling(c fiber.Ctx) error
+	GetSmartTargetingTestSamplingByID(c fiber.Ctx) error
 }
 
-// PreviewSmartTargetingTestSampling calculates ordered, all-or-nothing per-tag
-// samples. It never persists audience IDs; scheduler preparation is final.
-// @Summary Preview Smart Targeting Test sampling
+// PreviewSmartTargetingTestSampling queues ordered, all-or-nothing per-tag
+// sampling. It never persists audience IDs; scheduler preparation is final.
+// @Summary Request Smart Targeting Test sampling
 // @Tags Campaigns
 // @Produce json
 // @Security BearerAuth
 // @Param uuid path string true "Owned Smart Targeting Test campaign UUID" format(uuid)
-// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingTestSamplingPreviewResponse}
+// @Success 202 {object} dto.APIResponse{data=dto.SmartTargetingTestSamplingCalculationResponse}
 // @Router /api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview [post]
 func (h *CampaignHandler) PreviewSmartTargetingTestSampling(c fiber.Ctx) error {
 	customerID, ok := c.Locals("customer_id").(uint)
 	if !ok {
 		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
 	}
-	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/test-sampling-preview", 150*time.Second)
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/test-sampling-preview", 30*time.Second)
 	defer cancel()
-	result, err := h.campaignFlow.PreviewSmartTargetingTestSampling(ctx, &dto.SmartTargetingTestSamplingPreviewRequest{
+	result, err := h.campaignFlow.StartSmartTargetingTestSampling(ctx, &dto.SmartTargetingTestSamplingPreviewRequest{
 		CustomerID: customerID, CampaignUUID: c.Params("uuid"),
 	}, businessflow.NewClientMetadata(c.IP(), c.Get("User-Agent")))
 	if err != nil {
-		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to preview Smart Targeting Test sampling", "SMART_TARGETING_TEST_PREVIEW_FAILED")
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to request Smart Targeting Test sampling", "SMART_TARGETING_TEST_SAMPLING_REQUEST_FAILED")
 	}
-	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting Test sampling preview calculated successfully", result)
+	return h.SuccessResponse(c, fiber.StatusAccepted, "Smart Targeting Test sampling requested successfully", result)
+}
+
+// GetSmartTargetingTestSampling returns the latest job for the current input.
+// @Summary Get current Smart Targeting Test sampling
+// @Tags Campaigns
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned Smart Targeting Test campaign UUID" format(uuid)
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingTestSamplingCalculationResponse}
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview [get]
+func (h *CampaignHandler) GetSmartTargetingTestSampling(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/test-sampling-preview", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.GetCurrentSmartTargetingTestSampling(ctx, customerID, c.Params("uuid"))
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to load Smart Targeting Test sampling", "SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting Test sampling retrieved successfully", result)
+}
+
+// GetSmartTargetingTestSamplingByID returns one historical sampling job.
+// @Summary Get a Smart Targeting Test sampling job
+// @Tags Campaigns
+// @Produce json
+// @Security BearerAuth
+// @Param uuid path string true "Owned Smart Targeting Test campaign UUID" format(uuid)
+// @Param calculation_id path int true "Sampling calculation ID" minimum(1)
+// @Success 200 {object} dto.APIResponse{data=dto.SmartTargetingTestSamplingCalculationResponse}
+// @Router /api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview/{calculation_id} [get]
+func (h *CampaignHandler) GetSmartTargetingTestSamplingByID(c fiber.Ctx) error {
+	customerID, ok := c.Locals("customer_id").(uint)
+	if !ok {
+		return h.ErrorResponse(c, fiber.StatusUnauthorized, "Customer ID not found in context", "MISSING_CUSTOMER_ID", nil)
+	}
+	calculationID, err := strconv.ParseInt(c.Params("calculation_id"), 10, 64)
+	if err != nil || calculationID < 1 {
+		return h.ErrorResponse(c, fiber.StatusBadRequest, "Calculation ID is invalid", "INVALID_CALCULATION_ID", nil)
+	}
+	ctx, cancel := h.createRequestContextWithTimeout(c, "/api/v1/campaigns/:uuid/smart-targeting/test-sampling-preview/:calculation_id", 30*time.Second)
+	defer cancel()
+	result, err := h.campaignFlow.GetSmartTargetingTestSamplingByID(ctx, customerID, c.Params("uuid"), calculationID)
+	if err != nil {
+		return h.handleCampaignFlowError(c, err, fiber.StatusInternalServerError, "Failed to load Smart Targeting Test sampling", "SMART_TARGETING_TEST_SAMPLING_LOOKUP_FAILED")
+	}
+	return h.SuccessResponse(c, fiber.StatusOK, "Smart Targeting Test sampling retrieved successfully", result)
 }
 
 // CampaignHandler handles campaign-related HTTP requests
