@@ -274,6 +274,8 @@ func (r *FiberRouter) SetupRoutes() {
 	campaigns.Get("/:uuid/smart-targeting/capacity-calculations", r.campaignHandler.GetSmartTargetingCapacityCalculation)
 	campaigns.Get("/:uuid/smart-targeting/capacity-calculations/:calculation_id", r.campaignHandler.GetSmartTargetingCapacityCalculationByID)
 	campaigns.Post("/:uuid/smart-targeting/test-sampling-preview", r.campaignHandler.PreviewSmartTargetingTestSampling)
+	campaigns.Get("/:uuid/smart-targeting/test-sampling-preview", r.campaignHandler.GetSmartTargetingTestSampling)
+	campaigns.Get("/:uuid/smart-targeting/test-sampling-preview/:calculation_id", r.campaignHandler.GetSmartTargetingTestSamplingByID)
 	campaigns.Post("/:uuid/clone", r.campaignHandler.CloneCampaign)
 	campaigns.Post("/:uuid/test-send", r.campaignHandler.SendCampaignTestMessage)
 	campaigns.Post("/calculate-capacity", r.campaignHandler.CalculateCampaignCapacity)
