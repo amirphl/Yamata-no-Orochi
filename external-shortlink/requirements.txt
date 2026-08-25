@@ -1,0 +1,4 @@
+starlette==0.47.3
+uvicorn[standard]==0.35.0
+asyncpg==0.31.0
+prometheus-client==0.22.1
