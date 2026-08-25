@@ -395,5 +395,11 @@
 \echo 'Running 0128_smart_targeting_phase_preparation.sql...'
 \i migrations/0128_smart_targeting_phase_preparation.sql
 
+\echo 'Running 0129_create_payam_sms_send_responses.sql...'
+\i migrations/0129_create_payam_sms_send_responses.sql
+
+\echo 'Running 0130_create_campaign_targeting_test_sampling_calculations.sql...'
+\i migrations/0130_create_campaign_targeting_test_sampling_calculations.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
