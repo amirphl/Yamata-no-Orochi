@@ -2,6 +2,7 @@ package businessflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"testing"
@@ -207,9 +208,9 @@ func TestCurrentSmartTargetingTestSamplingIntentValidatesOrderedSubset(t *testin
 		SmartTargetingTestSamplingPreviewedAt: &previewedAt,
 	}
 	repo := &samplingSelectedTagRepositoryStub{selected: []*models.CampaignSelectedTag{
-		{TagID: 9, SelectionOrder: 0},
-		{TagID: 2, SelectionOrder: 1},
-		{TagID: 5, SelectionOrder: 2},
+		{CampaignID: 17, BundleID: 3, TagID: 9, SelectionOrder: 0},
+		{CampaignID: 17, BundleID: 3, TagID: 2, SelectionOrder: 1},
+		{CampaignID: 17, BundleID: 3, TagID: 5, SelectionOrder: 2},
 	}}
 	hash, err := smartTargetingTestSamplingHash(campaign, []uint{9, 2, 5}, []string{"A", "C"})
 	if err != nil {
@@ -225,6 +226,47 @@ func TestCurrentSmartTargetingTestSamplingIntentValidatesOrderedSubset(t *testin
 	campaign.SmartTargetingTestSatisfiedTagIDs = pq.Int64Array{5, 9}
 	if _, err := currentSmartTargetingTestSamplingIntent(t.Context(), repo, campaign, true); !errors.Is(err, ErrSmartTargetingTestPreviewRequired) {
 		t.Fatalf("out-of-order intent error = %v, want preview required", err)
+	}
+}
+
+func TestCurrentSmartTargetingTestSamplingInputRejectsMalformedSelectionSnapshot(t *testing.T) {
+	method := models.CampaignAudienceTargetingSmart
+	bundleID := uint(3)
+	sampleSize := uint64(600)
+	campaign := &models.Campaign{
+		ID: 17, BundleID: &bundleID, Phase: models.CampaignPhaseTest, SampleSizePerTag: &sampleSize,
+		Spec: models.CampaignSpec{AudienceTargetingMethod: &method, AudienceGrades: []string{"A"}},
+	}
+	repo := &samplingSelectedTagRepositoryStub{selected: []*models.CampaignSelectedTag{
+		{CampaignID: 17, BundleID: 3, TagID: 9, SelectionOrder: 1},
+	}}
+	if _, err := currentSmartTargetingTestSamplingInput(t.Context(), repo, campaign); !errors.Is(err, ErrSmartTargetingTagInvalid) {
+		t.Fatalf("malformed selection error = %v, want invalid tag", err)
+	}
+}
+
+func TestCurrentSmartTargetingTestSamplingInputIncludesTagDisplayNames(t *testing.T) {
+	method := models.CampaignAudienceTargetingSmart
+	bundleID := uint(3)
+	sampleSize := uint64(600)
+	displayName := "Frequent travelers"
+	campaign := &models.Campaign{
+		ID: 17, BundleID: &bundleID, Phase: models.CampaignPhaseTest, SampleSizePerTag: &sampleSize,
+		Spec: models.CampaignSpec{AudienceTargetingMethod: &method, AudienceGrades: []string{"A"}},
+	}
+	repo := &samplingSelectedTagRepositoryStub{selected: []*models.CampaignSelectedTag{
+		{CampaignID: 17, BundleID: 3, TagID: 9, SelectionOrder: 0, TagDisplayTitleSnapshot: &displayName},
+		{CampaignID: 17, BundleID: 3, TagID: 2, SelectionOrder: 1},
+	}}
+	input, err := currentSmartTargetingTestSamplingInput(t.Context(), repo, campaign)
+	if err != nil {
+		t.Fatalf("sampling input failed: %v", err)
+	}
+	if input.displayNames[9] == nil || *input.displayNames[9] != displayName {
+		t.Fatalf("tag 9 display name = %v, want %q", input.displayNames[9], displayName)
+	}
+	if value, exists := input.displayNames[2]; !exists || value != nil {
+		t.Fatalf("tag 2 display name = (%v, %t), want (nil, true)", value, exists)
 	}
 }
 
@@ -265,5 +307,119 @@ func TestSmartTargetingTestSamplingConfigurationInvalidatesOnlyEffectiveChanges(
 	changed, err = smartTargetingTestSamplingConfigurationChanged(campaign, &dto.UpdateCampaignRequest{Phase: &execution})
 	if err != nil || !changed {
 		t.Fatalf("changed phase = (%t, %v), want (true, nil)", changed, err)
+	}
+}
+
+func TestSmartTargetingTestSamplingCalculationDTOHidesPendingResults(t *testing.T) {
+	row := &models.CampaignTargetingTestSamplingCalculation{
+		ID: 7, CampaignID: 17, BundleID: 3,
+		SelectedTagIDs: pq.Int64Array{9, 2}, SelectedTagCount: 2, SelectedScoreClasses: pq.StringArray{"A", "C"},
+		SampleSizePerTag: 600, Status: models.CampaignTargetingTestSamplingCalculating,
+		TagResults: json.RawMessage(`[]`), CreatedAt: time.Now().UTC(),
+	}
+	got, err := smartTargetingTestSamplingCalculationDTO(row, false, false)
+	if err != nil {
+		t.Fatalf("pending DTO failed: %v", err)
+	}
+	if got.Status != "calculating" || got.SatisfiedTagCount != nil || got.EffectiveAudienceCount != nil || got.CampaignCost != nil {
+		t.Fatalf("pending DTO exposed completed results: %#v", got)
+	}
+}
+
+func TestSmartTargetingTestSamplingCalculationDTOExposesOrderedCompletedResults(t *testing.T) {
+	firstDisplayName := "Frequent travelers"
+	secondDisplayName := "Online shoppers"
+	results := []dto.SmartTargetingTestSamplingTagResult{
+		{TagID: 9, TagDisplayName: &firstDisplayName, SelectionOrder: 0, Satisfied: true, AvailableCount: 600},
+		{TagID: 2, TagDisplayName: &secondDisplayName, SelectionOrder: 1, Satisfied: false, AvailableCount: 417},
+	}
+	raw, err := json.Marshal(results)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishedAt := time.Now().UTC()
+	row := &models.CampaignTargetingTestSamplingCalculation{
+		ID: 8, CampaignID: 17, BundleID: 3,
+		SelectedTagIDs: pq.Int64Array{9, 2}, SelectedTagCount: 2, SelectedScoreClasses: pq.StringArray{"A", "C"},
+		SampleSizePerTag: 600, Status: models.CampaignTargetingTestSamplingCalculated,
+		TagResults: raw, SatisfiedTagCount: 1, EffectiveAudienceCount: 600, CampaignCost: 720_000,
+		FinishedAt: &finishedAt, CreatedAt: finishedAt.Add(-time.Minute),
+	}
+	got, err := smartTargetingTestSamplingCalculationDTO(row, true, false)
+	if err != nil {
+		t.Fatalf("calculated DTO failed: %v", err)
+	}
+	if !got.IsCurrent || len(got.TagSamplingOrder) != 2 || got.TagSamplingOrder[0] != 9 || got.TagSamplingOrder[1] != 2 {
+		t.Fatalf("calculated DTO order/current = %#v", got)
+	}
+	if len(got.SatisfiedTags) != 1 || got.SatisfiedTags[0].TagID != 9 || got.SatisfiedTags[0].TagDisplayName == nil || *got.SatisfiedTags[0].TagDisplayName != firstDisplayName ||
+		len(got.UnsatisfiedTags) != 1 || got.UnsatisfiedTags[0].TagID != 2 || got.UnsatisfiedTags[0].TagDisplayName == nil || *got.UnsatisfiedTags[0].TagDisplayName != secondDisplayName {
+		t.Fatalf("calculated DTO results = %#v", got)
+	}
+	if got.SatisfiedTagCount == nil || *got.SatisfiedTagCount != 1 || got.EffectiveAudienceCount == nil || *got.EffectiveAudienceCount != 600 || got.CampaignCost == nil || *got.CampaignCost != 720_000 {
+		t.Fatalf("calculated DTO aggregates = %#v", got)
+	}
+}
+
+func TestSmartTargetingTestSamplingCalculationDTOHidesStaleCompletedResults(t *testing.T) {
+	finishedAt := time.Now().UTC()
+	row := &models.CampaignTargetingTestSamplingCalculation{
+		ID: 8, CampaignID: 17, BundleID: 3,
+		SelectedTagIDs: pq.Int64Array{9}, SelectedTagCount: 1, SelectedScoreClasses: pq.StringArray{"A"},
+		SampleSizePerTag: 600, Status: models.CampaignTargetingTestSamplingCalculated,
+		TagResults:        json.RawMessage(`[{"tag_id":9,"selection_order":0,"satisfied":true,"available_count":600}]`),
+		SatisfiedTagCount: 1, EffectiveAudienceCount: 600, CampaignCost: 720_000,
+		FinishedAt: &finishedAt, CreatedAt: finishedAt.Add(-time.Minute),
+	}
+	got, err := smartTargetingTestSamplingCalculationDTO(row, false, true)
+	if err != nil {
+		t.Fatalf("stale calculated DTO failed: %v", err)
+	}
+	if got.Status != "stale" || !got.RecalculationRequired || got.SatisfiedTags != nil || got.UnsatisfiedTags != nil ||
+		got.SatisfiedTagCount != nil || got.EffectiveAudienceCount != nil || got.CampaignCost != nil {
+		t.Fatalf("stale calculated DTO exposed completed results: %#v", got)
+	}
+}
+
+func TestSmartTargetingTestSamplingCalculationDTORejectsInconsistentCompletedResults(t *testing.T) {
+	finishedAt := time.Now().UTC()
+	row := &models.CampaignTargetingTestSamplingCalculation{
+		ID: 8, CampaignID: 17, BundleID: 3,
+		SelectedTagIDs: pq.Int64Array{9}, SelectedTagCount: 1, SelectedScoreClasses: pq.StringArray{"A"},
+		SampleSizePerTag: 600, Status: models.CampaignTargetingTestSamplingCalculated,
+		TagResults:        json.RawMessage(`[{"tag_id":9,"selection_order":0,"satisfied":true,"available_count":599}]`),
+		SatisfiedTagCount: 1, EffectiveAudienceCount: 600, CampaignCost: 720_000,
+		FinishedAt: &finishedAt, CreatedAt: finishedAt.Add(-time.Minute),
+	}
+	if _, err := smartTargetingTestSamplingCalculationDTO(row, true, false); !errors.Is(err, ErrSmartTargetingTestPreviewRequired) {
+		t.Fatalf("inconsistent calculated DTO error = %v, want preview required", err)
+	}
+}
+
+func TestSamplingInputFromCalculationRejectsChangedCampaignSnapshot(t *testing.T) {
+	method := models.CampaignAudienceTargetingSmart
+	bundleID := uint(3)
+	sampleSize := uint64(600)
+	campaign := &models.Campaign{
+		ID: 17, BundleID: &bundleID, Phase: models.CampaignPhaseTest, SampleSizePerTag: &sampleSize,
+		Spec: models.CampaignSpec{AudienceTargetingMethod: &method, AudienceGrades: []string{"A", "C"}},
+	}
+	hash, err := smartTargetingTestSamplingHash(campaign, []uint{9, 2}, []string{"A", "C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := &models.CampaignTargetingTestSamplingCalculation{
+		CampaignID: 17, BundleID: 3, SelectedTagIDs: pq.Int64Array{9, 2}, SelectedTagCount: 2, SelectedScoreClasses: pq.StringArray{"A", "C"},
+		SampleSizePerTag: 600, InputHash: hash, CalculationVersion: smartTargetingTestSamplingCalculationVersion,
+	}
+	input, gotSampleSize, err := samplingInputFromCalculation(campaign, row)
+	if err != nil || gotSampleSize != 600 || len(input.order) != 2 || input.order[0] != 9 {
+		t.Fatalf("snapshot input = (%#v, %d, %v)", input, gotSampleSize, err)
+	}
+
+	changedSampleSize := uint64(601)
+	campaign.SampleSizePerTag = &changedSampleSize
+	if _, _, err := samplingInputFromCalculation(campaign, row); !errors.Is(err, ErrSmartTargetingTestPreviewRequired) {
+		t.Fatalf("changed campaign snapshot error = %v, want preview required", err)
 	}
 }
