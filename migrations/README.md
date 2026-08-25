@@ -4,10 +4,10 @@ This directory contains the ordered PostgreSQL schema history for Yamata no
 Orochi. The current schema head is:
 
 ```text
-0128_smart_targeting_phase_preparation.sql
+0130_create_campaign_targeting_test_sampling_calculations.sql
 ```
 
-There are 130 numbered up files and 129 numbered down files. Both aggregate
+There are 132 numbered up files and 131 numbered down files. Both aggregate
 manifests currently include every matching file exactly once. The difference is
 `0050_remove_short_links_indexes.sql`, which has no checked-in down migration.
 
@@ -28,15 +28,15 @@ number—is the migration identity:
 - `0104_create_sent_rubika_messages`
 - `0104_create_splus_status_results`
 
-New changes should use the next unused ordinal (`0129` after the current head),
+New changes should use the next unused ordinal (`0131` after the current head),
 include a down file whenever rollback is safe, and update both aggregate
 manifests. Do not edit a migration that may already have been deployed; add a
 corrective migration so every environment retains the same append-only history.
 
 ## Aggregate manifests
 
-[`run_all_up.sql`](run_all_up.sql) includes all 130 up files in filename order.
-[`run_all_down.sql`](run_all_down.sql) includes all 129 available down files
+[`run_all_up.sql`](run_all_up.sql) includes all 132 up files in filename order.
+[`run_all_down.sql`](run_all_down.sql) includes all 131 available down files
 once. Its order is the reverse filename order except for the existing
 `0034`/`0035` swap; treat the checked-in manifest order as canonical and review
 dependencies before changing it.
@@ -106,9 +106,9 @@ only at the documented point with both `yamata-app-beta` and
 
 The required-migrations helper is deliberately not a general migration engine.
 It requires the Bundle schema from `0111`, refuses to auto-apply destructive
-`0119`, applies an idempotent subset needed through `0128`, validates critical
+`0119`, applies an idempotent subset needed through `0130`, validates critical
 tables/columns/indexes, and then advances `.migration_tracker_beta` to at least
-`0128`. It preserves a valid tracker already pointing to a later available
+`0130`. It preserves a valid tracker already pointing to a later available
 migration, so the helper cannot move general migration state backward.
 
 ## Applying one migration
@@ -230,6 +230,8 @@ every production change.
 | `0098`–`0106` | Platform-neutral status jobs, tracking IDs, Bale/Soroush Plus/Rubika status data, Rubika sends, campaign test-send auditing, and wallet-charge previews |
 | `0107`–`0116` | Bundles, campaign phases, Bundle audience selections, audience scores/statistics, normalized scoring, hidden campaigns, and Bundle audit actions |
 | `0117`–`0128` | Smart-tag evaluation, platform-scoped jobs, bigint evaluation IDs, ordered campaign tag selections, explicit targeting methods, exact-capacity generations, processed Bundle linkage, source hierarchy, high-volume audience indexes, normalized append-only Bundle allocations/send order, Test-preview intent, and per-audience tag attribution |
+| `0129` | Immediate PayamSMS batch response bodies, response headers, HTTP status, retry counts, and terminal errors for campaign diagnostics |
+| `0130` | Durable asynchronous Smart Targeting Test sampling calculations and aggregate per-tag results |
 
 ## Current schema areas
 
