@@ -408,6 +408,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	tagRepo := repository.NewTagRepository(db)
 	campaignSelectedTagRepo := repository.NewCampaignSelectedTagRepository(db)
 	capacityCalculationRepo := repository.NewCampaignTargetingCapacityRepository(db)
+	testSamplingCalculationRepo := repository.NewCampaignTargetingTestSamplingRepository(db)
 	srcLayerAllStatsRepo := repository.NewSrcLayerAllStatsRepository(db)
 	audienceSpecRepo := repository.NewAudienceSpecRepository(db)
 	sentSMSRepo := repository.NewSentSMSRepository(db)
@@ -520,6 +521,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		shortLinkClickRepo,
 		campaignSelectedTagRepo,
 		capacityCalculationRepo,
+		testSamplingCalculationRepo,
 		audienceSpecRepo,
 		db,
 		rc,
@@ -907,6 +909,19 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		)
 		stopCapacityScheduler := capacityScheduler.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopCapacityScheduler)
+
+		// Test sampling uses the same durable database-job enablement as exact
+		// capacity, but a separate single-worker pool limits concurrent random
+		// audience scans.
+		testSamplingScheduler := scheduler.NewSmartTargetingTestSamplingScheduler(
+			campaignFlow,
+			testSamplingCalculationRepo,
+			log.Default(),
+			5*time.Second,
+			1,
+		)
+		stopTestSamplingScheduler := testSamplingScheduler.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopTestSamplingScheduler)
 	}
 
 	// Create application struct from FiberRouter
