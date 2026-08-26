@@ -5,6 +5,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0130_create_campaign_targeting_test_sampling_calculations_down.sql...'
+\i migrations/0130_create_campaign_targeting_test_sampling_calculations_down.sql
+
+\echo 'Running 0129_create_payam_sms_send_responses_down.sql...'
+\i migrations/0129_create_payam_sms_send_responses_down.sql
+
 \echo 'Running 0128_smart_targeting_phase_preparation_down.sql...'
 \i migrations/0128_smart_targeting_phase_preparation_down.sql
 
