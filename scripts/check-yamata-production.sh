@@ -136,6 +136,7 @@ schema_checks="$("${DOCKER[@]}" exec yamata-postgres-beta sh -lc \
 	 );
 	 SELECT to_regclass('\''public.campaign_selected_tags'\'') IS NOT NULL;
 	 SELECT to_regclass('\''public.campaign_targeting_capacity_calculations'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.campaign_targeting_test_sampling_calculations'\'') IS NOT NULL;
 		 SELECT to_regclass('\''public.src_reference'\'') IS NOT NULL;
 		 SELECT to_regclass('\''public.idx_audience_profiles_campaign_id_phone'\'') IS NOT NULL;
 	 SELECT to_regclass('\''public.bundle_audience_selection_members'\'') IS NOT NULL;
@@ -208,8 +209,9 @@ schema_checks="$("${DOCKER[@]}" exec yamata-postgres-beta sh -lc \
 	     AND table_name='\''bundle_audience_selection_members'\''
 	     AND column_name='\''selection_order'\''
 	 );
-	 SELECT to_regclass('\''public.campaign_audience_tag_attributions'\'') IS NOT NULL;"')"
-[[ "$schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Required migrations through 0128 are incomplete or inconsistent"
+	 SELECT to_regclass('\''public.campaign_audience_tag_attributions'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.payam_sms_send_responses'\'') IS NOT NULL;"')"
+[[ "$schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Required migrations through 0130 are incomplete or inconsistent"
 
 [[ -x "$PROJECT_DIR/scripts/check-yamata-certificates.sh" ]] ||
 	die "Missing certificate checker in $PROJECT_DIR/scripts"
