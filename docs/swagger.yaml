@@ -3025,12 +3025,30 @@ definitions:
         description: Reason                *string  `json:"reason"`
         type: number
     type: object
-  dto.SmartTargetingTestSamplingPreviewResponse:
+  dto.SmartTargetingTestSamplingCalculationResponse:
     properties:
+      bundle_id:
+        type: integer
+      calculation_id:
+        type: integer
       campaign_cost:
         type: integer
+      campaign_id:
+        type: integer
+      created_at:
+        type: string
       effective_audience_count:
         type: integer
+      error_code:
+        type: string
+      error_message:
+        type: string
+      finished_at:
+        type: string
+      is_current:
+        type: boolean
+      recalculation_required:
+        type: boolean
       sample_size_per_tag:
         type: integer
       satisfied_tag_count:
@@ -3039,6 +3057,14 @@ definitions:
         items:
           $ref: '#/definitions/dto.SmartTargetingTestSamplingTagResult'
         type: array
+      selected_score_classes:
+        items:
+          type: string
+        type: array
+      started_at:
+        type: string
+      status:
+        type: string
       tag_sampling_order:
         items:
           type: integer
@@ -3056,6 +3082,8 @@ definitions:
         type: boolean
       selection_order:
         type: integer
+      tag_display_name:
+        type: string
       tag_id:
         type: integer
     type: object
@@ -7030,7 +7058,7 @@ paths:
       tags:
       - Campaigns
   /api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview:
-    post:
+    get:
       parameters:
       - description: Owned Smart Targeting Test campaign UUID
         format: uuid
@@ -7048,11 +7076,68 @@ paths:
             - $ref: '#/definitions/dto.APIResponse'
             - properties:
                 data:
-                  $ref: '#/definitions/dto.SmartTargetingTestSamplingPreviewResponse'
+                  $ref: '#/definitions/dto.SmartTargetingTestSamplingCalculationResponse'
               type: object
       security:
       - BearerAuth: []
-      summary: Preview Smart Targeting Test sampling
+      summary: Get current Smart Targeting Test sampling
+      tags:
+      - Campaigns
+    post:
+      parameters:
+      - description: Owned Smart Targeting Test campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingTestSamplingCalculationResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Request Smart Targeting Test sampling
+      tags:
+      - Campaigns
+  /api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview/{calculation_id}:
+    get:
+      parameters:
+      - description: Owned Smart Targeting Test campaign UUID
+        format: uuid
+        in: path
+        name: uuid
+        required: true
+        type: string
+      - description: Sampling calculation ID
+        in: path
+        minimum: 1
+        name: calculation_id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            allOf:
+            - $ref: '#/definitions/dto.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/dto.SmartTargetingTestSamplingCalculationResponse'
+              type: object
+      security:
+      - BearerAuth: []
+      summary: Get a Smart Targeting Test sampling job
       tags:
       - Campaigns
   /api/v1/campaigns/{uuid}/test-send:
