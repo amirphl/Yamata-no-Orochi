@@ -16,7 +16,9 @@ Bundle ownership. Routes use the `/api/v1` prefix and return the common
 | `POST /campaigns/{uuid}/smart-targeting/capacity-calculations` | Start or reuse an asynchronous exact-capacity generation. |
 | `GET /campaigns/{uuid}/smart-targeting/capacity-calculations` | Read the current/latest generation state. |
 | `GET /campaigns/{uuid}/smart-targeting/capacity-calculations/{calculation_id}` | Read one historical generation. |
-| `POST /campaigns/{uuid}/smart-targeting/test-sampling-preview` | Preview and persist Test-phase sampling intent. |
+| `POST /campaigns/{uuid}/smart-targeting/test-sampling-preview` | Start or reuse an asynchronous Test-phase sampling job. |
+| `GET /campaigns/{uuid}/smart-targeting/test-sampling-preview` | Read the current/latest sampling job state. |
+| `GET /campaigns/{uuid}/smart-targeting/test-sampling-preview/{calculation_id}` | Read one historical sampling job. |
 
 The path column above omits the shared `/api/v1` prefix for readability.
 
@@ -163,8 +165,19 @@ A Smart Targeting campaign with `phase: "test"` requires a positive
 `sample_size_per_tag`; there is no default. `budget` and a caller-supplied
 audience count do not override the derived Test count.
 
-Before previewing, create a current exact-capacity generation. The preview then
-processes selected tag IDs in persisted order:
+Before requesting sampling, create a current exact-capacity generation. The
+POST endpoint responds with HTTP 202 after durably submitting the job. A
+process with `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true` executes the
+sampling asynchronously. Duplicate submissions for the same current inputs
+reuse the active or completed job.
+
+Poll the collection GET for the current/latest job or the ID-scoped GET for a
+specific historical job. Status is `not_calculated`, `calculating`,
+`calculated`, `failed`, or `stale`. Completed result fields are returned only
+when `is_current` is true; stale output is deliberately hidden and
+`recalculation_required` is true.
+
+The worker processes selected tag IDs in persisted order:
 
 1. randomly choose exactly `sample_size_per_tag` currently eligible audiences
    for the tag;
@@ -175,9 +188,9 @@ processes selected tag IDs in persisted order:
 4. calculate `effective_audience_count = satisfied_tag_count ×
    sample_size_per_tag` and the campaign cost.
 
-The response contains the complete sampling order, ordered satisfied and
-unsatisfied results, each tag’s available count, sample size, effective count,
-and cost.
+A current calculated response contains the complete sampling order, ordered
+satisfied and unsatisfied results, each tag’s display name and available count,
+sample size, effective count, and cost.
 
 Preview persists only satisfied tag IDs in user order, an input fingerprint,
 the preview timestamp, and the derived compatibility value `num_audience`.
