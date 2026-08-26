@@ -8,7 +8,7 @@ The complete ordered procedure is in
 | `deploy-beta.sh` | Deploy the Compose API stack; requires API campaign execution to remain disabled |
 | `deploy-production-beta.sh` | Canonical release command; deploys API then recreates isolated campaign workers |
 | `deploy-campaign-scheduler-beta.sh` | Recreates the private, restartable campaign-worker container from the running API environment |
-| `apply-yamata-required-migrations.sh` | Idempotently applies required schema changes through current head 0128 |
+| `apply-yamata-required-migrations.sh` | Idempotently applies required schema changes through current head 0130 |
 | `restore-yamata-audience-profiles.sh` | Atomically restores an `audience_profiles`-only PostgreSQL 17 plain dump |
 | `restore-yamata-scheduler-runtime-data.sh` | Atomically restores the exact scheduler table set, normalized selection members, audience/tag attribution, audience-spec sources, and sequence counters |
 | `run-yamata-data-restore.sh` | Starts either large restore in the background with systemd/journal progress |
@@ -28,6 +28,7 @@ Data and repair utilities:
 |---|---|
 | `check_campaign_audience_uid_counts.py` | Compares campaign JSONL UID counts with PostgreSQL |
 | `push_campaign_stats.py` | Recalculates and pushes persisted campaign delivery statistics |
+| `recover_sms_campaign_statistics.py` | Read-only-DB recovery for PayamSMS statuses and statistics for the fixed campaigns 935, 944, 945, 943, 937, 933, and 942; preview by default |
 | `push_campaign_fake_stats.py` | Pushes explicit all-failed statistics with a required message-part count |
 | `push_campaign_audience_uids.py` | Resolves and pushes aligned UID/short-code pairs |
 | `export_uid_campaign_participation.py` | Creates private, spreadsheet-safe TorobPay participation CSVs |
