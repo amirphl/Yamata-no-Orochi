@@ -113,6 +113,8 @@ apply_file "$PROJECT_DIR/migrations/0125_create_src_reference.sql"
 apply_file "$PROJECT_DIR/migrations/0126_optimize_campaign_audience_selection.sql"
 apply_file "$PROJECT_DIR/migrations/0127_normalize_bundle_audience_allocations.sql"
 apply_file "$PROJECT_DIR/migrations/0128_smart_targeting_phase_preparation.sql"
+apply_file "$PROJECT_DIR/migrations/0129_create_payam_sms_send_responses.sql"
+apply_file "$PROJECT_DIR/migrations/0130_create_campaign_targeting_test_sampling_calculations.sql"
 
 constraint_exists="$(psql_scalar "
 	SELECT EXISTS (
@@ -228,7 +230,11 @@ constraint_exists="$(psql_scalar "
 	die "Migration 0128 is incomplete: bundle audience selection order is missing"
 [[ "$(psql_scalar "SELECT to_regclass('public.campaign_audience_tag_attributions') IS NOT NULL;")" == t ]] ||
 	die "Migration 0128 is incomplete: campaign_audience_tag_attributions is missing"
+[[ "$(psql_scalar "SELECT to_regclass('public.payam_sms_send_responses') IS NOT NULL;")" == t ]] ||
+	die "Migration 0129 is incomplete: payam_sms_send_responses is missing"
+[[ "$(psql_scalar "SELECT to_regclass('public.campaign_targeting_test_sampling_calculations') IS NOT NULL;")" == t ]] ||
+	die "Migration 0130 is incomplete: campaign_targeting_test_sampling_calculations is missing"
 
-advance_migration_tracker '0128_smart_targeting_phase_preparation.sql'
+advance_migration_tracker '0130_create_campaign_targeting_test_sampling_calculations.sql'
 
 log "Required schema is ready"
