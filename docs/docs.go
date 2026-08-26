@@ -6200,7 +6200,7 @@ const docTemplate = `{
             }
         },
         "/api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview": {
-            "post": {
+            "get": {
                 "security": [
                     {
                         "BearerAuth": []
@@ -6212,7 +6212,7 @@ const docTemplate = `{
                 "tags": [
                     "Campaigns"
                 ],
-                "summary": "Preview Smart Targeting Test sampling",
+                "summary": "Get current Smart Targeting Test sampling",
                 "parameters": [
                     {
                         "type": "string",
@@ -6235,7 +6235,105 @@ const docTemplate = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "$ref": "#/definitions/dto.SmartTargetingTestSamplingPreviewResponse"
+                                            "$ref": "#/definitions/dto.SmartTargetingTestSamplingCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Request Smart Targeting Test sampling",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned Smart Targeting Test campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingTestSamplingCalculationResponse"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/campaigns/{uuid}/smart-targeting/test-sampling-preview/{calculation_id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Campaigns"
+                ],
+                "summary": "Get a Smart Targeting Test sampling job",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Owned Smart Targeting Test campaign UUID",
+                        "name": "uuid",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "minimum": 1,
+                        "type": "integer",
+                        "description": "Sampling calculation ID",
+                        "name": "calculation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/dto.APIResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/dto.SmartTargetingTestSamplingCalculationResponse"
                                         }
                                     }
                                 }
@@ -12964,14 +13062,41 @@ const docTemplate = `{
                 }
             }
         },
-        "dto.SmartTargetingTestSamplingPreviewResponse": {
+        "dto.SmartTargetingTestSamplingCalculationResponse": {
             "type": "object",
             "properties": {
+                "bundle_id": {
+                    "type": "integer"
+                },
+                "calculation_id": {
+                    "type": "integer"
+                },
                 "campaign_cost": {
                     "type": "integer"
                 },
+                "campaign_id": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
                 "effective_audience_count": {
                     "type": "integer"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "is_current": {
+                    "type": "boolean"
+                },
+                "recalculation_required": {
+                    "type": "boolean"
                 },
                 "sample_size_per_tag": {
                     "type": "integer"
@@ -12984,6 +13109,18 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/dto.SmartTargetingTestSamplingTagResult"
                     }
+                },
+                "selected_score_classes": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
                 },
                 "tag_sampling_order": {
                     "type": "array",
@@ -13010,6 +13147,9 @@ const docTemplate = `{
                 },
                 "selection_order": {
                     "type": "integer"
+                },
+                "tag_display_name": {
+                    "type": "string"
                 },
                 "tag_id": {
                     "type": "integer"
