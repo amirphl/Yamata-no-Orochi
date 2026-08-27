@@ -182,6 +182,16 @@ func IsValidCampaignAudienceTargetingMethod(method string) bool {
 	}
 }
 
+// SmartTargetingAllowedColors returns the delivery-eligible audience colors
+// for a campaign platform. An empty result means the platform has no color
+// restriction.
+func SmartTargetingAllowedColors(platform string) []string {
+	if strings.EqualFold(strings.TrimSpace(platform), CampaignPlatformSMS) {
+		return []string{"white", "pink"}
+	}
+	return nil
+}
+
 // EffectiveAudienceTargetingMethod returns the canonical targeting mode while
 // preserving campaigns created before AudienceTargetingMethod existed.
 //
@@ -263,7 +273,8 @@ type Campaign struct {
 	// selection order. It never stores provisionally sampled audience IDs.
 	SmartTargetingTestSatisfiedTagIDs pq.Int64Array `gorm:"type:integer[];not null;default:'{}'" json:"smart_targeting_test_satisfied_tag_ids,omitempty"`
 	// SmartTargetingTestSamplingInputHash invalidates the preview when the
-	// ordered tags, Bundle, sample size, or score classes change.
+	// ordered tags, Bundle, sample size, score classes, or platform-specific
+	// audience-color eligibility changes.
 	SmartTargetingTestSamplingInputHash   *string    `gorm:"type:char(64)" json:"-"`
 	SmartTargetingTestSamplingPreviewedAt *time.Time `json:"smart_targeting_test_sampling_previewed_at,omitempty"`
 
