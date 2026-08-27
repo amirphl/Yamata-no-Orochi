@@ -105,6 +105,82 @@ func TestSmartTargetingTestSamplingHashPreservesTagOrder(t *testing.T) {
 	}
 }
 
+func TestSmartTargetingTestSamplingHashIncludesEffectiveColorEligibility(t *testing.T) {
+	method := models.CampaignAudienceTargetingSmart
+	bundleID := uint(3)
+	sampleSize := uint64(600)
+	campaign := &models.Campaign{
+		ID:               17,
+		BundleID:         &bundleID,
+		SampleSizePerTag: &sampleSize,
+		Spec: models.CampaignSpec{
+			AudienceTargetingMethod: &method,
+			Platform:                models.CampaignPlatformBale,
+		},
+	}
+
+	unrestricted, err := smartTargetingTestSamplingHash(campaign, []uint{9, 2}, []string{"A", "C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign.Spec.Platform = models.CampaignPlatformSMS
+	sms, err := smartTargetingTestSamplingHash(campaign, []uint{9, 2}, []string{"A", "C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sms == unrestricted {
+		t.Fatal("sampling input hash must change when SMS color eligibility becomes active")
+	}
+
+	campaign.Spec.Platform = models.CampaignPlatformRubika
+	otherUnrestricted, err := smartTargetingTestSamplingHash(campaign, []uint{9, 2}, []string{"A", "C"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherUnrestricted != unrestricted {
+		t.Fatal("sampling input hash changed between platforms with identical color eligibility")
+	}
+}
+
+func TestSmartTargetingTestSamplingAudienceQueryRestrictsSMSColors(t *testing.T) {
+	method := models.CampaignAudienceTargetingSmart
+	bundleID := uint(3)
+	sampleSize := uint64(600)
+	campaign := &models.Campaign{
+		ID:               17,
+		BundleID:         &bundleID,
+		Phase:            models.CampaignPhaseTest,
+		SampleSizePerTag: &sampleSize,
+		Spec: models.CampaignSpec{
+			AudienceTargetingMethod: &method,
+			AudienceGrades:          []string{"A"},
+			Platform:                models.CampaignPlatformSMS,
+		},
+	}
+	repo := &samplingSelectedTagRepositoryStub{selected: []*models.CampaignSelectedTag{
+		{CampaignID: 17, BundleID: 3, TagID: 9, SelectionOrder: 0},
+	}}
+
+	input, err := currentSmartTargetingTestSamplingInput(t.Context(), repo, campaign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := smartTargetingTestSamplingAudienceQuery(bundleID, []int64{9}, input)
+	if len(query.AllowedColors) != 2 || query.AllowedColors[0] != "white" || query.AllowedColors[1] != "pink" {
+		t.Fatalf("SMS sampling allowed colors = %v, want [white pink]", query.AllowedColors)
+	}
+
+	campaign.Spec.Platform = models.CampaignPlatformBale
+	input, err = currentSmartTargetingTestSamplingInput(t.Context(), repo, campaign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query = smartTargetingTestSamplingAudienceQuery(bundleID, []int64{9}, input)
+	if len(query.AllowedColors) != 0 {
+		t.Fatalf("non-SMS sampling allowed colors = %v, want no restriction", query.AllowedColors)
+	}
+}
+
 func TestCheckedCampaignCostRejectsOverflow(t *testing.T) {
 	if _, err := checkedCampaignCost(math.MaxUint64, 2); !errors.Is(err, ErrCampaignCostOverflow) {
 		t.Fatalf("overflow error = %v, want ErrCampaignCostOverflow", err)
@@ -307,6 +383,19 @@ func TestSmartTargetingTestSamplingConfigurationInvalidatesOnlyEffectiveChanges(
 	changed, err = smartTargetingTestSamplingConfigurationChanged(campaign, &dto.UpdateCampaignRequest{Phase: &execution})
 	if err != nil || !changed {
 		t.Fatalf("changed phase = (%t, %v), want (true, nil)", changed, err)
+	}
+
+	campaign.Spec.Platform = models.CampaignPlatformBale
+	sms := models.CampaignPlatformSMS
+	changed, err = smartTargetingTestSamplingConfigurationChanged(campaign, &dto.UpdateCampaignRequest{Platform: &sms})
+	if err != nil || !changed {
+		t.Fatalf("enabled SMS color eligibility = (%t, %v), want (true, nil)", changed, err)
+	}
+
+	rubika := models.CampaignPlatformRubika
+	changed, err = smartTargetingTestSamplingConfigurationChanged(campaign, &dto.UpdateCampaignRequest{Platform: &rubika})
+	if err != nil || changed {
+		t.Fatalf("unchanged non-SMS color eligibility = (%t, %v), want (false, nil)", changed, err)
 	}
 }
 
