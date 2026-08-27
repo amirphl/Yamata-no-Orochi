@@ -27,10 +27,11 @@ type smartTargetingTestSample struct {
 const smartTargetingTestSamplingCalculationVersion = 1
 
 type smartTargetingTestSamplingInput struct {
-	order        []uint
-	displayNames map[uint]*string
-	classes      []string
-	hash         string
+	order         []uint
+	displayNames  map[uint]*string
+	classes       []string
+	allowedColors []string
+	hash          string
 }
 
 type smartTargetingTestSamplingIntent struct {
@@ -53,11 +54,13 @@ func smartTargetingTestSamplingHash(campaign *models.Campaign, orderedTagIDs []u
 	for i, id := range orderedTagIDs {
 		parts[i] = strconv.FormatUint(uint64(id), 10)
 	}
-	value := "feature4-v1|campaign=" + strconv.FormatUint(uint64(campaign.ID), 10) +
+	allowedColors := models.SmartTargetingAllowedColors(campaign.Spec.Platform)
+	value := "feature4-v2|campaign=" + strconv.FormatUint(uint64(campaign.ID), 10) +
 		"|bundle=" + strconv.FormatUint(uint64(*campaign.BundleID), 10) +
 		"|sample=" + strconv.FormatUint(*campaign.SampleSizePerTag, 10) +
 		"|tags=" + strings.Join(parts, ",") +
-		"|classes=" + strings.Join(classes, ",")
+		"|classes=" + strings.Join(classes, ",") +
+		"|colors=" + strings.Join(allowedColors, ",")
 	return hashSmartTargetingCapacityString(value), nil
 }
 
@@ -97,6 +100,7 @@ func currentSmartTargetingTestSamplingInput(ctx context.Context, selectedTagRepo
 	if err != nil {
 		return nil, err
 	}
+	input.allowedColors = models.SmartTargetingAllowedColors(campaign.Spec.Platform)
 	input.hash, err = smartTargetingTestSamplingHash(campaign, input.order, input.classes)
 	if err != nil {
 		return nil, err
@@ -146,6 +150,15 @@ func currentSmartTargetingTestSamplingIntent(ctx context.Context, selectedTagRep
 	}, nil
 }
 
+func smartTargetingTestSamplingAudienceQuery(bundleID uint, tagIDs []int64, input *smartTargetingTestSamplingInput) repository.SmartTargetingAudienceQuery {
+	return repository.SmartTargetingAudienceQuery{
+		BundleID:      bundleID,
+		TagIDs:        tagIDs,
+		ScoreClasses:  input.classes,
+		AllowedColors: input.allowedColors,
+	}
+}
+
 func (s *CampaignFlowImpl) calculateSmartTargetingTestSampleForInput(ctx context.Context, bundleID uint, sampleSizePerTag uint64, input *smartTargetingTestSamplingInput) (*smartTargetingTestSample, error) {
 	if bundleID == 0 || input == nil || len(input.order) == 0 || len(input.displayNames) != len(input.order) || len(input.classes) == 0 || sampleSizePerTag == 0 || sampleSizePerTag > math.MaxInt64 {
 		return nil, ErrSmartTargetingTestPreviewRequired
@@ -164,7 +177,7 @@ func (s *CampaignFlowImpl) calculateSmartTargetingTestSampleForInput(ctx context
 	// future allocations; the scheduler remains the availability source of truth.
 	excluded := make([]int64, 0)
 	audienceRepo := repository.NewSmartTargetingAudienceRepository(s.db)
-	query := repository.SmartTargetingAudienceQuery{BundleID: bundleID, TagIDs: tagIDs, ScoreClasses: input.classes}
+	query := smartTargetingTestSamplingAudienceQuery(bundleID, tagIDs, input)
 	for position, tagID := range tagIDs {
 		rows, err := audienceRepo.SelectRandomForTag(ctx, query, tagID, excluded, int64(sampleSizePerTag))
 		if err != nil {
@@ -501,7 +514,12 @@ func samplingInputFromCalculation(campaign *models.Campaign, calculation *models
 	if err != nil || hash != calculation.InputHash {
 		return nil, 0, ErrSmartTargetingTestPreviewRequired
 	}
-	return &smartTargetingTestSamplingInput{order: order, classes: classes, hash: hash}, uint64(calculation.SampleSizePerTag), nil
+	return &smartTargetingTestSamplingInput{
+		order:         order,
+		classes:       classes,
+		allowedColors: models.SmartTargetingAllowedColors(campaign.Spec.Platform),
+		hash:          hash,
+	}, uint64(calculation.SampleSizePerTag), nil
 }
 
 // ExecuteSmartTargetingTestSamplingCalculation performs the expensive scan and
