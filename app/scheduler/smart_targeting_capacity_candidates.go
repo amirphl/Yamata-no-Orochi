@@ -223,10 +223,7 @@ func isSmartTargetingTestCampaign(campaign dto.BotGetCampaignResponse) bool {
 }
 
 func smartTargetingSchedulerAllowedColors(platform string) []string {
-	if strings.EqualFold(strings.TrimSpace(platform), models.CampaignPlatformSMS) {
-		return []string{"white", "pink"}
-	}
-	return nil
+	return models.SmartTargetingAllowedColors(platform)
 }
 
 func smartTargetingTestSamplingTagIDs(
