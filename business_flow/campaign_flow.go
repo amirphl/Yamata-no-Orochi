@@ -732,6 +732,12 @@ func smartTargetingTestSamplingConfigurationChanged(campaign *models.Campaign, r
 			return true, nil
 		}
 	}
+	if req.Platform != nil && !slices.Equal(
+		models.SmartTargetingAllowedColors(campaign.Spec.Platform),
+		models.SmartTargetingAllowedColors(*req.Platform),
+	) {
+		return true, nil
+	}
 	return false, nil
 }
 
