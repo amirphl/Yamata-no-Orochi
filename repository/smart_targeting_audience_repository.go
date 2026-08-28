@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/lib/pq"
@@ -22,12 +23,22 @@ type SmartTargetingAudienceQuery struct {
 type SmartTargetingAudienceRepository interface {
 	CalculateCapacity(ctx context.Context, query SmartTargetingAudienceQuery) (*SmartTargetingAudienceCapacity, error)
 	SelectCandidates(ctx context.Context, query SmartTargetingAudienceQuery, limit int64) ([]*models.AudienceProfile, error)
-	SelectRandomForTag(ctx context.Context, query SmartTargetingAudienceQuery, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error)
+	CalculateScoreBounds(ctx context.Context, query SmartTargetingAudienceQuery) (*SmartTargetingScoreBounds, error)
+	SelectIDsForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]int64, error)
+	SelectForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error)
 }
 
 type SmartTargetingAudienceCapacity struct {
 	RawUniqueCount      int64 `gorm:"column:raw_unique_count"`
 	EligibleUniqueCount int64 `gorm:"column:eligible_unique_count"`
+}
+
+// SmartTargetingScoreBounds contains the union-wide score boundaries used by
+// every per-tag selection in one operation. Nil boundaries mean the eligible
+// union has no scored profiles, so every restricted score class is empty.
+type SmartTargetingScoreBounds struct {
+	P33 *float64 `gorm:"column:p33"`
+	P66 *float64 `gorm:"column:p66"`
 }
 
 type smartTargetingAudienceRepository struct{ db *gorm.DB }
@@ -45,6 +56,27 @@ func (r *smartTargetingAudienceRepository) getDB(ctx context.Context) *gorm.DB {
 
 const smartTargetingBasePopulationCTE = `
 WITH tagged_population AS (
+    SELECT ap.id, ap.normalized_score
+    FROM audience_profiles AS ap
+    WHERE ap.tags && ?::integer[]
+      AND ap.phone_number IS NOT NULL
+      AND BTRIM(ap.phone_number) <> ''
+      AND (?::boolean OR ap.color = ANY(?::text[]))
+), candidate_population AS (
+    SELECT tagged.*
+    FROM tagged_population AS tagged
+    WHERE NOT EXISTS (
+          SELECT 1
+          FROM bundle_audience_selection_members AS used
+          WHERE used.bundle_id = ? AND used.audience_id = tagged.id
+      )
+)`
+
+// Execution selection needs delivery columns. Capacity and score-bound work
+// use the slim CTE above so PostgreSQL does not materialize UID, phone, or tag
+// arrays for count/percentile-only operations.
+const smartTargetingSelectionBasePopulationCTE = `
+WITH tagged_population AS (
     SELECT ap.id, ap.uid, ap.phone_number, ap.tags, ap.normalized_score
     FROM audience_profiles AS ap
     WHERE ap.tags && ?::integer[]
@@ -61,11 +93,14 @@ WITH tagged_population AS (
       )
 )`
 
-const smartTargetingClassifiedPopulationCTE = `, bounds AS (
-    SELECT percentile_disc(0.33) WITHIN GROUP (ORDER BY normalized_score) AS p33,
-           percentile_disc(0.66) WITHIN GROUP (ORDER BY normalized_score) AS p66
+const smartTargetingClassifiedPopulationCTE = `, percentile_bounds AS (
+    SELECT percentile_disc(ARRAY[0.33, 0.66]::double precision[])
+               WITHIN GROUP (ORDER BY normalized_score) AS percentile_values
     FROM candidate_population
     WHERE normalized_score IS NOT NULL
+), bounds AS (
+    SELECT percentile_values[1] AS p33, percentile_values[2] AS p66
+    FROM percentile_bounds
 ), classified AS (
     SELECT population.*,
         CASE
@@ -80,6 +115,7 @@ const smartTargetingClassifiedPopulationCTE = `, bounds AS (
 )`
 
 const smartTargetingPopulationCTE = smartTargetingBasePopulationCTE + smartTargetingClassifiedPopulationCTE
+const smartTargetingSelectionPopulationCTE = smartTargetingSelectionBasePopulationCTE + smartTargetingClassifiedPopulationCTE
 
 func smartTargetingAllClasses(classes []string) bool {
 	return len(classes) == 3 && classes[0] == "A" && classes[1] == "B" && classes[2] == "C"
@@ -126,7 +162,7 @@ func (r *smartTargetingAudienceRepository) SelectCandidates(ctx context.Context,
 	}
 	var rows []*models.AudienceProfile
 	if smartTargetingAllClasses(query.ScoreClasses) {
-		sql := smartTargetingBasePopulationCTE + `
+		sql := smartTargetingSelectionBasePopulationCTE + `
 SELECT id, uid, phone_number, tags, normalized_score
 FROM candidate_population
 ORDER BY normalized_score DESC NULLS LAST, id ASC
@@ -135,7 +171,7 @@ LIMIT ?`
 		err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error
 		return rows, err
 	}
-	sql := smartTargetingPopulationCTE + `
+	sql := smartTargetingSelectionPopulationCTE + `
 SELECT id, uid, phone_number, tags, normalized_score
 FROM classified
 WHERE (?::boolean OR score_class = ANY(?::text[]))
@@ -147,40 +183,171 @@ LIMIT ?`
 	return rows, err
 }
 
-// SelectRandomForTag applies the same union-wide score classification used by
-// exact capacity, then samples only one tag. The exclusion list contains only
-// audiences allocated to earlier satisfied tags, so an insufficient tag does
-// not consume candidates needed by later tags.
-func (r *smartTargetingAudienceRepository) SelectRandomForTag(ctx context.Context, query SmartTargetingAudienceQuery, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error) {
+// CalculateScoreBounds computes the selected-tag union's exact p33/p66 once
+// per sampling operation. The former per-tag query rebuilt and sorted this
+// union for every selected tag.
+func (r *smartTargetingAudienceRepository) CalculateScoreBounds(ctx context.Context, query SmartTargetingAudienceQuery) (*SmartTargetingScoreBounds, error) {
+	if query.BundleID == 0 || len(query.TagIDs) == 0 || len(query.ScoreClasses) == 0 {
+		return nil, fmt.Errorf("invalid smart-targeting score-bound query")
+	}
+	if smartTargetingAllClasses(query.ScoreClasses) {
+		return &SmartTargetingScoreBounds{}, nil
+	}
+	sql, args := smartTargetingScoreBoundsQuery(query)
+	var bounds SmartTargetingScoreBounds
+	if err := r.getDB(ctx).Raw(sql, args...).Scan(&bounds).Error; err != nil {
+		return nil, err
+	}
+	return &bounds, nil
+}
+
+// SelectIDsForTag is the lightweight Test-preview path. Preview logic needs
+// only IDs to enforce cross-tag exclusion; profile delivery columns are loaded
+// only by the final campaign scheduler.
+func (r *smartTargetingAudienceRepository) SelectIDsForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]int64, error) {
+	sql, args, err := smartTargetingPerTagSelectionQuery(query, bounds, tagID, excludeAudienceIDs, limit, true)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	if err := r.getDB(ctx).Raw(sql, args...).Scan(&ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
+// SelectForTag is the final scheduler path. It deliberately has no global
+// random sort: any complete set of eligible rows satisfies Feature 4, while
+// removing ORDER BY RANDOM() avoids processing every match before LIMIT.
+func (r *smartTargetingAudienceRepository) SelectForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error) {
+	sql, args, err := smartTargetingPerTagSelectionQuery(query, bounds, tagID, excludeAudienceIDs, limit, false)
+	if err != nil {
+		return nil, err
+	}
+	var rows []*models.AudienceProfile
+	if err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func smartTargetingScoreBoundsQuery(query SmartTargetingAudienceQuery) (string, []any) {
+	sql := `
+	SELECT percentile_values[1] AS p33, percentile_values[2] AS p66
+FROM (
+    SELECT percentile_disc(ARRAY[0.33, 0.66]::double precision[])
+               WITHIN GROUP (ORDER BY ap.normalized_score) AS percentile_values
+    FROM audience_profiles AS ap
+    WHERE ap.tags && ?::integer[]
+      AND ap.phone_number IS NOT NULL
+      AND BTRIM(ap.phone_number) <> ''
+      AND ap.normalized_score IS NOT NULL`
+	args := []any{pq.Array(query.TagIDs)}
+	if len(query.AllowedColors) > 0 {
+		sql += `
+      AND ap.color = ANY(?::text[])`
+		args = append(args, pq.Array(query.AllowedColors))
+	}
+	sql += `
+      AND NOT EXISTS (
+          SELECT 1
+          FROM bundle_audience_selection_members AS used
+          WHERE used.bundle_id = ? AND used.audience_id = ap.id
+      )
+) AS calculated_bounds`
+	args = append(args, query.BundleID)
+	return sql, args
+}
+
+func smartTargetingPerTagSelectionQuery(query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64, idsOnly bool) (string, []any, error) {
 	if query.BundleID == 0 || len(query.TagIDs) == 0 || len(query.ScoreClasses) == 0 || tagID <= 0 || limit <= 0 {
-		return nil, fmt.Errorf("invalid smart-targeting per-tag sample query")
+		return "", nil, fmt.Errorf("invalid smart-targeting per-tag sample query")
+	}
+	selected := false
+	for _, candidateTagID := range query.TagIDs {
+		if candidateTagID == tagID {
+			selected = true
+			break
+		}
+	}
+	if !selected {
+		return "", nil, fmt.Errorf("smart-targeting per-tag sample is not in the selected tag set")
 	}
 	if excludeAudienceIDs == nil {
 		excludeAudienceIDs = []int64{}
 	}
-	var rows []*models.AudienceProfile
-	if smartTargetingAllClasses(query.ScoreClasses) {
-		sql := smartTargetingBasePopulationCTE + `
-SELECT id, uid, phone_number, tags, normalized_score
-FROM candidate_population
-WHERE ?::integer = ANY(tags)
-  AND NOT (id = ANY(?::bigint[]))
-ORDER BY RANDOM()
-LIMIT ?`
-		args := append(smartTargetingPopulationArgs(query), tagID, pq.Array(excludeAudienceIDs), limit)
-		err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error
-		return rows, err
+	columns := "ap.id, ap.uid, ap.phone_number, ap.tags, ap.normalized_score"
+	if idsOnly {
+		columns = "ap.id"
 	}
-	sql := smartTargetingPopulationCTE + `
-SELECT id, uid, phone_number, tags, normalized_score
-FROM classified
-WHERE (?::boolean OR score_class = ANY(?::text[]))
-  AND ?::integer = ANY(tags)
-  AND NOT (id = ANY(?::bigint[]))
-ORDER BY RANDOM()
+	sql := `
+SELECT ` + columns + `
+FROM audience_profiles AS ap
+WHERE ap.tags @> ARRAY[?]::integer[]
+  AND ap.phone_number IS NOT NULL
+  AND BTRIM(ap.phone_number) <> ''`
+	args := []any{tagID}
+	if len(query.AllowedColors) > 0 {
+		sql += `
+  AND ap.color = ANY(?::text[])`
+		args = append(args, pq.Array(query.AllowedColors))
+	}
+	sql += `
+  AND NOT EXISTS (
+      SELECT 1
+      FROM bundle_audience_selection_members AS used
+      WHERE used.bundle_id = ? AND used.audience_id = ap.id
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM unnest(?::bigint[]) AS earlier(audience_id)
+      WHERE earlier.audience_id = ap.id
+  )`
+	args = append(args, query.BundleID, pq.Array(excludeAudienceIDs))
+
+	scorePredicate, scoreArgs, err := smartTargetingPerTagScorePredicate(query.ScoreClasses, bounds)
+	if err != nil {
+		return "", nil, err
+	}
+	sql += scorePredicate + `
 LIMIT ?`
-	args := append(smartTargetingPopulationArgs(query),
-		smartTargetingAllClasses(query.ScoreClasses), pq.Array(query.ScoreClasses), tagID, pq.Array(excludeAudienceIDs), limit)
-	err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error
-	return rows, err
+	args = append(args, scoreArgs...)
+	args = append(args, limit)
+	return sql, args, nil
+}
+
+func smartTargetingPerTagScorePredicate(classes []string, bounds *SmartTargetingScoreBounds) (string, []any, error) {
+	key := strings.Join(classes, ",")
+	if key == "A,B,C" {
+		return "", nil, nil
+	}
+	if bounds == nil {
+		return "", nil, fmt.Errorf("smart-targeting score bounds are required")
+	}
+	if (bounds.P33 == nil) != (bounds.P66 == nil) {
+		return "", nil, fmt.Errorf("smart-targeting score bounds are inconsistent")
+	}
+	if bounds.P33 == nil {
+		return "\n  AND FALSE", nil, nil
+	}
+	if *bounds.P33 > *bounds.P66 {
+		return "", nil, fmt.Errorf("smart-targeting score bounds are invalid")
+	}
+	p33, p66 := *bounds.P33, *bounds.P66
+	switch key {
+	case "A":
+		return "\n  AND ap.normalized_score > ?::double precision", []any{p66}, nil
+	case "B":
+		return "\n  AND ap.normalized_score > ?::double precision AND ap.normalized_score <= ?::double precision", []any{p33, p66}, nil
+	case "C":
+		return "\n  AND ap.normalized_score <= ?::double precision", []any{p33}, nil
+	case "A,B":
+		return "\n  AND ap.normalized_score > ?::double precision", []any{p33}, nil
+	case "A,C":
+		return "\n  AND (ap.normalized_score <= ?::double precision OR ap.normalized_score > ?::double precision)", []any{p33, p66}, nil
+	case "B,C":
+		return "\n  AND ap.normalized_score <= ?::double precision", []any{p66}, nil
+	default:
+		return "", nil, fmt.Errorf("invalid smart-targeting score classes")
+	}
 }
