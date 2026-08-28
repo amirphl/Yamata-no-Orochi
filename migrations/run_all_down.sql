@@ -5,6 +5,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0131_optimize_postgres_audience_maintenance_down.sql...'
+\i migrations/0131_optimize_postgres_audience_maintenance_down.sql
+
 \echo 'Running 0130_create_campaign_targeting_test_sampling_calculations_down.sql...'
 \i migrations/0130_create_campaign_targeting_test_sampling_calculations_down.sql
 
