@@ -11,7 +11,7 @@ DO $$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM pg_available_extensions 
-        WHERE name = 'pg_stat_statements' AND installed_version IS NOT NULL
+        WHERE name = 'pg_stat_statements' AND default_version IS NOT NULL
     ) THEN
         CREATE EXTENSION IF NOT EXISTS "pg_stat_statements";
     END IF;
@@ -31,4 +31,4 @@ ALTER SYSTEM SET max_prepared_transactions = 0;
 ALTER SYSTEM SET max_locks_per_transaction = 256;
 
 -- Set timezone
-SET timezone = 'UTC'; 
+SET timezone = 'UTC';
