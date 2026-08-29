@@ -179,8 +179,8 @@ when `is_current` is true; stale output is deliberately hidden and
 
 The worker processes selected tag IDs in persisted order:
 
-1. randomly choose exactly `sample_size_per_tag` currently eligible audiences
-   for the tag;
+1. choose exactly `sample_size_per_tag` currently eligible audiences for the
+   tag; no audience ordering is promised;
 2. if the full sample is unavailable, mark the tag unsatisfied and consume no
    partial sample;
 3. exclude audiences assigned to each earlier satisfied tag, so first
