@@ -121,10 +121,17 @@ func selectAndReserveExactSmartTargetingCandidates(
 			if campaign.SampleSizePerTag == nil || *campaign.SampleSizePerTag == 0 || *campaign.SampleSizePerTag > math.MaxInt64 {
 				return fmt.Errorf("Smart Targeting Test campaign %d has invalid sample_size_per_tag", campaign.ID)
 			}
+			// Keep the established persisted enum value for reporting/schema
+			// compatibility. Candidate SQL no longer performs the global random
+			// sort; Feature 4 still selects an arbitrary eligible set per tag.
 			selectionMethod = "random_per_tag"
+			bounds, boundsErr := audienceRepo.CalculateScoreBounds(txCtx, query)
+			if boundsErr != nil {
+				return boundsErr
+			}
 			excluded := make([]int64, 0)
 			for _, tagID := range testSamplingTagIDs {
-				tagRows, sampleErr := audienceRepo.SelectRandomForTag(txCtx, query, tagID, excluded, int64(*campaign.SampleSizePerTag))
+				tagRows, sampleErr := audienceRepo.SelectForTag(txCtx, query, bounds, tagID, excluded, int64(*campaign.SampleSizePerTag))
 				if sampleErr != nil {
 					return sampleErr
 				}
