@@ -178,23 +178,25 @@ func (s *CampaignFlowImpl) calculateSmartTargetingTestSampleForInput(ctx context
 	excluded := make([]int64, 0)
 	audienceRepo := repository.NewSmartTargetingAudienceRepository(s.db)
 	query := smartTargetingTestSamplingAudienceQuery(bundleID, tagIDs, input)
+	bounds, err := audienceRepo.CalculateScoreBounds(ctx, query)
+	if err != nil {
+		return nil, err
+	}
 	for position, tagID := range tagIDs {
-		rows, err := audienceRepo.SelectRandomForTag(ctx, query, tagID, excluded, int64(sampleSizePerTag))
+		ids, err := audienceRepo.SelectIDsForTag(ctx, query, bounds, tagID, excluded, int64(sampleSizePerTag))
 		if err != nil {
 			return nil, err
 		}
 		item := dto.SmartTargetingTestSamplingTagResult{
-			TagID: uint(tagID), TagDisplayName: input.displayNames[uint(tagID)], SelectionOrder: position, AvailableCount: int64(len(rows)),
-			Satisfied: uint64(len(rows)) == sampleSizePerTag,
+			TagID: uint(tagID), TagDisplayName: input.displayNames[uint(tagID)], SelectionOrder: position, AvailableCount: int64(len(ids)),
+			Satisfied: uint64(len(ids)) == sampleSizePerTag,
 		}
 		result.results = append(result.results, item)
 		if !item.Satisfied {
 			continue
 		}
 		result.satisfied = append(result.satisfied, item)
-		for _, row := range rows {
-			excluded = append(excluded, row.ID)
-		}
+		excluded = append(excluded, ids...)
 	}
 	effective, err := checkedSmartTargetingTestAudienceCount(len(result.satisfied), sampleSizePerTag)
 	if err != nil {
