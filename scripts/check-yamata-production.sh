@@ -210,8 +210,12 @@ schema_checks="$("${DOCKER[@]}" exec yamata-postgres-beta sh -lc \
 	     AND column_name='\''selection_order'\''
 	 );
 	 SELECT to_regclass('\''public.campaign_audience_tag_attributions'\'') IS NOT NULL;
-	 SELECT to_regclass('\''public.payam_sms_send_responses'\'') IS NOT NULL;"')"
-[[ "$schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Required migrations through 0130 are incomplete or inconsistent"
+	 SELECT to_regclass('\''public.payam_sms_send_responses'\'') IS NOT NULL;
+	 SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='\''pg_stat_statements'\'');
+	 SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname='\''pgstattuple'\'');
+	 SELECT to_regclass('\''public.idx_audience_profiles_uid'\'') IS NULL;
+	 SELECT to_regclass('\''public.idx_audience_profiles_phone_number'\'') IS NULL;"')"
+[[ "$schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Required migrations through 0131 are incomplete or inconsistent"
 
 [[ -x "$PROJECT_DIR/scripts/check-yamata-certificates.sh" ]] ||
 	die "Missing certificate checker in $PROJECT_DIR/scripts"
