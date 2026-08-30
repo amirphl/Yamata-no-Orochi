@@ -26,19 +26,28 @@ type CampaignSelectedTag struct {
 func (CampaignSelectedTag) TableName() string { return "campaign_selected_tags" }
 
 type SmartTargetingTagRow struct {
-	TagID                 uint     `gorm:"column:tag_id"`
-	TagName               string   `gorm:"column:tag_name"`
-	TagDisplayTitle       *string  `gorm:"column:tag_display_title"`
-	TagAudiencePersona    *string  `gorm:"column:tag_audience_persona"`
-	TagAudienceCount      *int64   `gorm:"column:tag_audience_count"`
-	BundlePersonaFitScore *float64 `gorm:"column:bundle_persona_fit_score"`
-	EvaluationRunID       *int64   `gorm:"column:evaluation_run_id"`
-	FitLevel              *string  `gorm:"column:fit_level"`
-	RelationType          *string  `gorm:"column:relation_type"`
-	Reason                *string  `gorm:"column:reason"`
-	TestPhaseAvgCTR       *float64 `gorm:"column:test_phase_avg_ctr"`
-	OverallAvgCTR         *float64 `gorm:"column:overall_avg_ctr"`
-	Selected              bool     `gorm:"column:selected"`
+	TagID                   uint     `gorm:"column:tag_id"`
+	TagName                 string   `gorm:"column:tag_name"`
+	TagDisplayTitle         *string  `gorm:"column:tag_display_title"`
+	TagAudiencePersona      *string  `gorm:"column:tag_audience_persona"`
+	TagAudienceCount        *int64   `gorm:"column:tag_audience_count"`
+	BundlePersonaFitScore   *float64 `gorm:"column:bundle_persona_fit_score"`
+	EvaluationRunID         *int64   `gorm:"column:evaluation_run_id"`
+	FitLevel                *string  `gorm:"column:fit_level"`
+	RelationType            *string  `gorm:"column:relation_type"`
+	Reason                  *string  `gorm:"column:reason"`
+	TestPhaseAvgCTR         *float64 `gorm:"column:test_phase_avg_ctr"`
+	TotalTestSelectedCount  *int64   `gorm:"column:total_test_selected_count"`
+	TotalTestSentCount      *int64   `gorm:"column:total_test_sent_count"`
+	TotalTestDeliveredCount *int64   `gorm:"column:total_test_delivered_count"`
+	TotalTestClickCount     *int64   `gorm:"column:total_test_click_count"`
+	SelectedCount           *int64   `gorm:"column:selected_count"`
+	SentCount               *int64   `gorm:"column:sent_count"`
+	DeliveredCount          *int64   `gorm:"column:delivered_count"`
+	ClickCount              *int64   `gorm:"column:click_count"`
+	TestCampaignCTR         *float64 `gorm:"column:test_campaign_ctr"`
+	OverallAvgCTR           *float64 `gorm:"column:overall_avg_ctr"`
+	Selected                bool     `gorm:"column:selected"`
 }
 
 type CampaignSelectedTagSummary struct {
