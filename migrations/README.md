@@ -4,10 +4,10 @@ This directory contains the ordered PostgreSQL schema history for Yamata no
 Orochi. The current schema head is:
 
 ```text
-0131_optimize_postgres_audience_maintenance.sql
+0132_create_tag_test_performance_reports.sql
 ```
 
-There are 133 numbered up files and 132 numbered down files. Both aggregate
+There are 134 numbered up files and 133 numbered down files. Both aggregate
 manifests currently include every matching file exactly once. The difference is
 `0050_remove_short_links_indexes.sql`, which has no checked-in down migration.
 
@@ -28,15 +28,15 @@ number—is the migration identity:
 - `0104_create_sent_rubika_messages`
 - `0104_create_splus_status_results`
 
-New changes should use the next unused ordinal (`0132` after the current head),
+New changes should use the next unused ordinal (`0133` after the current head),
 include a down file whenever rollback is safe, and update both aggregate
 manifests. Do not edit a migration that may already have been deployed; add a
 corrective migration so every environment retains the same append-only history.
 
 ## Aggregate manifests
 
-[`run_all_up.sql`](run_all_up.sql) includes all 133 up files in filename order.
-[`run_all_down.sql`](run_all_down.sql) includes all 132 available down files
+[`run_all_up.sql`](run_all_up.sql) includes all 134 up files in filename order.
+[`run_all_down.sql`](run_all_down.sql) includes all 133 available down files
 once. Its order is the reverse filename order except for the existing
 `0034`/`0035` swap; treat the checked-in manifest order as canonical and review
 dependencies before changing it.
@@ -83,9 +83,9 @@ internal `ON_ERROR_STOP` supplies fail-fast behavior.
 The production release path is
 [`scripts/deploy-production-beta.sh`](../scripts/deploy-production-beta.sh).
 It stops both application writers, invokes
-[`scripts/init-beta-database.sh`](../scripts/init-beta-database.sh), applies the
-required current migrations, restarts the API and isolated scheduler, and runs
-topology/schema checks.
+[`scripts/init-beta-database.sh`](../scripts/init-beta-database.sh) to apply only
+pending migrations, runs a read-only required-schema verification, restarts the
+API and isolated scheduler, and runs topology/schema checks.
 
 `init-beta-database.sh` tracks the last successfully applied filename in the
 repository-root `.migration_tracker_beta`. That file is operational state, not
@@ -101,15 +101,17 @@ attempts the entire history. Stop and determine the real schema state instead.
 Follow [`../PRODUCTION_MIGRATION.md`](../PRODUCTION_MIGRATION.md). During that
 workflow, use
 [`scripts/apply-yamata-required-migrations.sh`](../scripts/apply-yamata-required-migrations.sh)
-only at the documented point with both `yamata-app-beta` and
+with `--repair` only at the documented point with both `yamata-app-beta` and
 `yamata-campaign-scheduler-beta` stopped.
 
 The required-migrations helper is deliberately not a general migration engine.
-It requires the Bundle schema from `0111`, refuses to auto-apply destructive
-`0119`, applies an idempotent subset needed through `0131`, validates critical
-tables/columns/indexes, and then advances `.migration_tracker_beta` to at least
-`0131`. It preserves a valid tracker already pointing to a later available
-migration, so the helper cannot move general migration state backward.
+Its default `--verify-only` mode performs catalog checks without modifying the
+database. Explicit `--repair` mode requires the Bundle schema from `0111`,
+refuses to auto-apply destructive `0119`, applies an idempotent subset needed
+through `0132`, validates critical schema and data invariants, and then advances
+`.migration_tracker_beta` to at least `0132`. It preserves a valid tracker
+already pointing to a later available migration, so the helper cannot move
+general migration state backward.
 
 ## Applying one migration
 
@@ -233,6 +235,7 @@ every production change.
 | `0129` | Immediate PayamSMS batch response bodies, response headers, HTTP status, retry counts, and terminal errors for campaign diagnostics |
 | `0130` | Durable asynchronous Smart Targeting Test sampling calculations and aggregate per-tag results |
 | `0131` | PostgreSQL query observability, redundant audience-index removal, and large-table autovacuum/statistics tuning |
+| `0132` | Durable, scheduler-driven Smart Targeting Test Campaign tag CTR reports and materialized Bundle/tag summaries |
 
 ## Current schema areas
 
