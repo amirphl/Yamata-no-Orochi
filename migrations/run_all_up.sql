@@ -404,5 +404,8 @@
 \echo 'Running 0131_optimize_postgres_audience_maintenance.sql...'
 \i migrations/0131_optimize_postgres_audience_maintenance.sql
 
+\echo 'Running 0132_create_tag_test_performance_reports.sql...'
+\i migrations/0132_create_tag_test_performance_reports.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
