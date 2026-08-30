@@ -21,10 +21,11 @@ type CampaignSelectedTagRepositoryImpl struct {
 }
 
 type campaignSelectedTagSnapshot struct {
-	TagID          uint
-	DisplayTitle   *string
-	AudienceCount  *int64
-	BundleFitScore *float64
+	TagID           uint
+	DisplayTitle    *string
+	AudienceCount   *int64
+	BundleFitScore  *float64
+	TestPhaseAvgCTR *float64
 }
 
 func invalidateCampaignSmartTargetingTestPreview(db *gorm.DB, campaignID uint) error {
@@ -79,9 +80,9 @@ func smartTagOrder(sortBy, direction string) (string, error) {
 		expression = "available_tags.tag_audience_count"
 	case "bundle_persona_fit_score":
 		expression = "available_tags.bundle_persona_fit_score"
-	case "test_phase_avg_ctr", "overall_avg_ctr":
-		// CTR values are intentionally unavailable in this version. A stable ID
-		// order makes these accepted future-facing sorts deterministic today.
+	case "test_phase_avg_ctr":
+		expression = "tag_test_summary.test_phase_avg_ctr"
+	case "overall_avg_ctr":
 		return "available_tags.tag_id ASC", nil
 	default:
 		return "", fmt.Errorf("invalid sort field")
@@ -140,8 +141,18 @@ func availableSmartTagsQuery(db *gorm.DB, bundleID uint) *gorm.DB {
 }
 
 func (r *CampaignSelectedTagRepositoryImpl) baseAvailableQuery(ctx context.Context, bundleID uint, search string) *gorm.DB {
-	query := availableSmartTagsQuery(r.getDB(ctx), bundleID)
+	query := availableSmartTagsQuery(r.getDB(ctx), bundleID).
+		Joins(`LEFT JOIN tag_test_phase_performance_summaries AS tag_test_summary
+                 ON tag_test_summary.bundle_id = ?
+                AND tag_test_summary.tag_id = available_tags.tag_id`, bundleID)
 	return applySmartTagSearch(query, search)
+}
+
+func applyCampaignTestPerformance(query *gorm.DB, campaignID, bundleID uint) *gorm.DB {
+	return query.Joins(`LEFT JOIN campaign_tag_test_performances AS campaign_test_performance
+                 ON campaign_test_performance.campaign_id = ?
+                AND campaign_test_performance.bundle_id = ?
+                AND campaign_test_performance.tag_id = available_tags.tag_id`, campaignID, bundleID)
 }
 
 func (r *CampaignSelectedTagRepositoryImpl) ListAvailable(ctx context.Context, bundleID, campaignID uint, search, sortBy, sortDirection string, limit, offset int) ([]*models.SmartTargetingTagRow, int64, error) {
@@ -168,12 +179,24 @@ func (r *CampaignSelectedTagRepositoryImpl) ListAvailable(ctx context.Context, b
                  available_tags.fit_level,
                  available_tags.relation_type,
                  available_tags.reason,
-                 NULL::numeric AS test_phase_avg_ctr,
+                 tag_test_summary.test_phase_avg_ctr,
+                 tag_test_summary.total_test_selected_count,
+                 tag_test_summary.total_test_sent_count,
+                 tag_test_summary.total_test_delivered_count,
+                 tag_test_summary.total_test_click_count,
+                 campaign_test_performance.selected_count,
+                 campaign_test_performance.sent_count,
+                 campaign_test_performance.delivered_count,
+                 campaign_test_performance.click_count,
+                 campaign_test_performance.test_campaign_ctr,
                  NULL::numeric AS overall_avg_ctr,
                  EXISTS (
                      SELECT 1 FROM campaign_selected_tags AS selected
-                     WHERE selected.campaign_id = ? AND selected.tag_id = available_tags.tag_id
-                 ) AS selected`, campaignID).
+                     WHERE selected.campaign_id = ?
+                       AND selected.bundle_id = ?
+                       AND selected.tag_id = available_tags.tag_id
+				 ) AS selected`, campaignID, bundleID)
+	query = applyCampaignTestPerformance(query, campaignID, bundleID).
 		Order(order)
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -261,10 +284,14 @@ func (r *CampaignSelectedTagRepositoryImpl) Replace(ctx context.Context, campaig
 	snapshots := make([]campaignSelectedTagSnapshot, 0, len(tagIDs))
 	if len(tagIDs) > 0 {
 		err := availableSmartTagsQuery(db, bundleID).
+			Joins(`LEFT JOIN tag_test_phase_performance_summaries AS tag_test_summary
+                     ON tag_test_summary.bundle_id = ?
+                    AND tag_test_summary.tag_id = available_tags.tag_id`, bundleID).
 			Select(`available_tags.tag_id,
 				available_tags.tag_display_title AS display_title,
 				available_tags.tag_audience_count AS audience_count,
-				available_tags.bundle_persona_fit_score AS bundle_fit_score`).
+				available_tags.bundle_persona_fit_score AS bundle_fit_score,
+				tag_test_summary.test_phase_avg_ctr`).
 			Where("available_tags.tag_id IN ?", tagIDs).
 			Order("available_tags.tag_id ASC").
 			Scan(&snapshots).Error
@@ -342,9 +369,9 @@ func buildCampaignSelectedTagRows(
 			BundlePersonaFitScoreSnapshot: item.BundleFitScore,
 			TagDisplayTitleSnapshot:       item.DisplayTitle,
 			TagAudienceCountSnapshot:      item.AudienceCount,
-			// No per-tag CTR source exists yet. Persist nil to distinguish
-			// unavailable metrics from a real measured zero.
-			TestPhaseAvgCTRSnapshot: nil,
+			// Preserve the latest materialized Test metric at selection time.
+			// Nil remains distinct from a real measured zero CTR.
+			TestPhaseAvgCTRSnapshot: item.TestPhaseAvgCTR,
 			OverallAvgCTRSnapshot:   nil,
 			SelectedByCustomerID:    selectedByCustomerID,
 			CreatedAt:               now, UpdatedAt: now,
