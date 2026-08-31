@@ -21,7 +21,7 @@ func TestSmartTagOrderAllowlist(t *testing.T) {
 		{"database_order", "asc", "available_tags.tag_id ASC"},
 		{"tag_capacity", "desc", "available_tags.tag_audience_count DESC NULLS LAST, available_tags.tag_id ASC"},
 		{"bundle_persona_fit_score", "asc", "available_tags.bundle_persona_fit_score ASC NULLS LAST, available_tags.tag_id ASC"},
-		{"test_phase_avg_ctr", "desc", "available_tags.tag_id ASC"},
+		{"test_phase_avg_ctr", "desc", "tag_test_summary.test_phase_avg_ctr DESC NULLS LAST, available_tags.tag_id ASC"},
 	}
 	for _, tt := range tests {
 		got, err := smartTagOrder(tt.sortBy, tt.direction)
@@ -86,11 +86,69 @@ func TestAvailableSmartTagsQueryPrefersScoreSnapshotWithCatalogFallback(t *testi
 	}
 }
 
+func TestBaseAvailableSmartTagsQueryReadsMaterializedTestPerformance(t *testing.T) {
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN: "host=localhost user=test dbname=test sslmode=disable",
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("open dry-run database: %v", err)
+	}
+	repo := &CampaignSelectedTagRepositoryImpl{db: db}
+
+	var rows []uint
+	statement := repo.baseAvailableQuery(t.Context(), 42, "").
+		Select("available_tags.tag_id").
+		Order("tag_test_summary.test_phase_avg_ctr DESC NULLS LAST").
+		Find(&rows).Statement
+	if statement.Error != nil {
+		t.Fatalf("build materialized tag-performance query: %v", statement.Error)
+	}
+	sql := statement.SQL.String()
+	for _, fragment := range []string{
+		"LEFT JOIN tag_test_phase_performance_summaries AS tag_test_summary",
+		"tag_test_summary.bundle_id = $3",
+		"ORDER BY tag_test_summary.test_phase_avg_ctr DESC NULLS LAST",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("materialized tag-performance query does not contain %q:\n%s", fragment, sql)
+		}
+	}
+}
+
+func TestCampaignTestPerformanceJoinIsBundleScoped(t *testing.T) {
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN: "host=localhost user=test dbname=test sslmode=disable",
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("open dry-run database: %v", err)
+	}
+	repo := &CampaignSelectedTagRepositoryImpl{db: db}
+
+	var rows []uint
+	statement := applyCampaignTestPerformance(repo.baseAvailableQuery(t.Context(), 42, ""), 77, 42).
+		Select("available_tags.tag_id").
+		Find(&rows).Statement
+	if statement.Error != nil {
+		t.Fatalf("build Campaign tag-performance query: %v", statement.Error)
+	}
+	sql := statement.SQL.String()
+	for _, fragment := range []string{
+		"campaign_test_performance.campaign_id = $4",
+		"campaign_test_performance.bundle_id = $5",
+		"campaign_test_performance.tag_id = available_tags.tag_id",
+	} {
+		if !strings.Contains(sql, fragment) {
+			t.Fatalf("Campaign tag-performance query does not contain %q:\n%s", fragment, sql)
+		}
+	}
+}
+
 func TestBuildCampaignSelectedTagRowsPreservesRequestOrder(t *testing.T) {
 	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
+	measuredCTR := 0.08
 	snapshots := []campaignSelectedTagSnapshot{
 		{TagID: 2},
-		{TagID: 5},
+		{TagID: 5, TestPhaseAvgCTR: &measuredCTR},
 		{TagID: 9},
 	}
 
@@ -109,6 +167,9 @@ func TestBuildCampaignSelectedTagRowsPreservesRequestOrder(t *testing.T) {
 	}
 	if want := []int{0, 1, 2}; !reflect.DeepEqual(gotPositions, want) {
 		t.Fatalf("selection positions = %v, want %v", gotPositions, want)
+	}
+	if rows[2].TestPhaseAvgCTRSnapshot == nil || *rows[2].TestPhaseAvgCTRSnapshot != measuredCTR {
+		t.Fatalf("tag 5 Test CTR snapshot = %v, want %v", rows[2].TestPhaseAvgCTRSnapshot, measuredCTR)
 	}
 
 	if _, err := buildCampaignSelectedTagRows(17, 3, 7, []uint{9, 4}, snapshots, now); !errors.Is(err, ErrInvalidCampaignSelectedTags) {
