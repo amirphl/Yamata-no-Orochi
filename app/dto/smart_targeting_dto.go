@@ -29,10 +29,24 @@ type SmartTargetingTagItem struct {
 	EvaluationRunID       *int64   `json:"evaluation_run_id"`
 	FitLevel              *string  `json:"fit_level"`
 	RelationType          *string  `json:"relation_type"`
-	// Reason                *string  `json:"reason"`
-	TestPhaseAvgCTR *float64 `json:"test_phase_avg_ctr"`
-	OverallAvgCTR   *float64 `json:"overall_avg_ctr"`
-	Selected        bool     `json:"selected"`
+	// TestPhaseAvgCTR is the weighted Bundle/tag Test CTR. It is null when the
+	// materialized denominator is zero or no Test report exists.
+	TestPhaseAvgCTR         *float64 `json:"test_phase_avg_ctr"`
+	TotalTestSelectedCount  *int64   `json:"total_test_selected_count"`
+	TotalTestSentCount      *int64   `json:"total_test_sent_count"`
+	TotalTestDeliveredCount *int64   `json:"total_test_delivered_count"`
+	TotalTestClickCount     *int64   `json:"total_test_click_count"`
+
+	// Campaign-specific fields are populated only by the campaign-scoped tag
+	// endpoint and remain null before a report has been prepared.
+	SelectedCount   *int64   `json:"selected_count"`
+	SentCount       *int64   `json:"sent_count"`
+	DeliveredCount  *int64   `json:"delivered_count"`
+	ClickCount      *int64   `json:"click_count"`
+	TestCampaignCTR *float64 `json:"test_campaign_ctr"`
+
+	OverallAvgCTR *float64 `json:"overall_avg_ctr"`
+	Selected      bool     `json:"selected"`
 }
 
 // SmartTargetingSelectionSummary describes the complete selection, not only
