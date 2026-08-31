@@ -5,7 +5,25 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestLoadSchedulerConfigReadsTagTestPerformanceSettings(t *testing.T) {
+	t.Setenv("TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED", "true")
+	t.Setenv("TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL", "45s")
+	t.Setenv("TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE", "17")
+
+	cfg := loadSchedulerConfig()
+	if !cfg.TagTestPerformanceSchedulerEnabled {
+		t.Fatal("TagTestPerformanceSchedulerEnabled = false, want true")
+	}
+	if cfg.TagTestPerformanceSchedulerInterval != 45*time.Second {
+		t.Fatalf("TagTestPerformanceSchedulerInterval = %s, want 45s", cfg.TagTestPerformanceSchedulerInterval)
+	}
+	if cfg.TagTestPerformanceSchedulerBatchSize != 17 {
+		t.Fatalf("TagTestPerformanceSchedulerBatchSize = %d, want 17", cfg.TagTestPerformanceSchedulerBatchSize)
+	}
+}
 
 func TestReadConfigTextFilePreservesMultilineContent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "prompt")
