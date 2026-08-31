@@ -254,9 +254,18 @@ func smartTargetingTagItem(row *models.SmartTargetingTagRow) dto.SmartTargetingT
 		FitLevel:              row.FitLevel,
 		RelationType:          row.RelationType,
 		// Reason:                row.Reason,
-		TestPhaseAvgCTR: row.TestPhaseAvgCTR,
-		OverallAvgCTR:   row.OverallAvgCTR,
-		Selected:        row.Selected,
+		TestPhaseAvgCTR:         row.TestPhaseAvgCTR,
+		TotalTestSelectedCount:  row.TotalTestSelectedCount,
+		TotalTestSentCount:      row.TotalTestSentCount,
+		TotalTestDeliveredCount: row.TotalTestDeliveredCount,
+		TotalTestClickCount:     row.TotalTestClickCount,
+		SelectedCount:           row.SelectedCount,
+		SentCount:               row.SentCount,
+		DeliveredCount:          row.DeliveredCount,
+		ClickCount:              row.ClickCount,
+		TestCampaignCTR:         row.TestCampaignCTR,
+		OverallAvgCTR:           row.OverallAvgCTR,
+		Selected:                row.Selected,
 	}
 }
 
