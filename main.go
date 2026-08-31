@@ -427,6 +427,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	bundleRepo := repository.NewBundleRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
+	tagTestPerformanceRepo := repository.NewTagTestPerformanceRepository(db)
 	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
 	platformBasePriceRepo := repository.NewPlatformBasePriceRepository(db)
 	pagePriceRepo := repository.NewPagePriceRepository(db)
@@ -922,6 +923,17 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		)
 		stopTestSamplingScheduler := testSamplingScheduler.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopTestSamplingScheduler)
+	}
+
+	if cfg.Scheduler.TagTestPerformanceSchedulerEnabled {
+		tagTestPerformanceScheduler := scheduler.NewTagTestPerformanceScheduler(
+			tagTestPerformanceRepo,
+			log.Default(),
+			cfg.Scheduler.TagTestPerformanceSchedulerInterval,
+			cfg.Scheduler.TagTestPerformanceSchedulerBatchSize,
+		)
+		stopTagTestPerformanceScheduler := tagTestPerformanceScheduler.Start(context.Background())
+		stopFuncs = append(stopFuncs, stopTagTestPerformanceScheduler)
 	}
 
 	// Create application struct from FiberRouter
