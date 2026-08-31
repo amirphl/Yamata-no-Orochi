@@ -407,7 +407,10 @@ type SchedulerConfig struct {
 	MessageSendMockEnabled    bool          `json:"message_send_mock_enabled"`
 	// SmartTargetingCapacitySchedulerEnabled controls both durable Smart
 	// Targeting calculation pools: exact capacity and Test sampling.
-	SmartTargetingCapacitySchedulerEnabled bool `json:"smart_targeting_capacity_scheduler_enabled"`
+	SmartTargetingCapacitySchedulerEnabled bool          `json:"smart_targeting_capacity_scheduler_enabled"`
+	TagTestPerformanceSchedulerEnabled     bool          `json:"tag_test_performance_scheduler_enabled"`
+	TagTestPerformanceSchedulerInterval    time.Duration `json:"tag_test_performance_scheduler_interval"`
+	TagTestPerformanceSchedulerBatchSize   int           `json:"tag_test_performance_scheduler_batch_size"`
 }
 
 func loadSchedulerConfig() SchedulerConfig {
@@ -417,6 +420,9 @@ func loadSchedulerConfig() SchedulerConfig {
 		MessageSendDelay:                       getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
 		MessageSendMockEnabled:                 getEnvBool("CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED", false),
 		SmartTargetingCapacitySchedulerEnabled: getEnvBool("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", false),
+		TagTestPerformanceSchedulerEnabled:     getEnvBool("TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED", false),
+		TagTestPerformanceSchedulerInterval:    getEnvDuration("TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL", time.Minute),
+		TagTestPerformanceSchedulerBatchSize:   getEnvInt("TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE", 25),
 	}
 }
 
@@ -1079,6 +1085,15 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 	if cfg.Cache.Enabled {
 		if cfg.Cache.Provider == "redis" && cfg.Cache.RedisURL == "" {
 			errors = append(errors, "CACHE_REDIS_URL is required when cache is enabled with redis provider")
+		}
+	}
+
+	if cfg.Scheduler.TagTestPerformanceSchedulerEnabled {
+		if cfg.Scheduler.TagTestPerformanceSchedulerInterval <= 0 {
+			errors = append(errors, "TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL must be positive")
+		}
+		if cfg.Scheduler.TagTestPerformanceSchedulerBatchSize <= 0 {
+			errors = append(errors, "TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE must be positive")
 		}
 	}
 
