@@ -1,5 +1,3 @@
-global:
-  scrape_timeout: 10s
-target:
-  # leave empty to use DATA_SOURCE_NAME env var; file presence silences startup warning
-  uri: ""
+# The exporter config only defines authentication modules for multi-target mode.
+# This deployment uses the DATA_SOURCE_* environment variables for one target.
+auth_modules: {}
