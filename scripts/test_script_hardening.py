@@ -204,5 +204,91 @@ class UtilityConsistencyTests(unittest.TestCase):
         self.assertNotIn("989121234567", key)
 
 
+class DeploymentMigrationSafetyTests(unittest.TestCase):
+    @staticmethod
+    def _paths():
+        scripts_dir = Path(__file__).resolve().parent
+        return (
+            scripts_dir.parent,
+            scripts_dir / "apply-yamata-required-migrations.sh",
+            scripts_dir / "deploy-beta.sh",
+        )
+
+    @staticmethod
+    def _fake_docker(directory: Path):
+        docker_log = directory / "docker.log"
+        docker = directory / "docker"
+        docker.write_text(
+            """#!/usr/bin/env bash
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "${1:-}" in
+  info) exit 0 ;;
+  inspect)
+    if [ "${2:-}" = "-f" ]; then printf 'true\\n'; fi
+    exit 0
+    ;;
+  exec)
+    if [ "${3:-}" = "printenv" ]; then
+      case "${4:-}" in
+        POSTGRES_USER) printf 'test_user\\n' ;;
+        POSTGRES_DB) printf 'test_db\\n' ;;
+      esac
+    else
+      printf 't\\n'
+    fi
+    exit 0
+    ;;
+esac
+exit 1
+""",
+            encoding="utf-8",
+        )
+        docker.chmod(0o755)
+        return docker_log
+
+    def test_routine_deploy_uses_read_only_schema_verification(self):
+        _, _, deploy = self._paths()
+        content = deploy.read_text(encoding="utf-8")
+        self.assertIn(
+            "apply-yamata-required-migrations.sh --verify-only", content
+        )
+
+    def test_required_schema_helper_is_read_only_by_default(self):
+        project_root, helper, _ = self._paths()
+        with tempfile.TemporaryDirectory() as directory:
+            directory_path = Path(directory)
+            docker_log = self._fake_docker(directory_path)
+            env = {
+                **os.environ,
+                "PATH": f"{directory_path}:{os.environ['PATH']}",
+                "FAKE_DOCKER_LOG": str(docker_log),
+            }
+            result = subprocess.run(
+                [str(helper), str(project_root)],
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+            docker_calls = docker_log.read_text(encoding="utf-8")
+
+        self.assertIn("Verification mode: no migrations will be applied", result.stdout)
+        self.assertIn("Required schema verified", result.stdout)
+        self.assertNotIn("Applying ", result.stdout)
+        self.assertNotIn("exec -i", docker_calls)
+
+    def test_required_schema_modes_are_mutually_exclusive(self):
+        project_root, helper, _ = self._paths()
+        result = subprocess.run(
+            [str(helper), "--repair", "--verify-only", str(project_root)],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("mutually exclusive", result.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
