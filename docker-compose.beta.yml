@@ -112,23 +112,45 @@ services:
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-    command: >
-      sh -c '
-        set -euo pipefail
+      BACKUP_RETRY_SECONDS: ${BACKUP_RETRY_SECONDS:-300}
+    command:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
         mkdir -p /backups
+        export PGPASSWORD="$${DB_PASSWORD}"
         while true; do
-          ts=$(date -u +%Y%m%dT%H%M%SZ)
-          export PGPASSWORD="${DB_PASSWORD}"
-          pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" -Fc -f "/backups/${DB_NAME}-$${ts}.dump"
-          echo "[backup] $(date -u +%Y-%m-%dT%H:%M:%SZ) backup completed: ${DB_NAME}-$${ts}.dump"
-          sleep "${BACKUP_INTERVAL_SECONDS:-86400}"
+          ts=$$(date -u +%Y%m%dT%H%M%SZ)
+          backup="$${DB_NAME}-$${ts}.dump"
+          temporary="/backups/.$${backup}.tmp"
+          echo "[backup] $$(date -u +%Y-%m-%dT%H:%M:%SZ) starting: $${backup}"
+          if pg_dump -h "$${DB_HOST}" -p "$${DB_PORT}" -U "$${DB_USER}" -d "$${DB_NAME}" -Fc -f "$${temporary}" &&
+             pg_restore --list "$${temporary}" >/dev/null; then
+            mv "$${temporary}" "/backups/$${backup}"
+            touch /backups/.last-success
+            echo "[backup] $$(date -u +%Y-%m-%dT%H:%M:%SZ) backup completed: $${backup}"
+            sleep "$${BACKUP_INTERVAL_SECONDS}"
+          else
+            status=$$?
+            rm -f "$${temporary}"
+            echo "[backup] $$(date -u +%Y-%m-%dT%H:%M:%SZ) backup failed (status $${status}); retrying in $${BACKUP_RETRY_SECONDS}s" >&2
+            sleep "$${BACKUP_RETRY_SECONDS}"
+          fi
         done
-      '
     volumes:
       - postgres_backups_beta:/backups
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.92
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'test -f /backups/.last-success && age=$$(($$(date +%s)-$$(stat -c %Y /backups/.last-success))) && test "$${age}" -le $$(($${BACKUP_INTERVAL_SECONDS}+$${BACKUP_RETRY_SECONDS}+3600))'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: ${BACKUP_HEALTH_START_PERIOD:-2h}
     security_opt:
       - no-new-privileges:true
 
@@ -187,6 +209,8 @@ services:
       DJANGO_SUPERUSER_EMAIL: ${SENTRY_SUPERUSER_EMAIL}
       EMAIL_URL: ${SENTRY_EMAIL_URL}
       SERVER_ROLE: all_in_one
+      # Monitor 1 targets a service on this private Compose network.
+      GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS: ${GLITCHTIP_UPTIME_ALLOW_PRIVATE_IPS:-True}
     command: ["./bin/start.sh"]
     networks:
       yamata-network-beta:
@@ -439,6 +463,9 @@ services:
       CAMPAIGN_MESSAGE_SEND_DELAY: ${CAMPAIGN_MESSAGE_SEND_DELAY}
       CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED: ${CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED:-false}
       SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED: ${SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED}
+      TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED: ${TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED:-false}
+      TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL: ${TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL:-1m}
+      TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE: ${TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE:-25}
 
       # Smart Tag Evaluation Configuration
       SMART_TAG_EVALUATION_ENABLED: ${SMART_TAG_EVALUATION_ENABLED}
@@ -575,7 +602,10 @@ services:
       - /tmp
 
   nginx-sentry-forwarder-beta:
-    image: python:3.12-alpine
+    build:
+      context: scripts
+      dockerfile: ../docker/nginx-sentry-forwarder/Dockerfile
+    image: yamata-nginx-sentry-forwarder-beta
     container_name: yamata-nginx-sentry-forwarder-beta
     restart: unless-stopped
     depends_on:
@@ -598,12 +628,6 @@ services:
       NGINX_ERROR_LOG: /var/log/nginx/error.log
       NGINX_LOG_POLL_INTERVAL_SECONDS: 0.5
     volumes:
-      - type: bind
-        source: ./scripts/nginx_sentry_forwarder.py
-        target: /app/nginx_sentry_forwarder.py
-        read_only: true
-        bind:
-          create_host_path: false
       - nginx_logs_beta:/var/log/nginx:ro
     healthcheck:
       test:
@@ -628,8 +652,8 @@ services:
 
   cert-monitor-beta:
     build:
-      context: docker/cert-monitor
-      dockerfile: Dockerfile
+      context: scripts
+      dockerfile: ../docker/cert-monitor/Dockerfile
     image: yamata-cert-monitor-beta
     container_name: yamata-cert-monitor-beta
     restart: unless-stopped
@@ -654,12 +678,6 @@ services:
       SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD:-300}
       SMS_TIMEOUT: ${SMS_TIMEOUT:-30s}
     volumes:
-      - type: bind
-        source: ./scripts/cert_monitor.py
-        target: /app/cert_monitor.py
-        read_only: true
-        bind:
-          create_host_path: false
       - type: bind
         source: ./docker/nginx/sites-available/generated/beta
         target: /etc/nginx/sites-available
@@ -716,7 +734,10 @@ services:
 
   # Grafana (Optional - for monitoring dashboards)
   grafana-beta:
-    image: grafana/grafana:12.1.0-ubuntu
+    build:
+      context: docker/grafana
+      dockerfile: Dockerfile
+    image: yamata-grafana-beta
     container_name: yamata-grafana-beta
     restart: unless-stopped
     environment:
@@ -725,13 +746,14 @@ services:
       GF_SECURITY_COOKIE_SECURE: true
       GF_SECURITY_COOKIE_SAMESITE: strict
       GF_SECURITY_STRICT_TRANSPORT_SECURITY: true
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/yamata-overview.json
+      # Let Grafana generate its supported nonce-based CSP; the edge proxy
+      # passes this header through for monitoring.${DOMAIN}.
+      GF_SECURITY_CONTENT_SECURITY_POLICY: true
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/yamata-overview.json
       GF_SERVER_ROOT_URL: "https://${MONITORING_DOMAIN}/grafana/"
       GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana_data_beta:/var/lib/grafana
-      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards:ro
     # ports:
     #   - "127.0.0.1:3000:3000"  # Only accessible from localhost
     networks:
@@ -745,12 +767,13 @@ services:
 
   # Postgres Exporter for DB metrics
   postgres-exporter-beta:
-    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.20.1
     container_name: yamata-postgres-exporter-beta
     restart: unless-stopped
     environment:
-      DATA_SOURCE_NAME: postgresql://${DB_USER}:${DB_PASSWORD}@postgres-beta:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE}
-      # Optional config file for custom metrics; bind if provided
+      DATA_SOURCE_URI: postgres-beta:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSL_MODE}
+      DATA_SOURCE_USER: ${DB_USER}
+      DATA_SOURCE_PASS: ${DB_PASSWORD}
     volumes:
       - ./docker/postgres_exporter/postgres_exporter.yml:/postgres_exporter.yml:ro
     depends_on:
