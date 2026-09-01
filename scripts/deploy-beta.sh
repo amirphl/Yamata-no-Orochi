@@ -287,7 +287,7 @@ start_services() {
 	
 	# Start all supporting services explicitly, excluding app-beta to allow safe DB migration
 	# Note: nginx-beta depends on app-beta, so we start it after app-beta to avoid pulling app-beta up implicitly
-	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d \
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d --build \
 		postgres-beta \
 		redis-beta \
 		sentry-postgres-beta \
@@ -327,7 +327,12 @@ wait_for_services() {
 		for container in "${containers[@]}"; do
 			state=$($docker_cmd inspect -f '{{.State.Status}}' "$container" 2>/dev/null || echo missing)
 			health=$($docker_cmd inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || echo missing)
-			if [ "$state" != running ] || { [ "$health" != none ] && [ "$health" != healthy ]; }; then
+			# A large first backup can outlast this readiness loop. Docker keeps
+			# checking its freshness independently after the deployment completes.
+			if [ "$state" != running ] || { \
+				[ "$health" != none ] && [ "$health" != healthy ] && \
+				{ [ "$container" != yamata-postgres-backup-beta ] || [ "$health" != starting ]; }; \
+			}; then
 				all_running=false
 				break
 			fi
@@ -381,7 +386,7 @@ start_app_service() {
 	# Start services that depend on nginx after the proxy is up.
 	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d --build cert-monitor-beta
 	print_success "cert-monitor-beta started"
-	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d nginx-sentry-forwarder-beta
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d --build nginx-sentry-forwarder-beta
 	print_success "nginx-sentry-forwarder-beta started"
 }
 
@@ -525,6 +530,11 @@ main() {
 		print_error "Exact Smart Targeting capacity jobs are managed by the main API instance"
 		exit 1
 	fi
+	if [ "${TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED:-}" != "true" ]; then
+		print_error "TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED must remain true in .env.beta"
+		print_error "Tag Test performance jobs are managed by the main API instance"
+		exit 1
+	fi
 	if [ "${SMART_TAG_EVALUATION_ENABLED:-}" != "true" ] ||
 		[ "${SMART_TAG_EVALUATION_SCHEDULER_ENABLED:-}" != "true" ]; then
 		print_error "Smart-tag evaluation and its scheduler must remain enabled in .env.beta"
@@ -541,7 +551,10 @@ main() {
 	print_status "Initializing database and applying migrations..."
 	
 	./scripts/init-beta-database.sh --yes
-	./scripts/apply-yamata-required-migrations.sh "$PROJECT_ROOT"
+	# Routine deployments must not replay historical backfills or maintenance
+	# operations. The pending-migration runner above performs schema changes once;
+	# this second pass is deliberately read-only.
+	./scripts/apply-yamata-required-migrations.sh --verify-only "$PROJECT_ROOT"
 	print_success "Database initialization completed"
 	
 	# Start app service after successful migrations
