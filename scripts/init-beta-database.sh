@@ -333,15 +333,8 @@ show_database_info() {
     table_count=$("${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public'")
     echo "  Tables: $table_count"
     
-    # Show record counts for main tables
-    local tables=("account_types" "customers" "customer_sessions" "audit_log")
-    for table in "${tables[@]}"; do
-        if "${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table" >/dev/null 2>&1; then
-            local count
-            count=$("${DOCKER[@]}" exec yamata-postgres-beta psql -X -U "$DB_USER" -d "$DB_NAME" -tAc "SELECT COUNT(*) FROM $table")
-            echo "  $table: $count records"
-        fi
-    done
+    # Exact row counts can require full-table scans and do not establish schema
+    # readiness. Keep routine deployments limited to catalog-level checks.
 }
 
 # Function to show migration status
