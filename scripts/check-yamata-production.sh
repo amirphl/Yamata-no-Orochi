@@ -60,6 +60,10 @@ log "yamata-postgres-beta /dev/shm: $((postgres_shm_bytes / 1024 / 1024 / 1024))
 	die "Exact Smart Targeting capacity scheduling must be enabled in yamata-app-beta"
 [[ "$(env_value yamata-campaign-scheduler-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == false ]] ||
 	die "Exact Smart Targeting capacity scheduling must be disabled in the campaign scheduler"
+[[ "$(env_value yamata-app-beta TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED)" == true ]] ||
+	die "Tag Test performance scheduling must be enabled in yamata-app-beta"
+[[ "$(env_value yamata-campaign-scheduler-beta TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED)" == false ]] ||
+	die "Tag Test performance scheduling must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-campaign-scheduler-beta BOT_API_DOMAIN)" == http://app-beta:8080 ]] ||
 	die "Scheduler BOT_API_DOMAIN must be http://app-beta:8080"
 [[ "$(env_value yamata-campaign-scheduler-beta SERVER_HOST)" == 127.0.0.1 ]] ||
