@@ -4308,7 +4308,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a page of tags for an owned bundle before a campaign exists. When current score rows exist, their tag and score snapshots are authoritative; otherwise the endpoint falls back to active live tags with null evaluation fields. selected_tag_ids and the selection summary are empty; submit chosen IDs with campaign creation.",
+                "description": "Returns a page of tags for an owned bundle before a campaign exists, including materialized Bundle/tag Test totals and CTR. When current score rows exist, their tag and score snapshots are authoritative; otherwise the endpoint falls back to active live tags with null evaluation fields. selected_tag_ids and the selection summary are empty; submit chosen IDs with campaign creation.",
                 "produces": [
                     "application/json"
                 ],
@@ -6065,7 +6065,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a page of tags for an owned campaign, each row's selected state, the complete selected_tag_ids set across all pages, and the complete selection capacity summary. When the bundle has current score rows, tag names, display titles, personas, capacities, fit scores, and score explanations come from that completed evaluation snapshot. Otherwise active live tags are returned and evaluation fields are null.",
+                "description": "Returns a page of tags for an owned campaign, each row's selected state, materialized Bundle/tag Test totals and CTR, nullable per-Campaign Test totals and CTR, the complete selected_tag_ids set across all pages, and the complete selection capacity summary. When the bundle has current score rows, tag names, display titles, personas, capacities, fit scores, and score explanations come from that completed evaluation snapshot. Otherwise active live tags are returned and evaluation fields are null.",
                 "produces": [
                     "application/json"
                 ],
@@ -13019,6 +13019,12 @@
                 "bundle_persona_fit_score": {
                     "type": "number"
                 },
+                "click_count": {
+                    "type": "integer"
+                },
+                "delivered_count": {
+                    "type": "integer"
+                },
                 "evaluation_run_id": {
                     "type": "integer"
                 },
@@ -13034,6 +13040,13 @@
                 "selected": {
                     "type": "boolean"
                 },
+                "selected_count": {
+                    "description": "Campaign-specific fields are populated only by the campaign-scoped tag\nendpoint and remain null before a report has been prepared.",
+                    "type": "integer"
+                },
+                "sent_count": {
+                    "type": "integer"
+                },
                 "tag_capacity": {
                     "description": "TagAudiencePersona    *string  `json:\"tag_audience_persona\"`",
                     "type": "integer"
@@ -13045,9 +13058,24 @@
                 "tag_id": {
                     "type": "integer"
                 },
-                "test_phase_avg_ctr": {
-                    "description": "Reason                *string  `json:\"reason\"`",
+                "test_campaign_ctr": {
                     "type": "number"
+                },
+                "test_phase_avg_ctr": {
+                    "description": "TestPhaseAvgCTR is the weighted Bundle/tag Test CTR. It is null when the\nmaterialized denominator is zero or no Test report exists.",
+                    "type": "number"
+                },
+                "total_test_click_count": {
+                    "type": "integer"
+                },
+                "total_test_delivered_count": {
+                    "type": "integer"
+                },
+                "total_test_selected_count": {
+                    "type": "integer"
+                },
+                "total_test_sent_count": {
+                    "type": "integer"
                 }
             }
         },
