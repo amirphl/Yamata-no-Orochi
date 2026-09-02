@@ -69,6 +69,7 @@ Production requires this worker split in `.env.beta`:
 ```env
 CAMPAIGN_EXECUTION_ENABLED=false
 SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true
+TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED=true
 SMART_TAG_EVALUATION_ENABLED=true
 SMART_TAG_EVALUATION_SCHEDULER_ENABLED=true
 CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED=false
@@ -114,10 +115,10 @@ docker logs --tail 100 yamata-campaign-scheduler-beta
 
 Expected worker settings:
 
-| Container | Campaign execution | Exact-capacity scheduler | Smart-tag scheduler |
-|---|---:|---:|---:|
-| `yamata-app-beta` | `false` | `true` | `true` |
-| `yamata-campaign-scheduler-beta` | `true` | `false` | `false` |
+| Container | Campaign execution | Exact-capacity scheduler | Tag Test report scheduler | Smart-tag scheduler |
+|---|---:|---:|---:|---:|
+| `yamata-app-beta` | `false` | `true` | `true` | `true` |
+| `yamata-campaign-scheduler-beta` | `true` | `false` | `false` | `false` |
 
 The scheduler has no published port. Its bot callback base is the internal
 `http://app-beta:8080`; port 443 belongs to nginx, not the API container.
