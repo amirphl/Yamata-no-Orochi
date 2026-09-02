@@ -35,8 +35,10 @@ Both tag-list endpoints accept:
 - `page_size`: 1–100, default 20; `limit` is a compatibility alias and is
   ignored when `page_size` is supplied.
 
-`bundle_persona_fit_score` requires a completed Bundle evaluation. CTR fields
-remain null until those metrics are populated.
+`bundle_persona_fit_score` requires a completed Bundle evaluation.
+`test_phase_avg_ctr` reads the last materialized Bundle/tag Test result and is
+null until at least one attributed delivery exists. Sorting by that field uses
+the materialized value, with unavailable rows last.
 
 The effective tag source is resolved per Bundle:
 
@@ -54,6 +56,17 @@ not just the current page, plus `selected_tag_count` and
 `selected_raw_capacity`. The ID array retains the customer’s selection order
 independently of the table’s current search, sort, and pagination. The Bundle
 endpoint has no campaign selection and returns an empty selection summary.
+
+Each tag row also exposes materialized aggregate fields:
+
+- `total_test_selected_count`, `total_test_sent_count`,
+  `total_test_delivered_count`, and `total_test_click_count`;
+- `test_phase_avg_ctr`, calculated as total clicks divided by total deliveries.
+
+The campaign-scoped endpoint additionally exposes `selected_count`,
+`sent_count`, `delivered_count`, `click_count`, and `test_campaign_ctr`. These
+fields are null until that Campaign's report is prepared. CTR is null—not
+zero—when its delivery denominator is zero.
 
 Replace a selection with:
 
@@ -221,5 +234,10 @@ for sending.
 
 For Test and Execution, preparation writes immutable
 campaign/audience/assigned-tag rows to
-`campaign_audience_tag_attributions`. CTR aggregation from this attribution is
-not implemented by the current feature.
+`campaign_audience_tag_attributions`. A durable scheduler configured with
+`TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED=true` observes new clicks and delivery
+updates, then recomputes each affected Test Campaign from its complete history.
+Its polling interval is configured with
+`TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL`. Multi-tag audiences contribute only
+to their persisted `assigned_tag_id`; repeated clicks and repeated provider
+status rows do not inflate audience-level counts.
