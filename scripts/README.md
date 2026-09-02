@@ -8,7 +8,7 @@ The complete ordered procedure is in
 | `deploy-beta.sh` | Deploy the Compose API stack; requires API campaign execution to remain disabled |
 | `deploy-production-beta.sh` | Canonical release command; deploys API then recreates isolated campaign workers |
 | `deploy-campaign-scheduler-beta.sh` | Recreates the private, restartable campaign-worker container from the running API environment |
-| `apply-yamata-required-migrations.sh` | Idempotently applies required schema changes through current head 0131 |
+| `apply-yamata-required-migrations.sh` | Verifies required schema by default; `--repair` explicitly reapplies the restore/repair subset through 0131 |
 | `restore-yamata-audience-profiles.sh` | Atomically restores an `audience_profiles`-only PostgreSQL 17 plain dump |
 | `restore-yamata-scheduler-runtime-data.sh` | Atomically restores the exact scheduler table set, normalized selection members, audience/tag attribution, audience-spec sources, and sequence counters |
 | `run-yamata-data-restore.sh` | Starts either large restore in the background with systemd/journal progress |
@@ -62,6 +62,9 @@ Key rules:
 - Restore audience profiles before scheduler runtime data.
 - Never run two imports concurrently.
 - Do not use `init-beta-database.sh` for the initial restored production database.
+- Use `apply-yamata-required-migrations.sh --repair` only for the documented
+  restore/repair workflow with both application writers stopped. Routine
+  deployments use its read-only `--verify-only` mode.
 - Supply passwords and API credentials through the documented environment variables
   or interactive hidden prompts. Secret-bearing command-line options are intentionally
   unsupported because process arguments may be visible to other users.
