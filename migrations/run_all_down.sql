@@ -5,6 +5,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0133_decouple_smart_targeting_test_sampling_down.sql...'
+\i migrations/0133_decouple_smart_targeting_test_sampling_down.sql
+
 \echo 'Running 0132_create_tag_test_performance_reports_down.sql...'
 \i migrations/0132_create_tag_test_performance_reports_down.sql
 
