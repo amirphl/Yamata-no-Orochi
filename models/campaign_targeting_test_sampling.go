@@ -36,8 +36,9 @@ type CampaignTargetingTestSamplingCalculation struct {
 	SatisfiedTagCount      int                                            `gorm:"not null;default:0" json:"satisfied_tag_count"`
 	EffectiveAudienceCount int64                                          `gorm:"type:bigint;not null;default:0" json:"effective_audience_count"`
 	CampaignCost           uint64                                         `gorm:"type:numeric(20,0);not null;default:0" json:"campaign_cost"`
+	AllocationFingerprint  string                                         `gorm:"type:char(64);not null" json:"-"`
 	Status                 CampaignTargetingTestSamplingCalculationStatus `gorm:"type:varchar(32);not null;index:idx_campaign_targeting_test_sampling_campaign_status,priority:2" json:"status"`
-	CalculationVersion     int                                            `gorm:"not null;default:1" json:"calculation_version"`
+	CalculationVersion     int                                            `gorm:"not null;default:2" json:"calculation_version"`
 	CreatedAt              time.Time                                      `gorm:"not null;default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_campaign_targeting_test_sampling_campaign_created,priority:2" json:"created_at"`
 	StartedAt              *time.Time                                     `json:"started_at,omitempty"`
 	FinishedAt             *time.Time                                     `json:"finished_at,omitempty"`
