@@ -374,16 +374,6 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 		if err := f.calculationRepo.Save(txCtx, calculation); err != nil {
 			return err
 		}
-		// A new exact-capacity generation means the population snapshot used by
-		// an earlier Test preview is no longer authoritative, even when the
-		// campaign's tags and score classes are unchanged. Require the caller to
-		// preview again before finalization; reusable/current generations above
-		// deliberately keep the existing preview intact.
-		if invalidateSmartTargetingTestPreviewForNewCapacityGeneration(&lockedCampaign) {
-			if err := f.campaignRepo.Update(txCtx, lockedCampaign); err != nil {
-				return err
-			}
-		}
 		return nil
 	})
 	if err != nil {
@@ -403,14 +393,6 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 	}
 	_ = metadata
 	return capacityDTO(calculation, reused, false), nil
-}
-
-func invalidateSmartTargetingTestPreviewForNewCapacityGeneration(campaign *models.Campaign) bool {
-	if campaign == nil || !campaign.IsEditable() || !campaign.Spec.UsesSmartTargeting() || campaign.Phase != models.CampaignPhaseTest {
-		return false
-	}
-	clearCampaignSmartTargetingTestSamplingPreviewFields(campaign)
-	return true
 }
 
 func (f *SmartTargetingCapacityFlowImpl) GetCurrent(ctx context.Context, customerID uint, campaignUUID string) (*dto.SmartTargetingCapacityCalculationResponse, error) {
@@ -600,21 +582,26 @@ func isCurrentSmartTargetingCapacity(ctx context.Context, db *gorm.DB, selection
 	return fingerprint == calculation.AllocationFingerprint, nil
 }
 
-// approvedCampaignDeduction uses approved campaigns plus running campaigns
-// whose audience selection has not yet been materialized. That closes the
-// approved-to-running reservation gap without double-deducting audiences that
-// are already excluded by the Bundle usage snapshot. The calculation's own
-// campaign is deliberately excluded because it is the allocation being priced.
-func approvedCampaignDeduction(ctx context.Context, db *gorm.DB, calculation *models.CampaignTargetingCapacityCalculation, currentCampaignID uint) (int64, string, error) {
-	if calculation == nil {
-		return 0, "", ErrInvalidState
+// smartTargetingBundleAllocationState computes the shared allocation
+// fingerprint used by capacity and Test sampling. It also returns the
+// unmaterialized reservation deduction needed only by exact capacity.
+func smartTargetingBundleAllocationState(ctx context.Context, db *gorm.DB, bundleID, currentCampaignID uint) (int64, string, error) {
+	if bundleID == 0 {
+		return 0, "", ErrBundleNotFound
 	}
 	if db == nil {
-		return 0, "", errors.New("approved deduction database is not configured")
+		return 0, "", errors.New("bundle allocation database is not configured")
 	}
-	rows, err := repository.ListBundleCampaignAllocations(ctx, db, calculation.BundleID, currentCampaignID)
+	rows, err := repository.ListBundleCampaignAllocations(ctx, db, bundleID, currentCampaignID)
 	if err != nil {
 		return 0, "", err
+	}
+	return smartTargetingBundleAllocationStateFromRows(bundleID, rows)
+}
+
+func smartTargetingBundleAllocationStateFromRows(bundleID uint, rows []repository.BundleCampaignAllocation) (int64, string, error) {
+	if bundleID == 0 {
+		return 0, "", ErrBundleNotFound
 	}
 	var total int64
 	parts := make([]string, 0, len(rows))
@@ -634,8 +621,20 @@ func approvedCampaignDeduction(ctx context.Context, db *gorm.DB, calculation *mo
 		}
 		parts = append(parts, strconv.FormatUint(uint64(row.CampaignID), 10)+":"+strconv.FormatUint(amount, 10)+":"+string(row.Status)+":"+strconv.FormatBool(row.Materialized))
 	}
-	fingerprintInput := "v3|bundle=" + strconv.FormatUint(uint64(calculation.BundleID), 10) + "|allocations=" + strings.Join(parts, ",")
+	fingerprintInput := "v3|bundle=" + strconv.FormatUint(uint64(bundleID), 10) + "|allocations=" + strings.Join(parts, ",")
 	return total, hashSmartTargetingCapacityString(fingerprintInput), nil
+}
+
+func smartTargetingBundleAllocationFingerprint(ctx context.Context, db *gorm.DB, bundleID, currentCampaignID uint) (string, error) {
+	_, fingerprint, err := smartTargetingBundleAllocationState(ctx, db, bundleID, currentCampaignID)
+	return fingerprint, err
+}
+
+func approvedCampaignDeduction(ctx context.Context, db *gorm.DB, calculation *models.CampaignTargetingCapacityCalculation, currentCampaignID uint) (int64, string, error) {
+	if calculation == nil {
+		return 0, "", ErrInvalidState
+	}
+	return smartTargetingBundleAllocationState(ctx, db, calculation.BundleID, currentCampaignID)
 }
 
 func emptySmartTargetingAllocationFingerprint() string {
