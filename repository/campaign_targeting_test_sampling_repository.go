@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strconv"
@@ -24,7 +25,7 @@ type CampaignTargetingTestSamplingRepository interface {
 	LatestCalculatedByInput(ctx context.Context, campaignID uint, inputHash string) (*models.CampaignTargetingTestSamplingCalculation, error)
 	Supersede(ctx context.Context, id int64, code, message string, at time.Time) error
 	ClaimPending(ctx context.Context, limit int, staleBefore, at time.Time) ([]*models.CampaignTargetingTestSamplingCalculation, error)
-	Complete(ctx context.Context, id int64, leaseStartedAt time.Time, tagResults json.RawMessage, satisfiedTagCount int, effectiveAudienceCount int64, campaignCost uint64, at time.Time) error
+	Complete(ctx context.Context, id int64, leaseStartedAt time.Time, tagResults json.RawMessage, satisfiedTagCount int, effectiveAudienceCount int64, campaignCost uint64, allocationFingerprint string, at time.Time) error
 	Fail(ctx context.Context, id int64, leaseStartedAt time.Time, code, message string, at time.Time) error
 }
 
@@ -122,8 +123,15 @@ RETURNING calculation.*`
 	return rows, r.getDB(ctx).Raw(query, models.CampaignTargetingTestSamplingCalculating, staleBefore, limit, at).Scan(&rows).Error
 }
 
-func (r *CampaignTargetingTestSamplingRepositoryImpl) Complete(ctx context.Context, id int64, leaseStartedAt time.Time, tagResults json.RawMessage, satisfiedTagCount int, effectiveAudienceCount int64, campaignCost uint64, at time.Time) error {
-	result := r.completeQuery(ctx, id, leaseStartedAt, tagResults, satisfiedTagCount, effectiveAudienceCount, campaignCost, at)
+func (r *CampaignTargetingTestSamplingRepositoryImpl) Complete(ctx context.Context, id int64, leaseStartedAt time.Time, tagResults json.RawMessage, satisfiedTagCount int, effectiveAudienceCount int64, campaignCost uint64, allocationFingerprint string, at time.Time) error {
+	if len(allocationFingerprint) != 64 {
+		return errors.New("campaign targeting test sampling allocation fingerprint must be a 64-character SHA-256 hex digest")
+	}
+	decodedFingerprint, err := hex.DecodeString(allocationFingerprint)
+	if err != nil || hex.EncodeToString(decodedFingerprint) != allocationFingerprint {
+		return errors.New("campaign targeting test sampling allocation fingerprint must be a 64-character SHA-256 hex digest")
+	}
+	result := r.completeQuery(ctx, id, leaseStartedAt, tagResults, satisfiedTagCount, effectiveAudienceCount, campaignCost, allocationFingerprint, at)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -133,7 +141,7 @@ func (r *CampaignTargetingTestSamplingRepositoryImpl) Complete(ctx context.Conte
 	return nil
 }
 
-func (r *CampaignTargetingTestSamplingRepositoryImpl) completeQuery(ctx context.Context, id int64, leaseStartedAt time.Time, tagResults json.RawMessage, satisfiedTagCount int, effectiveAudienceCount int64, campaignCost uint64, at time.Time) *gorm.DB {
+func (r *CampaignTargetingTestSamplingRepositoryImpl) completeQuery(ctx context.Context, id int64, leaseStartedAt time.Time, tagResults json.RawMessage, satisfiedTagCount int, effectiveAudienceCount int64, campaignCost uint64, allocationFingerprint string, at time.Time) *gorm.DB {
 	return r.getDB(ctx).Model(&models.CampaignTargetingTestSamplingCalculation{}).
 		Where("id = ? AND status = ? AND started_at = ?", id, models.CampaignTargetingTestSamplingCalculating, leaseStartedAt).
 		Updates(map[string]any{
@@ -141,7 +149,8 @@ func (r *CampaignTargetingTestSamplingRepositoryImpl) completeQuery(ctx context.
 			// database/sql rejects uint64 parameters above MaxInt64. NUMERIC(20,0)
 			// supports the complete uint64 range, so send its exact decimal form.
 			"effective_audience_count": effectiveAudienceCount, "campaign_cost": gorm.Expr("?::numeric", strconv.FormatUint(campaignCost, 10)),
-			"status": models.CampaignTargetingTestSamplingCalculated, "finished_at": at,
+			"allocation_fingerprint": allocationFingerprint,
+			"status":                 models.CampaignTargetingTestSamplingCalculated, "finished_at": at,
 			"error_code": nil, "error_message": nil,
 		})
 }
