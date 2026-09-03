@@ -236,6 +236,7 @@ every production change.
 | `0130` | Durable asynchronous Smart Targeting Test sampling calculations and aggregate per-tag results |
 | `0131` | PostgreSQL query observability, redundant audience-index removal, and large-table autovacuum/statistics tuning |
 | `0132` | Durable, scheduler-driven Smart Targeting Test Campaign tag CTR reports and materialized Bundle/tag summaries |
+| `0133` | Independent Smart Targeting Test sampling allocation fingerprints, decoupling preview jobs from exact-capacity generations |
 
 ## Current schema areas
 
@@ -247,8 +248,9 @@ At head, the schema supports:
   targeting methods, audience selections, scores, and per-platform
   sent-message/status data;
 - Bundle smart-tag runs/events/attempts/batches/scores, ordered campaign tag
-  snapshots, asynchronous exact-capacity generations, persisted Test-preview
-  intent, normalized Bundle audience members/send order, and immutable
+  snapshots, asynchronous exact-capacity generations, independently
+  fingerprinted Test-preview jobs and intent, normalized Bundle audience
+  members/send order, and immutable
   audience/tag attribution;
 - wallets, immutable transactions, balance snapshots, fiat payments, deposit
   receipts, invoices, crypto payments, taxes, and agency discounts;
