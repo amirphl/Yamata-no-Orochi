@@ -51,7 +51,7 @@ func (r *testSamplingSchedulerRepo) ClaimPending(_ context.Context, limit int, s
 	r.claimed = nil
 	return rows, nil
 }
-func (r *testSamplingSchedulerRepo) Complete(context.Context, int64, time.Time, json.RawMessage, int, int64, uint64, time.Time) error {
+func (r *testSamplingSchedulerRepo) Complete(context.Context, int64, time.Time, json.RawMessage, int, int64, uint64, string, time.Time) error {
 	return nil
 }
 func (r *testSamplingSchedulerRepo) Fail(context.Context, int64, time.Time, string, string, time.Time) error {
