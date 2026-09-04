@@ -401,28 +401,31 @@ type SplusConfig struct {
 }
 
 type SchedulerConfig struct {
-	CampaignExecutionEnabled  bool          `json:"campaign_execution_enabled"`
-	CampaignExecutionInterval time.Duration `json:"campaign_execution_interval"`
-	MessageSendDelay          time.Duration `json:"message_send_delay"`
-	MessageSendMockEnabled    bool          `json:"message_send_mock_enabled"`
-	// SmartTargetingCapacitySchedulerEnabled controls both durable Smart
-	// Targeting calculation pools: exact capacity and Test sampling.
-	SmartTargetingCapacitySchedulerEnabled bool          `json:"smart_targeting_capacity_scheduler_enabled"`
-	TagTestPerformanceSchedulerEnabled     bool          `json:"tag_test_performance_scheduler_enabled"`
-	TagTestPerformanceSchedulerInterval    time.Duration `json:"tag_test_performance_scheduler_interval"`
-	TagTestPerformanceSchedulerBatchSize   int           `json:"tag_test_performance_scheduler_batch_size"`
+	CampaignExecutionEnabled                   bool          `json:"campaign_execution_enabled"`
+	CampaignExecutionInterval                  time.Duration `json:"campaign_execution_interval"`
+	MessageSendDelay                           time.Duration `json:"message_send_delay"`
+	MessageSendMockEnabled                     bool          `json:"message_send_mock_enabled"`
+	SmartTargetingCapacitySchedulerEnabled     bool          `json:"smart_targeting_capacity_scheduler_enabled"`
+	SmartTargetingTestSamplingSchedulerEnabled bool          `json:"smart_targeting_test_sampling_scheduler_enabled"`
+	TagTestPerformanceSchedulerEnabled         bool          `json:"tag_test_performance_scheduler_enabled"`
+	TagTestPerformanceSchedulerInterval        time.Duration `json:"tag_test_performance_scheduler_interval"`
+	TagTestPerformanceSchedulerBatchSize       int           `json:"tag_test_performance_scheduler_batch_size"`
 }
 
 func loadSchedulerConfig() SchedulerConfig {
+	capacitySchedulerEnabled := getEnvBool("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", false)
 	return SchedulerConfig{
 		CampaignExecutionEnabled:               getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
 		CampaignExecutionInterval:              getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
 		MessageSendDelay:                       getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
 		MessageSendMockEnabled:                 getEnvBool("CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED", false),
-		SmartTargetingCapacitySchedulerEnabled: getEnvBool("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", false),
-		TagTestPerformanceSchedulerEnabled:     getEnvBool("TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED", false),
-		TagTestPerformanceSchedulerInterval:    getEnvDuration("TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL", time.Minute),
-		TagTestPerformanceSchedulerBatchSize:   getEnvInt("TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE", 25),
+		SmartTargetingCapacitySchedulerEnabled: capacitySchedulerEnabled,
+		// Fall back to the former shared switch for a backward-compatible rollout.
+		// An explicit sampling value always wins, so either worker can be enabled alone.
+		SmartTargetingTestSamplingSchedulerEnabled: getEnvBool("SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED", capacitySchedulerEnabled),
+		TagTestPerformanceSchedulerEnabled:         getEnvBool("TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED", false),
+		TagTestPerformanceSchedulerInterval:        getEnvDuration("TAG_TEST_PERFORMANCE_SCHEDULER_INTERVAL", time.Minute),
+		TagTestPerformanceSchedulerBatchSize:       getEnvInt("TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE", 25),
 	}
 }
 
