@@ -178,6 +178,7 @@ if [[ "$MODE" == repair ]]; then
 	apply_file "$PROJECT_DIR/migrations/0130_create_campaign_targeting_test_sampling_calculations.sql"
 	apply_file "$PROJECT_DIR/migrations/0131_optimize_postgres_audience_maintenance.sql"
 	apply_file "$PROJECT_DIR/migrations/0132_create_tag_test_performance_reports.sql"
+	apply_file "$PROJECT_DIR/migrations/0133_decouple_smart_targeting_test_sampling.sql"
 else
 	log "Verification mode: no migrations will be applied"
 fi
@@ -320,6 +321,36 @@ fi
 [[ "$(psql_scalar "SELECT to_regclass('public.tag_test_performance_scheduler_state') IS NOT NULL;")" == t ]] ||
 	die "Migration 0132 is incomplete: tag_test_performance_scheduler_state is missing"
 [[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='campaign_targeting_test_sampling_calculations'
+		  AND column_name='allocation_fingerprint'
+		  AND data_type='character'
+		  AND character_maximum_length=64
+		  AND is_nullable='NO'
+	);")" == t ]] ||
+	die "Migration 0133 is incomplete: Test sampling allocation fingerprint is missing or invalid"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1
+		FROM pg_constraint
+		WHERE conrelid='public.campaign_targeting_test_sampling_calculations'::regclass
+		  AND conname='campaign_targeting_test_sampling_allocation_fingerprint_valid'
+		  AND contype='c'
+		  AND convalidated
+	);")" == t ]] ||
+	die "Migration 0133 is incomplete: Test sampling allocation fingerprint constraint is missing"
+[[ "$(psql_scalar "
+	SELECT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema='public'
+		  AND table_name='campaign_targeting_test_sampling_calculations'
+		  AND column_name='calculation_version'
+		  AND column_default='2'
+	);")" == t ]] ||
+	die "Migration 0133 is incomplete: Test sampling calculation version default is not 2"
+[[ "$(psql_scalar "
 	SELECT COALESCE((
 		SELECT indisvalid AND indisready
 		FROM pg_index
@@ -362,7 +393,7 @@ fi
 	die "Migration 0132 is incomplete: generated aggregate Test CTR is missing"
 
 if [[ "$MODE" == repair ]]; then
-	advance_migration_tracker '0132_create_tag_test_performance_reports.sql'
+	advance_migration_tracker '0133_decouple_smart_targeting_test_sampling.sql'
 	log "Required schema repaired and verified"
 else
 	log "Required schema verified"
