@@ -102,6 +102,34 @@ func TestLoadSchedulerConfigReadsSmartTargetingCapacitySchedulerFlag(t *testing.
 	})
 }
 
+func TestLoadSchedulerConfigReadsIndependentSmartTargetingTestSamplingSchedulerFlag(t *testing.T) {
+	t.Run("inherits capacity flag when unset", func(t *testing.T) {
+		t.Setenv("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", "true")
+		t.Setenv("SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED", "")
+		if !loadSchedulerConfig().SmartTargetingTestSamplingSchedulerEnabled {
+			t.Fatal("SmartTargetingTestSamplingSchedulerEnabled = false, want backward-compatible true")
+		}
+	})
+
+	t.Run("sampling can run without capacity", func(t *testing.T) {
+		t.Setenv("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", "false")
+		t.Setenv("SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED", "true")
+		cfg := loadSchedulerConfig()
+		if cfg.SmartTargetingCapacitySchedulerEnabled || !cfg.SmartTargetingTestSamplingSchedulerEnabled {
+			t.Fatalf("scheduler flags = capacity:%t sampling:%t, want false/true", cfg.SmartTargetingCapacitySchedulerEnabled, cfg.SmartTargetingTestSamplingSchedulerEnabled)
+		}
+	})
+
+	t.Run("sampling can be disabled while capacity runs", func(t *testing.T) {
+		t.Setenv("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", "true")
+		t.Setenv("SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED", "false")
+		cfg := loadSchedulerConfig()
+		if !cfg.SmartTargetingCapacitySchedulerEnabled || cfg.SmartTargetingTestSamplingSchedulerEnabled {
+			t.Fatalf("scheduler flags = capacity:%t sampling:%t, want true/false", cfg.SmartTargetingCapacitySchedulerEnabled, cfg.SmartTargetingTestSamplingSchedulerEnabled)
+		}
+	})
+}
+
 func TestLoadSchedulerConfigReadsMessageSendMockFlag(t *testing.T) {
 	t.Run("disabled by default", func(t *testing.T) {
 		t.Setenv("CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED", "")
