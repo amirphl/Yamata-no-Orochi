@@ -24,7 +24,7 @@ type smartTargetingTestSample struct {
 	effective uint64
 }
 
-const smartTargetingTestSamplingCalculationVersion = 1
+const smartTargetingTestSamplingCalculationVersion = 2
 
 type smartTargetingTestSamplingInput struct {
 	order         []uint
@@ -289,13 +289,6 @@ func (s *CampaignFlowImpl) StartSmartTargetingTestSampling(ctx context.Context, 
 		if err := s.selectedTagRepo.Validate(txCtx, lockedCampaign.ID, *lockedCampaign.BundleID); err != nil {
 			return err
 		}
-		if s.capacityCalculationRepo == nil {
-			return ErrSmartTargetingExactCapacityRequired
-		}
-		if _, err := CurrentSmartTargetingCapacity(txCtx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, &lockedCampaign); err != nil {
-			return err
-		}
-
 		now := time.Now().UTC()
 		active, err := s.samplingCalculationRepo.ActiveByCampaignID(txCtx, lockedCampaign.ID)
 		if err != nil {
@@ -338,20 +331,26 @@ func (s *CampaignFlowImpl) StartSmartTargetingTestSampling(ctx context.Context, 
 		}
 
 		calculation = &models.CampaignTargetingTestSamplingCalculation{
-			CampaignID: lockedCampaign.ID, BundleID: *lockedCampaign.BundleID,
-			CustomerID: lockedCampaign.CustomerID, RequestedByCustomerID: req.CustomerID,
-			SelectedTagIDs: tagIDsToInt64(input.order), InputHash: input.hash,
-			SelectedScoreClasses: pq.StringArray(input.classes), SelectedTagCount: len(input.order),
-			SampleSizePerTag: int64(*lockedCampaign.SampleSizePerTag), CampaignUpdatedAt: lockedCampaign.UpdatedAt,
-			TagResults: json.RawMessage(`[]`), Status: models.CampaignTargetingTestSamplingCalculating,
-			CalculationVersion: smartTargetingTestSamplingCalculationVersion, CreatedAt: now,
+			CampaignID:            lockedCampaign.ID,
+			BundleID:              *lockedCampaign.BundleID,
+			CustomerID:            lockedCampaign.CustomerID,
+			RequestedByCustomerID: req.CustomerID,
+			SelectedTagIDs:        tagIDsToInt64(input.order),
+			InputHash:             input.hash,
+			SelectedScoreClasses:  pq.StringArray(input.classes),
+			SelectedTagCount:      len(input.order),
+			SampleSizePerTag:      int64(*lockedCampaign.SampleSizePerTag),
+			CampaignUpdatedAt:     lockedCampaign.UpdatedAt,
+			TagResults:            json.RawMessage(`[]`),
+			Status:                models.CampaignTargetingTestSamplingCalculating,
+			CalculationVersion:    smartTargetingTestSamplingCalculationVersion,
+			AllocationFingerprint: emptySmartTargetingAllocationFingerprint(),
+			CreatedAt:             now,
 		}
 		return s.samplingCalculationRepo.Save(txCtx, calculation)
 	})
 	if err != nil {
 		switch {
-		case errors.Is(err, ErrSmartTargetingExactCapacityRequired):
-			return nil, NewBusinessError("SMART_TARGETING_EXACT_CAPACITY_REQUIRED", "A current exact Smart Targeting capacity calculation is required", err)
 		case errors.Is(err, ErrSmartTargetingTagsRequired):
 			return nil, NewBusinessError("SMART_TARGETING_TAGS_REQUIRED", "Select at least one tag before calculating the Test sample", err)
 		case errors.Is(err, ErrSmartTargetingTagInvalid), errors.Is(err, repository.ErrInvalidCampaignSelectedTags):
@@ -477,16 +476,33 @@ func (s *CampaignFlowImpl) isCurrentSmartTargetingTestSampling(ctx context.Conte
 		}
 		return false, err
 	}
-	if s.capacityCalculationRepo == nil {
-		return false, nil
-	}
-	if _, err := CurrentSmartTargetingCapacity(ctx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, campaign); err != nil {
-		if errors.Is(err, ErrSmartTargetingExactCapacityRequired) {
-			return false, nil
-		}
+	allocationFingerprint, err := smartTargetingBundleAllocationFingerprint(ctx, s.db, calculation.BundleID, campaign.ID)
+	if err != nil {
 		return false, err
 	}
-	return true, nil
+	return calculation.AllocationFingerprint == allocationFingerprint, nil
+}
+
+func (s *CampaignFlowImpl) requireCurrentSmartTargetingTestSampling(ctx context.Context, campaign *models.Campaign) error {
+	if campaign == nil || s.samplingCalculationRepo == nil {
+		return ErrSmartTargetingTestPreviewRequired
+	}
+	input, err := currentSmartTargetingTestSamplingInput(ctx, s.selectedTagRepo, campaign)
+	if err != nil {
+		return err
+	}
+	calculation, err := s.samplingCalculationRepo.LatestCalculatedByInput(ctx, campaign.ID, input.hash)
+	if err != nil {
+		return err
+	}
+	current, err := s.isCurrentSmartTargetingTestSampling(ctx, campaign, calculation)
+	if err != nil {
+		return err
+	}
+	if !current {
+		return ErrSmartTargetingTestPreviewRequired
+	}
+	return nil
 }
 
 func samplingInputFromCalculation(campaign *models.Campaign, calculation *models.CampaignTargetingTestSamplingCalculation) (*smartTargetingTestSamplingInput, uint64, error) {
@@ -567,7 +583,8 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 	if err := s.selectedTagRepo.Validate(ctx, campaign.ID, calculation.BundleID); err != nil {
 		return err
 	}
-	if _, err := CurrentSmartTargetingCapacity(ctx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, campaign); err != nil {
+	allocationFingerprint, err := smartTargetingBundleAllocationFingerprint(ctx, s.db, calculation.BundleID, campaign.ID)
+	if err != nil {
 		return err
 	}
 
@@ -575,7 +592,7 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 	if err != nil {
 		return err
 	}
-	pricePerMessage, _, err := s.computeCostInputs(ctx, *campaign, nil)
+	pricePerMessage, err := s.computePricePerMessage(ctx, *campaign)
 	if err != nil {
 		return err
 	}
@@ -608,16 +625,20 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 			return ErrSmartTargetingTestPreviewRequired
 		}
 		// Approval and audience materialization take an UPDATE lock on the
-		// Bundle. Holding a SHARE lock makes the exact-capacity fingerprint and
-		// campaign preview publication one atomic view of Bundle allocations.
+		// Bundle. Holding a SHARE lock makes sampling's own allocation fingerprint
+		// and campaign preview publication one atomic view of Bundle allocations.
 		if err := repository.LockBundleForShare(txCtx, *lockedCampaign.BundleID); err != nil {
 			return err
 		}
 		if err := s.selectedTagRepo.Validate(txCtx, lockedCampaign.ID, *lockedCampaign.BundleID); err != nil {
 			return err
 		}
-		if _, err := CurrentSmartTargetingCapacity(txCtx, s.db, s.selectedTagRepo, s.capacityCalculationRepo, &lockedCampaign); err != nil {
+		currentAllocationFingerprint, err := smartTargetingBundleAllocationFingerprint(txCtx, s.db, calculation.BundleID, lockedCampaign.ID)
+		if err != nil {
 			return err
+		}
+		if currentAllocationFingerprint != allocationFingerprint {
+			return ErrSmartTargetingTestPreviewRequired
 		}
 		satisfied := make(pq.Int64Array, 0, len(sample.satisfied))
 		for _, item := range sample.satisfied {
@@ -632,7 +653,7 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 		}).Error; err != nil {
 			return err
 		}
-		return s.samplingCalculationRepo.Complete(txCtx, calculation.ID, leaseStartedAt, tagResults, len(sample.satisfied), int64(sample.effective), cost, finishedAt)
+		return s.samplingCalculationRepo.Complete(txCtx, calculation.ID, leaseStartedAt, tagResults, len(sample.satisfied), int64(sample.effective), cost, allocationFingerprint, finishedAt)
 	})
 }
 
