@@ -910,10 +910,11 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		)
 		stopCapacityScheduler := capacityScheduler.Start(context.Background())
 		stopFuncs = append(stopFuncs, stopCapacityScheduler)
+	}
 
-		// Test sampling uses the same durable database-job enablement as exact
-		// capacity, but a separate single-worker pool limits concurrent random
-		// audience scans.
+	if cfg.Scheduler.SmartTargetingTestSamplingSchedulerEnabled {
+		// Test sampling owns a separate durable worker pool and can run before an
+		// exact-capacity generation exists.
 		testSamplingScheduler := scheduler.NewSmartTargetingTestSamplingScheduler(
 			campaignFlow,
 			testSamplingCalculationRepo,
