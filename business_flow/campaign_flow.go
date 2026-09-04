@@ -528,6 +528,9 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			return NewBusinessError("CAMPAIGN_FINALIZE_STALE", "Campaign configuration changed while finalization was in progress", ErrInvalidState)
 		}
 		if lockedCampaign.Spec.UsesSmartTargeting() && lockedCampaign.Phase == models.CampaignPhaseTest {
+			if err := s.requireCurrentSmartTargetingTestSampling(txCtx, lockedCampaign); err != nil {
+				return err
+			}
 			intent, err := currentSmartTargetingTestSamplingIntent(txCtx, s.selectedTagRepo, lockedCampaign, true)
 			if err != nil {
 				return err
@@ -1547,6 +1550,9 @@ func (s *CampaignFlowImpl) CalculateCampaignCost(ctx context.Context, req *dto.C
 
 	numTargetAudience := availableCapacity
 	if campaign.Spec.UsesSmartTargeting() && campaign.Phase == models.CampaignPhaseTest {
+		if currentErr := s.requireCurrentSmartTargetingTestSampling(ctx, &campaign); currentErr != nil {
+			return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_REQUIRED", "A current Smart Targeting Test sampling preview is required", currentErr)
+		}
 		intent, intentErr := currentSmartTargetingTestSamplingIntent(ctx, s.selectedTagRepo, &campaign, true)
 		if intentErr != nil {
 			return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_REQUIRED", "A current Smart Targeting Test sampling preview is required", intentErr)
@@ -1597,6 +1603,9 @@ func (s *CampaignFlowImpl) CalculateCampaignCostV2(ctx context.Context, req *dto
 
 	numTargetAudience := req.NumMessages
 	if campaign.Spec.UsesSmartTargeting() && campaign.Phase == models.CampaignPhaseTest {
+		if currentErr := s.requireCurrentSmartTargetingTestSampling(ctx, &campaign); currentErr != nil {
+			return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_REQUIRED", "A current Smart Targeting Test sampling preview is required", currentErr)
+		}
 		intent, intentErr := currentSmartTargetingTestSamplingIntent(ctx, s.selectedTagRepo, &campaign, true)
 		if intentErr != nil {
 			return nil, NewBusinessError("SMART_TARGETING_TEST_PREVIEW_REQUIRED", "A current Smart Targeting Test sampling preview is required", intentErr)
@@ -1631,23 +1640,19 @@ func (s *CampaignFlowImpl) CalculateCampaignCostV2(ctx context.Context, req *dto
 	}, nil
 }
 
-func (s *CampaignFlowImpl) computeCostInputs(
-	ctx context.Context,
-	campaign models.Campaign,
-	metadata *ClientMetadata,
-) (uint64, uint64, error) {
+func (s *CampaignFlowImpl) computePricePerMessage(ctx context.Context, campaign models.Campaign) (uint64, error) {
 	platform, err := sanitizeCampaignPlatform(&campaign.Spec.Platform)
 	if err != nil {
-		return 0, 0, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
+		return 0, NewBusinessError("CAMPAIGN_VALIDATION_FAILED", "Campaign validation failed", err)
 	}
 
 	if platform == models.CampaignPlatformSMS && campaign.Spec.LineNumber == nil {
-		return 0, 0, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required for SMS campaigns", ErrCampaignLineNumberRequired)
+		return 0, NewBusinessError("LINE_NUMBER_REQUIRED", "Line number is required for SMS campaigns", ErrCampaignLineNumberRequired)
 	}
 
 	usingTargetAudienceExcelFile := campaign.Spec.UsesExcelTargeting()
 	if len(campaign.Spec.Level3s) == 0 && !usingTargetAudienceExcelFile && !campaign.Spec.UsesSmartTargeting() {
-		return 0, 0, NewBusinessError("LEVEL3_REQUIRED", "At least one level3 option or target audience Excel file is required for cost calculation", ErrLevel3Required)
+		return 0, NewBusinessError("LEVEL3_REQUIRED", "At least one level3 option or target audience Excel file is required for cost calculation", ErrLevel3Required)
 	}
 
 	// Pricing constants
@@ -1663,7 +1668,7 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		var err error
 		lineNumberFactor, err = s.fetchLineNumberPriceFactor(ctx, campaign.Spec.LineNumber)
 		if err != nil {
-			return 0, 0, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
+			return 0, NewBusinessError("LINE_NUMBER_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch line number price factor", err)
 		}
 	}
 
@@ -1673,13 +1678,13 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		if err != nil {
 			if errors.Is(err, ErrSegmentPriceFactorNotFound) {
 				s.notifyMissingSegmentPriceFactor(campaign.Spec.Level3s)
-				return 0, 0, NewBusinessError("SEGMENT_PRICE_FACTOR_NOT_FOUND", "Segment price factor not found for provided level3 options", ErrSegmentPriceFactorNotFound)
+				return 0, NewBusinessError("SEGMENT_PRICE_FACTOR_NOT_FOUND", "Segment price factor not found for provided level3 options", ErrSegmentPriceFactorNotFound)
 			}
-			return 0, 0, NewBusinessError("SEGMENT_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch segment price factors", err)
+			return 0, NewBusinessError("SEGMENT_PRICE_FACTOR_FETCH_FAILED", "Failed to fetch segment price factors", err)
 		}
 		if maxFactor == 0 {
 			s.notifyMissingSegmentPriceFactor(campaign.Spec.Level3s)
-			return 0, 0, NewBusinessError("SEGMENT_PRICE_FACTOR_NOT_FOUND", "Segment price factor not found for provided level3 options", ErrSegmentPriceFactorNotFound)
+			return 0, NewBusinessError("SEGMENT_PRICE_FACTOR_NOT_FOUND", "Segment price factor not found for provided level3 options", ErrSegmentPriceFactorNotFound)
 		}
 		segmentPriceFactor = maxFactor
 	}
@@ -1688,17 +1693,17 @@ func (s *CampaignFlowImpl) computeCostInputs(
 
 	pbp, err := s.platformBaseRepo.LatestByPlatform(ctx, platform)
 	if err != nil {
-		return 0, 0, NewBusinessError("PLATFORM_BASE_PRICE_FETCH_FAILED", "Failed to fetch platform base price", err)
+		return 0, NewBusinessError("PLATFORM_BASE_PRICE_FETCH_FAILED", "Failed to fetch platform base price", err)
 	}
 	if pbp == nil {
-		return 0, 0, NewBusinessError("PLATFORM_BASE_PRICE_NOT_FOUND", "Platform base price not found for platform "+platform, ErrPlatformBasePriceNotFound)
+		return 0, NewBusinessError("PLATFORM_BASE_PRICE_NOT_FOUND", "Platform base price not found for platform "+platform, ErrPlatformBasePriceNotFound)
 	}
 	pp, err := s.pagePriceRepo.LatestByPlatform(ctx, platform)
 	if err != nil {
-		return 0, 0, NewBusinessError("PAGE_PRICE_FETCH_FAILED", "Failed to fetch page price", err)
+		return 0, NewBusinessError("PAGE_PRICE_FETCH_FAILED", "Failed to fetch page price", err)
 	}
 	if pp == nil {
-		return 0, 0, NewBusinessError("PAGE_PRICE_NOT_FOUND", "Page price not found for platform "+platform, ErrPagePriceNotFound)
+		return 0, NewBusinessError("PAGE_PRICE_NOT_FOUND", "Page price not found for platform "+platform, ErrPagePriceNotFound)
 	}
 	pagePrice := float64(pp.Price)
 	numPages := float64(numParts)
@@ -1706,6 +1711,18 @@ func (s *CampaignFlowImpl) computeCostInputs(
 		pricePerMsg = pbp.Price*uint64(lineNumberFactor*numPages) + uint64(segmentPriceFactor*pagePrice)
 	} else {
 		pricePerMsg = pbp.Price*uint64(1*1) + uint64(segmentPriceFactor*pagePrice)
+	}
+	return pricePerMsg, nil
+}
+
+func (s *CampaignFlowImpl) computeCostInputs(
+	ctx context.Context,
+	campaign models.Campaign,
+	metadata *ClientMetadata,
+) (uint64, uint64, error) {
+	pricePerMsg, err := s.computePricePerMessage(ctx, campaign)
+	if err != nil {
+		return 0, 0, err
 	}
 
 	// Smart Targeting cost must use the persisted exact generation rather than
@@ -3012,6 +3029,9 @@ func (s *CampaignFlowImpl) canFinalizeCampaign(ctx context.Context, campaign *mo
 			}
 		}
 		if campaign.Phase == models.CampaignPhaseTest {
+			if err := s.requireCurrentSmartTargetingTestSampling(ctx, campaign); err != nil {
+				return err
+			}
 			if _, err := currentSmartTargetingTestSamplingIntent(ctx, s.selectedTagRepo, campaign, true); err != nil {
 				return err
 			}
