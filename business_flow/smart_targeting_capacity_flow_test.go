@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
+	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/lib/pq"
 )
 
@@ -157,61 +158,27 @@ func TestCalculationExpiryCoversScheduledExecution(t *testing.T) {
 	}
 }
 
-func TestNewCapacityGenerationInvalidatesOnlySmartTargetingTestPreview(t *testing.T) {
-	method := models.CampaignAudienceTargetingSmart
-	numAudience := uint64(200)
-	hash := "preview-hash"
-	previewedAt := time.Now().UTC()
-	testCampaign := &models.Campaign{
-		Spec:                                  models.CampaignSpec{AudienceTargetingMethod: &method},
-		Status:                                models.CampaignStatusInitiated,
-		Phase:                                 models.CampaignPhaseTest,
-		NumAudience:                           &numAudience,
-		SmartTargetingTestSatisfiedTagIDs:     pq.Int64Array{11, 22},
-		SmartTargetingTestSamplingInputHash:   &hash,
-		SmartTargetingTestSamplingPreviewedAt: &previewedAt,
+func TestSmartTargetingBundleAllocationFingerprintTracksSamplingPopulationChanges(t *testing.T) {
+	audience := uint64(600)
+	rows := []repository.BundleCampaignAllocation{
+		{CampaignID: 11, NumAudience: &audience, Status: models.CampaignStatusApproved, Materialized: false},
 	}
-	if !invalidateSmartTargetingTestPreviewForNewCapacityGeneration(testCampaign) {
-		t.Fatal("Smart Targeting Test preview was not invalidated")
-	}
-	if testCampaign.NumAudience == nil || *testCampaign.NumAudience != 0 ||
-		len(testCampaign.SmartTargetingTestSatisfiedTagIDs) != 0 ||
-		testCampaign.SmartTargetingTestSamplingInputHash != nil ||
-		testCampaign.SmartTargetingTestSamplingPreviewedAt != nil {
-		t.Fatalf("stale preview fields remain: %#v", testCampaign)
+	deduction, before, err := smartTargetingBundleAllocationStateFromRows(3, rows)
+	if err != nil || deduction != 600 {
+		t.Fatalf("allocation state = (%d, %q, %v), want deduction 600", deduction, before, err)
 	}
 
-	executionCampaign := &models.Campaign{
-		Spec:                                  models.CampaignSpec{AudienceTargetingMethod: &method},
-		Status:                                models.CampaignStatusInitiated,
-		Phase:                                 models.CampaignPhaseExecution,
-		NumAudience:                           &numAudience,
-		SmartTargetingTestSatisfiedTagIDs:     pq.Int64Array{11, 22},
-		SmartTargetingTestSamplingInputHash:   &hash,
-		SmartTargetingTestSamplingPreviewedAt: &previewedAt,
+	rows[0].Materialized = true
+	deduction, after, err := smartTargetingBundleAllocationStateFromRows(3, rows)
+	if err != nil || deduction != 0 {
+		t.Fatalf("materialized allocation state = (%d, %q, %v), want deduction 0", deduction, after, err)
 	}
-	if invalidateSmartTargetingTestPreviewForNewCapacityGeneration(executionCampaign) {
-		t.Fatal("Execution campaign was treated as a Test preview")
-	}
-	if executionCampaign.NumAudience == nil || *executionCampaign.NumAudience != numAudience {
-		t.Fatal("Execution audience count was modified")
+	if before == after {
+		t.Fatal("allocation fingerprint did not change when audience materialization changed")
 	}
 
-	finalizedTestCampaign := &models.Campaign{
-		Spec:                                  models.CampaignSpec{AudienceTargetingMethod: &method},
-		Status:                                models.CampaignStatusWaitingForApproval,
-		Phase:                                 models.CampaignPhaseTest,
-		NumAudience:                           &numAudience,
-		SmartTargetingTestSatisfiedTagIDs:     pq.Int64Array{11, 22},
-		SmartTargetingTestSamplingInputHash:   &hash,
-		SmartTargetingTestSamplingPreviewedAt: &previewedAt,
-	}
-	if invalidateSmartTargetingTestPreviewForNewCapacityGeneration(finalizedTestCampaign) {
-		t.Fatal("finalized Test billing intent was invalidated by a capacity refresh")
-	}
-	if finalizedTestCampaign.NumAudience == nil || *finalizedTestCampaign.NumAudience != numAudience ||
-		len(finalizedTestCampaign.SmartTargetingTestSatisfiedTagIDs) != 2 {
-		t.Fatal("finalized Test sampling intent was modified")
+	if _, _, err := smartTargetingBundleAllocationStateFromRows(3, []repository.BundleCampaignAllocation{{CampaignID: 12, Status: models.CampaignStatusApproved}}); err == nil {
+		t.Fatal("allocation fingerprint accepted a reservation without an audience count")
 	}
 }
 
