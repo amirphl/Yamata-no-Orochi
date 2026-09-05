@@ -15,7 +15,8 @@ import (
 )
 
 type samplingSelectedTagRepositoryStub struct {
-	selected []*models.CampaignSelectedTag
+	selected    []*models.CampaignSelectedTag
+	validateErr error
 }
 
 func (s *samplingSelectedTagRepositoryStub) ListAvailable(context.Context, uint, uint, string, string, string, int, int) ([]*models.SmartTargetingTagRow, int64, error) {
@@ -35,7 +36,7 @@ func (s *samplingSelectedTagRepositoryStub) Summary(context.Context, uint) (*mod
 }
 
 func (s *samplingSelectedTagRepositoryStub) Validate(context.Context, uint, uint) error {
-	return nil
+	return s.validateErr
 }
 
 func (s *samplingSelectedTagRepositoryStub) Replace(context.Context, uint, uint, uint, []uint) error {

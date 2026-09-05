@@ -330,6 +330,13 @@ func (s *CampaignFlowImpl) StartSmartTargetingTestSampling(ctx context.Context, 
 			return err
 		}
 		if active != nil {
+			// Retrying an unchanged request must not discard useful worker progress.
+			// API clients can retry a timed-out submission while the worker is
+			// already scanning this exact immutable input snapshot.
+			if reusableActiveSmartTargetingTestSampling(&lockedCampaign, active, input) {
+				calculation = active
+				return nil
+			}
 			if err := s.samplingCalculationRepo.Supersede(txCtx, active.ID, "SMART_TARGETING_TEST_SAMPLING_SUPERSEDED", "A newer campaign configuration replaced this sampling calculation", now); err != nil {
 				if !errors.Is(err, repository.ErrCampaignTargetingTestSamplingStateConflict) {
 					return err
