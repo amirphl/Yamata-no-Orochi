@@ -11,12 +11,21 @@ Environment variables:
   CERT_ALERT_CONF_GLOBS         (default: "/etc/nginx/sites-enabled/*.conf,/etc/nginx/conf.d/*.conf")
   CERT_ALERT_CERT_PATHS         optional, comma-separated extra cert paths
   CERT_ALERT_LOG_LEVEL          (default: INFO)
-  SMS_PROVIDER_DOMAIN           (required) SMS provider host (no scheme)
-  SMS_API_KEY                   (required)
+  SMS_PROVIDER_DOMAIN           (required) provider selector ("payamsms") or
+                                generic SMS provider host (no scheme)
+  SMS_API_KEY                   required for generic SMS providers
   SMS_SOURCE_NUMBER             (required) sender number
   SMS_RETRY_COUNT               (default: 3)
   SMS_VALIDITY_PERIOD           (default: 300) seconds
   SMS_TIMEOUT                   (default: 30s) simple duration (30s/5m/2h) or seconds
+  PAYAM_SMS_TOKEN_URL           PayamSMS OAuth endpoint
+  PAYAM_SMS_SEND_URL            PayamSMS send endpoint
+  PAYAM_SMS_SYSTEM_NAME         required when SMS_PROVIDER_DOMAIN=payamsms
+  PAYAM_SMS_USERNAME            required when SMS_PROVIDER_DOMAIN=payamsms
+  PAYAM_SMS_PASSWORD            required when SMS_PROVIDER_DOMAIN=payamsms
+  PAYAM_SMS_SCOPE               (default: webservice)
+  PAYAM_SMS_GRANT_TYPE          (default: password)
+  PAYAM_SMS_ROOT_ACCESS_TOKEN   optional Basic token for the OAuth request
   CERT_ALERT_RETRY_INTERVAL     (default: 5m) retry delay after transient failures
   DOMAIN / API_DOMAIN / ...     used for ${VAR} expansion inside the nginx conf paths
 
@@ -32,6 +41,7 @@ import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from cryptography import x509
@@ -131,7 +141,100 @@ def unique_paths(paths: list[Path]) -> list[Path]:
 # ---------- SMS ----------
 
 
+PAYAM_SMS_TOKEN_URL = "https://www.payamsms.com/auth/oauth/token"
+PAYAM_SMS_SEND_URL = (
+    "https://www.payamsms.com/panel/webservice/sendMultipleWithSrc"
+)
+
+
+def _validate_https_endpoint(value: str, name: str) -> None:
+    parsed = urlparse(value)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"{name} has an invalid port") from exc
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        raise ValueError(
+            f"{name} must be an absolute HTTPS URL without credentials or query"
+        )
+
+
+def _payamsms_token(cfg: dict[str, str], timeout_s: float) -> str:
+    token_url = cfg.get("PAYAM_SMS_TOKEN_URL", "").strip() or PAYAM_SMS_TOKEN_URL
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
+    root_access_token = cfg.get("PAYAM_SMS_ROOT_ACCESS_TOKEN", "").strip()
+    if root_access_token:
+        headers["Authorization"] = f"Basic {root_access_token}"
+    resp = requests.post(
+        token_url,
+        data={
+            "systemName": cfg["PAYAM_SMS_SYSTEM_NAME"],
+            "username": cfg["PAYAM_SMS_USERNAME"],
+            "password": cfg["PAYAM_SMS_PASSWORD"],
+            "scope": cfg.get("PAYAM_SMS_SCOPE", "").strip() or "webservice",
+            "grant_type": cfg.get("PAYAM_SMS_GRANT_TYPE", "").strip()
+            or "password",
+        },
+        headers=headers,
+        timeout=timeout_s,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    token = result.get("access_token", "") if isinstance(result, dict) else ""
+    if not isinstance(token, str) or not token.strip():
+        raise RuntimeError("PayamSMS token response did not contain access_token")
+    return token.strip()
+
+
+def _send_payamsms(
+    recipient: str, body: str, cfg: dict[str, str], timeout_s: float
+) -> None:
+    token = _payamsms_token(cfg, timeout_s)
+    send_url = cfg.get("PAYAM_SMS_SEND_URL", "").strip() or PAYAM_SMS_SEND_URL
+    payload = {
+        "sender": cfg["SMS_SOURCE_NUMBER"],
+        "smsItems": [
+            {
+                "recipient": recipient,
+                "body": body,
+                "customerId": f"cert-alert-{time.time_ns()}",
+            }
+        ],
+    }
+    resp = requests.post(
+        send_url,
+        json=payload,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        timeout=timeout_s,
+    )
+    resp.raise_for_status()
+    results = resp.json()
+    if not isinstance(results, list) or not results:
+        raise RuntimeError("PayamSMS returned an invalid or empty result")
+    for result in results:
+        if not isinstance(result, dict):
+            raise RuntimeError("PayamSMS returned a non-object result")
+        if str(result.get("errorCode") or "").strip():
+            raise RuntimeError("PayamSMS rejected the certificate alert")
+
+
 def send_sms(recipient: str, body: str, cfg: dict[str, str], timeout_s: float) -> None:
+    if cfg["SMS_PROVIDER_DOMAIN"].strip().lower() == "payamsms":
+        _send_payamsms(recipient, body, cfg, timeout_s)
+        return
+
     url = f"https://{cfg['SMS_PROVIDER_DOMAIN']}/api/v3.0.1/send"
     payload = [
         {
@@ -182,6 +285,47 @@ def _validate_hostname_with_optional_port(value: str) -> None:
         raise ValueError("SMS_PROVIDER_DOMAIN must be a valid hostname")
 
 
+def _validate_sms_config(cfg: dict[str, str]) -> None:
+    provider = cfg.get("SMS_PROVIDER_DOMAIN", "").strip()
+    if not provider:
+        raise SystemExit("Missing SMS config env: SMS_PROVIDER_DOMAIN")
+
+    source_number = cfg.get("SMS_SOURCE_NUMBER", "").strip()
+    if not source_number:
+        raise SystemExit("Missing SMS config env: SMS_SOURCE_NUMBER")
+    if not re.fullmatch(r"[0-9]{3,20}", source_number):
+        raise ValueError("SMS_SOURCE_NUMBER must contain 3 to 20 digits")
+
+    if provider.lower() == "payamsms":
+        required = [
+            "PAYAM_SMS_SYSTEM_NAME",
+            "PAYAM_SMS_USERNAME",
+            "PAYAM_SMS_PASSWORD",
+        ]
+        missing = [key for key in required if not cfg.get(key, "").strip()]
+        if missing:
+            raise SystemExit(f"Missing PayamSMS config envs: {', '.join(missing)}")
+        _validate_https_endpoint(
+            cfg.get("PAYAM_SMS_TOKEN_URL", "").strip() or PAYAM_SMS_TOKEN_URL,
+            "PAYAM_SMS_TOKEN_URL",
+        )
+        _validate_https_endpoint(
+            cfg.get("PAYAM_SMS_SEND_URL", "").strip() or PAYAM_SMS_SEND_URL,
+            "PAYAM_SMS_SEND_URL",
+        )
+        return
+
+    _validate_hostname_with_optional_port(provider)
+    if not cfg.get("SMS_API_KEY", "").strip():
+        raise SystemExit("Missing SMS config env: SMS_API_KEY")
+    retry_count = int(cfg.get("SMS_RETRY_COUNT", "").strip() or "3")
+    validity_period = int(cfg.get("SMS_VALIDITY_PERIOD", "").strip() or "300")
+    if retry_count < 0:
+        raise ValueError("SMS_RETRY_COUNT must be non-negative")
+    if validity_period <= 0:
+        raise ValueError("SMS_VALIDITY_PERIOD must be greater than zero")
+
+
 # ---------- Main logic ----------
 
 
@@ -200,22 +344,8 @@ def check_and_notify() -> None:
     if not re.fullmatch(r"\+?[0-9]{8,15}", recipient):
         raise ValueError("CERT_ALERT_PHONE must contain 8 to 15 digits")
 
-    sms_cfg_keys = ["SMS_PROVIDER_DOMAIN", "SMS_API_KEY", "SMS_SOURCE_NUMBER"]
-    missing = [k for k in sms_cfg_keys if not env_map.get(k)]
-    if missing:
-        raise SystemExit(f"Missing SMS config envs: {', '.join(missing)}")
-
     timeout_s = _parse_timedelta(os.getenv("SMS_TIMEOUT", "30s"))
-    provider_domain = env_map["SMS_PROVIDER_DOMAIN"]
-    _validate_hostname_with_optional_port(provider_domain)
-    if not re.fullmatch(r"[0-9]{3,20}", env_map["SMS_SOURCE_NUMBER"]):
-        raise ValueError("SMS_SOURCE_NUMBER must contain 3 to 20 digits")
-    retry_count = int(env_map.get("SMS_RETRY_COUNT", "3"))
-    validity_period = int(env_map.get("SMS_VALIDITY_PERIOD", "300"))
-    if retry_count < 0:
-        raise ValueError("SMS_RETRY_COUNT must be non-negative")
-    if validity_period <= 0:
-        raise ValueError("SMS_VALIDITY_PERIOD must be greater than zero")
+    _validate_sms_config(env_map)
 
     conf_globs = os.getenv(
         "CERT_ALERT_CONF_GLOBS",
@@ -228,6 +358,7 @@ def check_and_notify() -> None:
             continue
         for p in glob.glob(g):
             conf_files.append(Path(p))
+    conf_files = unique_paths(conf_files)
 
     log.info(
         "Scanning configs: %s",
