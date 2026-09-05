@@ -119,10 +119,10 @@ environment, not merely the existence of a configuration field.
 
 ## Worker and operational safety
 
-- [ ] `yamata-app-beta` has campaign execution off, exact-capacity scheduling
-  on, and smart-tag scheduling on.
+- [ ] `yamata-app-beta` has campaign execution off, exact-capacity and Test
+  sampling scheduling on, and smart-tag scheduling on.
 - [ ] `yamata-campaign-scheduler-beta` has campaign execution on and exact
-  capacity, Tag Test reporting, and smart-tag schedulers off.
+  capacity, Test sampling, Tag Test reporting, and smart-tag schedulers off.
 - [ ] `CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED=false` in production.
 - [ ] The scheduler has no published ports and uses
   `http://app-beta:8080` for its internal bot client.
