@@ -143,9 +143,9 @@ scheduled time.
 
 Changing selection or score classes makes previous results stale. Approved and
 not-yet-materialized campaign allocations are deducted to close the
-approval-to-scheduler reservation gap. Cost, approval, Test preview, and
-Execution preparation require a current exact capacity and can return a
-pending/recalculation conflict.
+approval-to-scheduler reservation gap. Campaign cost/finalization, approval,
+and Execution preparation require a current exact capacity and can return a
+pending/recalculation conflict. Test sampling itself does not.
 
 ## Campaign fields
 
@@ -178,9 +178,9 @@ A Smart Targeting campaign with `phase: "test"` requires a positive
 `sample_size_per_tag`; there is no default. `budget` and a caller-supplied
 audience count do not override the derived Test count.
 
-Before requesting sampling, create a current exact-capacity generation. The
+Sampling can be requested before any exact-capacity generation exists. The
 POST endpoint responds with HTTP 202 after durably submitting the job. A
-process with `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true` executes the
+process with `SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED=true` executes
 sampling asynchronously. Duplicate submissions for the same current inputs
 reuse the active or completed job.
 
@@ -207,11 +207,14 @@ sample size, effective count, and cost.
 
 Preview persists only satisfied tag IDs in user order, an input fingerprint,
 the preview timestamp, and the derived compatibility value `num_audience`.
-Audience IDs are never preview state. The fingerprint covers the campaign,
-Bundle, ordered selection, sample size, and score classes. Editing those inputs
-or starting a new capacity generation invalidates editable preview intent.
+Audience IDs are never preview state. The input fingerprint covers the
+campaign, Bundle, ordered selection, sample size, score classes, and delivery
+color eligibility. Each completed job also stores its own Bundle-allocation
+fingerprint. Editing sampling inputs or changing Bundle allocation state makes
+the preview stale; starting an exact-capacity generation by itself does not.
 
-Finalization requires a current preview with at least one satisfied tag. At
+Finalization requires a current preview with at least one satisfied tag and a
+current exact-capacity generation. At
 scheduler time, only persisted satisfied tags are attempted, in the same order,
 and each is sampled again while holding the Bundle lock. A tag that no longer
 has a full sample is skipped. Delivery can therefore be lower than preview but
