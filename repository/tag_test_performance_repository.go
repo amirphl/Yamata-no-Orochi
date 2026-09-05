@@ -41,11 +41,11 @@ SELECT DISTINCT
     campaign.id,
     campaign.bundle_id,
     'not_prepared',
-    ?,
+    ?::integer,
     0,
-    ?,
-    ?,
-    ?
+    ?::timestamptz,
+    ?::timestamptz,
+    ?::timestamptz
 FROM campaigns AS campaign
 LEFT JOIN campaign_tag_test_reports AS existing
   ON existing.campaign_id = campaign.id
@@ -408,9 +408,9 @@ SELECT
     SUM(performance.sent_count),
     SUM(performance.delivered_count),
     SUM(performance.click_count),
-    ?,
-    ?,
-    ?
+    ?::integer,
+    ?::timestamptz,
+    ?::timestamptz
 FROM campaign_tag_test_performances AS performance
 WHERE performance.bundle_id = ?
 GROUP BY performance.bundle_id, performance.tag_id
@@ -643,9 +643,9 @@ SELECT
     sent_count,
     delivered_count,
     click_count,
-    ?,
-    ?,
-    ?
+    ?::integer,
+    ?::timestamptz,
+    ?::timestamptz
 FROM tag_stats
 ON CONFLICT (campaign_id, tag_id) DO UPDATE
 SET bundle_id = EXCLUDED.bundle_id,
