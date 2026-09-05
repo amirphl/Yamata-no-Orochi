@@ -74,7 +74,7 @@ values after deployment.
 | Business identities | `ADMIN_*`, `SYSTEM_*`, `TAX_*` | UUIDs must match the database identities and wallets. |
 | Messaging | `SMS_*`, `PAYAM_SMS_*`, `BALE_*`, `RUBIKA_*`, `SPLUS_*`, `MESSAGE_*` | Bale provider behavior is documented in [`bale.md`](bale.md). |
 | Payments | `ATIPAY_*`, `CRYPTO_*`, `OXA_*` | Set `CRYPTO_ENABLED=false` to disable crypto payments; only OxaPay is accepted when enabled. |
-| Bot/schedulers | `BOT_*`, `CAMPAIGN_*`, `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED`, `TAG_TEST_PERFORMANCE_SCHEDULER_*` | Production deliberately splits API-owned and campaign-execution workers. |
+| Bot/schedulers | `BOT_*`, `CAMPAIGN_*`, `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED`, `SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED`, `TAG_TEST_PERFORMANCE_SCHEDULER_*` | Production deliberately splits API-owned and campaign-execution workers. |
 | Smart-tag evaluation | `SMART_TAG_EVALUATION_*`, `OPENAI_API_KEY`, `IR_HTTPS_PROXY` | The API owns these jobs in the current production topology. |
 | Certificate monitor | `CERT_ALERT_*`, `DOMAIN_MONITOR_*` | Monitoring checks and alerts; it does not issue or renew certificates. |
 
@@ -89,6 +89,7 @@ The checked-in production workflow requires the following `.env.beta` values:
 ```env
 CAMPAIGN_EXECUTION_ENABLED=false
 SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=true
+SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED=true
 TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED=true
 SMART_TAG_EVALUATION_ENABLED=true
 SMART_TAG_EVALUATION_SCHEDULER_ENABLED=true
@@ -98,10 +99,14 @@ CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED=false
 `scripts/deploy-campaign-scheduler-beta.sh` derives a private worker from the
 running API container and overrides those responsibilities:
 
-| Process | Campaign execution | Exact capacity | Tag Test reports | Smart-tag evaluation |
-|---|---:|---:|---:|---:|
-| `yamata-app-beta` | off | on | on | on |
-| `yamata-campaign-scheduler-beta` | on | off | off | off |
+| Process | Campaign execution | Exact capacity | Test sampling | Tag Test reports | Smart-tag evaluation |
+|---|---:|---:|---:|---:|---:|
+| `yamata-app-beta` | off | on | on | on | on |
+| `yamata-campaign-scheduler-beta` | on | off | off | off | off |
+
+The capacity and Test-sampling switches are independent. When the sampling
+variable is omitted, it inherits the capacity switch for backward
+compatibility; set it explicitly in production.
 
 This prevents two processes from claiming the same job family. Run
 `scripts/deploy-production-beta.sh` after any image or environment change;
