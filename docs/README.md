@@ -17,7 +17,9 @@ The application is a Go 1.26 service built on Fiber v3, GORM, PostgreSQL, and Re
 - Short links and click reporting, media, tickets, pricing, platform settings, admin customer management, and maker-checker access control.
 - Prometheus metrics, Grafana dashboards, structured/rotated logs, request IDs, and Sentry-compatible GlitchTip reporting.
 
-The schema head is migration `0128`. The newest schema work adds ordered Smart Targeting Test sampling, deterministic execution ordering, and campaign audience/tag attribution on top of normalized Bundle audience allocations.
+The schema head is migration `0133`. The newest schema work adds durable Tag
+Test performance reporting and makes Test sampling independently track Bundle
+allocation freshness instead of depending on an exact-capacity generation.
 
 ## Source of Truth
 
@@ -139,6 +141,7 @@ Smart-tag evaluation is off by default. When enabling it:
   - `SMART_TAG_EVALUATION_TAG_SCORING_SYSTEM_PROMPT`
 - Enable `SMART_TAG_EVALUATION_SCHEDULER_ENABLED` only when this process should claim queued runs.
 - Enable `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED` only when this process should claim exact Smart Targeting capacity jobs.
+- Enable `SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED` only when this process should claim Smart Targeting Test sampling jobs.
 
 The scheduler poll interval, maximum parallel runs, tag batch size, validation strictness, model, reasoning effort, token limit, timeout, retry count, temperature, and optional proxy are configurable through `env.template`.
 
