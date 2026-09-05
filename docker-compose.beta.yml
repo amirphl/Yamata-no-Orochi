@@ -678,6 +678,14 @@ services:
       SMS_RETRY_COUNT: ${SMS_RETRY_COUNT:-3}
       SMS_VALIDITY_PERIOD: ${SMS_VALIDITY_PERIOD:-300}
       SMS_TIMEOUT: ${SMS_TIMEOUT:-30s}
+      PAYAM_SMS_TOKEN_URL: ${PAYAM_SMS_TOKEN_URL:-https://www.payamsms.com/auth/oauth/token}
+      PAYAM_SMS_SEND_URL: ${PAYAM_SMS_SEND_URL:-https://www.payamsms.com/panel/webservice/sendMultipleWithSrc}
+      PAYAM_SMS_SYSTEM_NAME: ${PAYAM_SMS_SYSTEM_NAME}
+      PAYAM_SMS_USERNAME: ${PAYAM_SMS_USERNAME}
+      PAYAM_SMS_PASSWORD: ${PAYAM_SMS_PASSWORD}
+      PAYAM_SMS_SCOPE: ${PAYAM_SMS_SCOPE:-webservice}
+      PAYAM_SMS_GRANT_TYPE: ${PAYAM_SMS_GRANT_TYPE:-password}
+      PAYAM_SMS_ROOT_ACCESS_TOKEN: ${PAYAM_SMS_ROOT_ACCESS_TOKEN:-}
     volumes:
       - type: bind
         source: ./docker/nginx/sites-available/generated/beta
