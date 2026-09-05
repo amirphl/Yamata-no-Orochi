@@ -47,6 +47,11 @@ func TestDiscoverPendingTagTestReportsSQLBindsSourcesAndCalculationVersion(t *te
 	if !strings.Contains(discoverPendingTagTestReportsSQL, "existing.calculation_version <> ?") {
 		t.Fatal("discovery query does not enqueue stale calculation versions")
 	}
+	for _, fragment := range []string{"?::integer", "?::timestamptz"} {
+		if !strings.Contains(discoverPendingTagTestReportsSQL, fragment) {
+			t.Fatalf("discovery query does not cast its INSERT projection parameter %q", fragment)
+		}
+	}
 	if got, want := strings.Count(discoverPendingTagTestReportsSQL, "?"), 14; got != want {
 		t.Fatalf("discovery query bind count = %d, want %d", got, want)
 	}
@@ -56,6 +61,8 @@ func TestSummarySQLUsesWeightedTotalsAndStableUpsert(t *testing.T) {
 	for _, fragment := range []string{
 		"SUM(performance.delivered_count)",
 		"SUM(performance.click_count)",
+		"?::integer",
+		"?::timestamptz",
 		"ON CONFLICT (bundle_id, tag_id) DO UPDATE",
 	} {
 		if !strings.Contains(summarySQL, fragment) {
@@ -77,6 +84,11 @@ func TestCampaignMaterializationDeletesTagsNoLongerAttributed(t *testing.T) {
 }
 
 func TestRecomputeCampaignTagPerformanceSQLBindsEverySource(t *testing.T) {
+	for _, fragment := range []string{"?::integer", "?::timestamptz"} {
+		if !strings.Contains(recomputeCampaignTagPerformanceSQL, fragment) {
+			t.Fatalf("tag performance query does not cast its INSERT projection parameter %q", fragment)
+		}
+	}
 	// Campaign + phase, four send sources, four delivery sources, and three
 	// materialization metadata values.
 	if got, want := strings.Count(recomputeCampaignTagPerformanceSQL, "?"), 13; got != want {
