@@ -2,7 +2,7 @@
 
 The supported deployment is the checked-in beta Docker Compose stack. The
 canonical release command starts the API-owned workers, recreates the isolated
-campaign scheduler, and runs topology checks.
+campaign workers, and runs topology checks.
 
 For migration to a new host, restoring Docker volumes, or importing the large
 audience/scheduler dumps, follow
@@ -26,7 +26,7 @@ and downtime rules take precedence over this fresh-deployment guide.
 The Nginx edge containers publish host ports: 80 and 443 for the public
 application, plus 14433 bound exclusively to the selected host interface for
 the dedicated pgAdmin proxy. The API, databases, Redis,
-monitoring services, pgAdmin, and standalone campaign scheduler stay on private
+monitoring services, pgAdmin, and standalone campaign workers stay on private
 Docker networks. The checked-in networks use `172.28.0.0/28` for the dedicated
 pgAdmin proxy edge, `172.29.0.0/28` for the pgAdmin-to-PostgreSQL link,
 `172.30.0.0/24` for the application, and `172.31.0.0/28` for the
@@ -102,10 +102,12 @@ The wrapper performs these operations:
 1. validates `.env.beta` and the required worker ownership;
 2. validates pre-provisioned TLS certificates and renders nginx configuration;
 3. builds/starts the Compose dependencies;
-4. stops application writers and applies migrations through schema head `0128`;
+4. stops application writers and applies migrations through schema head `0141`;
 5. starts and health-checks `yamata-app-beta`;
-6. recreates `yamata-campaign-scheduler-beta` from the API image and effective
-   environment, with campaign-only worker overrides;
+6. recreates the `yamata-payam-campaign-scheduler-beta`,
+   `yamata-candoo-campaign-scheduler-beta`, and
+   `yamata-other-campaign-scheduler-beta` workers from the API image and
+   effective environment, with role-specific worker overrides;
 7. runs `scripts/check-yamata-production.sh`.
 
 Do not use that fresh-database path to restore a migrated production database.
@@ -121,7 +123,9 @@ curl --fail https://example.com/api/v1/health
 curl --fail https://api.example.com/api/v1/health
 curl -I https://pg.example.com:14433 # expected: 401 HTTP Basic challenge
 docker logs --tail 100 yamata-app-beta
-docker logs --tail 100 yamata-campaign-scheduler-beta
+docker logs --tail 100 yamata-payam-campaign-scheduler-beta
+docker logs --tail 100 yamata-candoo-campaign-scheduler-beta
+docker logs --tail 100 yamata-other-campaign-scheduler-beta
 ```
 
 Expected worker settings:
@@ -129,9 +133,11 @@ Expected worker settings:
 | Container | Campaign execution | Exact-capacity scheduler | Tag Test report scheduler | Smart-tag scheduler |
 |---|---:|---:|---:|---:|
 | `yamata-app-beta` | `false` | `true` | `true` | `true` |
-| `yamata-campaign-scheduler-beta` | `true` | `false` | `false` | `false` |
+| `yamata-payam-campaign-scheduler-beta` | `true` | `false` | `false` | `false` |
+| `yamata-candoo-campaign-scheduler-beta` | `true` | `false` | `false` | `false` |
+| `yamata-other-campaign-scheduler-beta` | `true` | `false` | `false` | `false` |
 
-The scheduler has no published port. Its bot callback base is the internal
+The campaign workers have no published ports. Their bot callback base is the internal
 `http://app-beta:8080`; port 443 belongs to nginx, not the API container.
 
 ## Updates and environment changes
@@ -146,7 +152,7 @@ git pull --ff-only
 ```
 
 A container restart does not reload environment variables. The wrapper
-recreates the isolated scheduler so it receives the API’s new effective
+recreates the isolated campaign workers so they receive the API’s new effective
 configuration while retaining the required worker overrides.
 
 Run database migrations only while both writer containers are stopped. See

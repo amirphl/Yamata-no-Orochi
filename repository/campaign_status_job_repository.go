@@ -12,14 +12,40 @@ import (
 // CampaignStatusJobRepositoryImpl implements CampaignStatusJobRepository
 type CampaignStatusJobRepositoryImpl struct {
 	*BaseRepository[models.CampaignStatusJob, any]
+	tableName string
 }
 
 func NewCampaignStatusJobRepository(db *gorm.DB) CampaignStatusJobRepository {
-	return &CampaignStatusJobRepositoryImpl{BaseRepository: NewBaseRepository[models.CampaignStatusJob, any](db)}
+	return newCampaignStatusJobRepository(db, "campaign_status_jobs")
+}
+
+// NewPayamSMSStatusJobRepository persists Payam delivery polling jobs.
+func NewPayamSMSStatusJobRepository(db *gorm.DB) CampaignStatusJobRepository {
+	return newCampaignStatusJobRepository(db, "payam_sms_status_jobs")
+}
+
+// NewCandooSMSStatusJobRepository persists Candoo delivery polling jobs.
+func NewCandooSMSStatusJobRepository(db *gorm.DB) CampaignStatusJobRepository {
+	return newCampaignStatusJobRepository(db, "candoo_sms_status_jobs")
+}
+
+func newCampaignStatusJobRepository(db *gorm.DB, tableName string) *CampaignStatusJobRepositoryImpl {
+	return &CampaignStatusJobRepositoryImpl{BaseRepository: NewBaseRepository[models.CampaignStatusJob, any](db), tableName: tableName}
+}
+
+func (r *CampaignStatusJobRepositoryImpl) table() string {
+	if r.tableName == "" {
+		return "campaign_status_jobs"
+	}
+	return r.tableName
+}
+
+func (r *CampaignStatusJobRepositoryImpl) Save(ctx context.Context, job *models.CampaignStatusJob) error {
+	return r.getDB(ctx).Table(r.table()).Create(job).Error
 }
 
 func (r *CampaignStatusJobRepositoryImpl) ByID(ctx context.Context, id uint) (*models.CampaignStatusJob, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	var row models.CampaignStatusJob
 	if err := db.Last(&row, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -47,17 +73,20 @@ func (r *CampaignStatusJobRepositoryImpl) ListDue(ctx context.Context, platform 
 }
 
 func (r *CampaignStatusJobRepositoryImpl) SaveBatch(ctx context.Context, jobs []*models.CampaignStatusJob) error {
-	return r.BaseRepository.SaveBatch(ctx, jobs)
+	if len(jobs) == 0 {
+		return nil
+	}
+	return r.getDB(ctx).Table(r.table()).CreateInBatches(jobs, 1000).Error
 }
 
 func (r *CampaignStatusJobRepositoryImpl) Update(ctx context.Context, job *models.CampaignStatusJob) error {
 	db := r.getDB(ctx)
-	return db.Save(job).Error
+	return db.Table(r.table()).Save(job).Error
 }
 
 // ByFilter: since no filter is defined, apply order/limit/offset only
 func (r *CampaignStatusJobRepositoryImpl) ByFilter(ctx context.Context, _ any, orderBy string, limit, offset int) ([]*models.CampaignStatusJob, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	if orderBy != "" {
 		db = db.Order(orderBy)
 	}
@@ -75,9 +104,9 @@ func (r *CampaignStatusJobRepositoryImpl) ByFilter(ctx context.Context, _ any, o
 }
 
 func (r *CampaignStatusJobRepositoryImpl) Count(ctx context.Context, _ any) (int64, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	var count int64
-	if err := db.Model(&models.CampaignStatusJob{}).Count(&count).Error; err != nil {
+	if err := db.Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil

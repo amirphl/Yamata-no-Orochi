@@ -3,10 +3,12 @@
 Recalculate and push campaign statistics to Jazebeh.
 
 For each supplied campaign ID the script:
-  1. Resolves the processed_campaign_id from processed_campaigns.
+  1. Resolves the processed_campaign_id from the selected scheduler's
+     provider-specific processed-campaign table.
   2. Aggregates stats from the platform-specific status-result table
-     (sms_status_results / bale_status_results / splus_status_results /
-      rubika_status_results), mirroring the Go AggregateByCampaign query.
+     (legacy sms_status_results, payam_sms_status_results,
+      candoo_sms_status_results, or a non-SMS platform table), mirroring the
+     Go AggregateByCampaign query.
   3. POSTs the statistics to the Jazebeh bot API
      (POST /api/v1/bot/campaigns/{id}/statistics).
 
@@ -36,13 +38,17 @@ from script_common import (
     validate_positive_ids,
 )
 
-PLATFORMS = ("sms", "bale", "splus", "rubika")
+PLATFORMS = ("sms", "payam", "candoo", "bale", "splus", "rubika")
 
-STATUS_TABLE = {
-    "sms": "sms_status_results",
-    "bale": "bale_status_results",
-    "splus": "splus_status_results",
-    "rubika": "rubika_status_results",
+# "sms" intentionally means the retired generic scheduler tables and is kept
+# only for historical repairs. New SMS campaigns are owned by Payam or Candoo.
+PLATFORM_TABLES = {
+    "sms": ("processed_campaigns", "sms_status_results"),
+    "payam": ("payam_processed_campaigns", "payam_sms_status_results"),
+    "candoo": ("candoo_processed_campaigns", "candoo_sms_status_results"),
+    "bale": ("processed_campaigns", "bale_status_results"),
+    "splus": ("processed_campaigns", "splus_status_results"),
+    "rubika": ("processed_campaigns", "rubika_status_results"),
 }
 
 AGGREGATE_SQL = """
@@ -66,7 +72,7 @@ def parse_args() -> argparse.Namespace:
         "--platform",
         required=True,
         choices=PLATFORMS,
-        help="Campaign platform (sms / bale / splus / rubika)",
+        help="Campaign platform (payam / candoo / sms legacy / bale / splus / rubika)",
     )
     parser.add_argument(
         "--campaign-ids",
@@ -176,9 +182,10 @@ def connect_db(args: argparse.Namespace):
     )
 
 
-def fetch_processed_campaign_id(cur, campaign_id: int) -> int | None:
+def fetch_processed_campaign_id(cur, campaign_id: int, platform: str) -> int | None:
+    processed_table, _ = PLATFORM_TABLES[platform]
     cur.execute(
-        "SELECT id FROM processed_campaigns WHERE campaign_id = %s ORDER BY id DESC LIMIT 1",
+        f"SELECT id FROM {processed_table} WHERE campaign_id = %s ORDER BY id DESC LIMIT 1",
         (campaign_id,),
     )
     row = cur.fetchone()
@@ -186,7 +193,7 @@ def fetch_processed_campaign_id(cur, campaign_id: int) -> int | None:
 
 
 def aggregate_stats(cur, platform: str, processed_campaign_id: int) -> dict | None:
-    table = STATUS_TABLE[platform]
+    _, table = PLATFORM_TABLES[platform]
     cur.execute(AGGREGATE_SQL.format(table=table), (processed_campaign_id,))
     row = cur.fetchone()
     if row is None:
@@ -246,7 +253,9 @@ def main() -> None:
     for campaign_id in args.campaign_ids:
         print(f"\n--- campaign_id={campaign_id} ---")
 
-        processed_campaign_id = fetch_processed_campaign_id(cur, campaign_id)
+        processed_campaign_id = fetch_processed_campaign_id(
+            cur, campaign_id, args.platform
+        )
         if processed_campaign_id is None:
             print(f"  SKIP: no processed_campaign found for campaign_id={campaign_id}")
             skip_count += 1

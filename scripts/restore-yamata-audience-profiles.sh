@@ -59,10 +59,12 @@ readonly DOCKER
 [[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$POSTGRES_CONTAINER")" == true ]] ||
 	die "PostgreSQL container is not running"
 
-if "${DOCKER[@]}" inspect yamata-campaign-scheduler-beta >/dev/null 2>&1 &&
-	[[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' yamata-campaign-scheduler-beta)" == true ]]; then
-	die "Dedicated campaign scheduler must be stopped before restore: yamata-campaign-scheduler-beta"
-fi
+for scheduler_container in yamata-campaign-scheduler-beta yamata-payam-campaign-scheduler-beta yamata-candoo-campaign-scheduler-beta yamata-other-campaign-scheduler-beta; do
+	if "${DOCKER[@]}" inspect "$scheduler_container" >/dev/null 2>&1 &&
+		[[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$scheduler_container")" == true ]]; then
+		die "Campaign scheduler must be stopped before restore: $scheduler_container"
+	fi
+done
 
 if "${DOCKER[@]}" inspect yamata-app-beta >/dev/null 2>&1 &&
 	[[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' yamata-app-beta)" == true ]]; then

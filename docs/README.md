@@ -17,9 +17,9 @@ The application is a Go 1.26 service built on Fiber v3, GORM, PostgreSQL, and Re
 - Short links and click reporting, media, tickets, pricing, platform settings, admin customer management, and maker-checker access control.
 - Prometheus metrics, Grafana dashboards, structured/rotated logs, request IDs, and Sentry-compatible GlitchTip reporting.
 
-The schema head is migration `0133`. The newest schema work adds durable Tag
-Test performance reporting and makes Test sampling independently track Bundle
-allocation freshness instead of depending on an exact-capacity generation.
+The schema head is migration `0141`. Campaign execution persists Payam and
+Candoo work in independent scheduler tables; the frontend still uses `sms` as
+its platform type and routing follows the active sender-line provider.
 
 ## Source of Truth
 
@@ -153,7 +153,7 @@ The scheduler poll interval, maximum parallel runs, tag batch size, validation s
 Use
 [`scripts/deploy-production-beta.sh`](../scripts/deploy-production-beta.sh) for
 production releases; it wraps the API deployment, recreates the isolated
-campaign scheduler, and runs topology checks. There is no checked-in production
+campaign workers, and runs topology checks. There is no checked-in production
 Kubernetes manifest or generic `docker-compose.production.yml`.
 
 ## Verification

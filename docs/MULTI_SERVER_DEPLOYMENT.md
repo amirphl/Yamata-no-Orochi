@@ -20,7 +20,7 @@ Each host should have its own:
 - JWT secret, database/Redis passwords, provider keys, bot credentials, and
   Grafana/GlitchTip credentials;
 - backup retention and restore test;
-- isolated campaign scheduler.
+- isolated Payam, Candoo, and non-SMS campaign workers.
 
 Do not share PostgreSQL or Redis between staging and production. Do not reuse
 JWT secrets or provider credentials unless that sharing is an explicit,
@@ -120,7 +120,9 @@ docker compose --env-file .env.beta -f docker-compose.beta.yml ps
 ./scripts/check-yamata-production.sh /srv/yamata
 docker exec yamata-app-beta printenv APP_ENV
 docker exec yamata-app-beta printenv CAMPAIGN_EXECUTION_ENABLED
-docker exec yamata-campaign-scheduler-beta printenv CAMPAIGN_EXECUTION_ENABLED
+docker exec yamata-payam-campaign-scheduler-beta printenv CAMPAIGN_SCHEDULER_ROLE
+docker exec yamata-candoo-campaign-scheduler-beta printenv CAMPAIGN_SCHEDULER_ROLE
+docker exec yamata-other-campaign-scheduler-beta printenv CAMPAIGN_SCHEDULER_ROLE
 curl --fail https://example.com/api/v1/health
 ```
 
@@ -129,7 +131,7 @@ Also verify that:
 - only ports 80/443 are published by the stack;
 - PostgreSQL, Redis, metrics, and Grafana are not exposed directly;
 - the API owns exact-capacity, Test-sampling, and smart-tag jobs;
-- the isolated scheduler alone owns campaign execution;
+- the isolated Payam, Candoo, and non-SMS workers alone own their respective campaign execution pipelines;
 - certificate monitoring works and an authorized renewal mechanism exists;
 - alerts, backups, retention, and restore drills identify the correct
   environment.

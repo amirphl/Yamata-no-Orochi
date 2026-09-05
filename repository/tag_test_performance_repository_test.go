@@ -116,9 +116,9 @@ func TestRecomputeCampaignTagPerformanceSQLBindsEverySource(t *testing.T) {
 			t.Fatalf("tag performance query does not cast its INSERT projection parameter %q", fragment)
 		}
 	}
-	// Campaign + phase, four send sources, four delivery sources, and three
+	// Campaign + phase, six send sources, six delivery sources, and three
 	// materialization metadata values.
-	if got, want := strings.Count(recomputeCampaignTagPerformanceSQL, "?"), 13; got != want {
+	if got, want := strings.Count(recomputeCampaignTagPerformanceSQL, "?"), 17; got != want {
 		t.Fatalf("tag performance query bind count = %d, want %d", got, want)
 	}
 }

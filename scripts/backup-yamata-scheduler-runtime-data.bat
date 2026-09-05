@@ -42,9 +42,19 @@ if exist "%DUMP_FILE%" (
   -t public.rubika_status_results ^
   -t public.campaign_status_jobs ^
   -t public.processed_campaigns ^
+	  -t public.payam_processed_campaigns ^
+	  -t public.candoo_processed_campaigns ^
   -t public.payam_sms_send_responses ^
+	  -t public.payam_sms_send_attempts ^
+	  -t public.candoo_sms_send_attempts ^
+	  -t public.payam_sms_status_jobs ^
+	  -t public.candoo_sms_status_jobs ^
+	  -t public.payam_sms_status_results ^
+	  -t public.candoo_sms_status_results ^
   -t public.sent_bale_messages ^
   -t public.sent_sms ^
+	  -t public.payam_sent_sms ^
+	  -t public.candoo_sent_sms ^
   -t public.sent_splus_messages ^
   -t public.sms_status_results ^
   -t public.splus_status_results ^

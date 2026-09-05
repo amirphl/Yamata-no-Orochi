@@ -34,7 +34,8 @@ env_value() {
 
 for container in \
 	yamata-postgres-beta yamata-redis-beta yamata-app-beta yamata-nginx-beta \
-	yamata-pgadmin-beta yamata-pgadmin-nginx-beta yamata-campaign-scheduler-beta; do
+	yamata-pgadmin-beta yamata-pgadmin-nginx-beta \
+	yamata-payam-campaign-scheduler-beta yamata-candoo-campaign-scheduler-beta yamata-other-campaign-scheduler-beta; do
 	"${DOCKER[@]}" container inspect "$container" >/dev/null 2>&1 || die "Missing container: $container"
 	state="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "$container")"
 	[[ "$state" == running ]] || die "$container is $state"
@@ -84,30 +85,12 @@ log "yamata-postgres-beta /dev/shm: $((postgres_shm_bytes / 1024 / 1024 / 1024))
 
 [[ "$(env_value yamata-app-beta CAMPAIGN_EXECUTION_ENABLED)" == false ]] ||
 	die "yamata-app-beta must have CAMPAIGN_EXECUTION_ENABLED=false"
-[[ "$(env_value yamata-campaign-scheduler-beta CAMPAIGN_EXECUTION_ENABLED)" == true ]] ||
-	die "yamata-campaign-scheduler-beta must have CAMPAIGN_EXECUTION_ENABLED=true"
-[[ "$(env_value yamata-campaign-scheduler-beta EXTERNAL_SHORTLINK_ENABLED)" == false ]] ||
-	die "External short-link sync must be disabled in the campaign scheduler; app-beta is the sole sync owner"
 [[ "$(env_value yamata-app-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == true ]] ||
 	die "Exact Smart Targeting capacity scheduling must be enabled in yamata-app-beta"
-[[ "$(env_value yamata-campaign-scheduler-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == false ]] ||
-	die "Exact Smart Targeting capacity scheduling must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-app-beta SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED)" == true ]] ||
 	die "Smart Targeting Test sampling must be enabled in yamata-app-beta"
-[[ "$(env_value yamata-campaign-scheduler-beta SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED)" == false ]] ||
-	die "Smart Targeting Test sampling must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-app-beta TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED)" == true ]] ||
 	die "Tag Test performance scheduling must be enabled in yamata-app-beta"
-[[ "$(env_value yamata-campaign-scheduler-beta TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED)" == false ]] ||
-	die "Tag Test performance scheduling must be disabled in the campaign scheduler"
-[[ "$(env_value yamata-campaign-scheduler-beta BOT_API_DOMAIN)" == http://app-beta:8080 ]] ||
-	die "Scheduler BOT_API_DOMAIN must be http://app-beta:8080"
-[[ "$(env_value yamata-campaign-scheduler-beta SERVER_HOST)" == 127.0.0.1 ]] ||
-	die "Scheduler HTTP listener must bind to 127.0.0.1"
-[[ "$(env_value yamata-campaign-scheduler-beta SMART_TAG_EVALUATION_ENABLED)" == false ]] ||
-	die "Smart-tag evaluation must be disabled in the campaign scheduler"
-[[ "$(env_value yamata-campaign-scheduler-beta SMART_TAG_EVALUATION_SCHEDULER_ENABLED)" == false ]] ||
-	die "Smart-tag scheduling must be disabled in the campaign scheduler"
 [[ "$(env_value yamata-app-beta SMART_TAG_EVALUATION_ENABLED)" == true ]] ||
 	die "Smart-tag evaluation must be enabled in yamata-app-beta"
 [[ "$(env_value yamata-app-beta SMART_TAG_EVALUATION_SCHEDULER_ENABLED)" == true ]] ||
@@ -116,32 +99,29 @@ log "yamata-postgres-beta /dev/shm: $((postgres_shm_bytes / 1024 / 1024 / 1024))
 [[ -n "$(env_value yamata-app-beta BOT_PASSWORD)" ]] || die "BOT_PASSWORD is empty"
 
 app_image_id="$("${DOCKER[@]}" inspect -f '{{.Image}}' yamata-app-beta)"
-scheduler_image_id="$("${DOCKER[@]}" inspect -f '{{.Image}}' yamata-campaign-scheduler-beta)"
-[[ "$app_image_id" == "$scheduler_image_id" ]] ||
-	die "API and scheduler use different image IDs; run deploy-production-beta.sh"
-[[ "$("${DOCKER[@]}" inspect -f '{{.HostConfig.RestartPolicy.Name}}' yamata-campaign-scheduler-beta)" == unless-stopped ]] ||
-	die "Scheduler restart policy must be unless-stopped"
-[[ "$("${DOCKER[@]}" inspect -f '{{len .HostConfig.PortBindings}}' yamata-campaign-scheduler-beta)" == 0 ]] ||
-	die "Scheduler must not publish ports"
-scheduler_log_volume="$(
-	"${DOCKER[@]}" inspect -f \
-		'{{range .Mounts}}{{if and (eq .Type "volume") (eq .Destination "/var/log/yamata")}}{{.Name}}{{end}}{{end}}' \
-		yamata-campaign-scheduler-beta
-)"
-[[ -n "$scheduler_log_volume" ]] || die "Scheduler has no persistent log volume"
-log "scheduler log volume: $scheduler_log_volume"
-
 app_network="$(
 	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
 		yamata-app-beta | awk 'NF { print; exit }'
 )"
-scheduler_network="$(
-	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
-		yamata-campaign-scheduler-beta | awk 'NF { print; exit }'
-)"
-[[ -n "$app_network" && "$app_network" == "$scheduler_network" ]] ||
-	die "API and scheduler are not attached to the same Docker network"
-log "shared network: $app_network"
+for scheduler_role in payam candoo other; do
+	scheduler_container="yamata-${scheduler_role}-campaign-scheduler-beta"
+	[[ "$(env_value "$scheduler_container" CAMPAIGN_EXECUTION_ENABLED)" == true ]] || die "$scheduler_container must enable campaign execution"
+	[[ "$(env_value "$scheduler_container" CAMPAIGN_SCHEDULER_ROLE)" == "$scheduler_role" ]] || die "$scheduler_container has the wrong scheduler role"
+	[[ "$(env_value "$scheduler_container" EXTERNAL_SHORTLINK_ENABLED)" == false ]] || die "$scheduler_container must disable external short-link sync"
+	[[ "$(env_value "$scheduler_container" SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == false ]] || die "$scheduler_container must disable capacity scheduling"
+	[[ "$(env_value "$scheduler_container" SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED)" == false ]] || die "$scheduler_container must disable test sampling"
+	[[ "$(env_value "$scheduler_container" TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED)" == false ]] || die "$scheduler_container must disable tag performance"
+	[[ "$(env_value "$scheduler_container" BOT_API_DOMAIN)" == http://app-beta:8080 ]] || die "$scheduler_container has an invalid BOT_API_DOMAIN"
+	[[ "$(env_value "$scheduler_container" SERVER_HOST)" == 127.0.0.1 ]] || die "$scheduler_container must bind HTTP to loopback"
+	[[ "$(env_value "$scheduler_container" SMART_TAG_EVALUATION_ENABLED)" == false ]] || die "$scheduler_container must disable smart-tag evaluation"
+	[[ "$(env_value "$scheduler_container" SMART_TAG_EVALUATION_SCHEDULER_ENABLED)" == false ]] || die "$scheduler_container must disable smart-tag scheduling"
+	[[ "$("${DOCKER[@]}" inspect -f '{{.Image}}' "$scheduler_container")" == "$app_image_id" ]] || die "API and $scheduler_container use different images"
+	[[ "$("${DOCKER[@]}" inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$scheduler_container")" == unless-stopped ]] || die "$scheduler_container must restart unless-stopped"
+	[[ "$("${DOCKER[@]}" inspect -f '{{len .HostConfig.PortBindings}}' "$scheduler_container")" == 0 ]] || die "$scheduler_container must not publish ports"
+	scheduler_network="$("${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$scheduler_container" | awk 'NF { print; exit }')"
+	[[ -n "$app_network" && "$app_network" == "$scheduler_network" ]] || die "API and $scheduler_container are not attached to the same Docker network"
+done
+log "all campaign workers share network: $app_network"
 
 # pgAdmin is an Nginx-only service: it must not publish a host port. Its
 # dedicated Nginx proxy is the sole listener, bound to the selected host
@@ -243,22 +223,23 @@ pgadmin_allowed_host="$(env_value yamata-pgadmin-beta PGADMIN_ALLOWED_HOST)"
 	die "PostgreSQL pg_hba.conf must allow SCRAM only from the dedicated pgAdmin network"
 log "pgAdmin is isolated, private, and protected by Nginx Basic Auth"
 
-"${DOCKER[@]}" exec yamata-campaign-scheduler-beta \
-	curl -fsS --noproxy app-beta http://app-beta:8080/api/v1/health >/dev/null ||
-	die "Scheduler cannot reach the API over the private network"
+for scheduler_role in payam candoo other; do
+	scheduler_container="yamata-${scheduler_role}-campaign-scheduler-beta"
+	"${DOCKER[@]}" exec "$scheduler_container" \
+		curl -fsS --noproxy app-beta http://app-beta:8080/api/v1/health >/dev/null ||
+		die "$scheduler_container cannot reach the API over the private network"
+done
 "${DOCKER[@]}" exec yamata-nginx-beta nginx -t >/dev/null
 
 app_password_hash="$(
 	"${DOCKER[@]}" exec yamata-app-beta sh -c 'printf %s "$BOT_PASSWORD" | sha256sum' | awk '{print $1}'
 )"
-scheduler_password_hash="$(
-	"${DOCKER[@]}" exec yamata-campaign-scheduler-beta sh -c 'printf %s "$BOT_PASSWORD" | sha256sum' | awk '{print $1}'
-)"
-[[ "$app_password_hash" == "$scheduler_password_hash" ]] ||
-	die "BOT_PASSWORD differs between API and scheduler; run deploy-production-beta.sh"
-[[ "$(env_value yamata-app-beta BOT_USERNAME)" == \
-	"$(env_value yamata-campaign-scheduler-beta BOT_USERNAME)" ]] ||
-	die "BOT_USERNAME differs between API and scheduler; run deploy-production-beta.sh"
+for scheduler_role in payam candoo other; do
+	scheduler_container="yamata-${scheduler_role}-campaign-scheduler-beta"
+	scheduler_password_hash="$("${DOCKER[@]}" exec "$scheduler_container" sh -c 'printf %s "$BOT_PASSWORD" | sha256sum' | awk '{print $1}')"
+	[[ "$app_password_hash" == "$scheduler_password_hash" ]] || die "BOT_PASSWORD differs between API and $scheduler_container"
+	[[ "$(env_value yamata-app-beta BOT_USERNAME)" == "$(env_value "$scheduler_container" BOT_USERNAME)" ]] || die "BOT_USERNAME differs between API and $scheduler_container"
+done
 log "BOT_PASSWORD hashes match (secret not displayed)"
 
 schema_checks="$("${DOCKER[@]}" exec yamata-postgres-beta sh -lc \
@@ -356,6 +337,29 @@ schema_checks="$("${DOCKER[@]}" exec yamata-postgres-beta sh -lc \
 	 SELECT to_regclass('\''public.idx_audience_profiles_uid'\'') IS NULL;
 	 SELECT to_regclass('\''public.idx_audience_profiles_phone_number'\'') IS NULL;"')"
 [[ "$schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Required migrations through 0131 are incomplete or inconsistent"
+
+provider_scheduler_schema_checks="$("${DOCKER[@]}" exec yamata-postgres-beta sh -lc \
+	'exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "
+	 SELECT to_regclass('\''public.payam_processed_campaigns'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.candoo_processed_campaigns'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.payam_sent_sms'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.candoo_sent_sms'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.payam_sms_status_jobs'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.candoo_sms_status_jobs'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.payam_sms_status_results'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.candoo_sms_status_results'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.payam_sms_send_attempts'\'') IS NOT NULL;
+	 SELECT to_regclass('\''public.candoo_sms_send_attempts'\'') IS NOT NULL;
+	 SELECT NOT EXISTS (
+	   SELECT 1
+	   FROM pg_attrdef AS default_value
+	   JOIN pg_attribute AS attribute
+	     ON attribute.attrelid = default_value.adrelid
+	    AND attribute.attnum = default_value.adnum
+	   WHERE default_value.adrelid = '\''public.line_numbers'\''::regclass
+	     AND attribute.attname = '\''provider'\''
+	 );"')"
+[[ "$provider_scheduler_schema_checks" == $'t\nt\nt\nt\nt\nt\nt\nt\nt\nt\nt' ]] || die "Provider scheduler split migration 0141 is incomplete or inconsistent"
 
 [[ -x "$PROJECT_DIR/scripts/check-yamata-certificates.sh" ]] ||
 	die "Missing certificate checker in $PROJECT_DIR/scripts"

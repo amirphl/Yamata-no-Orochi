@@ -72,7 +72,7 @@ values after deployment.
 | Redis/cache | `CACHE_*`, `REDIS_PASSWORD` | Compose injects `redis://redis-beta:6379` for the app. |
 | Deployment | `DOMAIN`, `API_DOMAIN`, `MONITORING_DOMAIN`, `SENTRY_*_DOMAIN`, `PGADMIN_*`, `CERTBOT_EMAIL`, `GRAFANA_ADMIN_PASSWORD`, backup variables | The deployment script renders nginx from the explicit domain argument. pgAdmin credential paths refer to protected host files; they are not credential values. |
 | Business identities | `ADMIN_*`, `SYSTEM_*`, `TAX_*` | UUIDs must match the database identities and wallets. |
-| Messaging | `SMS_*`, `PAYAM_SMS_*`, `BALE_*`, `RUBIKA_*`, `SPLUS_*`, `MESSAGE_*` | Bale provider behavior is documented in [`bale.md`](bale.md). |
+| Messaging | `SMS_*`, `PAYAM_SMS_*`, `CANDOO_SMS_*`, `BALE_*`, `RUBIKA_*`, `SPLUS_*`, `MESSAGE_*` | SMS campaign routing uses the active line number's Payam/Candoo provider. Bale provider behavior is documented in [`bale.md`](bale.md). |
 | Payments | `ATIPAY_*`, `CRYPTO_*`, `OXA_*` | Set `CRYPTO_ENABLED=false` to disable crypto payments; only OxaPay is accepted when enabled. |
 | Bot/schedulers | `BOT_*`, `CAMPAIGN_*`, `SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED`, `SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED`, `TAG_TEST_PERFORMANCE_SCHEDULER_*` | Production deliberately splits API-owned and campaign-execution workers. |
 | Smart-tag evaluation | `SMART_TAG_EVALUATION_*`, `OPENAI_API_KEY`, `IR_HTTPS_PROXY` | The API owns these jobs in the current production topology. |
@@ -102,7 +102,15 @@ running API container and overrides those responsibilities:
 | Process | Campaign execution | Exact capacity | Test sampling | Tag Test reports | Smart-tag evaluation |
 |---|---:|---:|---:|---:|---:|
 | `yamata-app-beta` | off | on | on | on | on |
-| `yamata-campaign-scheduler-beta` | on | off | off | off | off |
+| `yamata-payam-campaign-scheduler-beta` | on | off | off | off | off |
+| `yamata-candoo-campaign-scheduler-beta` | on | off | off | off | off |
+| `yamata-other-campaign-scheduler-beta` | on | off | off | off | off |
+
+The workers set `CAMPAIGN_SCHEDULER_ROLE` to `payam`, `candoo`, and `other`
+respectively. The frontend continues to submit SMS campaigns as platform `sms`;
+the active sender line's required `provider` field determines whether Payam or
+Candoo owns the work. Missing, inactive, or invalid line configuration leaves a
+campaign approved until an operator corrects it.
 
 The capacity and Test-sampling switches are independent. When the sampling
 variable is omitted, it inherits the capacity switch for backward

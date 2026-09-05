@@ -15,7 +15,7 @@ environment, not merely the existence of a configuration field.
 - [ ] Permit only required inbound traffic. The Yamata stack should publish
   only TCP 80/443; expose SSH through the host’s controlled management path.
 - [ ] Confirm PostgreSQL, Redis, Grafana, Prometheus, exporters, the API, and
-  the campaign scheduler are not directly published.
+  the campaign workers are not directly published.
 - [ ] Confirm Docker subnet `172.30.0.0/24` does not conflict with host, VPN, or
   upstream networks.
 - [ ] Protect Docker socket access as root-equivalent and review membership of
@@ -121,8 +121,10 @@ environment, not merely the existence of a configuration field.
 
 - [ ] `yamata-app-beta` has campaign execution off, exact-capacity and Test
   sampling scheduling on, and smart-tag scheduling on.
-- [ ] `yamata-campaign-scheduler-beta` has campaign execution on and exact
-  capacity, Test sampling, Tag Test reporting, and smart-tag schedulers off.
+- [ ] `yamata-payam-campaign-scheduler-beta`, `yamata-candoo-campaign-scheduler-beta`, and
+  `yamata-other-campaign-scheduler-beta` have campaign execution on, their matching
+  `CAMPAIGN_SCHEDULER_ROLE`, and exact-capacity, Test sampling, Tag Test reporting,
+  and smart-tag schedulers off.
 - [ ] `CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED=false` in production.
 - [ ] The scheduler has no published ports and uses
   `http://app-beta:8080` for its internal bot client.
@@ -167,7 +169,9 @@ docker ps --format 'table {{.Names}}\t{{.Ports}}'
 docker inspect yamata-app-beta \
   --format 'User={{.Config.User}} Readonly={{.HostConfig.ReadonlyRootfs}} SecurityOpt={{json .HostConfig.SecurityOpt}}'
 docker exec yamata-app-beta printenv CAMPAIGN_EXECUTION_ENABLED
-docker exec yamata-campaign-scheduler-beta printenv CAMPAIGN_EXECUTION_ENABLED
+docker exec yamata-payam-campaign-scheduler-beta printenv CAMPAIGN_SCHEDULER_ROLE
+docker exec yamata-candoo-campaign-scheduler-beta printenv CAMPAIGN_SCHEDULER_ROLE
+docker exec yamata-other-campaign-scheduler-beta printenv CAMPAIGN_SCHEDULER_ROLE
 ```
 
 Check response headers without assuming configuration fields are wired:

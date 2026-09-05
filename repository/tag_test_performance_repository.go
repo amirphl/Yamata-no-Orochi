@@ -311,6 +311,10 @@ WHERE campaign.id = ?
 			campaignID,
 			campaignID,
 			campaignID,
+			campaignID,
+			campaignID,
+			campaignID,
+			campaignID,
 			models.TagTestPerformanceCalculationVersion,
 			at,
 			at,
@@ -540,9 +544,20 @@ WITH attributed AS (
     ORDER BY attribution.campaign_id, attribution.audience_id, attribution.id ASC
 ),
 sent_recipients AS (
+    -- Legacy SMS scheduler records are retained for historical reporting.
     SELECT processed.bundle_audience_selection_id, sent.phone_number
     FROM processed_campaigns AS processed
     JOIN sent_sms AS sent ON sent.processed_campaign_id = processed.id
+    WHERE processed.campaign_id = ?
+    UNION ALL
+    SELECT processed.bundle_audience_selection_id, sent.phone_number
+    FROM payam_processed_campaigns AS processed
+    JOIN payam_sent_sms AS sent ON sent.processed_campaign_id = processed.id
+    WHERE processed.campaign_id = ?
+    UNION ALL
+    SELECT processed.bundle_audience_selection_id, sent.phone_number
+    FROM candoo_processed_campaigns AS processed
+    JOIN candoo_sent_sms AS sent ON sent.processed_campaign_id = processed.id
     WHERE processed.campaign_id = ?
     UNION ALL
     SELECT processed.bundle_audience_selection_id, sent.phone_number
@@ -561,14 +576,38 @@ sent_recipients AS (
     WHERE processed.campaign_id = ?
 ),
 delivered_recipients AS (
-    -- SMS may contain multiple parts and is delivered only when every part is
-    -- delivered. Non-SMS status adapters normalize a delivered recipient to
-    -- one total part and one delivered part, so the same predicate preserves
-    -- each platform's existing Campaign-report semantics.
+    -- Each SMS provider may contain multiple parts and is delivered only when
+    -- every part is delivered. Non-SMS status adapters normalize a delivered
+    -- recipient to one total part and one delivered part, so the same
+    -- predicate preserves each platform's existing Campaign-report semantics.
     SELECT processed.bundle_audience_selection_id, sent.phone_number
     FROM processed_campaigns AS processed
     JOIN sent_sms AS sent ON sent.processed_campaign_id = processed.id
     JOIN sms_status_results AS status
+      ON status.processed_campaign_id = sent.processed_campaign_id
+     AND status.tracking_id = sent.tracking_id
+    WHERE processed.campaign_id = ?
+      AND status.total_parts IS NOT NULL
+      AND status.total_delivered_parts IS NOT NULL
+      AND status.total_parts > 0
+      AND status.total_parts = status.total_delivered_parts
+    UNION ALL
+    SELECT processed.bundle_audience_selection_id, sent.phone_number
+    FROM payam_processed_campaigns AS processed
+    JOIN payam_sent_sms AS sent ON sent.processed_campaign_id = processed.id
+    JOIN payam_sms_status_results AS status
+      ON status.processed_campaign_id = sent.processed_campaign_id
+     AND status.tracking_id = sent.tracking_id
+    WHERE processed.campaign_id = ?
+      AND status.total_parts IS NOT NULL
+      AND status.total_delivered_parts IS NOT NULL
+      AND status.total_parts > 0
+      AND status.total_parts = status.total_delivered_parts
+    UNION ALL
+    SELECT processed.bundle_audience_selection_id, sent.phone_number
+    FROM candoo_processed_campaigns AS processed
+    JOIN candoo_sent_sms AS sent ON sent.processed_campaign_id = processed.id
+    JOIN candoo_sms_status_results AS status
       ON status.processed_campaign_id = sent.processed_campaign_id
      AND status.tracking_id = sent.tracking_id
     WHERE processed.campaign_id = ?

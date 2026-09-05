@@ -157,7 +157,7 @@ check_postgres_container() {
 }
 
 check_application_writers_stopped() {
-    for container in yamata-app-beta yamata-campaign-scheduler-beta; do
+    for container in yamata-app-beta yamata-campaign-scheduler-beta yamata-payam-campaign-scheduler-beta yamata-candoo-campaign-scheduler-beta yamata-other-campaign-scheduler-beta; do
         if "${DOCKER[@]}" container inspect "$container" >/dev/null 2>&1 &&
             [ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$container")" = true ]; then
             print_error "Stop $container before applying migrations"

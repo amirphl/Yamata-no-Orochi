@@ -7,16 +7,19 @@ import (
 	"github.com/google/uuid"
 )
 
-type SMSProvider string
+// LineNumberProvider selects the campaign scheduler responsible for a sender
+// line. Campaigns still expose platform="sms" to clients; this value is an
+// internal scheduler-routing decision rather than a public platform.
+type LineNumberProvider string
 
 const (
-	SMSProviderPayamSMS SMSProvider = "payamsms"
-	SMSProviderCandoo   SMSProvider = "candoo"
+	LineNumberProviderPayam  LineNumberProvider = "payamsms"
+	LineNumberProviderCandoo LineNumberProvider = "candoo"
 )
 
-func IsValidSMSProvider(provider SMSProvider) bool {
+func IsValidLineNumberProvider(provider LineNumberProvider) bool {
 	switch provider {
-	case SMSProviderPayamSMS, SMSProviderCandoo:
+	case LineNumberProviderPayam, LineNumberProviderCandoo:
 		return true
 	default:
 		return false
@@ -34,11 +37,11 @@ type LineNumber struct {
 	ID   uint      `gorm:"primaryKey" json:"id"`
 	UUID uuid.UUID `gorm:"type:uuid;not null;uniqueIndex:uk_line_numbers_uuid;index:idx_line_numbers_uuid" json:"uuid"`
 
-	Name        *string     `gorm:"size:255" json:"name,omitempty"`
-	LineNumber  string      `gorm:"size:20;not null;uniqueIndex:uk_line_numbers_value;index:idx_line_numbers_value" json:"line_number"`
-	Provider    SMSProvider `gorm:"size:32;not null;default:'payamsms'" json:"provider"`
-	PriceFactor float64     `gorm:"type:numeric(10,4);not null" json:"price_factor"`
-	Priority    *int        `gorm:"index:idx_line_numbers_priority" json:"priority,omitempty"`
+	Name        *string            `gorm:"size:255" json:"name,omitempty"`
+	LineNumber  string             `gorm:"size:20;not null;uniqueIndex:uk_line_numbers_value;index:idx_line_numbers_value" json:"line_number"`
+	Provider    LineNumberProvider `gorm:"size:32;not null" json:"provider"`
+	PriceFactor float64            `gorm:"type:numeric(10,4);not null" json:"price_factor"`
+	Priority    *int               `gorm:"index:idx_line_numbers_priority" json:"priority,omitempty"`
 
 	IsActive  *bool     `gorm:"default:true;index:idx_line_numbers_is_active" json:"is_active"`
 	CreatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_line_numbers_created_at" json:"created_at"`
@@ -55,9 +58,20 @@ type LineNumberFilter struct {
 	UUID          *uuid.UUID
 	Name          *string
 	LineNumber    *string
-	Provider      *SMSProvider
+	Provider      *LineNumberProvider
 	IsActive      *bool
 	Priority      *int
 	CreatedAfter  *time.Time
 	CreatedBefore *time.Time
 }
+
+// SMSProvider is retained as a source-compatible alias for integrations that
+// configure line numbers. Scheduler code must use LineNumberProvider.
+type SMSProvider = LineNumberProvider
+
+const (
+	SMSProviderPayamSMS = LineNumberProviderPayam
+	SMSProviderCandoo   = LineNumberProviderCandoo
+)
+
+func IsValidSMSProvider(provider SMSProvider) bool { return IsValidLineNumberProvider(provider) }

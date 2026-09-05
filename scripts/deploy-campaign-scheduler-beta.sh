@@ -1,24 +1,30 @@
 #!/usr/bin/env bash
 
-# Run campaign execution in an isolated backend container.
-# Usage: ./scripts/deploy-campaign-scheduler-beta.sh [IMAGE]
+# Run one campaign-execution role in an isolated backend container.
+# Usage: ./scripts/deploy-campaign-scheduler-beta.sh ROLE [IMAGE]
 
 set -Eeuo pipefail
 set +x # Scheduler environment values may contain credentials.
 umask 077
 
-readonly SOURCE_CONTAINER="${YAMATA_SOURCE_CONTAINER:-yamata-app-beta}"
-readonly CONTAINER_NAME="${YAMATA_SCHEDULER_CONTAINER:-yamata-campaign-scheduler-beta}"
-readonly LOG_VOLUME="${YAMATA_SCHEDULER_LOG_VOLUME:-yamata-campaign-scheduler-logs-beta}"
-readonly INTERNAL_BOT_API_DOMAIN="${YAMATA_SCHEDULER_BOT_API_DOMAIN:-http://app-beta:8080}"
-
-case "${1:-}" in
-	--help|-h)
-		printf 'Usage: %s [IMAGE]\n' "$0"
-		printf 'Recreate the isolated campaign scheduler from the running API environment.\n'
+readonly SCHEDULER_ROLE="${1:-}"
+case "$SCHEDULER_ROLE" in
+	payam|candoo|other) ;;
+	--help|-h|"")
+		printf 'Usage: %s ROLE [IMAGE]\n' "$0"
+		printf 'ROLE must be one of: payam, candoo, other.\n'
 		exit 0
 		;;
+	*)
+		printf '[campaign-scheduler] ERROR: invalid role %q (want payam, candoo, or other)\n' "$SCHEDULER_ROLE" >&2
+		exit 1
+		;;
 esac
+
+readonly SOURCE_CONTAINER="${YAMATA_SOURCE_CONTAINER:-yamata-app-beta}"
+readonly CONTAINER_NAME="${YAMATA_SCHEDULER_CONTAINER:-yamata-${SCHEDULER_ROLE}-campaign-scheduler-beta}"
+readonly LOG_VOLUME="${YAMATA_SCHEDULER_LOG_VOLUME:-yamata-${SCHEDULER_ROLE}-campaign-scheduler-logs-beta}"
+readonly INTERNAL_BOT_API_DOMAIN="${YAMATA_SCHEDULER_BOT_API_DOMAIN:-http://app-beta:8080}"
 
 log() {
 	printf '[campaign-scheduler] %s\n' "$*"
@@ -147,7 +153,7 @@ readonly PROMPT_PERSONA_SOURCE PROMPT_SCORING_SOURCE
 [[ "$PROMPT_SCORING_SOURCE" != *','* && "$PROMPT_SCORING_SOURCE" != *$'\n'* && "$PROMPT_SCORING_SOURCE" != *$'\r'* ]] ||
 	die "Tag-scoring prompt path contains unsupported characters"
 
-IMAGE="${1:-$("${DOCKER[@]}" inspect -f '{{.Config.Image}}' "$SOURCE_CONTAINER")}"
+IMAGE="${2:-$("${DOCKER[@]}" inspect -f '{{.Config.Image}}' "$SOURCE_CONTAINER")}"
 readonly IMAGE
 [[ "$IMAGE" =~ ^[A-Za-z0-9][A-Za-z0-9._/@:-]*$ ]] || die "Invalid Docker image reference"
 "${DOCKER[@]}" image inspect "$IMAGE" >/dev/null 2>&1 || die "Image does not exist locally: $IMAGE"
@@ -170,6 +176,7 @@ trap cleanup EXIT
 		BEGIN {
 			override["BOT_API_DOMAIN"] = 1
 			override["CAMPAIGN_EXECUTION_ENABLED"] = 1
+			override["CAMPAIGN_SCHEDULER_ROLE"] = 1
 			override["CRYPTO_ENABLED"] = 1
 			override["EXTERNAL_SHORTLINK_ENABLED"] = 1
 			override["SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED"] = 1
@@ -248,8 +255,9 @@ LOG_ENABLE_ACCESS=false
 LOG_ACCESS_PATH=/var/log/yamata/campaign-scheduler-access.log
 LOG_AUDIT_PATH=/var/log/yamata/campaign-scheduler-audit.log
 LOG_SECURITY_PATH=/var/log/yamata/campaign-scheduler-security.log
-SENTRY_SERVER_NAME=yamata-campaign-scheduler-beta
 EOF
+printf 'CAMPAIGN_SCHEDULER_ROLE=%s\n' "$SCHEDULER_ROLE" >>"$RUNTIME_ENV"
+printf 'SENTRY_SERVER_NAME=yamata-%s-campaign-scheduler-beta\n' "$SCHEDULER_ROLE" >>"$RUNTIME_ENV"
 printf 'SENTRY_DSN=%s\n' "$SCHEDULER_SENTRY_DSN" >>"$RUNTIME_ENV"
 printf 'BOT_API_DOMAIN=%s\n' "$INTERNAL_BOT_API_DOMAIN" >>"$RUNTIME_ENV"
 cat >>"$RUNTIME_ENV" <<'EOF'
@@ -307,7 +315,7 @@ log "Starting $CONTAINER_NAME from $IMAGE on $NETWORK"
 	--log-driver local \
 	--log-opt max-size=20m \
 	--log-opt max-file=5 \
-	--label com.yamata.role=campaign-scheduler \
+	--label com.yamata.role="campaign-scheduler-$SCHEDULER_ROLE" \
 	"$IMAGE" >/dev/null
 
 if ! verify_runtime_environment; then
@@ -324,7 +332,7 @@ while ((SECONDS < deadline)); do
 		"${DOCKER[@]}" exec "$CONTAINER_NAME" \
 			curl -fsS --noproxy app-beta "$INTERNAL_BOT_API_DOMAIN/api/v1/health" >/dev/null ||
 			die "$CONTAINER_NAME cannot reach the API at $INTERNAL_BOT_API_DOMAIN"
-		log "Ready. Campaign execution is enabled only in $CONTAINER_NAME"
+		log "Ready. $SCHEDULER_ROLE campaign execution is enabled only in $CONTAINER_NAME"
 		log "Internal bot API: $INTERNAL_BOT_API_DOMAIN"
 		log "Logs: ${DOCKER[*]} logs -f $CONTAINER_NAME"
 		log "Persistent log volume: $LOG_VOLUME"

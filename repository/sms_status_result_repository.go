@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -18,6 +19,7 @@ const smsStatusResultWriteBatchSize = 500
 // SMSStatusResultRepositoryImpl implements SMSStatusResultRepository
 type SMSStatusResultRepositoryImpl struct {
 	*BaseRepository[models.SMSStatusResult, any]
+	tableName string
 }
 
 type SMSStatusAggregates struct {
@@ -42,7 +44,43 @@ type SMSTrackingResult struct {
 }
 
 func NewSMSStatusResultRepository(db *gorm.DB) SMSStatusResultRepository {
-	return &SMSStatusResultRepositoryImpl{BaseRepository: NewBaseRepository[models.SMSStatusResult, any](db)}
+	return newSMSStatusResultRepository(db, "sms_status_results")
+}
+
+// NewPayamSMSStatusResultRepository persists only Payam delivery results.
+func NewPayamSMSStatusResultRepository(db *gorm.DB) SMSStatusResultRepository {
+	return newSMSStatusResultRepository(db, "payam_sms_status_results")
+}
+
+// NewCandooSMSStatusResultRepository persists only Candoo delivery results.
+func NewCandooSMSStatusResultRepository(db *gorm.DB) SMSStatusResultRepository {
+	return newSMSStatusResultRepository(db, "candoo_sms_status_results")
+}
+
+func newSMSStatusResultRepository(db *gorm.DB, tableName string) *SMSStatusResultRepositoryImpl {
+	return &SMSStatusResultRepositoryImpl{BaseRepository: NewBaseRepository[models.SMSStatusResult, any](db), tableName: tableName}
+}
+
+func (r *SMSStatusResultRepositoryImpl) table() string {
+	if r.tableName == "" {
+		return "sms_status_results"
+	}
+	return r.tableName
+}
+
+func sentTableForStatusTable(statusTable string) string {
+	switch statusTable {
+	case "payam_sms_status_results":
+		return "payam_sent_sms"
+	case "candoo_sms_status_results":
+		return "candoo_sent_sms"
+	default:
+		return "sent_sms"
+	}
+}
+
+func (r *SMSStatusResultRepositoryImpl) Save(ctx context.Context, row *models.SMSStatusResult) error {
+	return r.getDB(ctx).Table(r.table()).Create(row).Error
 }
 
 func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*models.SMSStatusResult) error {
@@ -85,7 +123,8 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 		return nil
 	}
 
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
+	table := r.table()
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "processed_campaign_id"}, {Name: "tracking_id"}},
 		DoUpdates: clause.Assignments(map[string]any{
@@ -101,14 +140,14 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 			"total_unknown_parts":     clause.Expr{SQL: "EXCLUDED.total_unknown_parts"},
 			"status":                  clause.Expr{SQL: "EXCLUDED.status"},
 			"metadata":                clause.Expr{SQL: "EXCLUDED.metadata"},
-			"created_at":              clause.Expr{SQL: "LEAST(sms_status_results.created_at, EXCLUDED.created_at)"},
+			"created_at":              clause.Expr{SQL: fmt.Sprintf("LEAST(%s.created_at, EXCLUDED.created_at)", table)},
 		}),
 	}).CreateInBatches(&deduped, smsStatusResultWriteBatchSize).Error
 }
 
 // ByFilter: no filter fields, just order/limit/offset
 func (r *SMSStatusResultRepositoryImpl) ByFilter(ctx context.Context, _ any, orderBy string, limit, offset int) ([]*models.SMSStatusResult, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	if orderBy != "" {
 		db = db.Order(orderBy)
 	}
@@ -126,9 +165,9 @@ func (r *SMSStatusResultRepositoryImpl) ByFilter(ctx context.Context, _ any, ord
 }
 
 func (r *SMSStatusResultRepositoryImpl) Count(ctx context.Context, _ any) (int64, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	var count int64
-	if err := db.Model(&models.SMSStatusResult{}).Count(&count).Error; err != nil {
+	if err := db.Count(&count).Error; err != nil {
 		return 0, err
 	}
 	return count, nil
@@ -139,7 +178,7 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 	// TODO: Query optimization: maintain a summary table updated on insert instead of aggregating on the fly.
 	db := r.getDB(ctx)
 	var agg SMSStatusAggregates
-	if err := db.Table("sms_status_results").
+	if err := db.Table(r.table()).
 		Select(`
 			COUNT(*) AS aggregated_total_records,
 			COALESCE(SUM(CASE WHEN total_parts = total_delivered_parts THEN 1 ELSE 0 END), 0) AS aggregated_total_sent,
@@ -156,8 +195,9 @@ func (r *SMSStatusResultRepositoryImpl) AggregateByCampaign(ctx context.Context,
 
 func (r *SMSStatusResultRepositoryImpl) TrackingResultsByCampaign(ctx context.Context, processedCampaignID uint) ([]SMSTrackingResult, error) {
 	db := r.getDB(ctx)
+	table := r.table()
 	trackingResults := make([]SMSTrackingResult, 0)
-	if err := db.Table("sms_status_results AS ssr").
+	if err := db.Table(table+" AS ssr").
 		Select(`
 				ap.uid AS audience_profile_uid,
 				COALESCE(ss.phone_number, '') AS phone_number,
@@ -171,7 +211,7 @@ func (r *SMSStatusResultRepositoryImpl) TrackingResultsByCampaign(ctx context.Co
 		Joins(`
 				LEFT JOIN LATERAL (
 					SELECT phone_number, server_id, status
-					FROM sent_sms AS ss
+					FROM `+sentTableForStatusTable(table)+` AS ss
 					WHERE ss.processed_campaign_id = ssr.processed_campaign_id
 						AND ss.tracking_id = ssr.tracking_id
 					ORDER BY ss.id DESC

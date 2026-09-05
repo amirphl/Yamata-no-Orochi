@@ -6,8 +6,8 @@ The complete ordered procedure is in
 | Script | Purpose |
 |---|---|
 | `deploy-beta.sh` | Deploy the Compose API stack; requires API campaign execution to remain disabled |
-| `deploy-production-beta.sh` | Canonical release command; deploys API then recreates isolated campaign workers |
-| `deploy-campaign-scheduler-beta.sh` | Recreates the private, restartable campaign-worker container from the running API environment |
+| `deploy-production-beta.sh` | Canonical release command; deploys API then recreates Payam, Candoo, and non-SMS campaign workers |
+| `deploy-campaign-scheduler-beta.sh` | Recreates one private, restartable campaign-worker role (`payam`, `candoo`, or `other`) from the running API environment |
 | `apply-yamata-required-migrations.sh` | Verifies required schema by default; `--repair` explicitly reapplies the restore/repair subset through 0133 |
 | `restore-yamata-audience-profiles.sh` | Atomically restores an `audience_profiles`-only PostgreSQL 17 plain dump |
 | `restore-yamata-scheduler-runtime-data.sh` | Atomically restores the exact scheduler table set, normalized selection members, audience/tag attribution, audience-spec sources, and sequence counters |
@@ -56,11 +56,13 @@ Key rules:
 
 - Keep `CAMPAIGN_EXECUTION_ENABLED=false` in `.env.beta` and the API container.
 - Keep exact-capacity and smart-tag scheduling enabled in the API container;
-  the isolated campaign scheduler overrides both to `false`.
-- Keep external short-link sync enabled only in the API container; the isolated
-  campaign scheduler always overrides `EXTERNAL_SHORTLINK_ENABLED=false`.
+  the isolated campaign workers override both to `false`.
+- Keep external short-link sync enabled only in the API container; every
+  campaign worker overrides `EXTERNAL_SHORTLINK_ENABLED=false`.
 - Run `deploy-production-beta.sh` after every image or environment change.
-- Stop `yamata-app-beta` and `yamata-campaign-scheduler-beta` during selective imports.
+- Stop `yamata-app-beta` and every campaign worker (`yamata-payam-campaign-scheduler-beta`,
+  `yamata-candoo-campaign-scheduler-beta`, and `yamata-other-campaign-scheduler-beta`)
+  during selective imports.
 - Restore audience profiles before scheduler runtime data.
 - Never run two imports concurrently.
 - Do not use `init-beta-database.sh` for the initial restored production database.

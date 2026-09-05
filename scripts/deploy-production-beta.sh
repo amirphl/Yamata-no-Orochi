@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Canonical production deployment: deploy the API, then recreate the isolated scheduler.
+# Canonical production deployment: deploy the API, then recreate isolated campaign workers.
 # Usage: ./scripts/deploy-production-beta.sh --domain jazebeh.ir
 
 set -Eeuo pipefail
@@ -58,7 +58,9 @@ load_yamata_env_file "$PROJECT_ROOT/.env.beta"
 
 cd "$PROJECT_ROOT"
 "$SCRIPT_DIR/deploy-beta.sh" "$@"
-"$SCRIPT_DIR/deploy-campaign-scheduler-beta.sh" yamata-no-orochi
+for scheduler_role in payam candoo other; do
+	"$SCRIPT_DIR/deploy-campaign-scheduler-beta.sh" "$scheduler_role" yamata-no-orochi
+done
 "$SCRIPT_DIR/check-yamata-production.sh" "$PROJECT_ROOT"
 
-printf '[deploy-production] API and isolated campaign scheduler deployed successfully\n'
+printf '[deploy-production] API and isolated campaign workers deployed successfully\n'

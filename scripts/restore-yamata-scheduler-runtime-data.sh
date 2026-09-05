@@ -22,9 +22,19 @@ TABLES=(
 	rubika_status_results
 	campaign_status_jobs
 	processed_campaigns
+	payam_processed_campaigns
+	candoo_processed_campaigns
 	payam_sms_send_responses
+	payam_sms_send_attempts
+	candoo_sms_send_attempts
+	payam_sms_status_jobs
+	candoo_sms_status_jobs
+	payam_sms_status_results
+	candoo_sms_status_results
 	sent_bale_messages
 	sent_sms
+	payam_sent_sms
+	candoo_sent_sms
 	sent_splus_messages
 	sms_status_results
 	splus_status_results
@@ -73,10 +83,12 @@ readonly DOCKER
 [[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$POSTGRES_CONTAINER")" == true ]] ||
 	die "PostgreSQL container is not running"
 
-if "${DOCKER[@]}" inspect yamata-campaign-scheduler-beta >/dev/null 2>&1 &&
-	[[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' yamata-campaign-scheduler-beta)" == true ]]; then
-	die "Dedicated campaign scheduler must be stopped before restore: yamata-campaign-scheduler-beta"
-fi
+for scheduler_container in yamata-campaign-scheduler-beta yamata-payam-campaign-scheduler-beta yamata-candoo-campaign-scheduler-beta yamata-other-campaign-scheduler-beta; do
+	if "${DOCKER[@]}" inspect "$scheduler_container" >/dev/null 2>&1 &&
+		[[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' "$scheduler_container")" == true ]]; then
+		die "Campaign scheduler must be stopped before restore: $scheduler_container"
+	fi
+done
 
 if "${DOCKER[@]}" inspect yamata-app-beta >/dev/null 2>&1 &&
 	[[ "$("${DOCKER[@]}" inspect -f '{{.State.Running}}' yamata-app-beta)" == true ]]; then
@@ -144,6 +156,22 @@ normalized_schema_columns="$(
 [[ "$normalized_schema_columns" == 3 ]] ||
 	die "Migrations through 0129 must be applied before restoring scheduler runtime data"
 
+provider_scheduler_tables="$(
+	"${DOCKER[@]}" exec "$POSTGRES_CONTAINER" psql -X -At \
+		-U "$DB_USER" -d "$DB_NAME" \
+		-c "SELECT COUNT(*) FROM information_schema.tables
+		    WHERE table_schema='public'
+		      AND table_name IN (
+		        'payam_processed_campaigns', 'candoo_processed_campaigns',
+		        'payam_sent_sms', 'candoo_sent_sms',
+		        'payam_sms_status_jobs', 'candoo_sms_status_jobs',
+		        'payam_sms_status_results', 'candoo_sms_status_results',
+		        'payam_sms_send_attempts', 'candoo_sms_send_attempts'
+		      );"
+)"
+[[ "$provider_scheduler_tables" == 10 ]] ||
+	die "Migration 0141 must be applied before restoring provider scheduler runtime data"
+
 log "Starting atomic import while preserving audience_profiles"
 {
 	printf 'TRUNCATE TABLE public.sequence_counters;\n'
@@ -170,9 +198,19 @@ BEGIN
         'rubika_status_results',
         'campaign_status_jobs',
         'processed_campaigns',
+	        'payam_processed_campaigns',
+	        'candoo_processed_campaigns',
 	    'payam_sms_send_responses',
+	        'payam_sms_send_attempts',
+	        'candoo_sms_send_attempts',
+	        'payam_sms_status_jobs',
+	        'candoo_sms_status_jobs',
+	        'payam_sms_status_results',
+	        'candoo_sms_status_results',
         'sent_bale_messages',
         'sent_sms',
+	        'payam_sent_sms',
+	        'candoo_sent_sms',
         'sent_splus_messages',
         'sms_status_results',
 	        'splus_status_results',

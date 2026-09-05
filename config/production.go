@@ -439,7 +439,12 @@ type SplusConfig struct {
 }
 
 type SchedulerConfig struct {
-	CampaignExecutionEnabled                   bool          `json:"campaign_execution_enabled"`
+	CampaignExecutionEnabled bool `json:"campaign_execution_enabled"`
+	// CampaignExecutionRole selects the isolated campaign worker process. The
+	// API normally leaves campaign execution disabled; production starts one
+	// process for each of payam, candoo, and other. "all" is retained only for
+	// local development and backwards-compatible single-process operation.
+	CampaignExecutionRole                      string        `json:"campaign_execution_role"`
 	CampaignExecutionInterval                  time.Duration `json:"campaign_execution_interval"`
 	MessageSendDelay                           time.Duration `json:"message_send_delay"`
 	MessageSendMockEnabled                     bool          `json:"message_send_mock_enabled"`
@@ -471,6 +476,7 @@ func loadSchedulerConfig() SchedulerConfig {
 	capacitySchedulerEnabled := getEnvBool("SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED", false)
 	return SchedulerConfig{
 		CampaignExecutionEnabled:               getEnvBool("CAMPAIGN_EXECUTION_ENABLED", true),
+		CampaignExecutionRole:                  strings.ToLower(strings.TrimSpace(getEnvString("CAMPAIGN_SCHEDULER_ROLE", "all"))),
 		CampaignExecutionInterval:              getEnvDuration("CAMPAIGN_EXECUTION_INTERVAL", 1*time.Minute),
 		MessageSendDelay:                       getEnvDuration("CAMPAIGN_MESSAGE_SEND_DELAY", 23*time.Millisecond),
 		MessageSendMockEnabled:                 getEnvBool("CAMPAIGN_MESSAGE_SEND_MOCK_ENABLED", false),
@@ -1098,6 +1104,21 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 	}
 
 	// Validate SMS configuration if enabled
+	if cfg.Scheduler.CampaignExecutionEnabled {
+		switch cfg.Scheduler.CampaignExecutionRole {
+		case "all", "payam", "candoo", "other":
+		default:
+			errors = append(errors, "CAMPAIGN_SCHEDULER_ROLE must be one of all, payam, candoo, or other when campaign execution is enabled")
+		}
+		payamSchedulerEnabled := cfg.Scheduler.CampaignExecutionRole == "all" || cfg.Scheduler.CampaignExecutionRole == "payam"
+		candooSchedulerEnabled := cfg.Scheduler.CampaignExecutionRole == "all" || cfg.Scheduler.CampaignExecutionRole == "candoo"
+		if payamSchedulerEnabled && (strings.TrimSpace(cfg.PayamSMS.Username) == "" || strings.TrimSpace(cfg.PayamSMS.Password) == "") {
+			errors = append(errors, "PAYAM_SMS_USERNAME and PAYAM_SMS_PASSWORD are required for the payam campaign scheduler")
+		}
+		if candooSchedulerEnabled && !cfg.CandooSMS.Enabled {
+			errors = append(errors, "CANDOO_SMS_ENABLED must be true for the candoo campaign scheduler")
+		}
+	}
 	if cfg.SMS.ProviderDomain == "payamsms" {
 		if cfg.SMS.SourceNumber == "" {
 			errors = append(errors, "SMS_SOURCE_NUMBER is required for PayamSMS provider")

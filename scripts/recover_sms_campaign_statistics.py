@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Safely recover and publish SMS statistics for a fixed campaign set.
 
-The SMS scheduler normally fetches PayamSMS delivery statuses, upserts them in
-``sms_status_results``, aggregates that table, stores a copy on the current
-``processed_campaigns`` row, and publishes the aggregate to Jazebeh.
+The retired generic SMS scheduler fetched PayamSMS delivery statuses, upserted
+them in ``sms_status_results``, aggregated that table, stored a copy on the
+current ``processed_campaigns`` row, and published the aggregate to Jazebeh.
+New work uses the provider-specific Payam/Candoo scheduler tables instead.
 
 This one-off recovery tool deliberately avoids scheduler/database mutations:
 

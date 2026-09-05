@@ -389,12 +389,14 @@ check_http_proxy() {
 
 # Function to start services (all except app-beta)
 stop_application_writers() {
-	print_status "Stopping API and campaign scheduler before migrations..."
+	print_status "Stopping API and campaign workers before migrations..."
 	local docker_cmd
 	docker_cmd=$(get_docker_cmd)
-	if $docker_cmd container inspect yamata-campaign-scheduler-beta >/dev/null 2>&1; then
-		$docker_cmd stop --time 60 yamata-campaign-scheduler-beta >/dev/null
-	fi
+	for scheduler_container in yamata-campaign-scheduler-beta yamata-payam-campaign-scheduler-beta yamata-candoo-campaign-scheduler-beta yamata-other-campaign-scheduler-beta; do
+		if $docker_cmd container inspect "$scheduler_container" >/dev/null 2>&1; then
+			$docker_cmd stop --time 60 "$scheduler_container" >/dev/null
+		fi
+	done
 	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml stop -t 60 app-beta >/dev/null 2>&1 || true
 	print_success "Database writers stopped"
 }
@@ -685,7 +687,7 @@ main() {
 
 	if [ "${CAMPAIGN_EXECUTION_ENABLED:-}" != "false" ]; then
 		print_error "CAMPAIGN_EXECUTION_ENABLED must remain false in .env.beta"
-		print_error "Campaign execution is managed by the isolated scheduler container"
+		print_error "Campaign execution is managed by isolated campaign worker containers"
 		exit 1
 	fi
 	if [ "${SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED:-}" != "true" ]; then

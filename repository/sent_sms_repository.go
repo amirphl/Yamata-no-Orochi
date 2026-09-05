@@ -11,14 +11,50 @@ import (
 // SentSMSRepositoryImpl implements SentSMSRepository
 type SentSMSRepositoryImpl struct {
 	*BaseRepository[models.SentSMS, models.SentSMSFilter]
+	tableName string
 }
 
 func NewSentSMSRepository(db *gorm.DB) SentSMSRepository {
-	return &SentSMSRepositoryImpl{BaseRepository: NewBaseRepository[models.SentSMS, models.SentSMSFilter](db)}
+	return newSentSMSRepository(db, "sent_sms")
+}
+
+// NewPayamSentSMSRepository persists only Payam campaign sends.
+func NewPayamSentSMSRepository(db *gorm.DB) SentSMSRepository {
+	return newSentSMSRepository(db, "payam_sent_sms")
+}
+
+// NewCandooSentSMSRepository persists only Candoo campaign sends.
+func NewCandooSentSMSRepository(db *gorm.DB) SentSMSRepository {
+	return newSentSMSRepository(db, "candoo_sent_sms")
+}
+
+func newSentSMSRepository(db *gorm.DB, tableName string) *SentSMSRepositoryImpl {
+	return &SentSMSRepositoryImpl{
+		BaseRepository: NewBaseRepository[models.SentSMS, models.SentSMSFilter](db),
+		tableName:      tableName,
+	}
+}
+
+func (r *SentSMSRepositoryImpl) table() string {
+	if r.tableName == "" {
+		return "sent_sms"
+	}
+	return r.tableName
+}
+
+func (r *SentSMSRepositoryImpl) Save(ctx context.Context, row *models.SentSMS) error {
+	return r.getDB(ctx).Table(r.table()).Create(row).Error
+}
+
+func (r *SentSMSRepositoryImpl) SaveBatch(ctx context.Context, rows []*models.SentSMS) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	return r.getDB(ctx).Table(r.table()).CreateInBatches(rows, 1000).Error
 }
 
 func (r *SentSMSRepositoryImpl) ByID(ctx context.Context, id uint) (*models.SentSMS, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	var row models.SentSMS
 	if err := db.Last(&row, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -39,7 +75,7 @@ func (r *SentSMSRepositoryImpl) ListByTrackingIDs(ctx context.Context, processed
 		return []*models.SentSMS{}, nil
 	}
 	rows := make([]*models.SentSMS, 0, len(trackingIDs))
-	err := r.getDB(ctx).
+	err := r.getDB(ctx).Table(r.table()).
 		Where("processed_campaign_id = ? AND tracking_id IN ?", processedCampaignID, trackingIDs).
 		Order("id ASC").
 		Find(&rows).Error
@@ -70,7 +106,7 @@ func (r *SentSMSRepositoryImpl) applyFilter(db *gorm.DB, f models.SentSMSFilter)
 
 func (r *SentSMSRepositoryImpl) ByFilter(ctx context.Context, filter models.SentSMSFilter, orderBy string, limit, offset int) ([]*models.SentSMS, error) {
 	db := r.getDB(ctx)
-	query := r.applyFilter(db.Model(&models.SentSMS{}), filter)
+	query := r.applyFilter(db.Table(r.table()), filter)
 	if orderBy != "" {
 		query = query.Order(orderBy)
 	}
@@ -89,7 +125,7 @@ func (r *SentSMSRepositoryImpl) ByFilter(ctx context.Context, filter models.Sent
 
 func (r *SentSMSRepositoryImpl) Count(ctx context.Context, filter models.SentSMSFilter) (int64, error) {
 	db := r.getDB(ctx)
-	query := r.applyFilter(db.Model(&models.SentSMS{}), filter)
+	query := r.applyFilter(db.Table(r.table()), filter)
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
 		return 0, err
@@ -141,7 +177,7 @@ func (r *SentSMSRepositoryImpl) UpdateProviderFieldsByTrackingIDs(ctx context.Co
 		if u.PartsDelivered != nil {
 			m["parts_delivered"] = *u.PartsDelivered
 		}
-		query := db.Model(&models.SentSMS{}).Where("tracking_id = ?", u.TrackingID)
+		query := db.Table(r.table()).Where("tracking_id = ?", u.TrackingID)
 		if u.ProcessedCampaignID != nil {
 			query = query.Where("processed_campaign_id = ?", *u.ProcessedCampaignID)
 		}

@@ -187,6 +187,63 @@ func TestDispatchPendingSMSCampaignsSerializesSameBundle(t *testing.T) {
 	}
 }
 
+func TestActiveLineNumberProviderRequiresExplicitActiveProvider(t *testing.T) {
+	t.Parallel()
+
+	active := true
+	inactive := false
+	tests := []struct {
+		name    string
+		line    *models.LineNumber
+		want    models.SMSProvider
+		wantErr string
+	}{
+		{
+			name: "payam",
+			line: &models.LineNumber{LineNumber: "1000", IsActive: &active, Provider: models.LineNumberProviderPayam},
+			want: models.SMSProviderPayamSMS,
+		},
+		{
+			name: "candoo",
+			line: &models.LineNumber{LineNumber: "2000", IsActive: &active, Provider: models.LineNumberProviderCandoo},
+			want: models.SMSProviderCandoo,
+		},
+		{
+			name:    "missing provider",
+			line:    &models.LineNumber{LineNumber: "3000", IsActive: &active},
+			wantErr: "invalid provider",
+		},
+		{
+			name:    "inactive",
+			line:    &models.LineNumber{LineNumber: "4000", IsActive: &inactive, Provider: models.LineNumberProviderPayam},
+			wantErr: "inactive",
+		},
+		{
+			name:    "missing active state",
+			line:    &models.LineNumber{LineNumber: "5000", Provider: models.LineNumberProviderPayam},
+			wantErr: "inactive",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := activeLineNumberProvider(tt.line)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("activeLineNumberProvider: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("provider = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSelectTagAudiencesPushesLimitAndExclusionsIntoRepository(t *testing.T) {
 	t.Parallel()
 

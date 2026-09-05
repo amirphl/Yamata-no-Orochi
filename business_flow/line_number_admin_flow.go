@@ -50,11 +50,8 @@ func (f *AdminLineNumberFlowImpl) Create(ctx context.Context, req *dto.AdminCrea
 	if req.PriceFactor <= 0 {
 		return nil, NewBusinessError("PRICE_FACTOR_INVALID", "Price factor must be greater than zero", ErrPriceFactorInvalid)
 	}
-	provider := models.SMSProvider(strings.ToLower(strings.TrimSpace(req.Provider)))
-	if provider == "" {
-		provider = models.SMSProviderPayamSMS
-	}
-	if !models.IsValidSMSProvider(provider) {
+	provider := models.LineNumberProvider(strings.ToLower(strings.TrimSpace(req.Provider)))
+	if provider == "" || !models.IsValidLineNumberProvider(provider) {
 		return nil, NewBusinessError("LINE_NUMBER_PROVIDER_INVALID", "Line number provider is invalid", ErrLineNumberNotFound)
 	}
 
@@ -149,8 +146,8 @@ func (f *AdminLineNumberFlowImpl) UpdateBatch(ctx context.Context, req *dto.Admi
 			UpdatedAt: utils.UTCNow(),
 		}
 		if item.Provider != nil {
-			provider := models.SMSProvider(strings.ToLower(strings.TrimSpace(*item.Provider)))
-			if !models.IsValidSMSProvider(provider) {
+			provider := models.LineNumberProvider(strings.ToLower(strings.TrimSpace(*item.Provider)))
+			if !models.IsValidLineNumberProvider(provider) {
 				return NewBusinessError("LINE_NUMBER_PROVIDER_INVALID", "Line number provider is invalid", ErrLineNumberNotFound)
 			}
 			line.Provider = provider

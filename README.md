@@ -44,7 +44,7 @@ templates/             Payment success/failure HTML templates
 py-ai/                 Offline/auxiliary Python tooling for audiences and tags
 ```
 
-`main.go` wires configuration, logging, Sentry, PostgreSQL, Redis, repositories, business flows, handlers, routes, campaign schedulers, and the metrics server.
+`main.go` wires configuration, logging, Sentry, PostgreSQL, Redis, repositories, business flows, handlers, routes, the Payam/Candoo/non-SMS campaign workers, and the metrics server.
 
 ## Requirements
 
@@ -248,10 +248,16 @@ Seed helpers and operational snippets for local admin/bot setup are kept in `RUN
 
 When `CAMPAIGN_EXECUTION_ENABLED=true`, the app starts scheduler workers for:
 
-- SMS
+- Payam SMS (`CAMPAIGN_SCHEDULER_ROLE=payam`)
+- Candoo SMS (`CAMPAIGN_SCHEDULER_ROLE=candoo`)
 - Bale
 - Rubika
 - Soroush Plus
+
+The frontend platform remains `sms`. The scheduler resolves the active sender
+line and routes each SMS campaign to its required `payamsms` or `candoo`
+provider; it leaves the campaign approved when that line configuration is
+missing, inactive, or invalid.
 
 Schedulers poll ready campaigns through the internal bot API, fetch audience data, send through the configured provider clients, create sent-message rows, enqueue status checks, update processed campaign statistics, and notify configured admins on notable failures.
 

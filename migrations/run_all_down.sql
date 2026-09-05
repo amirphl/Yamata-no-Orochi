@@ -5,6 +5,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0141_split_payam_and_candoo_campaign_schedulers_down.sql...'
+\i migrations/0141_split_payam_and_candoo_campaign_schedulers_down.sql
+
 \echo 'Running 0140_persist_smart_targeting_test_sample_selections_down.sql...'
 \i migrations/0140_persist_smart_targeting_test_sample_selections_down.sql
 

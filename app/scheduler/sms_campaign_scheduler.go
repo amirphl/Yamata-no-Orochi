@@ -30,6 +30,8 @@ const (
 	smsStatusJobMaxRetry = 3
 )
 
+// SMSCampaignScheduler is the private shared execution engine for the two
+// provider-owned workers. It is not constructed as a generic SMS worker.
 type SMSCampaignScheduler struct {
 	audRepo   repository.AudienceProfileRepository
 	tagRepo   repository.TagRepository
@@ -54,9 +56,20 @@ type SMSCampaignScheduler struct {
 	logFile *os.File
 
 	schedulerName string
+	// targetProvider is fixed for the lifetime of this worker. It prevents a
+	// worker from ever claiming a campaign owned by the other SMS gateway.
+	targetProvider models.SMSProvider
 
 	bundleAudienceCache *BundleAudienceCache
 }
+
+// PayamCampaignScheduler owns only Payam campaign execution and its isolated
+// persistence repositories.
+type PayamCampaignScheduler struct{ *SMSCampaignScheduler }
+
+// CandooCampaignScheduler owns only Candoo campaign execution and its isolated
+// persistence repositories.
+type CandooCampaignScheduler struct{ *SMSCampaignScheduler }
 
 // NotificationSender is a minimal interface extracted from NotificationService for SMS
 // This keeps the scheduler independent and easy to test
@@ -65,7 +78,62 @@ type NotificationSender interface {
 	SendSMSBulk(ctx context.Context, mobiles []string, message string, trackingID *int64) error
 }
 
-func NewCampaignScheduler(
+// NewPayamCampaignScheduler starts the Payam-only campaign pipeline.
+func NewPayamCampaignScheduler(
+	audRepo repository.AudienceProfileRepository,
+	tagRepo repository.TagRepository,
+	lineRepo repository.LineNumberRepository,
+	sentRepo repository.SentSMSRepository,
+	pcRepo repository.ProcessedCampaignRepository,
+	jobRepo repository.CampaignStatusJobRepository,
+	resRepo repository.SMSStatusResultRepository,
+	statsRepo repository.SrcLayerAllStatsRepository,
+	notifier NotificationSender,
+	db *gorm.DB,
+	logger *log.Logger,
+	interval time.Duration,
+	payamSMSCfg config.PayamSMSConfig,
+	botCfg config.BotConfig,
+	adminCfg config.AdminConfig,
+	messageSendMockEnabled bool,
+) *PayamCampaignScheduler {
+	return &PayamCampaignScheduler{newProviderCampaignScheduler(
+		models.SMSProviderPayamSMS,
+		audRepo, tagRepo, lineRepo, sentRepo, pcRepo, jobRepo, resRepo, statsRepo,
+		notifier, db, logger, interval, payamSMSCfg, config.CandooSMSConfig{}, botCfg,
+		adminCfg, messageSendMockEnabled,
+	)}
+}
+
+// NewCandooCampaignScheduler starts the Candoo-only campaign pipeline.
+func NewCandooCampaignScheduler(
+	audRepo repository.AudienceProfileRepository,
+	tagRepo repository.TagRepository,
+	lineRepo repository.LineNumberRepository,
+	sentRepo repository.SentSMSRepository,
+	pcRepo repository.ProcessedCampaignRepository,
+	jobRepo repository.CampaignStatusJobRepository,
+	resRepo repository.SMSStatusResultRepository,
+	statsRepo repository.SrcLayerAllStatsRepository,
+	notifier NotificationSender,
+	db *gorm.DB,
+	logger *log.Logger,
+	interval time.Duration,
+	candooSMSCfg config.CandooSMSConfig,
+	botCfg config.BotConfig,
+	adminCfg config.AdminConfig,
+	messageSendMockEnabled bool,
+) *CandooCampaignScheduler {
+	return &CandooCampaignScheduler{newProviderCampaignScheduler(
+		models.SMSProviderCandoo,
+		audRepo, tagRepo, lineRepo, sentRepo, pcRepo, jobRepo, resRepo, statsRepo,
+		notifier, db, logger, interval, config.PayamSMSConfig{}, candooSMSCfg, botCfg,
+		adminCfg, messageSendMockEnabled,
+	)}
+}
+
+func newProviderCampaignScheduler(
+	targetProvider models.SMSProvider,
 	audRepo repository.AudienceProfileRepository,
 	tagRepo repository.TagRepository,
 	lineRepo repository.LineNumberRepository,
@@ -92,10 +160,22 @@ func NewCampaignScheduler(
 		botCfg.APIDomain = defaultBotAPIDomain
 	}
 
-	payamClient := maybeMockPayamSMSClient(newHTTPPayamSMSClient(payamSMSCfg), messageSendMockEnabled)
-	candooProvider := NewCandooSMSProvider(candooSMSCfg)
-	if messageSendMockEnabled {
-		candooProvider = maybeMockSMSProvider(candooProvider, true)
+	var (
+		payamClient PayamSMSClient
+		providers   *SMSProviderRegistry
+	)
+	switch targetProvider {
+	case models.SMSProviderPayamSMS:
+		payamClient = maybeMockPayamSMSClient(newHTTPPayamSMSClient(payamSMSCfg), messageSendMockEnabled)
+		providers = NewSMSProviderRegistry(newPayamSMSProvider(payamClient))
+	case models.SMSProviderCandoo:
+		candooProvider := NewCandooSMSProvider(candooSMSCfg)
+		if messageSendMockEnabled {
+			candooProvider = maybeMockSMSProvider(candooProvider, true)
+		}
+		providers = NewSMSProviderRegistry(candooProvider)
+	default:
+		panic(fmt.Sprintf("unsupported provider scheduler %q", targetProvider))
 	}
 	s := &SMSCampaignScheduler{
 		audRepo:             audRepo,
@@ -114,14 +194,15 @@ func NewCampaignScheduler(
 		botCfg:              botCfg,
 		botClient:           newHTTPBotClient(botCfg),
 		smsClient:           payamClient,
-		providers:           NewSMSProviderRegistry(newPayamSMSProvider(payamClient), candooProvider),
+		providers:           providers,
 		bundleAudienceCache: NewBundleAudienceCache(repository.NewBundleAudienceSelectionRepository(db)),
-		schedulerName:       "sms",
+		schedulerName:       string(targetProvider),
+		targetProvider:      targetProvider,
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
-		s.logger = log.New(log.Default().Writer(), "sms_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
-		s.logger.Printf("SMS scheduler: failed to initialize file logger: %v", err)
+		s.logger = log.New(log.Default().Writer(), s.schedulerName+"_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		s.logger.Printf("%s scheduler: failed to initialize file logger: %v", s.schedulerName, err)
 	}
 
 	return s
@@ -192,6 +273,16 @@ func (s *SMSCampaignScheduler) runOnce(ctx context.Context, parent context.Conte
 			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: campaign id=%d has unsupported platform %q, skipping", c.ID, c.Platform))
 			continue
 		}
+		provider, err := s.routeCampaignProvider(ctx, c)
+		if err != nil {
+			s.logger.Printf("%s scheduler: campaign id=%d has no executable line-provider route: %v", s.schedulerName, c.ID, err)
+			s.notifyAdmin(fmt.Sprintf("%s scheduler: campaign id=%d is left approved until its line-number provider is corrected: %v", s.schedulerName, c.ID, err))
+			continue
+		}
+		if provider != s.targetProvider {
+			// The other isolated provider worker owns this campaign.
+			continue
+		}
 		if err := s.validateSMSCampaign(c); err != nil {
 			s.logger.Printf("SMS scheduler: validate campaign failed for campaign id=%d (skipped): %v", c.ID, err)
 			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: validate campaign failed for id=%d: %v", c.ID, err))
@@ -215,6 +306,45 @@ func (s *SMSCampaignScheduler) runOnce(ctx context.Context, parent context.Conte
 	s.logger.Printf("SMS scheduler: %d campaigns pending processing...", len(pending))
 
 	s.dispatchPendingSMSCampaigns(parent, jazzAccessToken, pending, s.processSMSCampaign)
+}
+
+// routeCampaignProvider is intentionally strict. A campaign is never
+// silently sent through Payam because a line was deleted or disabled after it
+// was approved; the active line-number configuration is the scheduler's
+// ownership contract.
+func (s *SMSCampaignScheduler) routeCampaignProvider(ctx context.Context, c dto.BotGetCampaignResponse) (models.SMSProvider, error) {
+	if c.LineNumber == nil || strings.TrimSpace(*c.LineNumber) == "" {
+		return "", fmt.Errorf("campaign line number is empty")
+	}
+	if s.lineRepo == nil {
+		return "", fmt.Errorf("line number repository is unavailable")
+	}
+	line, err := s.lineRepo.ByValue(ctx, strings.TrimSpace(*c.LineNumber))
+	if err != nil {
+		return "", fmt.Errorf("load line number: %w", err)
+	}
+	if line == nil {
+		return "", fmt.Errorf("line number %q does not exist", strings.TrimSpace(*c.LineNumber))
+	}
+	return activeLineNumberProvider(line)
+}
+
+// activeLineNumberProvider intentionally does not use normalizeSMSProvider:
+// that helper preserves legacy status-job compatibility by defaulting blank
+// providers to Payam. Campaign routing has no such fallback; an operator must
+// explicitly assign every active sender line to Payam or Candoo.
+func activeLineNumberProvider(line *models.LineNumber) (models.SMSProvider, error) {
+	if line == nil {
+		return "", fmt.Errorf("line number does not exist")
+	}
+	if line.IsActive == nil || !*line.IsActive {
+		return "", fmt.Errorf("line number %q is inactive", line.LineNumber)
+	}
+	provider := models.SMSProvider(strings.ToLower(strings.TrimSpace(string(line.Provider))))
+	if !models.IsValidSMSProvider(provider) {
+		return "", fmt.Errorf("line number %q has invalid provider %q", line.LineNumber, line.Provider)
+	}
+	return provider, nil
 }
 
 type smsCampaignDispatchGroup struct {
@@ -436,7 +566,7 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		rows := make([]*models.SentSMS, 0, len(batchPhones))
 
 		s.logger.Printf("SMS scheduler: campaign id=%d allocating tracking ids for batch [%d,%d)", c.ID, start, end)
-		trackingIDs, err := allocateTrackingIDs(ctx, s.db, len(batchPhones))
+		trackingIDs, err := allocateProviderTrackingIDs(ctx, s.db, s.targetProvider, len(batchPhones))
 		if err != nil {
 			return fmt.Errorf("allocate tracking ids for batch [%d,%d) campaign id=%d: %w", start, end, c.ID, err)
 		}
@@ -500,15 +630,14 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		} else {
 			smsProviderSendBatchesTotal.WithLabelValues(string(providerName), "success").Inc()
 		}
-		if auditErr := s.persistSMSProviderSendAttempt(ctx, pc.ID, providerName, items, batchResult, batchErr); auditErr != nil {
-			s.logger.Printf("SMS scheduler: failed to persist %s send response for campaign id=%d batch [%d,%d): %v", providerName, c.ID, start, end, auditErr)
-			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: failed to persist %s send response for campaign id=%d: %v", providerName, c.ID, auditErr))
-		}
 		if providerName == models.SMSProviderPayamSMS {
 			payamItems, payamResult := payamAuditInput(items, batchResult)
 			if auditErr := s.persistPayamSMSSendResponse(ctx, pc.ID, payamItems, payamResult, batchErr); auditErr != nil {
-				s.logger.Printf("SMS scheduler: failed to persist PayamSMS compatibility audit for campaign id=%d batch [%d,%d): %v", c.ID, start, end, auditErr)
+				s.logger.Printf("SMS scheduler: failed to persist PayamSMS send attempt for campaign id=%d batch [%d,%d): %v", c.ID, start, end, auditErr)
 			}
+		} else if auditErr := s.persistSMSProviderSendAttempt(ctx, pc.ID, providerName, items, batchResult, batchErr); auditErr != nil {
+			s.logger.Printf("SMS scheduler: failed to persist %s send response for campaign id=%d batch [%d,%d): %v", providerName, c.ID, start, end, auditErr)
+			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: failed to persist %s send response for campaign id=%d: %v", providerName, c.ID, auditErr))
 		}
 
 		responseByTrackingID := make(map[string]*SMSProviderSendItem, len(batchResult.Items))
@@ -627,35 +756,25 @@ func (s *SMSCampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse)
 
 func (s *SMSCampaignScheduler) resolveCampaignSMSProvider(ctx context.Context, sender string) (models.SMSProvider, SMSProvider, error) {
 	if s.lineRepo == nil {
-		provider, err := s.providers.Provider(models.SMSProviderPayamSMS)
-		if err != nil {
-			return "", nil, err
-		}
-		s.logger.Printf("SMS scheduler: line number repository is unavailable; defaulting sender=%q to PayamSMS", sender)
-		return models.SMSProviderPayamSMS, provider, nil
+		return "", nil, fmt.Errorf("line number repository is unavailable")
 	}
 	line, err := s.lineRepo.ByValue(ctx, strings.TrimSpace(sender))
 	if err != nil {
 		return "", nil, err
 	}
 	if line == nil {
-		// The legacy scheduler only knew the sender string. Preserve that
-		// behavior for an old campaign whose line configuration was removed:
-		// missing configuration must not silently become a Candoo send.
-		provider, providerErr := s.providers.Provider(models.SMSProviderPayamSMS)
-		if providerErr != nil {
-			return "", nil, providerErr
-		}
-		s.logger.Printf("SMS scheduler: sender=%q has no line-number configuration; defaulting to PayamSMS", sender)
-		return models.SMSProviderPayamSMS, provider, nil
+		return "", nil, fmt.Errorf("line number %q does not exist", sender)
 	}
-	providerName, err := normalizeSMSProvider(line.Provider)
+	providerName, err := activeLineNumberProvider(line)
 	if err != nil {
 		return "", nil, err
 	}
 	provider, err := s.providers.Provider(providerName)
 	if err != nil {
 		return "", nil, err
+	}
+	if s.targetProvider != "" && providerName != s.targetProvider {
+		return "", nil, fmt.Errorf("line number %q is owned by %s, not %s", sender, providerName, s.targetProvider)
 	}
 	return providerName, provider, nil
 }
@@ -908,7 +1027,7 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 		return fmt.Errorf("processed campaign not found for processed campaign id=%d", processedCampaignID)
 	}
 
-	trackingIDs, err := allocateTrackingIDs(ctx, s.db, len(unmatchedUIDs))
+	trackingIDs, err := allocateProviderTrackingIDs(ctx, s.db, s.targetProvider, len(unmatchedUIDs))
 	if err != nil {
 		return err
 	}
@@ -1072,6 +1191,8 @@ func (s *SMSCampaignScheduler) startStatusJobWorker(parent context.Context) {
 				providerName, providerErr := statusJobProvider(job)
 				if providerErr != nil {
 					err = providerErr
+				} else if s.targetProvider != "" && providerName != s.targetProvider {
+					err = fmt.Errorf("status job provider %q does not belong to %s scheduler", providerName, s.targetProvider)
 				} else if providerName == models.SMSProviderPayamSMS {
 					if !payamLoaded {
 						tokenCtx, tokenCancel := context.WithTimeout(parent, 30*time.Second)
@@ -1115,6 +1236,9 @@ func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.
 	providerName, err := statusJobProvider(job)
 	if err != nil {
 		return err
+	}
+	if s.targetProvider != "" && providerName != s.targetProvider {
+		return fmt.Errorf("status job provider %q does not belong to %s scheduler", providerName, s.targetProvider)
 	}
 	if providerName != models.SMSProviderPayamSMS {
 		return s.handleExternalSMSStatusJob(ctx, job, providerName)
@@ -1252,17 +1376,16 @@ func (s *SMSCampaignScheduler) updateProcessedCampaignStats(ctx context.Context,
 
 func (s *SMSCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx context.Context, pc *models.ProcessedCampaign) (map[string]any, error) {
 	s.logger.Printf("updateProcessedCampaignStatsFromSentRows: computing stats from sent rows for processed_campaign_id=%d", pc.ID)
-	type row struct {
-		Total      int64
-		Successful int64
+	total, err := s.sentRepo.Count(ctx, models.SentSMSFilter{ProcessedCampaignID: &pc.ID})
+	if err != nil {
+		return nil, err
 	}
-	var agg row
-	if err := s.db.WithContext(ctx).Table("sent_sms").
-		Select(`
-			COUNT(*) AS total,
-			COALESCE(SUM(CASE WHEN LOWER(BTRIM(status::text)) = 'successful' THEN 1 ELSE 0 END), 0) AS successful`).
-		Where("processed_campaign_id = ?", pc.ID).
-		Scan(&agg).Error; err != nil {
+	successStatus := models.SMSSendStatusSuccessful
+	successful, err := s.sentRepo.Count(ctx, models.SentSMSFilter{
+		ProcessedCampaignID: &pc.ID,
+		Status:              &successStatus,
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -1272,11 +1395,11 @@ func (s *SMSCampaignScheduler) updateProcessedCampaignStatsFromSentRows(ctx cont
 	// }
 
 	stats := map[string]any{
-		"aggregatedTotalRecords":          agg.Total,
-		"aggregatedTotalSent":             agg.Successful,
-		"aggregatedTotalParts":            agg.Total,
-		"aggregatedTotalDeliveredParts":   agg.Successful,
-		"aggregatedTotalUnDeliveredParts": agg.Total - agg.Successful,
+		"aggregatedTotalRecords":          total,
+		"aggregatedTotalSent":             successful,
+		"aggregatedTotalParts":            total,
+		"aggregatedTotalDeliveredParts":   successful,
+		"aggregatedTotalUnDeliveredParts": total - successful,
 		"aggregatedTotalUnKnownParts":     int64(0),
 		// "trackingResults":                 trackingResults,
 		"updatedAt": utils.UTCNow().Format(time.RFC3339),
@@ -1359,7 +1482,7 @@ func (s *SMSCampaignScheduler) persistPayamSMSSendResponse(
 	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	return s.db.WithContext(persistCtx).Create(row).Error
+	return s.db.WithContext(persistCtx).Table("payam_sms_send_attempts").Create(row).Error
 }
 
 func buildSMSProviderUpdate(trackingID string, resp *PayamSMSResponseItem, sendErr error) repository.SentSMSProviderUpdate {
@@ -1501,7 +1624,10 @@ func (s *SMSCampaignScheduler) persistSMSProviderSendAttempt(
 	}
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 	defer cancel()
-	return s.db.WithContext(persistCtx).Create(row).Error
+	if provider != models.SMSProviderCandoo {
+		return fmt.Errorf("provider send attempt routed to unexpected provider %q", provider)
+	}
+	return s.db.WithContext(persistCtx).Table("candoo_sms_send_attempts").Create(row).Error
 }
 
 func (s *SMSCampaignScheduler) recordImmediateSMSOutcomes(
@@ -1828,7 +1954,7 @@ func allocateCandooCustomerIDs(ctx context.Context, db *gorm.DB, count int) ([]i
 	}
 	values := make([]sequenceValue, 0, count)
 	if err := db.WithContext(ctx).
-		Raw("SELECT nextval('candoo_customer_id_seq') AS value FROM generate_series(1, ?)", count).
+		Raw("SELECT nextval('candoo_scheduler_customer_id_seq') AS value FROM generate_series(1, ?)", count).
 		Scan(&values).Error; err != nil {
 		return nil, err
 	}

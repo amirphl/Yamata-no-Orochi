@@ -52,6 +52,10 @@ func ReleaseUnpreparedCampaign(ctx context.Context, db *gorm.DB, campaignID uint
 	return db.WithContext(ctx).Model(&models.Campaign{}).
 		Where(`id = ? AND status = ? AND NOT EXISTS (
 			SELECT 1 FROM processed_campaigns WHERE processed_campaigns.campaign_id = campaigns.id
+			UNION ALL
+			SELECT 1 FROM payam_processed_campaigns WHERE payam_processed_campaigns.campaign_id = campaigns.id
+			UNION ALL
+			SELECT 1 FROM candoo_processed_campaigns WHERE candoo_processed_campaigns.campaign_id = campaigns.id
 		)`, campaignID, models.CampaignStatusRunning).
 		Updates(map[string]any{"status": models.CampaignStatusApproved, "updated_at": utils.UTCNow()}).Error
 }
@@ -63,6 +67,10 @@ func ReleaseStaleUnpreparedCampaigns(ctx context.Context, db *gorm.DB, staleBefo
 	result := db.WithContext(ctx).Model(&models.Campaign{}).
 		Where(`status = ? AND updated_at < ? AND NOT EXISTS (
 			SELECT 1 FROM processed_campaigns WHERE processed_campaigns.campaign_id = campaigns.id
+			UNION ALL
+			SELECT 1 FROM payam_processed_campaigns WHERE payam_processed_campaigns.campaign_id = campaigns.id
+			UNION ALL
+			SELECT 1 FROM candoo_processed_campaigns WHERE candoo_processed_campaigns.campaign_id = campaigns.id
 		)`, models.CampaignStatusRunning, staleBefore).
 		Updates(map[string]any{"status": models.CampaignStatusApproved, "updated_at": utils.UTCNow()})
 	return result.RowsAffected, result.Error

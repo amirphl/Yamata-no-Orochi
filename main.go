@@ -411,13 +411,20 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	testSamplingCalculationRepo := repository.NewCampaignTargetingTestSamplingRepository(db)
 	srcLayerAllStatsRepo := repository.NewSrcLayerAllStatsRepository(db)
 	audienceSpecRepo := repository.NewAudienceSpecRepository(db)
-	sentSMSRepo := repository.NewSentSMSRepository(db)
+	payamSentSMSRepo := repository.NewPayamSentSMSRepository(db)
+	candooSentSMSRepo := repository.NewCandooSentSMSRepository(db)
 	sentBaleMessageRepo := repository.NewSentBaleMessageRepository(db)
 	sentRubikaMessageRepo := repository.NewSentRubikaMessageRepository(db)
 	sentSplusMessageRepo := repository.NewSentSplusMessageRepository(db)
 	processedCampaignRepo := repository.NewProcessedCampaignRepository(db)
+	payamProcessedCampaignRepo := repository.NewPayamProcessedCampaignRepository(db)
+	candooProcessedCampaignRepo := repository.NewCandooProcessedCampaignRepository(db)
 	campaignStatusJobRepo := repository.NewCampaignStatusJobRepository(db)
+	payamSMSStatusJobRepo := repository.NewPayamSMSStatusJobRepository(db)
+	candooSMSStatusJobRepo := repository.NewCandooSMSStatusJobRepository(db)
 	smsStatusResultRepo := repository.NewSMSStatusResultRepository(db)
+	payamSMSStatusResultRepo := repository.NewPayamSMSStatusResultRepository(db)
+	candooSMSStatusResultRepo := repository.NewCandooSMSStatusResultRepository(db)
 	baleStatusResultRepo := repository.NewBaleStatusResultRepository(db)
 	rubikaStatusResultRepo := repository.NewRubikaStatusResultRepository(db)
 	splusStatusResultRepo := repository.NewSplusStatusResultRepository(db)
@@ -832,94 +839,58 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	}
 
 	if cfg.Scheduler.CampaignExecutionEnabled {
-		// Start SMS campaign scheduler.
-		smsSched := scheduler.NewCampaignScheduler(
-			audienceProfileRepo,
-			tagRepo,
-			lineNumberRepo,
-			sentSMSRepo,
-			processedCampaignRepo,
-			campaignStatusJobRepo,
-			smsStatusResultRepo,
-			srcLayerAllStatsRepo,
-			notificationService,
-			db,
-			log.Default(),
-			cfg.Scheduler.CampaignExecutionInterval,
-			cfg.PayamSMS,
-			cfg.CandooSMS,
-			cfg.Bot,
-			cfg.Admin,
-			cfg.Scheduler.MessageSendMockEnabled,
-		)
-		stopSMSScheduler := smsSched.Start(context.Background())
-		stopFuncs = append(stopFuncs, stopSMSScheduler)
+		role := cfg.Scheduler.CampaignExecutionRole
+		if role == "all" || role == "payam" {
+			payamSched := scheduler.NewPayamCampaignScheduler(
+				audienceProfileRepo, tagRepo, lineNumberRepo, payamSentSMSRepo,
+				payamProcessedCampaignRepo, payamSMSStatusJobRepo, payamSMSStatusResultRepo,
+				srcLayerAllStatsRepo, notificationService, db, log.Default(),
+				cfg.Scheduler.CampaignExecutionInterval, cfg.PayamSMS, cfg.Bot, cfg.Admin,
+				cfg.Scheduler.MessageSendMockEnabled,
+			)
+			stopFuncs = append(stopFuncs, payamSched.Start(context.Background()))
+		}
 
-		// Start Bale campaign scheduler.
-		baleSched := scheduler.NewBaleCampaignScheduler(
-			audienceProfileRepo,
-			tagRepo,
-			sentBaleMessageRepo,
-			processedCampaignRepo,
-			campaignStatusJobRepo,
-			baleStatusResultRepo,
-			srcLayerAllStatsRepo,
-			notificationService,
-			db,
-			log.Default(),
-			cfg.Scheduler.CampaignExecutionInterval,
-			cfg.Scheduler.MessageSendDelay,
-			cfg.Bale,
-			cfg.Bot,
-			cfg.Admin,
-			cfg.Scheduler.MessageSendMockEnabled,
-		)
-		stopBaleScheduler := baleSched.Start(context.Background())
-		stopFuncs = append(stopFuncs, stopBaleScheduler)
+		if role == "all" || role == "candoo" {
+			candooSched := scheduler.NewCandooCampaignScheduler(
+				audienceProfileRepo, tagRepo, lineNumberRepo, candooSentSMSRepo,
+				candooProcessedCampaignRepo, candooSMSStatusJobRepo, candooSMSStatusResultRepo,
+				srcLayerAllStatsRepo, notificationService, db, log.Default(),
+				cfg.Scheduler.CampaignExecutionInterval, cfg.CandooSMS, cfg.Bot, cfg.Admin,
+				cfg.Scheduler.MessageSendMockEnabled,
+			)
+			stopFuncs = append(stopFuncs, candooSched.Start(context.Background()))
+		}
 
-		// Start Rubika campaign scheduler.
-		rubikaSched := scheduler.NewRubikaCampaignScheduler(
-			audienceProfileRepo,
-			tagRepo,
-			sentRubikaMessageRepo,
-			processedCampaignRepo,
-			campaignStatusJobRepo,
-			rubikaStatusResultRepo,
-			srcLayerAllStatsRepo,
-			notificationService,
-			db,
-			log.Default(),
-			cfg.Scheduler.CampaignExecutionInterval,
-			cfg.Scheduler.MessageSendDelay,
-			cfg.Rubika,
-			cfg.Bot,
-			cfg.Admin,
-			cfg.Scheduler.MessageSendMockEnabled,
-		)
-		stopRubikaScheduler := rubikaSched.Start(context.Background())
-		stopFuncs = append(stopFuncs, stopRubikaScheduler)
+		if role == "all" || role == "other" {
+			// The third isolated role retains ownership of the non-SMS platforms.
+			baleSched := scheduler.NewBaleCampaignScheduler(
+				audienceProfileRepo, tagRepo, sentBaleMessageRepo, processedCampaignRepo,
+				campaignStatusJobRepo, baleStatusResultRepo, srcLayerAllStatsRepo,
+				notificationService, db, log.Default(), cfg.Scheduler.CampaignExecutionInterval,
+				cfg.Scheduler.MessageSendDelay, cfg.Bale, cfg.Bot, cfg.Admin,
+				cfg.Scheduler.MessageSendMockEnabled,
+			)
+			stopFuncs = append(stopFuncs, baleSched.Start(context.Background()))
 
-		// Start Splus campaign scheduler.
-		splusSched := scheduler.NewSplusCampaignScheduler(
-			audienceProfileRepo,
-			tagRepo,
-			sentSplusMessageRepo,
-			processedCampaignRepo,
-			campaignStatusJobRepo,
-			splusStatusResultRepo,
-			srcLayerAllStatsRepo,
-			notificationService,
-			db,
-			log.Default(),
-			cfg.Scheduler.CampaignExecutionInterval,
-			cfg.Scheduler.MessageSendDelay,
-			cfg.Splus,
-			cfg.Bot,
-			cfg.Admin,
-			cfg.Scheduler.MessageSendMockEnabled,
-		)
-		stopSplusScheduler := splusSched.Start(context.Background())
-		stopFuncs = append(stopFuncs, stopSplusScheduler)
+			rubikaSched := scheduler.NewRubikaCampaignScheduler(
+				audienceProfileRepo, tagRepo, sentRubikaMessageRepo, processedCampaignRepo,
+				campaignStatusJobRepo, rubikaStatusResultRepo, srcLayerAllStatsRepo,
+				notificationService, db, log.Default(), cfg.Scheduler.CampaignExecutionInterval,
+				cfg.Scheduler.MessageSendDelay, cfg.Rubika, cfg.Bot, cfg.Admin,
+				cfg.Scheduler.MessageSendMockEnabled,
+			)
+			stopFuncs = append(stopFuncs, rubikaSched.Start(context.Background()))
+
+			splusSched := scheduler.NewSplusCampaignScheduler(
+				audienceProfileRepo, tagRepo, sentSplusMessageRepo, processedCampaignRepo,
+				campaignStatusJobRepo, splusStatusResultRepo, srcLayerAllStatsRepo,
+				notificationService, db, log.Default(), cfg.Scheduler.CampaignExecutionInterval,
+				cfg.Scheduler.MessageSendDelay, cfg.Splus, cfg.Bot, cfg.Admin,
+				cfg.Scheduler.MessageSendMockEnabled,
+			)
+			stopFuncs = append(stopFuncs, splusSched.Start(context.Background()))
+		}
 	}
 
 	if cfg.SmartTagEvaluation.Enabled && cfg.SmartTagEvaluation.Scheduler.Enabled {

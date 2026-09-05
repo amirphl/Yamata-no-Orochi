@@ -652,6 +652,21 @@ func fetchAudiencePhonesByUIDs(
 }
 
 func allocateTrackingIDs(ctx context.Context, db *gorm.DB, count int) ([]string, error) {
+	return allocateTrackingIDsForCounter(ctx, db, trackingCounterName, count)
+}
+
+// allocateProviderTrackingIDs gives Payam and Candoo independent durable
+// tracking streams. The old shared counter remains in use by legacy/non-SMS
+// schedulers and is never mutated by the provider-only workers.
+func allocateProviderTrackingIDs(ctx context.Context, db *gorm.DB, provider models.SMSProvider, count int) ([]string, error) {
+	counterName := "payam_sms_tracking_id"
+	if provider == models.SMSProviderCandoo {
+		counterName = "candoo_sms_tracking_id"
+	}
+	return allocateTrackingIDsForCounter(ctx, db, counterName, count)
+}
+
+func allocateTrackingIDsForCounter(ctx context.Context, db *gorm.DB, counterName string, count int) ([]string, error) {
 	if count <= 0 {
 		return nil, nil
 	}
@@ -665,13 +680,13 @@ func allocateTrackingIDs(ctx context.Context, db *gorm.DB, count int) ([]string,
 
 		var counter models.SequenceCounter
 		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).
-			First(&counter, "name = ?", trackingCounterName).Error; err != nil {
+			First(&counter, "name = ?", counterName).Error; err != nil {
 			if !errors.Is(err, gorm.ErrRecordNotFound) {
 				return err
 			}
 			now := utils.UTCNow()
 			counter = models.SequenceCounter{
-				Name:      trackingCounterName,
+				Name:      counterName,
 				LastValue: strings.Repeat("0", trackingCounterHexLen),
 				CreatedAt: now,
 				UpdatedAt: now,

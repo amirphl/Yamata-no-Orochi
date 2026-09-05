@@ -12,14 +12,50 @@ import (
 // ProcessedCampaignRepositoryImpl implements ProcessedCampaignRepository
 type ProcessedCampaignRepositoryImpl struct {
 	*BaseRepository[models.ProcessedCampaign, models.ProcessedCampaignFilter]
+	tableName string
 }
 
 func NewProcessedCampaignRepository(db *gorm.DB) ProcessedCampaignRepository {
-	return &ProcessedCampaignRepositoryImpl{BaseRepository: NewBaseRepository[models.ProcessedCampaign, models.ProcessedCampaignFilter](db)}
+	return newProcessedCampaignRepository(db, "processed_campaigns")
+}
+
+// NewPayamProcessedCampaignRepository owns Payam scheduler checkpoints.
+func NewPayamProcessedCampaignRepository(db *gorm.DB) ProcessedCampaignRepository {
+	return newProcessedCampaignRepository(db, "payam_processed_campaigns")
+}
+
+// NewCandooProcessedCampaignRepository owns Candoo scheduler checkpoints.
+func NewCandooProcessedCampaignRepository(db *gorm.DB) ProcessedCampaignRepository {
+	return newProcessedCampaignRepository(db, "candoo_processed_campaigns")
+}
+
+func newProcessedCampaignRepository(db *gorm.DB, tableName string) *ProcessedCampaignRepositoryImpl {
+	return &ProcessedCampaignRepositoryImpl{
+		BaseRepository: NewBaseRepository[models.ProcessedCampaign, models.ProcessedCampaignFilter](db),
+		tableName:      tableName,
+	}
+}
+
+func (r *ProcessedCampaignRepositoryImpl) table() string {
+	if r.tableName == "" {
+		return "processed_campaigns"
+	}
+	return r.tableName
+}
+
+func (r *ProcessedCampaignRepositoryImpl) Save(ctx context.Context, pc *models.ProcessedCampaign) error {
+	return r.getDB(ctx).Table(r.table()).Create(pc).Error
+}
+
+func (r *ProcessedCampaignRepositoryImpl) SaveBatch(ctx context.Context, pcs []*models.ProcessedCampaign) error {
+	if len(pcs) == 0 {
+		return nil
+	}
+	return r.getDB(ctx).Table(r.table()).CreateInBatches(pcs, 1000).Error
 }
 
 func (r *ProcessedCampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.ProcessedCampaign, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	var row models.ProcessedCampaign
 	if err := db.Last(&row, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -31,7 +67,7 @@ func (r *ProcessedCampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*m
 }
 
 func (r *ProcessedCampaignRepositoryImpl) ByCampaignID(ctx context.Context, campaignID uint) (*models.ProcessedCampaign, error) {
-	db := r.getDB(ctx)
+	db := r.getDB(ctx).Table(r.table())
 	var row models.ProcessedCampaign
 	err := db.Where("campaign_id = ? AND is_current", campaignID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -64,7 +100,7 @@ func (r *ProcessedCampaignRepositoryImpl) applyFilter(db *gorm.DB, f models.Proc
 
 func (r *ProcessedCampaignRepositoryImpl) ByFilter(ctx context.Context, filter models.ProcessedCampaignFilter, orderBy string, limit, offset int) ([]*models.ProcessedCampaign, error) {
 	db := r.getDB(ctx)
-	query := r.applyFilter(db.Model(&models.ProcessedCampaign{}), filter)
+	query := r.applyFilter(db.Table(r.table()), filter)
 	if orderBy != "" {
 		query = query.Order(orderBy)
 	}
@@ -83,7 +119,7 @@ func (r *ProcessedCampaignRepositoryImpl) ByFilter(ctx context.Context, filter m
 
 func (r *ProcessedCampaignRepositoryImpl) Count(ctx context.Context, filter models.ProcessedCampaignFilter) (int64, error) {
 	db := r.getDB(ctx)
-	query := r.applyFilter(db.Model(&models.ProcessedCampaign{}), filter)
+	query := r.applyFilter(db.Table(r.table()), filter)
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
 		return 0, err
@@ -113,7 +149,7 @@ func (r *ProcessedCampaignRepositoryImpl) Update(ctx context.Context, pc *models
 			}
 		}()
 	}
-	err = db.Save(pc).Error
+	err = db.Table(r.table()).Save(pc).Error
 	return err
 }
 
@@ -123,7 +159,7 @@ func (r *ProcessedCampaignRepositoryImpl) AppendAudienceData(ctx context.Context
 	}
 	db := r.getDB(ctx)
 	return db.Exec(
-		`UPDATE processed_campaigns SET audience_ids = audience_ids || ?, audience_codes = audience_codes || ? WHERE id = ?`,
+		`UPDATE `+r.table()+` SET audience_ids = audience_ids || ?, audience_codes = audience_codes || ? WHERE id = ?`,
 		pq.Int64Array(ids), pq.StringArray(codes), id,
 	).Error
 }
@@ -149,7 +185,7 @@ func (r *ProcessedCampaignRepositoryImpl) UpdateMeta(ctx context.Context, pc *mo
 		"bundle_audience_selection_id": pc.BundleAudienceSelectionID,
 		"updated_at":                   pc.UpdatedAt,
 	}
-	err = db.Model(&models.ProcessedCampaign{}).
+	err = db.Table(r.table()).
 		Where("id = ?", pc.ID).
 		Updates(updates).Error
 	return err
