@@ -96,7 +96,7 @@ services:
     tmpfs:
       - /tmp
 
-  # Postgres daily backup
+  # PostgreSQL backup scheduled daily at 00:00 UTC
   postgres-backup-beta:
     image: postgres:15-alpine
     container_name: yamata-postgres-backup-beta
@@ -111,8 +111,7 @@ services:
       DB_NAME: ${DB_NAME}
       DB_USER: ${DB_USER}
       DB_PASSWORD: ${DB_PASSWORD}
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-      BACKUP_RETRY_SECONDS: ${BACKUP_RETRY_SECONDS:-300}
+      BACKUP_HEALTH_MAX_AGE_SECONDS: ${BACKUP_HEALTH_MAX_AGE_SECONDS:-93600}
     command:
       - /bin/sh
       - -eu
@@ -120,7 +119,22 @@ services:
       - |
         mkdir -p /backups
         export PGPASSWORD="$${DB_PASSWORD}"
+        touch /backups/.scheduler-started
+        last_scheduled_epoch=0
         while true; do
+          now_epoch=$$(date -u +%s)
+          current_midnight_epoch=$$((now_epoch - (now_epoch % 86400)))
+          if [ "$${now_epoch}" -eq "$${current_midnight_epoch}" ] &&
+             [ "$${current_midnight_epoch}" -ne "$${last_scheduled_epoch}" ]; then
+            scheduled_epoch=$${current_midnight_epoch}
+          else
+            scheduled_epoch=$$((current_midnight_epoch + 86400))
+          fi
+          wait_seconds=$$((scheduled_epoch - now_epoch))
+          echo "[backup] $$(date -u +%Y-%m-%dT%H:%M:%SZ) next backup at 00:00 UTC (in $${wait_seconds}s)"
+          sleep "$${wait_seconds}"
+          last_scheduled_epoch=$${scheduled_epoch}
+
           ts=$$(date -u +%Y%m%dT%H%M%SZ)
           backup="$${DB_NAME}-$${ts}.dump"
           temporary="/backups/.$${backup}.tmp"
@@ -128,14 +142,14 @@ services:
           if pg_dump -h "$${DB_HOST}" -p "$${DB_PORT}" -U "$${DB_USER}" -d "$${DB_NAME}" -Fc -f "$${temporary}" &&
              pg_restore --list "$${temporary}" >/dev/null; then
             mv "$${temporary}" "/backups/$${backup}"
+            rm -f /backups/.last-failure
             touch /backups/.last-success
             echo "[backup] $$(date -u +%Y-%m-%dT%H:%M:%SZ) backup completed: $${backup}"
-            sleep "$${BACKUP_INTERVAL_SECONDS}"
           else
             status=$$?
             rm -f "$${temporary}"
-            echo "[backup] $$(date -u +%Y-%m-%dT%H:%M:%SZ) backup failed (status $${status}); retrying in $${BACKUP_RETRY_SECONDS}s" >&2
-            sleep "$${BACKUP_RETRY_SECONDS}"
+            touch /backups/.last-failure
+            echo "[backup] $$(date -u +%Y-%m-%dT%H:%M:%SZ) backup failed (status $${status}); next attempt at the next 00:00 UTC" >&2
           fi
         done
     volumes:
@@ -146,7 +160,17 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - 'test -f /backups/.last-success && age=$$(($$(date +%s)-$$(stat -c %Y /backups/.last-success))) && test "$${age}" -le $$(($${BACKUP_INTERVAL_SECONDS}+$${BACKUP_RETRY_SECONDS}+3600))'
+        - |
+          test ! -f /backups/.last-failure || exit 1
+          reference=$$(stat -c %Y /backups/.scheduler-started)
+          if test -f /backups/.last-success; then
+            last_success=$$(stat -c %Y /backups/.last-success)
+            if test "$${last_success}" -gt "$${reference}"; then
+              reference=$${last_success}
+            fi
+          fi
+          age=$$(($$(date -u +%s) - reference))
+          test "$${age}" -le "$${BACKUP_HEALTH_MAX_AGE_SECONDS}"
       interval: 30s
       timeout: 5s
       retries: 3
