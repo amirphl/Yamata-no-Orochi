@@ -186,6 +186,8 @@ trap cleanup EXIT
 			omit["CERT_ALERT_CERT_PATHS"] = 1
 			omit["REDIS_PASSWORD"] = 1
 			omit["BACKUP_INTERVAL_SECONDS"] = 1
+			omit["BACKUP_RETRY_SECONDS"] = 1
+			omit["BACKUP_HEALTH_MAX_AGE_SECONDS"] = 1
 			omit["BACKUP_S3_BUCKET"] = 1
 			omit["BACKUP_S3_ACCESS_KEY"] = 1
 			omit["BACKUP_S3_SECRET_KEY"] = 1
