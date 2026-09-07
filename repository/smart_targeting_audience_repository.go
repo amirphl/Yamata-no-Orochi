@@ -14,10 +14,14 @@ import (
 // jobs leave AllowedColors empty, while schedulers may apply platform-specific
 // delivery eligibility when selecting the final audience.
 type SmartTargetingAudienceQuery struct {
-	BundleID      uint
-	TagIDs        []int64
-	ScoreClasses  []string
-	AllowedColors []string
+	BundleID uint
+	// ApplyBundleAudienceExclusions enables the manually populated, bundle-
+	// scoped exclusion list. Capacity and preview callers leave it false; the
+	// final Smart Targeting Test scheduler enables it.
+	ApplyBundleAudienceExclusions bool
+	TagIDs                        []int64
+	ScoreClasses                  []string
+	AllowedColors                 []string
 }
 
 type SmartTargetingAudienceRepository interface {
@@ -253,9 +257,20 @@ FROM (
           SELECT 1
           FROM bundle_audience_selection_members AS used
           WHERE used.bundle_id = ? AND used.audience_id = ap.id
-      )
-) AS calculated_bounds`
+      )`
 	args = append(args, query.BundleID)
+	if query.ApplyBundleAudienceExclusions {
+		sql += `
+      AND NOT EXISTS (
+          SELECT 1
+          FROM bundle_audience_exclusions AS bundle_exclusion
+          WHERE bundle_exclusion.bundle_id = ?
+            AND bundle_exclusion.audience_id = ap.id
+      )`
+		args = append(args, query.BundleID)
+	}
+	sql += `
+) AS calculated_bounds`
 	return sql, args
 }
 
@@ -297,13 +312,25 @@ WHERE ap.tags @> ARRAY[?]::integer[]
       SELECT 1
       FROM bundle_audience_selection_members AS used
       WHERE used.bundle_id = ? AND used.audience_id = ap.id
-  )
+  )`
+	args = append(args, query.BundleID)
+	if query.ApplyBundleAudienceExclusions {
+		sql += `
+  AND NOT EXISTS (
+      SELECT 1
+      FROM bundle_audience_exclusions AS bundle_exclusion
+      WHERE bundle_exclusion.bundle_id = ?
+        AND bundle_exclusion.audience_id = ap.id
+  )`
+		args = append(args, query.BundleID)
+	}
+	sql += `
   AND NOT EXISTS (
       SELECT 1
       FROM unnest(?::bigint[]) AS earlier(audience_id)
       WHERE earlier.audience_id = ap.id
   )`
-	args = append(args, query.BundleID, pq.Array(excludeAudienceIDs))
+	args = append(args, pq.Array(excludeAudienceIDs))
 
 	scorePredicate, scoreArgs, err := smartTargetingPerTagScorePredicate(query.ScoreClasses, bounds)
 	if err != nil {
