@@ -410,5 +410,8 @@
 \echo 'Running 0133_decouple_smart_targeting_test_sampling.sql...'
 \i migrations/0133_decouple_smart_targeting_test_sampling.sql
 
+\echo 'Running 0134_create_bundle_audience_exclusions.sql...'
+\i migrations/0134_create_bundle_audience_exclusions.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
