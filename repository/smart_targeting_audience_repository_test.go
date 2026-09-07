@@ -70,13 +70,14 @@ func TestSmartTargetingClassifiedPopulationCalculatesBothBoundsWithOneAggregate(
 
 func TestSmartTargetingScoreBoundsQueryCalculatesEligibleUnionOnce(t *testing.T) {
 	query := SmartTargetingAudienceQuery{
-		BundleID: 3, TagIDs: []int64{9, 2}, ScoreClasses: []string{"A", "C"}, AllowedColors: []string{"white", "pink"},
+		BundleID: 3, ApplyBundleAudienceExclusions: true, TagIDs: []int64{9, 2}, ScoreClasses: []string{"A", "C"}, AllowedColors: []string{"white", "pink"},
 	}
 	sql, args := smartTargetingScoreBoundsQuery(query)
 	lowerSQL := strings.ToLower(sql)
 	for _, required := range []string{
 		"percentile_disc(array[0.33, 0.66]", "ap.tags && ?::integer[]", "ap.color = any(?::text[])",
 		"bundle_audience_selection_members", "used.bundle_id = ?", "ap.normalized_score is not null",
+		"bundle_audience_exclusions", "bundle_exclusion.bundle_id = ?", "bundle_exclusion.audience_id = ap.id",
 	} {
 		if !strings.Contains(lowerSQL, required) {
 			t.Fatalf("score-bound query is missing %q:\n%s", required, sql)
@@ -85,8 +86,8 @@ func TestSmartTargetingScoreBoundsQueryCalculatesEligibleUnionOnce(t *testing.T)
 	if strings.Count(lowerSQL, "percentile_disc") != 1 {
 		t.Fatalf("score-bound query recalculates percentile aggregates:\n%s", sql)
 	}
-	if len(args) != 3 {
-		t.Fatalf("score-bound argument count = %d, want tag IDs, colors, and Bundle", len(args))
+	if len(args) != 4 || args[3] != uint(3) {
+		t.Fatalf("score-bound arguments = %#v, want tag IDs, colors, and Bundle twice", args)
 	}
 
 	withoutColors, args := smartTargetingScoreBoundsQuery(SmartTargetingAudienceQuery{
@@ -95,12 +96,15 @@ func TestSmartTargetingScoreBoundsQueryCalculatesEligibleUnionOnce(t *testing.T)
 	if strings.Contains(strings.ToLower(withoutColors), "ap.color") || len(args) != 2 {
 		t.Fatalf("unrestricted-color score-bound query = %q with %d args", withoutColors, len(args))
 	}
+	if strings.Contains(strings.ToLower(withoutColors), "bundle_audience_exclusions") {
+		t.Fatalf("default score-bound query unexpectedly applies Bundle exclusions:\n%s", withoutColors)
+	}
 }
 
 func TestSmartTargetingPerTagSelectionUsesContainmentLimitAndNoGlobalSort(t *testing.T) {
 	p33, p66 := 24.0, 29.6
 	query := SmartTargetingAudienceQuery{
-		BundleID: 3, TagIDs: []int64{9, 2}, ScoreClasses: []string{"A", "C"},
+		BundleID: 3, ApplyBundleAudienceExclusions: true, TagIDs: []int64{9, 2}, ScoreClasses: []string{"A", "C"},
 	}
 	sql, args, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, []int64{101, 102}, 600, true)
 	if err != nil {
@@ -109,6 +113,7 @@ func TestSmartTargetingPerTagSelectionUsesContainmentLimitAndNoGlobalSort(t *tes
 	lowerSQL := strings.ToLower(sql)
 	for _, required := range []string{
 		"select ap.id", "ap.tags @> array[?]::integer[]", "bundle_audience_selection_members",
+		"bundle_audience_exclusions", "bundle_exclusion.bundle_id = ?", "bundle_exclusion.audience_id = ap.id",
 		"unnest(?::bigint[])", "ap.normalized_score <= ?::double precision or ap.normalized_score > ?::double precision", "limit ?",
 	} {
 		if !strings.Contains(lowerSQL, required) {
@@ -120,8 +125,8 @@ func TestSmartTargetingPerTagSelectionUsesContainmentLimitAndNoGlobalSort(t *tes
 			t.Fatalf("per-tag ID query unexpectedly contains %q:\n%s", forbidden, sql)
 		}
 	}
-	if len(args) != 6 {
-		t.Fatalf("per-tag argument count = %d, want tag, Bundle, exclusions, two bounds, and limit", len(args))
+	if len(args) != 7 || args[2] != uint(3) {
+		t.Fatalf("per-tag arguments = %#v, want tag, Bundle twice, exclusions, two bounds, and limit", args)
 	}
 
 	fullSQL, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, nil, 600, false)
@@ -135,6 +140,15 @@ func TestSmartTargetingPerTagSelectionUsesContainmentLimitAndNoGlobalSort(t *tes
 	}
 	if _, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 77, nil, 600, true); err == nil {
 		t.Fatal("per-tag selection accepted a tag outside the selected set")
+	}
+
+	query.ApplyBundleAudienceExclusions = false
+	withoutBundleExclusions, args, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, nil, 600, true)
+	if err != nil {
+		t.Fatalf("build default per-tag selection query: %v", err)
+	}
+	if strings.Contains(strings.ToLower(withoutBundleExclusions), "bundle_audience_exclusions") || len(args) != 6 {
+		t.Fatalf("default per-tag query unexpectedly applies Bundle exclusions:\n%s\nargs=%#v", withoutBundleExclusions, args)
 	}
 }
 
