@@ -5,6 +5,9 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0134_create_bundle_audience_exclusions_down.sql...'
+\i migrations/0134_create_bundle_audience_exclusions_down.sql
+
 \echo 'Running 0133_decouple_smart_targeting_test_sampling_down.sql...'
 \i migrations/0133_decouple_smart_targeting_test_sampling_down.sql
 
