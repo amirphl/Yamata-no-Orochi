@@ -485,30 +485,49 @@ func TestSmartTargetingTestSamplingCalculationDTORejectsInconsistentCompletedRes
 	}
 }
 
-func TestSamplingInputFromCalculationRejectsChangedCampaignSnapshot(t *testing.T) {
+func TestSamplingCalculationFreshnessIgnoresRevisionButRejectsChangedSamplingInput(t *testing.T) {
 	method := models.CampaignAudienceTargetingSmart
 	bundleID := uint(3)
 	sampleSize := uint64(600)
+	currentRevision := time.Now().UTC()
+	calculationRevision := currentRevision.Add(-time.Minute)
 	campaign := &models.Campaign{
 		ID: 17, BundleID: &bundleID, Phase: models.CampaignPhaseTest, SampleSizePerTag: &sampleSize,
-		Spec: models.CampaignSpec{AudienceTargetingMethod: &method, AudienceGrades: []string{"A", "C"}},
+		Status:    models.CampaignStatusInProgress,
+		Spec:      models.CampaignSpec{AudienceTargetingMethod: &method, AudienceGrades: []string{"A", "C"}},
+		UpdatedAt: &currentRevision,
 	}
+	repo := &samplingSelectedTagRepositoryStub{selected: []*models.CampaignSelectedTag{
+		{CampaignID: 17, BundleID: 3, TagID: 9, SelectionOrder: 0},
+		{CampaignID: 17, BundleID: 3, TagID: 2, SelectionOrder: 1},
+	}}
 	hash, err := smartTargetingTestSamplingHash(campaign, []uint{9, 2}, []string{"A", "C"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	row := &models.CampaignTargetingTestSamplingCalculation{
 		CampaignID: 17, BundleID: 3, SelectedTagIDs: pq.Int64Array{9, 2}, SelectedTagCount: 2, SelectedScoreClasses: pq.StringArray{"A", "C"},
-		SampleSizePerTag: 600, InputHash: hash, CalculationVersion: smartTargetingTestSamplingCalculationVersion,
+		SampleSizePerTag: 600, InputHash: hash, CalculationVersion: smartTargetingTestSamplingCalculationVersion, CampaignUpdatedAt: &calculationRevision,
+		Status: models.CampaignTargetingTestSamplingCalculating,
 	}
-	input, gotSampleSize, err := samplingInputFromCalculation(campaign, row)
+	currentInput, err := currentSmartTargetingTestSamplingInput(t.Context(), repo, campaign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reusableActiveSmartTargetingTestSampling(campaign, row, currentInput) {
+		t.Fatal("same-input active calculation was not reusable after only updated_at changed")
+	}
+	input, gotSampleSize, err := currentSmartTargetingTestSamplingCalculationInput(t.Context(), repo, campaign, row)
 	if err != nil || gotSampleSize != 600 || len(input.order) != 2 || input.order[0] != 9 {
 		t.Fatalf("snapshot input = (%#v, %d, %v)", input, gotSampleSize, err)
 	}
 
 	changedSampleSize := uint64(601)
 	campaign.SampleSizePerTag = &changedSampleSize
-	if _, _, err := samplingInputFromCalculation(campaign, row); !errors.Is(err, ErrSmartTargetingTestPreviewRequired) {
+	if reusableActiveSmartTargetingTestSampling(campaign, row, currentInput) {
+		t.Fatal("active calculation remained reusable after sample size changed")
+	}
+	if _, _, err := currentSmartTargetingTestSamplingCalculationInput(t.Context(), repo, campaign, row); !errors.Is(err, ErrSmartTargetingTestPreviewRequired) {
 		t.Fatalf("changed campaign snapshot error = %v, want preview required", err)
 	}
 }
