@@ -30,11 +30,6 @@ type SmartTargetingCapacityScheduler struct {
 	inFlight map[int64]struct{}
 }
 
-const (
-	smartTargetingCapacityJobTimeout    = 30 * time.Minute
-	smartTargetingCapacityLeaseDuration = 35 * time.Minute
-)
-
 func NewSmartTargetingCapacityScheduler(executor SmartTargetingCapacityExecutor, repo repository.CampaignTargetingCapacityRepository, logger *log.Logger, pollInterval time.Duration, maxParallelRuns int) *SmartTargetingCapacityScheduler {
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
@@ -87,7 +82,7 @@ func (s *SmartTargetingCapacityScheduler) runOnce(parent context.Context, worker
 	if slots == 0 {
 		return
 	}
-	rows, err := s.repo.ClaimPending(parent, slots, now.Add(-smartTargetingCapacityLeaseDuration), now)
+	rows, err := s.repo.ClaimPending(parent, slots, now.Add(-smartTargetingCalculationLeaseDuration), now)
 	if err != nil {
 		s.logger.Printf("smart targeting capacity scheduler: claim pending calculations failed: %v", err)
 		return
@@ -105,7 +100,7 @@ func (s *SmartTargetingCapacityScheduler) runOnce(parent context.Context, worker
 					s.logger.Printf("smart targeting capacity scheduler: calculation %d panicked: %v", id, recovered)
 				}
 			}()
-			jobCtx, cancel := context.WithTimeout(parent, smartTargetingCapacityJobTimeout)
+			jobCtx, cancel := context.WithTimeout(parent, smartTargetingCalculationJobTimeout)
 			defer cancel()
 			if err := s.executor.ExecuteCampaignTargetingCapacityCalculation(jobCtx, id, leaseStartedAt); err != nil {
 				s.logger.Printf("smart targeting capacity scheduler: calculation %d failed: %v", id, err)
