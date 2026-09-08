@@ -380,8 +380,11 @@ start_app_service() {
 	docker_cmd=$(get_docker_cmd)
 	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d app-beta
 	print_success "app-beta started"
-	# Start nginx after app-beta to avoid implicit dependency startup
-	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d nginx-beta
+	# Start nginx after app-beta to avoid implicit dependency startup. Recreate it
+	# so Docker refreshes the individual nginx.conf bind mount after git replaces
+	# that file during an update. The generated vhost is directory-mounted and
+	# can otherwise get ahead of a stale nginx.conf in the existing container.
+	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d --force-recreate nginx-beta
 	print_success "nginx-beta started"
 	# Start services that depend on nginx after the proxy is up.
 	$docker_cmd compose --env-file "$ENV_FILE" -f docker-compose.beta.yml up -d --build cert-monitor-beta

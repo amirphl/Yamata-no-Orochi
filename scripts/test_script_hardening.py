@@ -254,6 +254,11 @@ exit 1
             "apply-yamata-required-migrations.sh --verify-only", content
         )
 
+    def test_routine_deploy_recreates_nginx_to_refresh_file_bind_mounts(self):
+        _, _, deploy = self._paths()
+        content = deploy.read_text(encoding="utf-8")
+        self.assertIn("up -d --force-recreate nginx-beta", content)
+
     def test_required_schema_helper_is_read_only_by_default(self):
         project_root, helper, _ = self._paths()
         with tempfile.TemporaryDirectory() as directory:
