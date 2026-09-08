@@ -179,6 +179,7 @@ if [[ "$MODE" == repair ]]; then
 	apply_file "$PROJECT_DIR/migrations/0131_optimize_postgres_audience_maintenance.sql"
 	apply_file "$PROJECT_DIR/migrations/0132_create_tag_test_performance_reports.sql"
 	apply_file "$PROJECT_DIR/migrations/0133_decouple_smart_targeting_test_sampling.sql"
+	apply_file "$PROJECT_DIR/migrations/0134_create_bundle_audience_exclusions.sql"
 else
 	log "Verification mode: no migrations will be applied"
 fi
@@ -320,6 +321,22 @@ fi
 	die "Migration 0132 is incomplete: tag_test_phase_performance_summaries is missing"
 [[ "$(psql_scalar "SELECT to_regclass('public.tag_test_performance_scheduler_state') IS NOT NULL;")" == t ]] ||
 	die "Migration 0132 is incomplete: tag_test_performance_scheduler_state is missing"
+[[ "$(psql_scalar "SELECT to_regclass('public.bundle_audience_exclusions') IS NOT NULL;")" == t ]] ||
+	die "Migration 0134 is incomplete: bundle_audience_exclusions is missing"
+[[ "$(psql_scalar "
+	SELECT COALESCE((
+		SELECT indisunique AND indisvalid AND indisready
+		FROM pg_index
+		WHERE indexrelid=to_regclass('public.bundle_audience_exclusions_pkey')
+	), FALSE);")" == t ]] ||
+	die "Migration 0134 is incomplete: Bundle audience exclusion pair uniqueness is missing"
+[[ "$(psql_scalar "
+	SELECT COALESCE((
+		SELECT indisvalid AND indisready
+		FROM pg_index
+		WHERE indexrelid=to_regclass('public.idx_bundle_audience_exclusions_audience')
+	), FALSE);")" == t ]] ||
+	die "Migration 0134 is incomplete: Bundle audience exclusion reverse index is missing"
 [[ "$(psql_scalar "
 	SELECT EXISTS (
 		SELECT 1 FROM information_schema.columns
@@ -393,7 +410,7 @@ fi
 	die "Migration 0132 is incomplete: generated aggregate Test CTR is missing"
 
 if [[ "$MODE" == repair ]]; then
-	advance_migration_tracker '0133_decouple_smart_targeting_test_sampling.sql'
+	advance_migration_tracker '0134_create_bundle_audience_exclusions.sql'
 	log "Required schema repaired and verified"
 else
 	log "Required schema verified"
