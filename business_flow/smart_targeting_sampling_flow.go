@@ -250,11 +250,35 @@ func (s *CampaignFlowImpl) ownedSmartTargetingTestCampaign(ctx context.Context, 
 	return &campaign, nil
 }
 
-func sameCampaignRevision(left, right *time.Time) bool {
-	if left == nil || right == nil {
-		return left == nil && right == nil
+func reusableActiveSmartTargetingTestSampling(campaign *models.Campaign, calculation *models.CampaignTargetingTestSamplingCalculation, currentInput *smartTargetingTestSamplingInput) bool {
+	if calculation == nil || calculation.Status != models.CampaignTargetingTestSamplingCalculating || currentInput == nil || calculation.InputHash != currentInput.hash {
+		return false
 	}
-	return left.Equal(*right)
+	_, _, err := samplingInputFromCalculation(campaign, calculation)
+	return err == nil
+}
+
+func currentSmartTargetingTestSamplingCalculationInput(
+	ctx context.Context,
+	selectedTagRepo repository.CampaignSelectedTagRepository,
+	campaign *models.Campaign,
+	calculation *models.CampaignTargetingTestSamplingCalculation,
+) (*smartTargetingTestSamplingInput, uint64, error) {
+	if campaign == nil || !campaign.IsEditable() {
+		return nil, 0, ErrSmartTargetingTestPreviewRequired
+	}
+	_, sampleSizePerTag, err := samplingInputFromCalculation(campaign, calculation)
+	if err != nil {
+		return nil, 0, err
+	}
+	currentInput, err := currentSmartTargetingTestSamplingInput(ctx, selectedTagRepo, campaign)
+	if err != nil {
+		return nil, 0, err
+	}
+	if currentInput.hash != calculation.InputHash {
+		return nil, 0, ErrSmartTargetingTestPreviewRequired
+	}
+	return currentInput, sampleSizePerTag, nil
 }
 
 // StartSmartTargetingTestSampling snapshots the current inputs and returns a
@@ -295,8 +319,7 @@ func (s *CampaignFlowImpl) StartSmartTargetingTestSampling(ctx context.Context, 
 			return err
 		}
 		if active != nil {
-			_, _, snapshotErr := samplingInputFromCalculation(&lockedCampaign, active)
-			if active.InputHash == input.hash && sameCampaignRevision(active.CampaignUpdatedAt, lockedCampaign.UpdatedAt) && snapshotErr == nil {
+			if reusableActiveSmartTargetingTestSampling(&lockedCampaign, active, input) {
 				calculation = active
 				return nil
 			}
@@ -340,7 +363,6 @@ func (s *CampaignFlowImpl) StartSmartTargetingTestSampling(ctx context.Context, 
 			SelectedScoreClasses:  pq.StringArray(input.classes),
 			SelectedTagCount:      len(input.order),
 			SampleSizePerTag:      int64(*lockedCampaign.SampleSizePerTag),
-			CampaignUpdatedAt:     lockedCampaign.UpdatedAt,
 			TagResults:            json.RawMessage(`[]`),
 			Status:                models.CampaignTargetingTestSamplingCalculating,
 			CalculationVersion:    smartTargetingTestSamplingCalculationVersion,
@@ -566,19 +588,9 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 	if err != nil {
 		return err
 	}
-	if campaign == nil || !campaign.IsEditable() || !sameCampaignRevision(campaign.UpdatedAt, calculation.CampaignUpdatedAt) {
-		return ErrSmartTargetingTestPreviewRequired
-	}
-	_, sampleSizePerTag, err := samplingInputFromCalculation(campaign, calculation)
+	currentInput, sampleSizePerTag, err := currentSmartTargetingTestSamplingCalculationInput(ctx, s.selectedTagRepo, campaign, calculation)
 	if err != nil {
 		return err
-	}
-	currentInput, err := currentSmartTargetingTestSamplingInput(ctx, s.selectedTagRepo, campaign)
-	if err != nil || currentInput.hash != calculation.InputHash {
-		if err != nil {
-			return err
-		}
-		return ErrSmartTargetingTestPreviewRequired
 	}
 	if err := s.selectedTagRepo.Validate(ctx, campaign.ID, calculation.BundleID); err != nil {
 		return err
@@ -592,17 +604,6 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 	if err != nil {
 		return err
 	}
-	pricePerMessage, err := s.computePricePerMessage(ctx, *campaign)
-	if err != nil {
-		return err
-	}
-	cost, err := checkedCampaignCost(pricePerMessage, sample.effective)
-	if err != nil {
-		return err
-	}
-	if customer, lookupErr := getCustomer(ctx, s.customerRepo, calculation.CustomerID); lookupErr == nil && s.adminConfig.HasMobile(customer.RepresentativeMobile) {
-		cost = 0
-	}
 	tagResults, err := json.Marshal(sample.results)
 	if err != nil {
 		return err
@@ -614,15 +615,8 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 		if err := txDB.Clauses(clause.Locking{Strength: "UPDATE"}).First(&lockedCampaign, calculation.CampaignID).Error; err != nil {
 			return err
 		}
-		if !lockedCampaign.IsEditable() || !sameCampaignRevision(lockedCampaign.UpdatedAt, calculation.CampaignUpdatedAt) {
-			return ErrSmartTargetingTestPreviewRequired
-		}
-		currentInput, err := currentSmartTargetingTestSamplingInput(txCtx, s.selectedTagRepo, &lockedCampaign)
-		if err != nil || currentInput.hash != calculation.InputHash {
-			if err != nil {
-				return err
-			}
-			return ErrSmartTargetingTestPreviewRequired
+		if _, _, err := currentSmartTargetingTestSamplingCalculationInput(txCtx, s.selectedTagRepo, &lockedCampaign, calculation); err != nil {
+			return err
 		}
 		// Approval and audience materialization take an UPDATE lock on the
 		// Bundle. Holding a SHARE lock makes sampling's own allocation fingerprint
@@ -639,6 +633,20 @@ func (s *CampaignFlowImpl) ExecuteSmartTargetingTestSamplingCalculation(ctx cont
 		}
 		if currentAllocationFingerprint != allocationFingerprint {
 			return ErrSmartTargetingTestPreviewRequired
+		}
+		// Pricing must use the same final, locked campaign state that receives
+		// the published preview. Unrelated saves no longer invalidate sampling,
+		// so computing this before the lock could publish a stale cost.
+		pricePerMessage, err := s.computePricePerMessage(txCtx, lockedCampaign)
+		if err != nil {
+			return err
+		}
+		cost, err := checkedCampaignCost(pricePerMessage, sample.effective)
+		if err != nil {
+			return err
+		}
+		if customer, lookupErr := getCustomer(txCtx, s.customerRepo, calculation.CustomerID); lookupErr == nil && s.adminConfig.HasMobile(customer.RepresentativeMobile) {
+			cost = 0
 		}
 		satisfied := make(pq.Int64Array, 0, len(sample.satisfied))
 		for _, item := range sample.satisfied {
