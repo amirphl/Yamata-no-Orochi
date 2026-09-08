@@ -211,7 +211,9 @@ services:
       - no-new-privileges:true
 
   sentry-beta:
-    image: glitchtip/glitchtip:latest
+    # Pin the tested patch release so routine deploys cannot silently upgrade
+    # GlitchTip and its database/frontend assets through the mutable latest tag.
+    image: glitchtip/glitchtip:6.2.2
     container_name: yamata-sentry-beta
     restart: unless-stopped
     depends_on:
