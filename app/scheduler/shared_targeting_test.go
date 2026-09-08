@@ -6,12 +6,34 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/app/dto"
 	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/repository"
 	"github.com/lib/pq"
 )
+
+func TestHeavySmartTargetingTimeoutsRemainConsistent(t *testing.T) {
+	if smartTargetingCalculationJobTimeout != 60*time.Minute {
+		t.Fatalf("Smart Targeting calculation timeout = %s, want 60m", smartTargetingCalculationJobTimeout)
+	}
+	if smartTargetingCalculationLeaseDuration != 70*time.Minute {
+		t.Fatalf("Smart Targeting calculation lease = %s, want 70m", smartTargetingCalculationLeaseDuration)
+	}
+	if smartTargetingCalculationLeaseDuration <= smartTargetingCalculationJobTimeout {
+		t.Fatalf("Smart Targeting lease %s must exceed job timeout %s", smartTargetingCalculationLeaseDuration, smartTargetingCalculationJobTimeout)
+	}
+	if campaignExecutionTimeout != 8*time.Hour {
+		t.Fatalf("campaign execution timeout = %s, want 8h", campaignExecutionTimeout)
+	}
+	if campaignExecutionStaleAfter != 10*time.Hour {
+		t.Fatalf("campaign stale threshold = %s, want 10h", campaignExecutionStaleAfter)
+	}
+	if campaignExecutionStaleAfter <= campaignExecutionTimeout {
+		t.Fatalf("campaign stale threshold %s must exceed execution timeout %s", campaignExecutionStaleAfter, campaignExecutionTimeout)
+	}
+}
 
 type missingSchedulerStatsRepository struct{}
 
