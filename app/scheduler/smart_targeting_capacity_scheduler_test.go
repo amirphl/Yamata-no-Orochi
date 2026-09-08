@@ -241,8 +241,8 @@ func TestSmartTargetingCapacitySchedulerUsesDurableClaimsAndCleanup(t *testing.T
 	if claimCalls != 1 || limit != 1 {
 		t.Fatalf("claim calls = %d with limit %d, want 1 with limit 1", claimCalls, limit)
 	}
-	if leaseAge < smartTargetingCapacityLeaseDuration || leaseAge > smartTargetingCapacityLeaseDuration+time.Minute {
-		t.Fatalf("stale lease age = %s, want approximately %s", leaseAge, smartTargetingCapacityLeaseDuration)
+	if leaseAge < smartTargetingCalculationLeaseDuration || leaseAge > smartTargetingCalculationLeaseDuration+time.Minute {
+		t.Fatalf("stale lease age = %s, want approximately %s", leaseAge, smartTargetingCalculationLeaseDuration)
 	}
 	executor.mu.Lock()
 	defer executor.mu.Unlock()
