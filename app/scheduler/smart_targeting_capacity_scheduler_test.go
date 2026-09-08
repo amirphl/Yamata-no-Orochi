@@ -125,6 +125,27 @@ func TestSmartTargetingSchedulerAllowedColorsRestrictsOnlySMS(t *testing.T) {
 	}
 }
 
+func TestSmartTargetingSchedulerAudienceQueryEnablesBundleExclusionsOnlyForTest(t *testing.T) {
+	testPhase := string(models.CampaignPhaseTest)
+	campaign := dto.BotGetCampaignResponse{
+		ID:              17,
+		TargetingMethod: models.CampaignAudienceTargetingSmart,
+		Phase:           &testPhase,
+		Platform:        string(models.CampaignPlatformSMS),
+	}
+	query := smartTargetingSchedulerAudienceQuery(campaign, 3, []int64{9, 2}, []string{"A", "C"})
+	if !query.ApplyBundleAudienceExclusions || query.BundleID != 3 || len(query.TagIDs) != 2 || len(query.AllowedColors) != 2 {
+		t.Fatalf("Smart Test scheduler audience query = %#v, want Bundle-scoped SMS query", query)
+	}
+
+	executionPhase := string(models.CampaignPhaseExecution)
+	campaign.Phase = &executionPhase
+	query = smartTargetingSchedulerAudienceQuery(campaign, 3, []int64{9, 2}, []string{"A", "C"})
+	if query.ApplyBundleAudienceExclusions {
+		t.Fatal("execution scheduler audience query applies Bundle exclusions")
+	}
+}
+
 type capacitySchedulerTestRepo struct {
 	mu              sync.Mutex
 	claimCalls      int
