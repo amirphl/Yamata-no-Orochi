@@ -108,12 +108,7 @@ func selectAndReserveExactSmartTargetingCandidates(
 		// candidate query below is the authoritative current population and the
 		// exact-count check fails safely if capacity has genuinely disappeared.
 		audienceRepo := repository.NewSmartTargetingAudienceRepository(txDB)
-		query := repository.SmartTargetingAudienceQuery{
-			BundleID:      *campaign.BundleID,
-			TagIDs:        tagIDs,
-			ScoreClasses:  classes,
-			AllowedColors: smartTargetingSchedulerAllowedColors(campaign.Platform),
-		}
+		query := smartTargetingSchedulerAudienceQuery(campaign, *campaign.BundleID, tagIDs, classes)
 		var rows []*models.AudienceProfile
 		assignedTags := make([]uint, 0)
 		selectionMethod := "score_desc"
@@ -231,6 +226,19 @@ func isSmartTargetingTestCampaign(campaign dto.BotGetCampaignResponse) bool {
 
 func smartTargetingSchedulerAllowedColors(platform string) []string {
 	return models.SmartTargetingAllowedColors(platform)
+}
+
+func smartTargetingSchedulerAudienceQuery(campaign dto.BotGetCampaignResponse, bundleID uint, tagIDs []int64, classes []string) repository.SmartTargetingAudienceQuery {
+	query := repository.SmartTargetingAudienceQuery{
+		BundleID:      bundleID,
+		TagIDs:        tagIDs,
+		ScoreClasses:  classes,
+		AllowedColors: smartTargetingSchedulerAllowedColors(campaign.Platform),
+	}
+	if isSmartTargetingTestCampaign(campaign) {
+		query.ApplyBundleAudienceExclusions = true
+	}
+	return query
 }
 
 func smartTargetingTestSamplingTagIDs(
