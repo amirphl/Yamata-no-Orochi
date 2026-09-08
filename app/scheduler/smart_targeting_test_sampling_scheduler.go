@@ -26,11 +26,6 @@ type SmartTargetingTestSamplingScheduler struct {
 	inFlight map[int64]struct{}
 }
 
-const (
-	smartTargetingTestSamplingJobTimeout    = 30 * time.Minute
-	smartTargetingTestSamplingLeaseDuration = 35 * time.Minute
-)
-
 func NewSmartTargetingTestSamplingScheduler(executor SmartTargetingTestSamplingExecutor, repo repository.CampaignTargetingTestSamplingRepository, logger *log.Logger, pollInterval time.Duration, maxParallelRuns int) *SmartTargetingTestSamplingScheduler {
 	if pollInterval <= 0 {
 		pollInterval = 5 * time.Second
@@ -83,7 +78,7 @@ func (s *SmartTargetingTestSamplingScheduler) runOnce(parent context.Context, wo
 	if slots == 0 {
 		return
 	}
-	rows, err := s.repo.ClaimPending(parent, slots, now.Add(-smartTargetingTestSamplingLeaseDuration), now)
+	rows, err := s.repo.ClaimPending(parent, slots, now.Add(-smartTargetingCalculationLeaseDuration), now)
 	if err != nil {
 		s.logger.Printf("smart targeting test sampling scheduler: claim pending calculations failed: %v", err)
 		return
@@ -101,7 +96,7 @@ func (s *SmartTargetingTestSamplingScheduler) runOnce(parent context.Context, wo
 					s.logger.Printf("smart targeting test sampling scheduler: calculation %d panicked: %v", id, recovered)
 				}
 			}()
-			jobCtx, cancel := context.WithTimeout(parent, smartTargetingTestSamplingJobTimeout)
+			jobCtx, cancel := context.WithTimeout(parent, smartTargetingCalculationJobTimeout)
 			defer cancel()
 			if err := s.executor.ExecuteSmartTargetingTestSamplingCalculation(jobCtx, id, leaseStartedAt); err != nil {
 				s.logger.Printf("smart targeting test sampling scheduler: calculation %d failed: %v", id, err)
