@@ -43,9 +43,20 @@ const (
 	// database per AppendAudienceData call inside the persistence transaction.
 	// Used by all platform schedulers.
 	audienceAppendBatchSize = 1000
-	// Campaign workers have a four-hour execution deadline. A larger stale
-	// threshold avoids reclaiming a live worker while recovering hard crashes.
-	campaignExecutionStaleAfter = 5 * time.Hour
+
+	// Smart Targeting capacity and Test-sampling calculations scan the same
+	// large audience population. Keep one deadline for both durable workers so
+	// their behavior cannot drift. The lease must remain longer than the worker
+	// deadline or another replica could reclaim a calculation that is still
+	// running.
+	smartTargetingCalculationJobTimeout    = 60 * time.Minute
+	smartTargetingCalculationLeaseDuration = smartTargetingCalculationJobTimeout + 10*time.Minute
+
+	// Audience preparation can repeat the large-population scan once per Smart
+	// Targeting Test tag. Keep every platform scheduler on the same deadline and
+	// reclaim only after a larger hard-crash recovery window.
+	campaignExecutionTimeout    = 8 * time.Hour
+	campaignExecutionStaleAfter = campaignExecutionTimeout + 2*time.Hour
 
 	// Campaigns targeting this tag must not be constrained by audience grades.
 	// The tag predicate itself still applies, and the tag must exist and be active.
