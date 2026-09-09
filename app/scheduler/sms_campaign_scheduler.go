@@ -246,8 +246,7 @@ func (s *SMSCampaignScheduler) dispatchPendingSMSCampaigns(
 					return
 				}
 
-				// TODO: Make 4 hours configurable or use a more dynamic approach based on campaign content/size
-				ctx2, cancel2 := context.WithTimeout(parent, 4*time.Hour)
+				ctx2, cancel2 := context.WithTimeout(parent, campaignExecutionTimeout)
 				if err := process(ctx2, jazzAccessToken, camp); err != nil {
 					s.logger.Printf("SMS scheduler: process campaign id=%d failed: %v", camp.ID, err)
 					s.notifyAdmin(fmt.Sprintf("SMS Scheduler: process campaign failed for campaign id=%d: %v", camp.ID, err))
