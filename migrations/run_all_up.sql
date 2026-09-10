@@ -413,5 +413,20 @@
 \echo 'Running 0134_create_bundle_audience_exclusions.sql...'
 \i migrations/0134_create_bundle_audience_exclusions.sql
 
+\echo 'Running 0135_external_short_link_sync.sql...'
+\i migrations/0135_external_short_link_sync.sql
+
+\echo 'Running 0136_version_smart_targeting_capacity_eligibility.sql...'
+\i migrations/0136_version_smart_targeting_capacity_eligibility.sql
+
+\echo 'Running 0137_add_sms_provider_selection.sql...'
+\i migrations/0137_add_sms_provider_selection.sql
+
+\echo 'Running 0138_extend_tag_performance_to_execution.sql...'
+\i migrations/0138_extend_tag_performance_to_execution.sql
+
+\echo 'Running 0139_create_indexed_audience_tag_sampling.sql...'
+\i migrations/0139_create_indexed_audience_tag_sampling.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
