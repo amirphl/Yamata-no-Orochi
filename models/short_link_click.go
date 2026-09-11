@@ -20,8 +20,44 @@ type ShortLinkClick struct {
 	ShortLinkUpdatedAt *time.Time `gorm:"column:short_link_updated_at" json:"short_link_updated_at,omitempty"`
 	UserAgent          *string    `gorm:"type:text" json:"user_agent,omitempty"`
 	IP                 *string    `gorm:"size:64" json:"ip,omitempty"`
+	Referer            *string    `gorm:"type:text" json:"referer,omitempty"`
+	Source             string     `gorm:"size:64;not null;default:local;uniqueIndex:uk_short_link_clicks_source_external_id,priority:1" json:"source"`
+	ExternalClickID    *int64     `gorm:"uniqueIndex:uk_short_link_clicks_source_external_id,priority:2" json:"external_click_id,omitempty"`
 	CreatedAt          time.Time  `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_short_link_clicks_created_at" json:"created_at"`
 }
 
 // TableName returns the table name for ShortLinkClick
 func (ShortLinkClick) TableName() string { return "short_link_clicks" }
+
+const ShortLinkClickSourceExternal = "external_shortlink"
+
+// ExternalShortLinkSyncState is the durable ID cursor for a click source.
+type ExternalShortLinkSyncState struct {
+	Source      string    `gorm:"primaryKey;size:64" json:"source"`
+	LastClickID int64     `gorm:"not null" json:"last_click_id"`
+	UpdatedAt   time.Time `gorm:"not null" json:"updated_at"`
+}
+
+func (ExternalShortLinkSyncState) TableName() string { return "external_short_link_sync_state" }
+
+// ExternalShortLinkClick is the wire representation fetched from the external service.
+type ExternalShortLinkClick struct {
+	ClickID       int64      `json:"click_id"`
+	EventID       string     `json:"event_id"`
+	ShortCode     string     `json:"short_code"`
+	LinkID        int64      `json:"link_id"`
+	LongURL       string     `json:"long_url"`
+	ShortURL      *string    `json:"short_url,omitempty"`
+	SourceLinkID  *int64     `json:"source_link_id,omitempty"`
+	CampaignID    *uint      `json:"campaign_id,omitempty"`
+	ClientID      *uint      `json:"client_id,omitempty"`
+	ScenarioID    *uint      `json:"scenario_id,omitempty"`
+	ScenarioName  *string    `json:"scenario_name,omitempty"`
+	PhoneNumber   *string    `json:"phone_number,omitempty"`
+	LinkCreatedAt *time.Time `json:"link_created_at,omitempty"`
+	LinkUpdatedAt *time.Time `json:"link_updated_at,omitempty"`
+	ClickedAt     time.Time  `json:"clicked_at"`
+	ClientIP      *string    `json:"client_ip,omitempty"`
+	UserAgent     *string    `json:"user_agent,omitempty"`
+	Referer       *string    `json:"referer,omitempty"`
+}
