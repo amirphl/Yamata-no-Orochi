@@ -14,8 +14,8 @@ type CampaignSelectedTag struct {
 	BundlePersonaFitScoreSnapshot *float64 `gorm:"type:numeric(5,2)" json:"bundle_persona_fit_score_snapshot"`
 	TagDisplayTitleSnapshot       *string  `gorm:"type:text" json:"tag_display_title_snapshot"`
 	TagAudienceCountSnapshot      *int64   `gorm:"type:bigint" json:"tag_audience_count_snapshot"`
-	// CTR snapshots are nil until a per-tag CTR source is introduced. Nil means
-	// "not measured"; it must not be replaced with a misleading numeric zero.
+	// CTR snapshots capture the latest materialized metrics at selection time.
+	// Nil means "not measured" and must not be replaced with numeric zero.
 	TestPhaseAvgCTRSnapshot *float64  `gorm:"type:numeric" json:"test_phase_avg_ctr_snapshot"`
 	OverallAvgCTRSnapshot   *float64  `gorm:"type:numeric" json:"overall_avg_ctr_snapshot"`
 	SelectedByCustomerID    uint      `gorm:"not null;index:idx_campaign_selected_tags_selected_by_customer" json:"selected_by_customer_id"`
