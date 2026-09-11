@@ -30,13 +30,18 @@ func (AudienceProfile) TableName() string {
 //
 // Exactly one of the following patterns should be set per query:
 //   - GTE only:       normalized_score >= GTE
+//   - GT only:        normalized_score > GT
 //   - LTE only:       normalized_score <= LTE
 //   - GTE + LTE:      GTE <= normalized_score <= LTE
+//   - GT + LTE:       GT < normalized_score <= LTE
 //   - LTE + OrGTE:    normalized_score <= LTE OR normalized_score >= OrGTE
+//   - LTE + OrGT:     normalized_score <= LTE OR normalized_score > OrGT
 type NormalizedScoreConstraint struct {
 	GTE   *float64
+	GT    *float64
 	LTE   *float64
 	OrGTE *float64 // paired with LTE to form OR pattern
+	OrGT  *float64 // paired with LTE to form a strict-upper-boundary OR pattern
 }
 
 // AudienceProfileFilter represents filter criteria for audience profile queries
