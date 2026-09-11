@@ -12,6 +12,7 @@ type CampaignStatusJob struct {
 	CorrelationID       string         `gorm:"size:64;index:idx_campaign_status_jobs_corr_id;not null" json:"correlation_id"`
 	ProcessedCampaignID uint           `gorm:"index:idx_campaign_status_jobs_processed_campaign_id;not null" json:"processed_campaign_id"`
 	Platform            string         `gorm:"size:20;index:idx_campaign_status_jobs_platform_scheduled_retry,priority:1;not null" json:"platform"`
+	Provider            *SMSProvider   `gorm:"size:32" json:"provider,omitempty"`
 	TrackingIDs         pq.StringArray `gorm:"type:text[];not null" json:"tracking_ids"`
 	RetryCount          int            `gorm:"index:idx_campaign_status_jobs_platform_scheduled_retry,priority:3;not null;default:0" json:"retry_count"`
 	ScheduledAt         time.Time      `gorm:"index:idx_campaign_status_jobs_scheduled_retry;index:idx_campaign_status_jobs_platform_scheduled_retry,priority:2;not null" json:"scheduled_at"`
