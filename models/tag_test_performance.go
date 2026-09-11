@@ -11,11 +11,13 @@ const (
 	TagTestReportStatusFailed      TagTestReportStatus = "failed"
 )
 
-const TagTestPerformanceCalculationVersion = 1
+// Version 2 extends the Feature 5 materialization to both attributable Smart
+// Targeting phases and derives the Feature 6 global tag summary from it.
+const TagTestPerformanceCalculationVersion = 2
 
 // CampaignTagTestReport is the durable, retryable calculation state for one
-// Smart Targeting Test Campaign. The metric rows remain available while a
-// newer generation is pending, so API reads always use the last prepared data.
+// attributable Smart Targeting Campaign. The historical name is retained for
+// compatibility. Metric rows remain available while a generation is pending.
 type CampaignTagTestReport struct {
 	CampaignID            uint                `gorm:"primaryKey" json:"campaign_id"`
 	BundleID              uint                `gorm:"not null;index:idx_campaign_tag_test_reports_bundle_status,priority:1" json:"bundle_id"`
@@ -36,23 +38,24 @@ type CampaignTagTestReport struct {
 func (CampaignTagTestReport) TableName() string { return "campaign_tag_test_reports" }
 
 // CampaignTagTestPerformance is the latest complete per-Campaign/per-tag
-// materialization. TestCampaignCTR is database-generated and is nil when no
-// attributed audience has a confirmed delivery.
+// materialization shared by Test and Execution reporting. The historical type
+// and table names are retained for migration and API compatibility.
 type CampaignTagTestPerformance struct {
-	ID                            int64     `gorm:"primaryKey" json:"id"`
-	CampaignID                    uint      `gorm:"not null;uniqueIndex:uk_campaign_tag_test_performance,priority:1" json:"campaign_id"`
-	BundleID                      uint      `gorm:"not null;index:idx_campaign_tag_test_performances_bundle_tag,priority:1" json:"bundle_id"`
-	TagID                         uint      `gorm:"not null;uniqueIndex:uk_campaign_tag_test_performance,priority:2;index:idx_campaign_tag_test_performances_bundle_tag,priority:2" json:"tag_id"`
-	TagDisplayTitleSnapshot       string    `gorm:"type:text;not null" json:"tag_display_title_snapshot"`
-	BundlePersonaFitScoreSnapshot *float64  `gorm:"type:numeric(5,2)" json:"bundle_persona_fit_score_snapshot"`
-	SelectedCount                 int64     `gorm:"not null" json:"selected_count"`
-	SentCount                     int64     `gorm:"not null" json:"sent_count"`
-	DeliveredCount                int64     `gorm:"not null" json:"delivered_count"`
-	ClickCount                    int64     `gorm:"not null" json:"click_count"`
-	TestCampaignCTR               *float64  `gorm:"->;type:numeric" json:"test_campaign_ctr"`
-	CalculationVersion            int       `gorm:"not null" json:"calculation_version"`
-	CreatedAt                     time.Time `gorm:"not null" json:"created_at"`
-	UpdatedAt                     time.Time `gorm:"not null" json:"updated_at"`
+	ID                            int64         `gorm:"primaryKey" json:"id"`
+	CampaignID                    uint          `gorm:"not null;uniqueIndex:uk_campaign_tag_test_performance,priority:1" json:"campaign_id"`
+	BundleID                      uint          `gorm:"not null;index:idx_campaign_tag_test_performances_bundle_tag,priority:1;index:idx_campaign_tag_performances_bundle_phase_tag,priority:1" json:"bundle_id"`
+	TagID                         uint          `gorm:"not null;uniqueIndex:uk_campaign_tag_test_performance,priority:2;index:idx_campaign_tag_test_performances_bundle_tag,priority:2;index:idx_campaign_tag_performances_bundle_phase_tag,priority:3" json:"tag_id"`
+	PhaseType                     CampaignPhase `gorm:"type:campaign_phase;not null;index:idx_campaign_tag_performances_bundle_phase_tag,priority:2" json:"phase_type"`
+	TagDisplayTitleSnapshot       string        `gorm:"type:text;not null" json:"tag_display_title_snapshot"`
+	BundlePersonaFitScoreSnapshot *float64      `gorm:"type:numeric(5,2)" json:"bundle_persona_fit_score_snapshot"`
+	SelectedCount                 int64         `gorm:"not null" json:"selected_count"`
+	SentCount                     int64         `gorm:"not null" json:"sent_count"`
+	DeliveredCount                int64         `gorm:"not null" json:"delivered_count"`
+	ClickCount                    int64         `gorm:"not null" json:"click_count"`
+	TestCampaignCTR               *float64      `gorm:"->;type:numeric" json:"test_campaign_ctr"`
+	CalculationVersion            int           `gorm:"not null" json:"calculation_version"`
+	CreatedAt                     time.Time     `gorm:"not null" json:"created_at"`
+	UpdatedAt                     time.Time     `gorm:"not null" json:"updated_at"`
 }
 
 func (CampaignTagTestPerformance) TableName() string {
@@ -78,6 +81,24 @@ type TagTestPhasePerformanceSummary struct {
 
 func (TagTestPhasePerformanceSummary) TableName() string {
 	return "tag_test_phase_performance_summaries"
+}
+
+// TagOverallPerformanceSummary is the global weighted performance of one tag
+// across all materialized Smart Targeting Test and Execution Campaigns.
+type TagOverallPerformanceSummary struct {
+	TagID               uint      `gorm:"primaryKey" json:"tag_id"`
+	TotalSelectedCount  int64     `gorm:"not null" json:"total_selected_count"`
+	TotalSentCount      int64     `gorm:"not null" json:"total_sent_count"`
+	TotalDeliveredCount int64     `gorm:"not null" json:"total_delivered_count"`
+	TotalClickCount     int64     `gorm:"not null" json:"total_click_count"`
+	OverallAvgCTR       *float64  `gorm:"->;type:numeric" json:"overall_avg_ctr"`
+	CalculationVersion  int       `gorm:"not null" json:"calculation_version"`
+	CreatedAt           time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt           time.Time `gorm:"not null" json:"updated_at"`
+}
+
+func (TagOverallPerformanceSummary) TableName() string {
+	return "tag_overall_performance_summaries"
 }
 
 type TagTestPerformanceSchedulerState struct {
