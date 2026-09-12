@@ -13,12 +13,13 @@ import (
 
 var (
 	ErrTagTestPerformanceLeaseLost       = errors.New("tag test performance report lease changed")
-	ErrTagTestPerformanceCampaignInvalid = errors.New("campaign is not an attributable smart targeting test campaign")
+	ErrTagTestPerformanceCampaignInvalid = errors.New("campaign is not an attributable smart targeting campaign")
 )
 
 // TagTestPerformanceRepository owns discovery, durable leasing, per-Campaign
-// recomputation, and Bundle/tag summary refresh. It never locks short-link or
-// click rows: click ingestion and redirects remain independent of reporting.
+// recomputation, Bundle/tag Test refresh, and global overall refresh. The
+// historical name is retained for configuration compatibility. It never locks
+// short-link or click rows: ingestion and redirects remain independent.
 type TagTestPerformanceRepository interface {
 	DiscoverPending(ctx context.Context, at time.Time) error
 	ClaimPending(ctx context.Context, limit int, staleBefore, at time.Time) ([]*models.CampaignTagTestReport, error)
@@ -50,14 +51,14 @@ FROM campaigns AS campaign
 LEFT JOIN campaign_tag_test_reports AS existing
   ON existing.campaign_id = campaign.id
 WHERE campaign.bundle_id IS NOT NULL
-  AND campaign.phase = ?
+  AND campaign.phase IN (?, ?)
   AND LOWER(BTRIM(COALESCE(campaign.spec->>'audience_targeting_method', ''))) = ?
   AND EXISTS (
       SELECT 1
       FROM campaign_audience_tag_attributions AS attribution
       WHERE attribution.campaign_id = campaign.id
         AND attribution.bundle_id = campaign.bundle_id
-        AND attribution.phase_type = ?
+        AND attribution.phase_type = campaign.phase
   )
   AND (
       existing.campaign_id IS NULL
@@ -144,8 +145,8 @@ func (r *TagTestPerformanceRepositoryImpl) DiscoverPending(ctx context.Context, 
 			models.TagTestPerformanceCalculationVersion,
 			at, at, at,
 			models.CampaignPhaseTest,
+			models.CampaignPhaseExecution,
 			models.CampaignAudienceTargetingSmart,
-			models.CampaignPhaseTest,
 			models.TagTestPerformanceCalculationVersion,
 			state.LastClickID,
 			clickCutoff,
@@ -217,15 +218,16 @@ FROM claimable
 WHERE report.campaign_id = claimable.campaign_id
 RETURNING report.*`
 
-type attributableTestCampaign struct {
-	CampaignID uint `gorm:"column:campaign_id"`
-	BundleID   uint `gorm:"column:bundle_id"`
+type attributableCampaign struct {
+	CampaignID uint                 `gorm:"column:campaign_id"`
+	BundleID   uint                 `gorm:"column:bundle_id"`
+	PhaseType  models.CampaignPhase `gorm:"column:phase_type"`
 }
 
 // RecomputeCampaign reads the complete source history for one Campaign and
 // replaces its materialized values with one aggregate SQL statement. The
-// report lease and a Bundle-scoped advisory lock make completion and summary
-// refresh safe across concurrent scheduler replicas.
+// report lease and a short global summary lock make completion and refresh
+// safe across concurrent scheduler replicas.
 func (r *TagTestPerformanceRepositoryImpl) RecomputeCampaign(ctx context.Context, campaignID uint, leaseStartedAt, at time.Time) error {
 	return WithTransaction(ctx, r.db, func(txCtx context.Context) error {
 		db := r.getDB(txCtx)
@@ -260,34 +262,35 @@ func (r *TagTestPerformanceRepositoryImpl) RecomputeCampaign(ctx context.Context
 			return nil
 		}
 
-		var campaign attributableTestCampaign
+		var campaign attributableCampaign
 		const campaignSQL = `
-SELECT campaign.id AS campaign_id, campaign.bundle_id
+SELECT campaign.id AS campaign_id, campaign.bundle_id, campaign.phase AS phase_type
 FROM campaigns AS campaign
 WHERE campaign.id = ?
   AND campaign.bundle_id IS NOT NULL
   AND campaign.bundle_id = ?
-  AND campaign.phase = ?
+  AND campaign.phase IN (?, ?)
   AND LOWER(BTRIM(COALESCE(campaign.spec->>'audience_targeting_method', ''))) = ?
   AND EXISTS (
       SELECT 1
       FROM campaign_audience_tag_attributions AS attribution
       WHERE attribution.campaign_id = campaign.id
         AND attribution.bundle_id = campaign.bundle_id
-        AND attribution.phase_type = ?
+        AND attribution.phase_type = campaign.phase
   )`
 		err = db.Raw(
 			campaignSQL,
 			campaignID,
 			report.BundleID,
 			models.CampaignPhaseTest,
+			models.CampaignPhaseExecution,
 			models.CampaignAudienceTargetingSmart,
-			models.CampaignPhaseTest,
 		).Scan(&campaign).Error
 		if err != nil {
 			return fmt.Errorf("validate tag performance campaign: %w", err)
 		}
-		if campaign.CampaignID == 0 || campaign.BundleID == 0 {
+		if campaign.CampaignID == 0 || campaign.BundleID == 0 ||
+			(campaign.PhaseType != models.CampaignPhaseTest && campaign.PhaseType != models.CampaignPhaseExecution) {
 			return ErrTagTestPerformanceCampaignInvalid
 		}
 
@@ -298,7 +301,7 @@ WHERE campaign.id = ?
 
 		result := db.Exec(recomputeCampaignTagPerformanceSQL,
 			campaignID,
-			models.CampaignPhaseTest,
+			campaign.PhaseType,
 			campaignID,
 			campaignID,
 			campaignID,
@@ -321,11 +324,11 @@ WHERE campaign.id = ?
 			return err
 		}
 
-		// Only the inexpensive Bundle summary refresh must be serialized. The
-		// high-volume Campaign aggregation above can safely run in parallel for
-		// different Campaigns in the same Bundle.
-		if err := db.Exec("SELECT pg_advisory_xact_lock(845170, ?::integer)", campaign.BundleID).Error; err != nil {
-			return fmt.Errorf("lock tag performance bundle summary: %w", err)
+		// Only the inexpensive materialized summaries are serialized. This global
+		// lock is required because different Bundles can update the same tag's
+		// overall row; the high-volume Campaign aggregation remains parallel.
+		if err := db.Exec("SELECT pg_advisory_xact_lock(845171, 0)").Error; err != nil {
+			return fmt.Errorf("lock tag performance summaries: %w", err)
 		}
 
 		status := models.TagTestReportStatusPrepared
@@ -355,6 +358,9 @@ WHERE campaign.id = ?
 		}
 
 		if err := refreshTagTestPhaseSummary(db, campaign.BundleID, at); err != nil {
+			return err
+		}
+		if err := refreshTagOverallPerformanceSummary(db, at); err != nil {
 			return err
 		}
 		return nil
@@ -413,6 +419,7 @@ SELECT
     ?::timestamptz
 FROM campaign_tag_test_performances AS performance
 WHERE performance.bundle_id = ?
+  AND performance.phase_type = ?
 GROUP BY performance.bundle_id, performance.tag_id
 ON CONFLICT (bundle_id, tag_id) DO UPDATE
 SET total_test_selected_count = EXCLUDED.total_test_selected_count,
@@ -423,7 +430,7 @@ SET total_test_selected_count = EXCLUDED.total_test_selected_count,
     updated_at = EXCLUDED.updated_at`
 
 func refreshTagTestPhaseSummary(db *gorm.DB, bundleID uint, at time.Time) error {
-	if err := db.Exec(summarySQL, models.TagTestPerformanceCalculationVersion, at, at, bundleID).Error; err != nil {
+	if err := db.Exec(summarySQL, models.TagTestPerformanceCalculationVersion, at, at, bundleID, models.CampaignPhaseTest).Error; err != nil {
 		return fmt.Errorf("refresh tag test performance summary: %w", err)
 	}
 	const deleteStaleSQL = `
@@ -434,9 +441,57 @@ WHERE summary.bundle_id = ?
       FROM campaign_tag_test_performances AS performance
       WHERE performance.bundle_id = summary.bundle_id
         AND performance.tag_id = summary.tag_id
+        AND performance.phase_type = ?
   )`
-	if err := db.Exec(deleteStaleSQL, bundleID).Error; err != nil {
+	if err := db.Exec(deleteStaleSQL, bundleID, models.CampaignPhaseTest).Error; err != nil {
 		return fmt.Errorf("delete stale tag test performance summaries: %w", err)
+	}
+	return nil
+}
+
+const overallSummarySQL = `
+INSERT INTO tag_overall_performance_summaries (
+    tag_id,
+    total_selected_count,
+    total_sent_count,
+    total_delivered_count,
+    total_click_count,
+    calculation_version,
+    created_at,
+    updated_at
+)
+SELECT
+    performance.tag_id,
+    SUM(performance.selected_count),
+    SUM(performance.sent_count),
+    SUM(performance.delivered_count),
+    SUM(performance.click_count),
+    ?::integer,
+    ?::timestamptz,
+    ?::timestamptz
+FROM campaign_tag_test_performances AS performance
+GROUP BY performance.tag_id
+ON CONFLICT (tag_id) DO UPDATE
+SET total_selected_count = EXCLUDED.total_selected_count,
+    total_sent_count = EXCLUDED.total_sent_count,
+    total_delivered_count = EXCLUDED.total_delivered_count,
+    total_click_count = EXCLUDED.total_click_count,
+    calculation_version = EXCLUDED.calculation_version,
+    updated_at = EXCLUDED.updated_at`
+
+func refreshTagOverallPerformanceSummary(db *gorm.DB, at time.Time) error {
+	if err := db.Exec(overallSummarySQL, models.TagTestPerformanceCalculationVersion, at, at).Error; err != nil {
+		return fmt.Errorf("refresh overall tag performance summary: %w", err)
+	}
+	const deleteStaleSQL = `
+DELETE FROM tag_overall_performance_summaries AS summary
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM campaign_tag_test_performances AS performance
+    WHERE performance.tag_id = summary.tag_id
+)`
+	if err := db.Exec(deleteStaleSQL).Error; err != nil {
+		return fmt.Errorf("delete stale overall tag performance summaries: %w", err)
 	}
 	return nil
 }
@@ -452,12 +507,12 @@ WHERE performance.campaign_id = ?
        AND campaign.bundle_id = attribution.bundle_id
       WHERE attribution.campaign_id = performance.campaign_id
         AND attribution.bundle_id = performance.bundle_id
-        AND attribution.phase_type = ?
+        AND attribution.phase_type = performance.phase_type
         AND attribution.assigned_tag_id = performance.tag_id
   )`
 
 func deleteStaleCampaignTagPerformances(db *gorm.DB, campaignID uint) error {
-	if err := db.Exec(deleteStaleCampaignTagPerformancesSQL, campaignID, models.CampaignPhaseTest).Error; err != nil {
+	if err := db.Exec(deleteStaleCampaignTagPerformancesSQL, campaignID).Error; err != nil {
 		return fmt.Errorf("delete stale campaign tag performance: %w", err)
 	}
 	return nil
@@ -471,6 +526,7 @@ WITH attributed AS (
         attribution.bundle_audience_selection_id,
         attribution.audience_id,
         attribution.assigned_tag_id AS tag_id,
+        attribution.phase_type,
         profile.phone_number
     FROM campaign_audience_tag_attributions AS attribution
     JOIN campaigns AS source_campaign
@@ -592,6 +648,7 @@ tag_stats AS (
         attributed.campaign_id,
         attributed.bundle_id,
         attributed.tag_id,
+        attributed.phase_type,
         COALESCE(
             NULLIF(BTRIM(selected.tag_display_title_snapshot), ''),
             NULLIF(BTRIM(tag.display_title), ''),
@@ -614,6 +671,7 @@ tag_stats AS (
         attributed.campaign_id,
         attributed.bundle_id,
         attributed.tag_id,
+        attributed.phase_type,
         selected.tag_display_title_snapshot,
         selected.bundle_persona_fit_score_snapshot,
         tag.display_title,
@@ -623,6 +681,7 @@ INSERT INTO campaign_tag_test_performances (
     campaign_id,
     bundle_id,
     tag_id,
+    phase_type,
     tag_display_title_snapshot,
     bundle_persona_fit_score_snapshot,
     selected_count,
@@ -637,6 +696,7 @@ SELECT
     campaign_id,
     bundle_id,
     tag_id,
+    phase_type,
     tag_display_title_snapshot,
     bundle_persona_fit_score_snapshot,
     selected_count,
@@ -649,6 +709,7 @@ SELECT
 FROM tag_stats
 ON CONFLICT (campaign_id, tag_id) DO UPDATE
 SET bundle_id = EXCLUDED.bundle_id,
+    phase_type = EXCLUDED.phase_type,
     tag_display_title_snapshot = EXCLUDED.tag_display_title_snapshot,
     bundle_persona_fit_score_snapshot = EXCLUDED.bundle_persona_fit_score_snapshot,
     selected_count = EXCLUDED.selected_count,
