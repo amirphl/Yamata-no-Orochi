@@ -84,6 +84,9 @@ func (r *LineNumberRepositoryImpl) applyFilter(query *gorm.DB, filter models.Lin
 	if filter.LineNumber != nil {
 		query = query.Where("line_number = ?", *filter.LineNumber)
 	}
+	if filter.Provider != nil {
+		query = query.Where("provider = ?", *filter.Provider)
+	}
 	if filter.IsActive != nil {
 		query = query.Where("is_active = ?", *filter.IsActive)
 	}
@@ -179,6 +182,9 @@ func (r *LineNumberRepositoryImpl) Update(ctx context.Context, line *models.Line
 	if line.LineNumber != "" {
 		updates["line_number"] = line.LineNumber
 	}
+	if line.Provider != "" {
+		updates["provider"] = line.Provider
+	}
 	if line.PriceFactor != 0 {
 		updates["price_factor"] = line.PriceFactor
 	}
@@ -232,6 +238,9 @@ func (r *LineNumberRepositoryImpl) UpdateBatch(ctx context.Context, lines []*mod
 		}
 		if line.LineNumber != "" {
 			updates["line_number"] = line.LineNumber
+		}
+		if line.Provider != "" {
+			updates["provider"] = line.Provider
 		}
 		if line.PriceFactor != 0 {
 			updates["price_factor"] = line.PriceFactor
