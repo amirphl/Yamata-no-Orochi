@@ -44,6 +44,15 @@ func (r *ShortLinkRepositoryImpl) SaveBatch(ctx context.Context, entities []*mod
 	if len(entities) == 0 {
 		return nil
 	}
+	now := time.Now().UTC()
+	for _, entity := range entities {
+		if entity.CreatedAt.IsZero() {
+			entity.CreatedAt = now
+		}
+		if entity.UpdatedAt.IsZero() {
+			entity.UpdatedAt = now
+		}
+	}
 
 	// Try COPY via database/sql using lib/pq for maximum throughput
 	sqlDB, err := r.DB.DB()
@@ -82,6 +91,8 @@ func (r *ShortLinkRepositoryImpl) copyInShortLinks(ctx context.Context, sqlDB *s
 		"phone_number",
 		"long_link",
 		"short_link",
+		"created_at",
+		"updated_at",
 	))
 	if err != nil {
 		return err
@@ -118,6 +129,8 @@ func (r *ShortLinkRepositoryImpl) copyInShortLinks(ctx context.Context, sqlDB *s
 			phone,
 			e.LongLink,
 			e.ShortLink,
+			e.CreatedAt,
+			e.UpdatedAt,
 		)
 		if err != nil {
 			return err
@@ -165,6 +178,47 @@ func (r *ShortLinkRepositoryImpl) ByUID(ctx context.Context, uid string) (*model
 		return nil, nil
 	}
 	return rows[0], nil
+}
+
+func (r *ShortLinkRepositoryImpl) ByUIDs(ctx context.Context, uids []string) ([]*models.ShortLink, error) {
+	if len(uids) == 0 {
+		return []*models.ShortLink{}, nil
+	}
+	const chunkSize = 5000
+	rows := make([]*models.ShortLink, 0, len(uids))
+	db := r.getDB(ctx)
+	for start := 0; start < len(uids); start += chunkSize {
+		end := min(start+chunkSize, len(uids))
+		var chunk []*models.ShortLink
+		if err := db.Where("uid IN ?", uids[start:end]).Order("id ASC").Find(&chunk).Error; err != nil {
+			return nil, err
+		}
+		rows = append(rows, chunk...)
+	}
+	return rows, nil
+}
+
+func (r *ShortLinkRepositoryImpl) ListPendingExternalPublication(ctx context.Context, limit int) ([]*models.ShortLink, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	var rows []*models.ShortLink
+	err := r.getDB(ctx).
+		Where("external_published_at IS NULL").
+		Order("id ASC").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
+func (r *ShortLinkRepositoryImpl) MarkExternallyPublished(ctx context.Context, uids []string, publishedAt time.Time) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	return r.getDB(ctx).
+		Model(&models.ShortLink{}).
+		Where("uid IN ?", uids).
+		Update("external_published_at", publishedAt.UTC()).Error
 }
 
 func (r *ShortLinkRepositoryImpl) applyFilter(db *gorm.DB, f models.ShortLinkFilter) *gorm.DB {
