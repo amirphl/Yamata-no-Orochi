@@ -34,6 +34,18 @@ func (r *SentSMSRepositoryImpl) ListByProcessedCampaign(ctx context.Context, pro
 	return r.ByFilter(ctx, filter, "id ASC", limit, offset)
 }
 
+func (r *SentSMSRepositoryImpl) ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentSMS, error) {
+	if len(trackingIDs) == 0 {
+		return []*models.SentSMS{}, nil
+	}
+	rows := make([]*models.SentSMS, 0, len(trackingIDs))
+	err := r.getDB(ctx).
+		Where("processed_campaign_id = ? AND tracking_id IN ?", processedCampaignID, trackingIDs).
+		Order("id ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
 func (r *SentSMSRepositoryImpl) applyFilter(db *gorm.DB, f models.SentSMSFilter) *gorm.DB {
 	if f.ID != nil {
 		db = db.Where("id = ?", *f.ID)
@@ -117,7 +129,23 @@ func (r *SentSMSRepositoryImpl) UpdateProviderFieldsByTrackingIDs(ctx context.Co
 			"error_code":  u.ErrorCode,
 			"description": u.Description,
 		}
-		if e := db.Model(&models.SentSMS{}).Where("tracking_id = ?", u.TrackingID).Updates(m).Error; e != nil {
+		if u.Provider != nil {
+			m["provider"] = *u.Provider
+		}
+		if u.ProviderCustomerID != nil {
+			m["provider_customer_id"] = *u.ProviderCustomerID
+		}
+		if u.Status != nil {
+			m["status"] = *u.Status
+		}
+		if u.PartsDelivered != nil {
+			m["parts_delivered"] = *u.PartsDelivered
+		}
+		query := db.Model(&models.SentSMS{}).Where("tracking_id = ?", u.TrackingID)
+		if u.ProcessedCampaignID != nil {
+			query = query.Where("processed_campaign_id = ?", *u.ProcessedCampaignID)
+		}
+		if e := query.Updates(m).Error; e != nil {
 			return e
 		}
 	}
