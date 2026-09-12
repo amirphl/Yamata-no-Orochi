@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -64,6 +65,12 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 		if trackingID == "" {
 			continue
 		}
+		if row.Provider == "" {
+			row.Provider = models.SMSProviderPayamSMS
+		}
+		if len(row.Metadata) == 0 || !json.Valid(row.Metadata) {
+			row.Metadata = json.RawMessage(`{}`)
+		}
 		row.TrackingID = trackingID
 		key := aggKey{pcID: row.ProcessedCampaignID, trackingID: trackingID}
 		if idx, exists := seen[key]; exists {
@@ -84,11 +91,16 @@ func (r *SMSStatusResultRepositoryImpl) SaveBatch(ctx context.Context, rows []*m
 		DoUpdates: clause.Assignments(map[string]any{
 			"job_id":                  clause.Expr{SQL: "EXCLUDED.job_id"},
 			"server_id":               clause.Expr{SQL: "EXCLUDED.server_id"},
+			"provider":                clause.Expr{SQL: "EXCLUDED.provider"},
+			"provider_status_code":    clause.Expr{SQL: "EXCLUDED.provider_status_code"},
+			"provider_status_text":    clause.Expr{SQL: "EXCLUDED.provider_status_text"},
+			"internal_status":         clause.Expr{SQL: "EXCLUDED.internal_status"},
 			"total_parts":             clause.Expr{SQL: "EXCLUDED.total_parts"},
 			"total_delivered_parts":   clause.Expr{SQL: "EXCLUDED.total_delivered_parts"},
 			"total_undelivered_parts": clause.Expr{SQL: "EXCLUDED.total_undelivered_parts"},
 			"total_unknown_parts":     clause.Expr{SQL: "EXCLUDED.total_unknown_parts"},
 			"status":                  clause.Expr{SQL: "EXCLUDED.status"},
+			"metadata":                clause.Expr{SQL: "EXCLUDED.metadata"},
 			"created_at":              clause.Expr{SQL: "LEAST(sms_status_results.created_at, EXCLUDED.created_at)"},
 		}),
 	}).CreateInBatches(&deduped, smsStatusResultWriteBatchSize).Error
