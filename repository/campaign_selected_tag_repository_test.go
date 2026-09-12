@@ -22,6 +22,8 @@ func TestSmartTagOrderAllowlist(t *testing.T) {
 		{"tag_capacity", "desc", "available_tags.tag_audience_count DESC NULLS LAST, available_tags.tag_id ASC"},
 		{"bundle_persona_fit_score", "asc", "available_tags.bundle_persona_fit_score ASC NULLS LAST, available_tags.tag_id ASC"},
 		{"test_phase_avg_ctr", "desc", "tag_test_summary.test_phase_avg_ctr DESC NULLS LAST, available_tags.tag_id ASC"},
+		{"overall_avg_ctr", "desc", "tag_overall_summary.overall_avg_ctr DESC NULLS LAST, available_tags.tag_id ASC"},
+		{"execution_default", "desc", "tag_test_summary.test_phase_avg_ctr DESC NULLS LAST,\navailable_tags.bundle_persona_fit_score DESC NULLS LAST,\navailable_tags.tag_id ASC"},
 	}
 	for _, tt := range tests {
 		got, err := smartTagOrder(tt.sortBy, tt.direction)
@@ -106,7 +108,9 @@ func TestBaseAvailableSmartTagsQueryReadsMaterializedTestPerformance(t *testing.
 	sql := statement.SQL.String()
 	for _, fragment := range []string{
 		"LEFT JOIN tag_test_phase_performance_summaries AS tag_test_summary",
+		"LEFT JOIN tag_overall_performance_summaries AS tag_overall_summary",
 		"tag_test_summary.bundle_id = $3",
+		"tag_overall_summary.tag_id = available_tags.tag_id",
 		"ORDER BY tag_test_summary.test_phase_avg_ctr DESC NULLS LAST",
 	} {
 		if !strings.Contains(sql, fragment) {
@@ -136,6 +140,7 @@ func TestCampaignTestPerformanceJoinIsBundleScoped(t *testing.T) {
 		"campaign_test_performance.campaign_id = $4",
 		"campaign_test_performance.bundle_id = $5",
 		"campaign_test_performance.tag_id = available_tags.tag_id",
+		"campaign_test_performance.phase_type = 'test'",
 	} {
 		if !strings.Contains(sql, fragment) {
 			t.Fatalf("Campaign tag-performance query does not contain %q:\n%s", fragment, sql)
@@ -146,9 +151,10 @@ func TestCampaignTestPerformanceJoinIsBundleScoped(t *testing.T) {
 func TestBuildCampaignSelectedTagRowsPreservesRequestOrder(t *testing.T) {
 	now := time.Date(2026, time.August, 9, 12, 0, 0, 0, time.UTC)
 	measuredCTR := 0.08
+	overallCTR := 0.11
 	snapshots := []campaignSelectedTagSnapshot{
 		{TagID: 2},
-		{TagID: 5, TestPhaseAvgCTR: &measuredCTR},
+		{TagID: 5, TestPhaseAvgCTR: &measuredCTR, OverallAvgCTR: &overallCTR},
 		{TagID: 9},
 	}
 
@@ -170,6 +176,9 @@ func TestBuildCampaignSelectedTagRowsPreservesRequestOrder(t *testing.T) {
 	}
 	if rows[2].TestPhaseAvgCTRSnapshot == nil || *rows[2].TestPhaseAvgCTRSnapshot != measuredCTR {
 		t.Fatalf("tag 5 Test CTR snapshot = %v, want %v", rows[2].TestPhaseAvgCTRSnapshot, measuredCTR)
+	}
+	if rows[2].OverallAvgCTRSnapshot == nil || *rows[2].OverallAvgCTRSnapshot != overallCTR {
+		t.Fatalf("tag 5 overall CTR snapshot = %v, want %v", rows[2].OverallAvgCTRSnapshot, overallCTR)
 	}
 
 	if _, err := buildCampaignSelectedTagRows(17, 3, 7, []uint{9, 4}, snapshots, now); !errors.Is(err, ErrInvalidCampaignSelectedTags) {
