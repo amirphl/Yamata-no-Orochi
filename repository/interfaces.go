@@ -365,10 +365,15 @@ type ProcessedCampaignRepository interface {
 
 // SentSMSProviderUpdate describes provider fields update identified by tracking id
 type SentSMSProviderUpdate struct {
-	TrackingID  string
-	ServerID    *string
-	ErrorCode   *string
-	Description *string
+	ProcessedCampaignID *uint
+	TrackingID          string
+	Provider            *models.SMSProvider
+	ProviderCustomerID  *int64
+	ServerID            *string
+	ErrorCode           *string
+	Description         *string
+	Status              *models.SMSSendStatus
+	PartsDelivered      *int
 }
 
 // SentBaleSendResultUpdate describes send result fields update identified by tracking id.
@@ -406,6 +411,7 @@ type SentSMSRepository interface {
 	Repository[models.SentSMS, models.SentSMSFilter]
 	ByID(ctx context.Context, id uint) (*models.SentSMS, error)
 	ListByProcessedCampaign(ctx context.Context, processedCampaignID uint, limit, offset int) ([]*models.SentSMS, error)
+	ListByTrackingIDs(ctx context.Context, processedCampaignID uint, trackingIDs []string) ([]*models.SentSMS, error)
 	UpdateProviderFieldsByTrackingIDs(ctx context.Context, updates []SentSMSProviderUpdate) error
 }
 
@@ -511,7 +517,10 @@ type ShortLinkRepository interface {
 	Repository[models.ShortLink, models.ShortLinkFilter]
 	ByID(ctx context.Context, id uint) (*models.ShortLink, error)
 	ByUID(ctx context.Context, uid string) (*models.ShortLink, error)
+	ByUIDs(ctx context.Context, uids []string) ([]*models.ShortLink, error)
 	DeleteTestLinksOlderThan(ctx context.Context, age time.Duration) error
+	ListPendingExternalPublication(ctx context.Context, limit int) ([]*models.ShortLink, error)
+	MarkExternallyPublished(ctx context.Context, uids []string, publishedAt time.Time) error
 	ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error)
 	ListWithClicksDetailsByScenario(ctx context.Context, scenarioID uint, orderBy string) ([]*ShortLinkWithClick, error)
 	ListWithClicksDetailsByScenarioRange(ctx context.Context, scenarioFrom, scenarioTo uint, orderBy string) ([]*ShortLinkWithClick, error)
@@ -519,6 +528,12 @@ type ShortLinkRepository interface {
 	ListWithClicksDetailsByScenarioNameLike(ctx context.Context, pattern string, orderBy string) ([]*ShortLinkWithClick, error)
 	GetLastScenarioID(ctx context.Context) (uint, error)
 	GetMaxUIDSince(ctx context.Context, since time.Time) (string, error)
+}
+
+// ExternalShortLinkSyncRepository atomically imports external clicks and advances their cursor.
+type ExternalShortLinkSyncRepository interface {
+	Cursor(ctx context.Context, source string) (int64, error)
+	ImportPage(ctx context.Context, source string, clicks []models.ExternalShortLinkClick, throughClickID int64) error
 }
 
 // ShortLinkClickRepository defines operations for short link clicks
