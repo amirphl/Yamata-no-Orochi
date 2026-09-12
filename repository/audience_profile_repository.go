@@ -168,10 +168,16 @@ func (r *AudienceProfileRepositoryImpl) applyFilter(db *gorm.DB, f models.Audien
 	}
 	if ns := f.NormalizedScore; ns != nil {
 		switch {
+		case ns.LTE != nil && ns.OrGT != nil:
+			db = db.Where("normalized_score <= ? OR normalized_score > ?", *ns.LTE, *ns.OrGT)
 		case ns.LTE != nil && ns.OrGTE != nil:
 			db = db.Where("normalized_score <= ? OR normalized_score >= ?", *ns.LTE, *ns.OrGTE)
+		case ns.GT != nil && ns.LTE != nil:
+			db = db.Where("normalized_score > ? AND normalized_score <= ?", *ns.GT, *ns.LTE)
 		case ns.GTE != nil && ns.LTE != nil:
 			db = db.Where("normalized_score >= ? AND normalized_score <= ?", *ns.GTE, *ns.LTE)
+		case ns.GT != nil:
+			db = db.Where("normalized_score > ?", *ns.GT)
 		case ns.GTE != nil:
 			db = db.Where("normalized_score >= ?", *ns.GTE)
 		case ns.LTE != nil:
