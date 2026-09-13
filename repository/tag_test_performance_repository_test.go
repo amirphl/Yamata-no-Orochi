@@ -9,6 +9,7 @@ func TestRecomputeCampaignTagPerformanceSQLUsesSingleAudienceAttribution(t *test
 	for _, fragment := range []string{
 		"SELECT DISTINCT ON (attribution.campaign_id, attribution.audience_id)",
 		"attribution.assigned_tag_id AS tag_id",
+		"attribution.phase_type",
 		"source_campaign.bundle_id = attribution.bundle_id",
 		"sent.bundle_audience_selection_id = attributed.bundle_audience_selection_id",
 		"delivered.bundle_audience_selection_id = attributed.bundle_audience_selection_id",
@@ -18,6 +19,7 @@ func TestRecomputeCampaignTagPerformanceSQLUsesSingleAudienceAttribution(t *test
 		"click.phone_number = attributed.phone_number",
 		"click.uid IS NOT NULL",
 		"ON CONFLICT (campaign_id, tag_id) DO UPDATE",
+		"phase_type = EXCLUDED.phase_type",
 	} {
 		if !strings.Contains(recomputeCampaignTagPerformanceSQL, fragment) {
 			t.Fatalf("tag performance query does not contain %q", fragment)
@@ -52,6 +54,14 @@ func TestDiscoverPendingTagTestReportsSQLBindsSourcesAndCalculationVersion(t *te
 			t.Fatalf("discovery query does not cast its INSERT projection parameter %q", fragment)
 		}
 	}
+	for _, fragment := range []string{
+		"campaign.phase IN (?, ?)",
+		"attribution.phase_type = campaign.phase",
+	} {
+		if !strings.Contains(discoverPendingTagTestReportsSQL, fragment) {
+			t.Fatalf("discovery query does not include %q", fragment)
+		}
+	}
 	if got, want := strings.Count(discoverPendingTagTestReportsSQL, "?"), 14; got != want {
 		t.Fatalf("discovery query bind count = %d, want %d", got, want)
 	}
@@ -64,9 +74,25 @@ func TestSummarySQLUsesWeightedTotalsAndStableUpsert(t *testing.T) {
 		"?::integer",
 		"?::timestamptz",
 		"ON CONFLICT (bundle_id, tag_id) DO UPDATE",
+		"performance.phase_type = ?",
 	} {
 		if !strings.Contains(summarySQL, fragment) {
 			t.Fatalf("summary query does not contain %q", fragment)
+		}
+	}
+}
+
+func TestOverallSummarySQLUsesWeightedTotalsAndStableUpsert(t *testing.T) {
+	for _, fragment := range []string{
+		"SUM(performance.selected_count)",
+		"SUM(performance.sent_count)",
+		"SUM(performance.delivered_count)",
+		"SUM(performance.click_count)",
+		"GROUP BY performance.tag_id",
+		"ON CONFLICT (tag_id) DO UPDATE",
+	} {
+		if !strings.Contains(overallSummarySQL, fragment) {
+			t.Fatalf("overall summary query does not contain %q", fragment)
 		}
 	}
 }
@@ -75,6 +101,7 @@ func TestCampaignMaterializationDeletesTagsNoLongerAttributed(t *testing.T) {
 	for _, fragment := range []string{
 		"DELETE FROM campaign_tag_test_performances",
 		"attribution.bundle_id = performance.bundle_id",
+		"attribution.phase_type = performance.phase_type",
 		"attribution.assigned_tag_id = performance.tag_id",
 	} {
 		if !strings.Contains(deleteStaleCampaignTagPerformancesSQL, fragment) {
