@@ -224,6 +224,9 @@ func (s *CampaignFlowImpl) resolveCampaignTestLink(
 	if err := s.shortLinkRepo.Save(ctx, shortLinkRow); err != nil {
 		return nil, err
 	}
+	if err := publishShortLinkMappings(ctx, s.shortLinkRepo, s.shortLinkPublisher, []*models.ShortLink{shortLinkRow}); err != nil {
+		return nil, fmt.Errorf("publish campaign test short link: %w", err)
+	}
 
 	return &shortLink, nil
 }
@@ -271,6 +274,51 @@ func (s *CampaignFlowImpl) sendCampaignTestMessageBestEffort(
 		if _, err := s.fetchLineNumberPriceFactor(ctx, &lineNumber); err != nil {
 			return nil, err
 		}
+		line, err := s.lineNumberRepo.ByValue(ctx, lineNumber)
+		if err != nil {
+			return nil, err
+		}
+		if line == nil {
+			return nil, ErrLineNumberNotFound
+		}
+		provider := models.SMSProvider(strings.ToLower(strings.TrimSpace(string(line.Provider))))
+		if provider == "" {
+			provider = models.SMSProviderPayamSMS
+		}
+		if !models.IsValidSMSProvider(provider) {
+			return nil, fmt.Errorf("SMS provider %q is not supported for campaign test sends", provider)
+		}
+
+		if provider == models.SMSProviderCandoo {
+			client, err := s.newTestCandooSMSProvider()
+			if err != nil {
+				return nil, err
+			}
+			if readiness, ok := client.(scheduler.SMSProviderReadinessChecker); ok {
+				if err := readiness.Validate(); err != nil {
+					return nil, fmt.Errorf("validate Candoo campaign test configuration: %w", err)
+				}
+			}
+			customerID := int64(campaign.CustomerID)
+			if customerID <= 0 {
+				return nil, fmt.Errorf("Candoo campaign test send requires a positive customer id")
+			}
+			s.runAsyncCampaignTestSend(baseCtx, platform, recipient, func(sendCtx context.Context) error {
+				s.logTestSendProxyUsage(platform, recipient)
+				resp, err := client.SendBatch(sendCtx, lineNumber, []scheduler.SMSProviderMessage{{
+					Recipient:          recipient,
+					Body:               body,
+					TrackingID:         buildProviderTestID("test-sms", campaign.CustomerID),
+					ProviderCustomerID: &customerID,
+				}})
+				if err == nil && len(resp.Items) > 0 {
+					log.Printf("sendCampaignTestMessageBestEffort: Candoo response for campaign test send (line number: %s): %+v", lineNumber, resp.Items)
+				}
+				return err
+			})
+			return nil, nil
+		}
+
 		client, err := s.newTestPayamSMSClient()
 		if err != nil {
 			return nil, err
@@ -467,6 +515,13 @@ func (s *CampaignFlowImpl) newTestPayamSMSClient() (scheduler.PayamSMSClient, er
 		return scheduler.NewPayamSMSClient(s.payamSMSConfig), nil
 	}
 	return scheduler.NewPayamSMSClientWithHTTPSProxy(s.payamSMSConfig, s.irHTTPSProxy)
+}
+
+func (s *CampaignFlowImpl) newTestCandooSMSProvider() (scheduler.SMSProvider, error) {
+	if strings.TrimSpace(s.irHTTPSProxy) == "" {
+		return scheduler.NewCandooSMSProvider(s.candooSMSConfig), nil
+	}
+	return scheduler.NewCandooSMSProviderWithHTTPSProxy(s.candooSMSConfig, s.irHTTPSProxy)
 }
 
 func (s *CampaignFlowImpl) newTestBaleClient() (scheduler.BaleClient, error) {
