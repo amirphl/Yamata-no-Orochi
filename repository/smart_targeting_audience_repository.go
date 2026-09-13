@@ -2,7 +2,12 @@ package repository
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
+	"math"
+	mathrand "math/rand"
+	"strconv"
 	"strings"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -10,18 +15,22 @@ import (
 	"gorm.io/gorm"
 )
 
-// SmartTargetingAudienceQuery is platform-independent by default. Capacity
-// jobs leave AllowedColors empty, while schedulers may apply platform-specific
-// delivery eligibility when selecting the final audience.
+// SmartTargetingAudienceQuery describes the eligibility rules shared by exact
+// capacity, Test preview, and final selection. AllowedColors is empty for
+// platforms without a delivery-color restriction.
 type SmartTargetingAudienceQuery struct {
 	BundleID uint
 	// ApplyBundleAudienceExclusions enables the manually populated, bundle-
-	// scoped exclusion list. Capacity and preview callers leave it false; the
-	// final Smart Targeting Test scheduler enables it.
+	// scoped exclusion list for Smart Targeting Test capacity, preview, and
+	// final selection.
 	ApplyBundleAudienceExclusions bool
 	TagIDs                        []int64
 	ScoreClasses                  []string
 	AllowedColors                 []string
+	// SamplingSeed is the required persisted Test-preview input hash. Using it
+	// for both preview and execution makes the randomized per-tag allocation
+	// repeatable while the eligible database population remains unchanged.
+	SamplingSeed string
 }
 
 type SmartTargetingAudienceRepository interface {
@@ -43,6 +52,20 @@ type SmartTargetingAudienceCapacity struct {
 type SmartTargetingScoreBounds struct {
 	P33 *float64 `gorm:"column:p33"`
 	P66 *float64 `gorm:"column:p66"`
+}
+
+type smartTargetingSampleRow struct {
+	ID              int64         `gorm:"column:id"`
+	UID             string        `gorm:"column:uid"`
+	PhoneNumber     *string       `gorm:"column:phone_number"`
+	Tags            pq.Int32Array `gorm:"column:tags;type:integer[]"`
+	NormalizedScore *float64      `gorm:"column:normalized_score"`
+	SampleKey       int64         `gorm:"column:sample_key"`
+}
+
+type smartTargetingSampleCursor struct {
+	key int64
+	id  int64
 }
 
 type smartTargetingAudienceRepository struct{ db *gorm.DB }
@@ -74,6 +97,12 @@ WITH tagged_population AS (
           FROM bundle_audience_selection_members AS used
           WHERE used.bundle_id = ? AND used.audience_id = tagged.id
       )
+      AND (?::boolean OR NOT EXISTS (
+          SELECT 1
+          FROM bundle_audience_exclusions AS bundle_exclusion
+          WHERE bundle_exclusion.bundle_id = ?
+            AND bundle_exclusion.audience_id = tagged.id
+      ))
 )`
 
 // Execution selection needs delivery columns. Capacity and score-bound work
@@ -95,6 +124,12 @@ WITH tagged_population AS (
           FROM bundle_audience_selection_members AS used
           WHERE used.bundle_id = ? AND used.audience_id = tagged.id
       )
+      AND (?::boolean OR NOT EXISTS (
+          SELECT 1
+          FROM bundle_audience_exclusions AS bundle_exclusion
+          WHERE bundle_exclusion.bundle_id = ?
+            AND bundle_exclusion.audience_id = tagged.id
+      ))
 )`
 
 const smartTargetingClassifiedPopulationCTE = `, percentile_bounds AS (
@@ -134,6 +169,8 @@ func smartTargetingPopulationArgs(query SmartTargetingAudienceQuery) []any {
 		pq.Array(query.TagIDs),
 		len(colors) == 0,
 		pq.Array(colors),
+		query.BundleID,
+		!query.ApplyBundleAudienceExclusions,
 		query.BundleID,
 	}
 }
@@ -205,34 +242,139 @@ func (r *smartTargetingAudienceRepository) CalculateScoreBounds(ctx context.Cont
 	return &bounds, nil
 }
 
+const smartTargetingSampleOversamplingFactor int64 = 2
+
 // SelectIDsForTag is the lightweight Test-preview path. Preview logic needs
 // only IDs to enforce cross-tag exclusion; profile delivery columns are loaded
 // only by the final campaign scheduler.
 func (r *smartTargetingAudienceRepository) SelectIDsForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]int64, error) {
-	sql, args, err := smartTargetingPerTagSelectionQuery(query, bounds, tagID, excludeAudienceIDs, limit, true)
+	rows, err := r.selectSampleForTag(ctx, query, bounds, tagID, excludeAudienceIDs, limit, true)
 	if err != nil {
 		return nil, err
 	}
-	var ids []int64
-	if err := r.getDB(ctx).Raw(sql, args...).Scan(&ids).Error; err != nil {
-		return nil, err
+	ids := make([]int64, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
 	}
 	return ids, nil
 }
 
-// SelectForTag is the final scheduler path. It deliberately has no global
-// random sort: any complete set of eligible rows satisfies Feature 4, while
-// removing ORDER BY RANDOM() avoids processing every match before LIMIT.
+// SelectForTag is the final Smart Targeting Test scheduler path. The shared
+// sampler reads a bounded window from a persisted random order and shuffles
+// only that window; score classes remain eligibility filters rather than row
+// priority.
 func (r *smartTargetingAudienceRepository) SelectForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error) {
-	sql, args, err := smartTargetingPerTagSelectionQuery(query, bounds, tagID, excludeAudienceIDs, limit, false)
+	return r.selectSampleForTag(ctx, query, bounds, tagID, excludeAudienceIDs, limit, false)
+}
+
+func smartTargetingSamplePoolLimit(limit int64) int64 {
+	if limit <= 0 {
+		return limit
+	}
+	if limit > math.MaxInt64/smartTargetingSampleOversamplingFactor {
+		return math.MaxInt64
+	}
+	return limit * smartTargetingSampleOversamplingFactor
+}
+
+// selectSampleForTag starts at a random point in a persistent random ordering,
+// reads small index-seekable pages, and shuffles a bounded oversampled result
+// in memory. Cross-tag exclusions are applied in Go: sending an ever-growing
+// ID array to PostgreSQL can produce a hash anti-join that destroys index order
+// and reintroduces a population-wide top-N sort for later tags.
+func (r *smartTargetingAudienceRepository) selectSampleForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64, idsOnly bool) ([]*models.AudienceProfile, error) {
+	pivot, err := smartTargetingSamplePivot(query.SamplingSeed, tagID)
 	if err != nil {
+		return nil, fmt.Errorf("generate smart-targeting sample pivot: %w", err)
+	}
+	poolLimit := smartTargetingSamplePoolLimit(limit)
+	excluded := make(map[int64]struct{}, len(excludeAudienceIDs))
+	for _, audienceID := range excludeAudienceIDs {
+		excluded[audienceID] = struct{}{}
+	}
+
+	pool := make([]smartTargetingSampleRow, 0)
+	if err := r.scanSmartTargetingSampleSegment(ctx, query, bounds, tagID, poolLimit, idsOnly, pivot, false, excluded, &pool); err != nil {
 		return nil, err
 	}
-	var rows []*models.AudienceProfile
-	if err := r.getDB(ctx).Raw(sql, args...).Scan(&rows).Error; err != nil {
-		return nil, err
+	if int64(len(pool)) < poolLimit {
+		if err := r.scanSmartTargetingSampleSegment(ctx, query, bounds, tagID, poolLimit, idsOnly, pivot, true, excluded, &pool); err != nil {
+			return nil, err
+		}
+	}
+
+	rows := make([]*models.AudienceProfile, len(pool))
+	for i := range pool {
+		row := &pool[i]
+		rows[i] = &models.AudienceProfile{
+			ID:              row.ID,
+			UID:             row.UID,
+			PhoneNumber:     row.PhoneNumber,
+			Tags:            row.Tags,
+			NormalizedScore: row.NormalizedScore,
+		}
+	}
+
+	shuffleSmartTargetingSample(rows, pivot)
+	if int64(len(rows)) > limit {
+		rows = rows[:int(limit)]
 	}
 	return rows, nil
+}
+
+// scanSmartTargetingSampleSegment walks one side of the circular sample order.
+// Each page is capped at poolLimit and resumes strictly after its last (key,id)
+// tuple. If exclusions consume a page, the next page continues without sorting
+// or rescanning previously visited index entries.
+func (r *smartTargetingAudienceRepository) scanSmartTargetingSampleSegment(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID, poolLimit int64, idsOnly bool, pivot int64, beforePivot bool, excluded map[int64]struct{}, pool *[]smartTargetingSampleRow) error {
+	var cursor *smartTargetingSampleCursor
+	for int64(len(*pool)) < poolLimit {
+		sql, args, err := smartTargetingPerTagSelectionQuery(query, bounds, tagID, poolLimit, idsOnly, pivot, beforePivot, cursor)
+		if err != nil {
+			return err
+		}
+		page := make([]smartTargetingSampleRow, 0)
+		if err := r.getDB(ctx).Raw(sql, args...).Scan(&page).Error; err != nil {
+			return err
+		}
+		for _, row := range page {
+			if _, skip := excluded[row.ID]; skip {
+				continue
+			}
+			*pool = append(*pool, row)
+			if int64(len(*pool)) == poolLimit {
+				return nil
+			}
+		}
+		if int64(len(page)) < poolLimit {
+			return nil
+		}
+		last := page[len(page)-1]
+		cursor = &smartTargetingSampleCursor{key: last.SampleKey, id: last.ID}
+	}
+	return nil
+}
+
+func smartTargetingSamplePivot(seed string, tagID int64) (int64, error) {
+	if seed == "" || tagID <= 0 {
+		return 0, fmt.Errorf("smart-targeting sampling seed and tag are required")
+	}
+	hash := sha256.New()
+	_, _ = hash.Write([]byte(seed))
+	var rawTagID [8]byte
+	binary.LittleEndian.PutUint64(rawTagID[:], uint64(tagID))
+	_, _ = hash.Write(rawTagID[:])
+	return int64(binary.LittleEndian.Uint64(hash.Sum(nil)[:8])), nil
+}
+
+func shuffleSmartTargetingSample(rows []*models.AudienceProfile, pivot int64) {
+	if len(rows) < 2 {
+		return
+	}
+	rng := mathrand.New(mathrand.NewSource(pivot))
+	rng.Shuffle(len(rows), func(i, j int) {
+		rows[i], rows[j] = rows[j], rows[i]
+	})
 }
 
 func smartTargetingScoreBoundsQuery(query SmartTargetingAudienceQuery) (string, []any) {
@@ -274,8 +416,8 @@ FROM (
 	return sql, args
 }
 
-func smartTargetingPerTagSelectionQuery(query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64, idsOnly bool) (string, []any, error) {
-	if query.BundleID == 0 || len(query.TagIDs) == 0 || len(query.ScoreClasses) == 0 || tagID <= 0 || limit <= 0 {
+func smartTargetingPerTagSelectionQuery(query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID, limit int64, idsOnly bool, pivot int64, beforePivot bool, cursor *smartTargetingSampleCursor) (string, []any, error) {
+	if query.BundleID == 0 || len(query.TagIDs) == 0 || len(query.ScoreClasses) == 0 || tagID <= 0 || tagID > math.MaxInt32 || limit <= 0 {
 		return "", nil, fmt.Errorf("invalid smart-targeting per-tag sample query")
 	}
 	selected := false
@@ -288,30 +430,55 @@ func smartTargetingPerTagSelectionQuery(query SmartTargetingAudienceQuery, bound
 	if !selected {
 		return "", nil, fmt.Errorf("smart-targeting per-tag sample is not in the selected tag set")
 	}
-	if excludeAudienceIDs == nil {
-		excludeAudienceIDs = []int64{}
-	}
-	columns := "ap.id, ap.uid, ap.phone_number, ap.tags, ap.normalized_score"
+	columns := "ap.id, ap.uid, ap.phone_number, ap.tags, ap.normalized_score, hashint8extended(ap.id, 0) AS sample_key"
 	if idsOnly {
-		columns = "ap.id"
+		columns = "ap.id, hashint8extended(ap.id, 0) AS sample_key"
 	}
 	sql := `
 SELECT ` + columns + `
-FROM audience_profiles AS ap
-WHERE ap.tags @> ARRAY[?]::integer[]
+FROM audience_profiles AS ap`
+	args := make([]any, 0, 10)
+	if cursor == nil {
+		keyComparison := ">="
+		if beforePivot {
+			keyComparison = "<"
+		}
+		sql += `
+WHERE hashint8extended(ap.id, 0) ` + keyComparison + ` ?::bigint`
+		args = append(args, pivot)
+	} else {
+		sql += `
+WHERE (hashint8extended(ap.id, 0), ap.id) > (?::bigint, ?::bigint)`
+		args = append(args, cursor.key, cursor.id)
+		if beforePivot {
+			sql += `
+  AND hashint8extended(ap.id, 0) < ?::bigint`
+			args = append(args, pivot)
+		}
+	}
+	// Keep the validated int32 tag as a numeric SQL literal. pgx caches prepared
+	// statements, and a generic plan with a bound tag cannot account for the
+	// extreme tag-frequency skew. A tag-specific statement lets common tags use
+	// the ordered sampling index and rare tags use the GIN index. No caller text
+	// is interpolated.
+	sql += `
+  AND ap.tags @> ARRAY[` + strconv.FormatInt(tagID, 10) + `]::integer[]
   AND ap.phone_number IS NOT NULL
   AND BTRIM(ap.phone_number) <> ''`
-	args := []any{tagID}
 	if len(query.AllowedColors) > 0 {
 		sql += `
   AND ap.color = ANY(?::text[])`
 		args = append(args, pq.Array(query.AllowedColors))
 	}
+	// OFFSET 0 is an intentional optimizer barrier. Without it PostgreSQL may
+	// turn either correlated lookup into a hash anti-join, discard the sampling
+	// index order, and sort the full eligible population before applying LIMIT.
 	sql += `
   AND NOT EXISTS (
       SELECT 1
       FROM bundle_audience_selection_members AS used
       WHERE used.bundle_id = ? AND used.audience_id = ap.id
+      OFFSET 0
   )`
 	args = append(args, query.BundleID)
 	if query.ApplyBundleAudienceExclusions {
@@ -321,22 +488,17 @@ WHERE ap.tags @> ARRAY[?]::integer[]
       FROM bundle_audience_exclusions AS bundle_exclusion
       WHERE bundle_exclusion.bundle_id = ?
         AND bundle_exclusion.audience_id = ap.id
+      OFFSET 0
   )`
 		args = append(args, query.BundleID)
 	}
-	sql += `
-  AND NOT EXISTS (
-      SELECT 1
-      FROM unnest(?::bigint[]) AS earlier(audience_id)
-      WHERE earlier.audience_id = ap.id
-  )`
-	args = append(args, pq.Array(excludeAudienceIDs))
 
 	scorePredicate, scoreArgs, err := smartTargetingPerTagScorePredicate(query.ScoreClasses, bounds)
 	if err != nil {
 		return "", nil, err
 	}
 	sql += scorePredicate + `
+ORDER BY hashint8extended(ap.id, 0) ASC, ap.id ASC
 LIMIT ?`
 	args = append(args, scoreArgs...)
 	args = append(args, limit)
