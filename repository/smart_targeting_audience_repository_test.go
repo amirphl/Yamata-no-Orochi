@@ -1,9 +1,12 @@
 package repository
 
 import (
+	"math"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/amirphl/Yamata-no-Orochi/models"
 )
 
 func TestSmartTargetingPopulationUsesOptionalParameterizedColorFilter(t *testing.T) {
@@ -13,7 +16,7 @@ func TestSmartTargetingPopulationUsesOptionalParameterizedColorFilter(t *testing
 			t.Fatalf("capacity population unexpectedly contains %q:\n%s", forbidden, smartTargetingPopulationCTE)
 		}
 	}
-	for _, required := range []string{"bundle_audience_selection_members", "used.bundle_id", "used.audience_id", "percentile_disc", "ap.color = any(?::text[])"} {
+	for _, required := range []string{"bundle_audience_selection_members", "used.bundle_id", "used.audience_id", "bundle_audience_exclusions", "bundle_exclusion.bundle_id", "bundle_exclusion.audience_id", "percentile_disc", "ap.color = any(?::text[])"} {
 		if !strings.Contains(query, required) {
 			t.Fatalf("capacity population is missing %q:\n%s", required, smartTargetingPopulationCTE)
 		}
@@ -31,17 +34,26 @@ func TestSmartTargetingPopulationUsesOptionalParameterizedColorFilter(t *testing
 	}
 }
 
-func TestSmartTargetingPopulationArgsDisableEmptyColorFilter(t *testing.T) {
+func TestSmartTargetingPopulationArgsControlOptionalEligibilityFilters(t *testing.T) {
 	args := smartTargetingPopulationArgs(SmartTargetingAudienceQuery{TagIDs: []int64{7}, BundleID: 3})
 	if disabled, ok := args[1].(bool); !ok || !disabled {
 		t.Fatalf("empty allowed colors produced disabled=%#v, want true", args[1])
 	}
+	if disabled, ok := args[4].(bool); !ok || !disabled {
+		t.Fatalf("default Bundle exclusions produced disabled=%#v, want true", args[4])
+	}
 
 	args = smartTargetingPopulationArgs(SmartTargetingAudienceQuery{
-		TagIDs: []int64{7}, BundleID: 3, AllowedColors: []string{"white", "pink"},
+		TagIDs: []int64{7}, BundleID: 3, AllowedColors: []string{"white", "pink"}, ApplyBundleAudienceExclusions: true,
 	})
 	if disabled, ok := args[1].(bool); !ok || disabled {
 		t.Fatalf("SMS allowed colors produced disabled=%#v, want false", args[1])
+	}
+	if disabled, ok := args[4].(bool); !ok || disabled {
+		t.Fatalf("enabled Bundle exclusions produced disabled=%#v, want false", args[4])
+	}
+	if len(args) != 6 || args[3] != uint(3) || args[5] != uint(3) {
+		t.Fatalf("population arguments = %#v, want colors and Bundle eligibility inputs", args)
 	}
 }
 
@@ -101,35 +113,38 @@ func TestSmartTargetingScoreBoundsQueryCalculatesEligibleUnionOnce(t *testing.T)
 	}
 }
 
-func TestSmartTargetingPerTagSelectionUsesContainmentLimitAndNoGlobalSort(t *testing.T) {
+func TestSmartTargetingPerTagSelectionUsesIndexedRandomWindow(t *testing.T) {
 	p33, p66 := 24.0, 29.6
+	pivot := int64(-7_000_000_000_000_000_000)
 	query := SmartTargetingAudienceQuery{
 		BundleID: 3, ApplyBundleAudienceExclusions: true, TagIDs: []int64{9, 2}, ScoreClasses: []string{"A", "C"},
 	}
-	sql, args, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, []int64{101, 102}, 600, true)
+	sql, args, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, 4_800, true, pivot, false, nil)
 	if err != nil {
 		t.Fatalf("build per-tag selection query: %v", err)
 	}
 	lowerSQL := strings.ToLower(sql)
 	for _, required := range []string{
-		"select ap.id", "ap.tags @> array[?]::integer[]", "bundle_audience_selection_members",
+		"select ap.id", "hashint8extended(ap.id, 0) as sample_key", "from audience_profiles as ap", "hashint8extended(ap.id, 0) >= ?::bigint",
+		"ap.tags @> array[9]::integer[]", "bundle_audience_selection_members",
 		"bundle_audience_exclusions", "bundle_exclusion.bundle_id = ?", "bundle_exclusion.audience_id = ap.id",
-		"unnest(?::bigint[])", "ap.normalized_score <= ?::double precision or ap.normalized_score > ?::double precision", "limit ?",
+		"offset 0", "ap.normalized_score <= ?::double precision or ap.normalized_score > ?::double precision",
+		"order by hashint8extended(ap.id, 0) asc, ap.id asc", "limit ?",
 	} {
 		if !strings.Contains(lowerSQL, required) {
 			t.Fatalf("per-tag selection query is missing %q:\n%s", required, sql)
 		}
 	}
-	for _, forbidden := range []string{"order by random", "= any(tags)", "candidate_population", "classified", "ap.uid"} {
+	for _, forbidden := range []string{"order by random", "order by normalized_score", "= any(tags)", "array[?]", "candidate_population", "classified", "ap.uid", "unnest("} {
 		if strings.Contains(lowerSQL, forbidden) {
 			t.Fatalf("per-tag ID query unexpectedly contains %q:\n%s", forbidden, sql)
 		}
 	}
-	if len(args) != 7 || args[2] != uint(3) {
-		t.Fatalf("per-tag arguments = %#v, want tag, Bundle twice, exclusions, two bounds, and limit", args)
+	if len(args) != 6 || args[1] != uint(3) || args[0] != pivot {
+		t.Fatalf("per-tag arguments = %#v, want pivot, Bundle twice, two bounds, and limit", args)
 	}
 
-	fullSQL, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, nil, 600, false)
+	fullSQL, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, 4_800, false, pivot, false, nil)
 	if err != nil {
 		t.Fatalf("build full per-tag selection query: %v", err)
 	}
@@ -138,17 +153,87 @@ func TestSmartTargetingPerTagSelectionUsesContainmentLimitAndNoGlobalSort(t *tes
 			t.Fatalf("final scheduler query is missing %q:\n%s", column, fullSQL)
 		}
 	}
-	if _, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 77, nil, 600, true); err == nil {
+	if strings.Contains(strings.ToLower(fullSQL), "order by random") {
+		t.Fatalf("final per-tag scheduler query performs a full random sort:\n%s", fullSQL)
+	}
+	wrapSQL, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, 4_800, true, pivot, true, nil)
+	if err != nil || !strings.Contains(strings.ToLower(wrapSQL), "hashint8extended(ap.id, 0) < ?::bigint") {
+		t.Fatalf("wrapped sample query = %q, %v", wrapSQL, err)
+	}
+	cursor := &smartTargetingSampleCursor{key: pivot + 100, id: 123}
+	seekSQL, seekArgs, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, 4_800, true, pivot, true, cursor)
+	if err != nil || !strings.Contains(strings.ToLower(seekSQL), "(hashint8extended(ap.id, 0), ap.id) > (?::bigint, ?::bigint)") || !strings.Contains(strings.ToLower(seekSQL), "hashint8extended(ap.id, 0) < ?::bigint") {
+		t.Fatalf("wrapped seek query = %q, %v", seekSQL, err)
+	}
+	if len(seekArgs) != 8 || seekArgs[0] != cursor.key || seekArgs[1] != cursor.id || seekArgs[2] != pivot {
+		t.Fatalf("wrapped seek arguments = %#v", seekArgs)
+	}
+	if _, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 77, 600, true, pivot, false, nil); err == nil {
 		t.Fatal("per-tag selection accepted a tag outside the selected set")
 	}
-
+	query.TagIDs = append(query.TagIDs, int64(math.MaxInt32)+1)
+	if _, _, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, int64(math.MaxInt32)+1, 600, true, pivot, false, nil); err == nil {
+		t.Fatal("per-tag selection accepted a tag that cannot fit PostgreSQL integer[]")
+	}
 	query.ApplyBundleAudienceExclusions = false
-	withoutBundleExclusions, args, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, nil, 600, true)
+	withoutBundleExclusions, args, err := smartTargetingPerTagSelectionQuery(query, &SmartTargetingScoreBounds{P33: &p33, P66: &p66}, 9, 600, true, pivot, false, nil)
 	if err != nil {
 		t.Fatalf("build default per-tag selection query: %v", err)
 	}
-	if strings.Contains(strings.ToLower(withoutBundleExclusions), "bundle_audience_exclusions") || len(args) != 6 {
+	if strings.Contains(strings.ToLower(withoutBundleExclusions), "bundle_audience_exclusions") || len(args) != 5 {
 		t.Fatalf("default per-tag query unexpectedly applies Bundle exclusions:\n%s\nargs=%#v", withoutBundleExclusions, args)
+	}
+}
+
+func TestSmartTargetingSamplePivotIsStablePerPreviewAndTag(t *testing.T) {
+	const seed = "ca0eebb1b9af1ad2a24050dfd76b04fd98b1db173a486748004dd728ea9ecb41"
+	first, err := smartTargetingSamplePivot(seed, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := smartTargetingSamplePivot(seed, 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherTag, err := smartTargetingSamplePivot(seed, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("same preview seed and tag produced pivots %d and %d", first, second)
+	}
+	if first == otherTag {
+		t.Fatalf("different tags unexpectedly produced the same pivot %d", first)
+	}
+	if _, err := smartTargetingSamplePivot("", 9); err == nil {
+		t.Fatal("empty persisted preview seed must fail closed")
+	}
+}
+
+func TestSmartTargetingSamplePoolIsBoundedAndShuffleIsDeterministicForPivot(t *testing.T) {
+	if got := smartTargetingSamplePoolLimit(600); got != 1_200 {
+		t.Fatalf("sample pool limit = %d, want 1200", got)
+	}
+	if got := smartTargetingSamplePoolLimit(math.MaxInt64); got != math.MaxInt64 {
+		t.Fatalf("overflow-safe sample pool limit = %d, want MaxInt64", got)
+	}
+
+	pivot := int64(0x0123456789abcdef)
+	first := []*models.AudienceProfile{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}}
+	second := []*models.AudienceProfile{{ID: 1}, {ID: 2}, {ID: 3}, {ID: 4}, {ID: 5}}
+	shuffleSmartTargetingSample(first, pivot)
+	shuffleSmartTargetingSample(second, pivot)
+	if !reflect.DeepEqual(first, second) {
+		t.Fatalf("same sampling pivot produced different shuffles: %#v != %#v", first, second)
+	}
+	seen := make(map[int64]bool, len(first))
+	for _, row := range first {
+		seen[row.ID] = true
+	}
+	for id := int64(1); id <= 5; id++ {
+		if !seen[id] {
+			t.Fatalf("shuffle lost audience %d: %#v", id, first)
+		}
 	}
 }
 
