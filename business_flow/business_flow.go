@@ -155,6 +155,7 @@ func ToLineNumberDTO(line models.LineNumber) dto.AdminLineNumberDTO {
 		UUID:        line.UUID.String(),
 		Name:        line.Name,
 		LineNumber:  line.LineNumber,
+		Provider:    string(line.Provider),
 		PriceFactor: line.PriceFactor,
 		Priority:    line.Priority,
 		IsActive:    line.IsActive,
