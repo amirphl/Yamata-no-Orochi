@@ -112,6 +112,64 @@ WHERE campaign_id = 1900000001`, fourthLease.Add(-time.Second), fourthLease, fou
 	if staleCount != 0 {
 		t.Fatalf("stale unattributed tag rows = %d, want 0", staleCount)
 	}
+
+	// Feature 6 reuses the same materialization for Execution Campaigns. Adding
+	// one delivered/clicked Tag A audience yields a global weighted CTR of
+	// (1 Test + 1 Execution clicks) / (3 Test + 1 Execution deliveries) = 1/2.
+	executionLease := lease.Add(8 * time.Minute)
+	if err := repo.DiscoverPending(context.Background(), executionLease.Add(-time.Minute)); err != nil {
+		t.Fatalf("discover Execution Campaign performance: %v", err)
+	}
+	var discoveredExecutionReport models.CampaignTagTestReport
+	if err := db.First(&discoveredExecutionReport, "campaign_id = ?", 1900000003).Error; err != nil {
+		t.Fatalf("read discovered Execution Campaign report: %v", err)
+	}
+	if discoveredExecutionReport.Status != models.TagTestReportStatusNotPrepared ||
+		discoveredExecutionReport.CalculationVersion != models.TagTestPerformanceCalculationVersion {
+		t.Fatalf("discovered Execution Campaign report is incorrect: %#v", discoveredExecutionReport)
+	}
+	if err := db.Exec(`
+UPDATE campaign_tag_test_reports
+SET status = 'preparing', requested_at = ?, started_at = ?, finished_at = NULL,
+    next_retry_at = NULL, updated_at = ?
+WHERE campaign_id = 1900000003`, executionLease.Add(-time.Second), executionLease, executionLease).Error; err != nil {
+		t.Fatalf("lease Execution Campaign recomputation: %v", err)
+	}
+	if err := repo.RecomputeCampaign(context.Background(), 1900000003, executionLease, executionLease.Add(time.Minute)); err != nil {
+		t.Fatalf("Execution Campaign recomputation: %v", err)
+	}
+
+	var executionPerformance models.CampaignTagTestPerformance
+	if err := db.Where("campaign_id = ? AND tag_id = ?", 1900000003, 1900000001).
+		First(&executionPerformance).Error; err != nil {
+		t.Fatalf("read Execution Campaign performance: %v", err)
+	}
+	if executionPerformance.PhaseType != models.CampaignPhaseExecution ||
+		executionPerformance.DeliveredCount != 1 || executionPerformance.ClickCount != 1 {
+		t.Fatalf("Execution Campaign performance is incorrect: %#v", executionPerformance)
+	}
+
+	assertOverallTagPerformanceIntegration(t, db, 1900000001, 4, 4, 4, 2, 0.5)
+	assertOverallTagPerformanceNullCTR(t, db, 1900000003)
+	rows, _, err := NewCampaignSelectedTagRepository(db).ListAvailable(
+		context.Background(), 1900000001, 1900000003, "", "overall_avg_ctr", "desc", 10, 0,
+	)
+	if err != nil {
+		t.Fatalf("read Execution tag table: %v", err)
+	}
+	if len(rows) == 0 || rows[0].TagID != 1900000001 || rows[0].OverallAvgCTR == nil ||
+		!tagTestCTREqual(*rows[0].OverallAvgCTR, 0.5) || rows[0].TestCampaignCTR != nil || rows[0].DeliveredCount != nil {
+		t.Fatalf("Execution tag API row is incorrect: %#v", rows)
+	}
+
+	var testSummary models.TagTestPhasePerformanceSummary
+	if err := db.Where("bundle_id = ? AND tag_id = ?", 1900000001, 1900000001).First(&testSummary).Error; err != nil {
+		t.Fatalf("read Test-only summary after Execution recomputation: %v", err)
+	}
+	if testSummary.TotalTestDeliveredCount != 3 || testSummary.TotalTestClickCount != 1 ||
+		testSummary.TestPhaseAvgCTR == nil || !tagTestCTREqual(*testSummary.TestPhaseAvgCTR, 1.0/3.0) {
+		t.Fatalf("Execution performance leaked into Test summary: %#v", testSummary)
+	}
 }
 
 func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
@@ -144,6 +202,11 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
             1900000002, 1900000001, 'approved',
             '{"audience_targeting_method":"smart_targeting","platform":"sms"}'::jsonb,
             1900000001, 'test', 1
+		),
+		(
+			1900000003, 1900000001, 'approved',
+			'{"audience_targeting_method":"smart_targeting","platform":"sms"}'::jsonb,
+			1900000001, 'execution', 1
         )`,
 		`INSERT INTO campaign_selected_tags (
             campaign_id, bundle_id, tag_id, selection_order,
@@ -153,13 +216,15 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
             (1900000001, 1900000001, 1900000001, 0, 90, 'Tag A snapshot', 2, 1900000001),
             (1900000001, 1900000001, 1900000002, 1, 80, 'Tag B snapshot', 1, 1900000001),
 			(1900000001, 1900000001, 1900000003, 2, 70, 'Tag C snapshot', 1, 1900000001),
-			(1900000002, 1900000001, 1900000001, 0, 90, 'Tag A snapshot', 1, 1900000001)`,
+			(1900000002, 1900000001, 1900000001, 0, 90, 'Tag A snapshot', 1, 1900000001),
+			(1900000003, 1900000001, 1900000001, 0, 90, 'Tag A execution snapshot', 1, 1900000001)`,
 		`INSERT INTO audience_profiles (id, uid, phone_number, tags, color) VALUES
             (1900000001, 'feature5-a1', '+989000000001', ARRAY[1900000001,1900000002], 'white'),
             (1900000002, 'feature5-a2', '+989000000002', ARRAY[1900000001], 'white'),
             (1900000003, 'feature5-b1', '+989000000003', ARRAY[1900000002], 'white'),
 			(1900000004, 'feature5-c1', '+989000000004', ARRAY[1900000003], 'white'),
-			(1900000005, 'feature5-a3', '+989000000005', ARRAY[1900000001], 'white')`,
+			(1900000005, 'feature5-a3', '+989000000005', ARRAY[1900000001], 'white'),
+			(1900000006, 'feature6-a1', '+989000000006', ARRAY[1900000001,1900000002], 'white')`,
 		`INSERT INTO bundle_audience_selections (
             id, customer_id, bundle_id, campaign_id, correlation_id, audience_count
         ) VALUES
@@ -170,6 +235,10 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
         (
             1900000002, 1900000001, 1900000001, 1900000002,
             'feature5-integration-selection-2', 1
+		),
+		(
+			1900000003, 1900000001, 1900000001, 1900000003,
+			'feature6-integration-selection', 1
         )`,
 		`INSERT INTO bundle_audience_selection_members (
             selection_id, bundle_id, audience_id, selection_order
@@ -178,7 +247,8 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
             (1900000001, 1900000001, 1900000002, 1),
             (1900000001, 1900000001, 1900000003, 2),
 			(1900000001, 1900000001, 1900000004, 3),
-			(1900000002, 1900000001, 1900000005, 0)`,
+			(1900000002, 1900000001, 1900000005, 0),
+			(1900000003, 1900000001, 1900000006, 0)`,
 		`INSERT INTO campaign_audience_tag_attributions (
             campaign_id, bundle_id, bundle_audience_selection_id, audience_id,
             assigned_tag_id, phase_type, selection_method, selection_order
@@ -187,7 +257,8 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
             (1900000001, 1900000001, 1900000001, 1900000002, 1900000001, 'test', 'random_per_tag', 1),
             (1900000001, 1900000001, 1900000001, 1900000003, 1900000002, 'test', 'random_per_tag', 2),
 			(1900000001, 1900000001, 1900000001, 1900000004, 1900000003, 'test', 'random_per_tag', 3),
-			(1900000002, 1900000001, 1900000002, 1900000005, 1900000001, 'test', 'random_per_tag', 0)`,
+			(1900000002, 1900000001, 1900000002, 1900000005, 1900000001, 'test', 'random_per_tag', 0),
+			(1900000003, 1900000001, 1900000003, 1900000006, 1900000001, 'execution', 'score_desc', 0)`,
 		`INSERT INTO processed_campaigns (
             id, campaign_id, campaign_json, audience_ids, audience_codes,
             statistics, bundle_audience_selection_id
@@ -201,6 +272,10 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
         (
             1900000002, 1900000002, '{"bundle_id":1900000001,"platform":"sms"}'::jsonb,
             ARRAY[1900000005], ARRAY['feature5-a3'], '{}'::jsonb, 1900000002
+		),
+		(
+			1900000003, 1900000003, '{"bundle_id":1900000001,"platform":"sms"}'::jsonb,
+			ARRAY[1900000006], ARRAY['feature6-a1'], '{}'::jsonb, 1900000003
         )`,
 		`INSERT INTO sent_sms (processed_campaign_id, phone_number, tracking_id, status) VALUES
             (1900000001, '+989000000001', 'trk-a1', 'successful'),
@@ -208,7 +283,8 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
             (1900000001, '+989000000002', 'trk-a2', 'successful'),
             (1900000001, '+989000000003', 'trk-b1', 'successful'),
 			(1900000001, '+989000000004', 'trk-c1', 'successful'),
-			(1900000002, '+989000000005', 'trk-a3', 'successful')`,
+			(1900000002, '+989000000005', 'trk-a3', 'successful'),
+			(1900000003, '+989000000006', 'trk-exec-a1', 'successful')`,
 		`INSERT INTO campaign_status_jobs (
             id, processed_campaign_id, correlation_id, tracking_ids,
             scheduled_at, platform
@@ -220,6 +296,10 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
         (
             1900000002, 1900000002, 'feature5-status-job-2',
             ARRAY['trk-a3'], CURRENT_TIMESTAMP, 'sms'
+		),
+		(
+			1900000003, 1900000003, 'feature6-status-job',
+			ARRAY['trk-exec-a1'], CURRENT_TIMESTAMP, 'sms'
         )`,
 		`INSERT INTO sms_status_results (
             job_id, processed_campaign_id, tracking_id, total_parts,
@@ -228,32 +308,34 @@ func seedTagTestPerformanceIntegration(t *testing.T, db *gorm.DB) {
             (1900000001, 1900000001, 'trk-a1', 2, 2, 0, 0),
             (1900000001, 1900000001, 'trk-a2', 0, 0, 0, 0),
 			(1900000001, 1900000001, 'trk-b1', 1, 1, 0, 0),
-			(1900000002, 1900000002, 'trk-a3', 1, 1, 0, 0)`,
+			(1900000002, 1900000002, 'trk-a3', 1, 1, 0, 0),
+			(1900000003, 1900000003, 'trk-exec-a1', 1, 1, 0, 0)`,
 		`INSERT INTO short_link_clicks (
             short_link_id, uid, campaign_id, phone_number, user_agent, ip
         ) VALUES
             (1900000001, 'click-a1-1', 1900000001, '+989000000001', 'Mobile Safari', '1.1.1.1'),
             (1900000002, 'click-a1-2', 1900000001, '+989000000001', 'Mobile Safari', '1.1.1.1'),
             (1900000003, NULL, 1900000001, '+989000000002', 'Mobile Safari', '1.1.1.2'),
-            (1900000004, 'bot-a2', 1900000001, '+989000000002', 'Mobile Safari', '66.249.1.1')`,
+			(1900000004, 'bot-a2', 1900000001, '+989000000002', 'Mobile Safari', '66.249.1.1'),
+			(1900000005, 'click-exec-a1', 1900000003, '+989000000006', 'Mobile Safari', '1.1.1.6')`,
 		`INSERT INTO campaign_tag_test_reports (
             campaign_id, bundle_id, status, calculation_version, attempt_count,
             requested_at, started_at
         ) VALUES
         (
-            1900000001, 1900000001, 'preparing', 1, 1,
+			1900000001, 1900000001, 'preparing', 2, 1,
             TIMESTAMPTZ '2026-08-17 07:59:00+00', TIMESTAMPTZ '2026-08-17 08:00:00+00'
         ),
         (
-            1900000002, 1900000001, 'not_prepared', 1, 0,
+			1900000002, 1900000001, 'not_prepared', 2, 0,
             TIMESTAMPTZ '2026-08-17 07:59:00+00', NULL
         )`,
 		`INSERT INTO campaign_tag_test_performances (
-            campaign_id, bundle_id, tag_id, tag_display_title_snapshot,
+			campaign_id, bundle_id, tag_id, phase_type, tag_display_title_snapshot,
             selected_count, sent_count, delivered_count, click_count,
             calculation_version
         ) VALUES (
-            1900000001, 1900000001, 1900000004, 'stale', 0, 0, 0, 0, 1
+			1900000001, 1900000001, 1900000004, 'test', 'stale', 0, 0, 0, 0, 2
         )`,
 	}
 	for _, statement := range statements {
@@ -333,6 +415,48 @@ func assertTagTestPerformanceIntegration(
 
 func tagTestCTREqual(got, want float64) bool {
 	return math.Abs(got-want) < 1e-12
+}
+
+func assertOverallTagPerformanceIntegration(
+	t *testing.T,
+	db *gorm.DB,
+	tagID uint,
+	wantSelected, wantSent, wantDelivered, wantClicks int64,
+	wantCTR float64,
+) {
+	t.Helper()
+	var summary models.TagOverallPerformanceSummary
+	if err := db.First(&summary, "tag_id = ?", tagID).Error; err != nil {
+		t.Fatalf("read overall tag performance: %v", err)
+	}
+	if summary.TotalSelectedCount != wantSelected || summary.TotalSentCount != wantSent ||
+		summary.TotalDeliveredCount != wantDelivered || summary.TotalClickCount != wantClicks ||
+		summary.OverallAvgCTR == nil || !tagTestCTREqual(*summary.OverallAvgCTR, wantCTR) {
+		t.Fatalf(
+			"overall tag performance = selected %d, sent %d, delivered %d, clicks %d, CTR %v; want %d/%d/%d/%d/%v",
+			summary.TotalSelectedCount,
+			summary.TotalSentCount,
+			summary.TotalDeliveredCount,
+			summary.TotalClickCount,
+			summary.OverallAvgCTR,
+			wantSelected,
+			wantSent,
+			wantDelivered,
+			wantClicks,
+			wantCTR,
+		)
+	}
+}
+
+func assertOverallTagPerformanceNullCTR(t *testing.T, db *gorm.DB, tagID uint) {
+	t.Helper()
+	var summary models.TagOverallPerformanceSummary
+	if err := db.First(&summary, "tag_id = ?", tagID).Error; err != nil {
+		t.Fatalf("read zero-delivery overall tag performance: %v", err)
+	}
+	if summary.TotalDeliveredCount != 0 || summary.OverallAvgCTR != nil {
+		t.Fatalf("zero-delivery overall tag performance = %#v, want null CTR", summary)
+	}
 }
 
 func assertTagTestPerformanceMaterializedAPIRead(t *testing.T, db *gorm.DB) {
