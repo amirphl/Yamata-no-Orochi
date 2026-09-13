@@ -82,10 +82,12 @@ type CampaignFlowImpl struct {
 	cacheConfig             config.CacheConfig
 	botConfig               config.BotConfig
 	payamSMSConfig          config.PayamSMSConfig
+	candooSMSConfig         config.CandooSMSConfig
 	baleConfig              config.BaleConfig
 	rubikaConfig            config.RubikaConfig
 	splusConfig             config.SplusConfig
 	irHTTPSProxy            string
+	shortLinkPublisher      ShortLinkMappingPublisher
 	rc                      *redis.Client
 	db                      *gorm.DB
 }
@@ -103,7 +105,7 @@ const (
 
 var tehranLoc *time.Location
 
-var allowedShortLinkDomains = []string{"jo1n.ir", "joinsahel.ir"}
+var allowedShortLinkDomains = []string{"jo1n.ir", "joinsahel.ir", "jzbe.ir"}
 
 // NewCampaignFlow creates a new campaign flow instance
 func NewCampaignFlow(
@@ -135,11 +137,17 @@ func NewCampaignFlow(
 	cacheConfig config.CacheConfig,
 	botConfig config.BotConfig,
 	payamSMSConfig config.PayamSMSConfig,
+	candooSMSConfig config.CandooSMSConfig,
 	baleConfig config.BaleConfig,
 	rubikaConfig config.RubikaConfig,
 	splusConfig config.SplusConfig,
 	irHTTPSProxy string,
+	shortLinkPublishers ...ShortLinkMappingPublisher,
 ) CampaignFlow {
+	var shortLinkPublisher ShortLinkMappingPublisher
+	if len(shortLinkPublishers) > 0 {
+		shortLinkPublisher = shortLinkPublishers[0]
+	}
 	return &CampaignFlowImpl{
 		campaignRepo:            campaignRepo,
 		bundleRepo:              bundleRepo,
@@ -167,10 +175,12 @@ func NewCampaignFlow(
 		cacheConfig:             cacheConfig,
 		botConfig:               botConfig,
 		payamSMSConfig:          payamSMSConfig,
+		candooSMSConfig:         candooSMSConfig,
 		baleConfig:              baleConfig,
 		rubikaConfig:            rubikaConfig,
 		splusConfig:             splusConfig,
 		irHTTPSProxy:            irHTTPSProxy,
+		shortLinkPublisher:      shortLinkPublisher,
 		rc:                      rc,
 		db:                      db,
 	}
