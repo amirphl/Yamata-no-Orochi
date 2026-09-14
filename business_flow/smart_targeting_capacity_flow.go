@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	smartTargetingCapacityAlgorithmVersion = 2
+	smartTargetingCapacityAlgorithmVersion = 3
 	smartTargetingCapacityTTL              = 24 * time.Hour
 )
 
@@ -158,8 +158,19 @@ func smartTargetingTagHash(campaignID uint, ids []uint) string {
 	return hashSmartTargetingCapacityString("v1|campaign=" + strconv.FormatUint(uint64(campaignID), 10) + "|tags=" + strings.Join(parts, ","))
 }
 
-func smartTargetingInputHash(tagHash string, classes []string) string {
-	return hashSmartTargetingCapacityString("v2|algorithm=" + strconv.Itoa(smartTargetingCapacityAlgorithmVersion) + "|tags=" + tagHash + "|classes=" + strings.Join(classes, ","))
+func smartTargetingCapacityAppliesBundleExclusions(campaign *models.Campaign) bool {
+	return campaign != nil && campaign.Spec.UsesSmartTargeting() && campaign.Phase == models.CampaignPhaseTest
+}
+
+func smartTargetingInputHash(tagHash string, classes []string, platform string, applyBundleAudienceExclusions bool) string {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	return hashSmartTargetingCapacityString(
+		"v3|algorithm=" + strconv.Itoa(smartTargetingCapacityAlgorithmVersion) +
+			"|tags=" + tagHash +
+			"|classes=" + strings.Join(classes, ",") +
+			"|platform=" + platform +
+			"|bundle_exclusions=" + strconv.FormatBool(applyBundleAudienceExclusions),
+	)
 }
 
 func hashSmartTargetingCapacityString(value string) string {
@@ -316,7 +327,8 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 
 		now := time.Now().UTC()
 		tagHash := smartTargetingTagHash(lockedCampaign.ID, ids)
-		inputHash := smartTargetingInputHash(tagHash, effectiveClasses)
+		applyBundleAudienceExclusions := smartTargetingCapacityAppliesBundleExclusions(&lockedCampaign)
+		inputHash := smartTargetingInputHash(tagHash, effectiveClasses, platform, applyBundleAudienceExclusions)
 		active, err := f.calculationRepo.ActiveByCampaignID(txCtx, lockedCampaign.ID)
 		if err != nil {
 			return err
@@ -354,22 +366,23 @@ func (f *SmartTargetingCapacityFlowImpl) Start(ctx context.Context, req *dto.Sta
 			}
 		}
 		calculation = &models.CampaignTargetingCapacityCalculation{
-			CampaignID:            lockedCampaign.ID,
-			BundleID:              *lockedCampaign.BundleID,
-			CustomerID:            lockedCampaign.CustomerID,
-			Platform:              platform,
-			RequestedByCustomerID: req.CustomerID,
-			SelectedTagIDs:        canonicalSmartTargetingCapacityTagIDs(ids),
-			SelectedTagsHash:      tagHash,
-			InputHash:             inputHash,
-			SelectedScoreClasses:  pq.StringArray(effectiveClasses),
-			SelectedTagCount:      len(ids),
-			RawAudienceCount:      0,
-			AllocationFingerprint: emptySmartTargetingAllocationFingerprint(),
-			Status:                models.CampaignTargetingCapacityCalculating,
-			CalculationVersion:    smartTargetingCapacityAlgorithmVersion,
-			CreatedAt:             now,
-			ExpiresAt:             ptrTime(calculationExpiry(now, &lockedCampaign)),
+			CampaignID:                    lockedCampaign.ID,
+			BundleID:                      *lockedCampaign.BundleID,
+			CustomerID:                    lockedCampaign.CustomerID,
+			Platform:                      platform,
+			RequestedByCustomerID:         req.CustomerID,
+			SelectedTagIDs:                canonicalSmartTargetingCapacityTagIDs(ids),
+			SelectedTagsHash:              tagHash,
+			InputHash:                     inputHash,
+			SelectedScoreClasses:          pq.StringArray(effectiveClasses),
+			SelectedTagCount:              len(ids),
+			ApplyBundleAudienceExclusions: applyBundleAudienceExclusions,
+			RawAudienceCount:              0,
+			AllocationFingerprint:         emptySmartTargetingAllocationFingerprint(),
+			Status:                        models.CampaignTargetingCapacityCalculating,
+			CalculationVersion:            smartTargetingCapacityAlgorithmVersion,
+			CreatedAt:                     now,
+			ExpiresAt:                     ptrTime(calculationExpiry(now, &lockedCampaign)),
 		}
 		if err := f.calculationRepo.Save(txCtx, calculation); err != nil {
 			return err
@@ -407,7 +420,12 @@ func (f *SmartTargetingCapacityFlowImpl) GetCurrent(ctx context.Context, custome
 		if classErr != nil {
 			return nil, NewBusinessError("SMART_TARGETING_SCORE_CLASSES_INVALID", "Audience score classes are invalid", classErr)
 		}
-		inputHash := smartTargetingInputHash(smartTargetingTagHash(campaign.ID, ids), classes)
+		inputHash := smartTargetingInputHash(
+			smartTargetingTagHash(campaign.ID, ids),
+			classes,
+			campaign.Spec.Platform,
+			smartTargetingCapacityAppliesBundleExclusions(campaign),
+		)
 		calculated, calculatedErr := f.calculationRepo.LatestCalculatedByInput(ctx, campaign.ID, inputHash)
 		if calculatedErr != nil {
 			return nil, NewBusinessError("SMART_TARGETING_CAPACITY_LOOKUP_FAILED", "Failed to load exact capacity calculation", calculatedErr)
@@ -501,7 +519,12 @@ func CurrentSmartTargetingCapacity(ctx context.Context, db *gorm.DB, selectionRe
 	if err != nil {
 		return nil, err
 	}
-	inputHash := smartTargetingInputHash(smartTargetingTagHash(campaign.ID, ids), classes)
+	inputHash := smartTargetingInputHash(
+		smartTargetingTagHash(campaign.ID, ids),
+		classes,
+		campaign.Spec.Platform,
+		smartTargetingCapacityAppliesBundleExclusions(campaign),
+	)
 	calculation, err := calculationRepo.LatestCalculatedByInput(ctx, campaign.ID, inputHash)
 	if err != nil {
 		return nil, err
@@ -568,11 +591,14 @@ func isCurrentSmartTargetingCapacity(ctx context.Context, db *gorm.DB, selection
 	if err != nil {
 		return false, err
 	}
-	if !sameSmartTargetingScoreClasses(classes, []string(calculation.SelectedScoreClasses)) {
+	platform := strings.ToLower(strings.TrimSpace(campaign.Spec.Platform))
+	applyBundleAudienceExclusions := smartTargetingCapacityAppliesBundleExclusions(campaign)
+	if calculation.Platform != platform || calculation.ApplyBundleAudienceExclusions != applyBundleAudienceExclusions ||
+		!sameSmartTargetingScoreClasses(classes, []string(calculation.SelectedScoreClasses)) {
 		return false, nil
 	}
 	if calculation.CalculationVersion != smartTargetingCapacityAlgorithmVersion ||
-		smartTargetingInputHash(smartTargetingTagHash(campaign.ID, ids), classes) != calculation.InputHash {
+		smartTargetingInputHash(smartTargetingTagHash(campaign.ID, ids), classes, platform, applyBundleAudienceExclusions) != calculation.InputHash {
 		return false, nil
 	}
 	_, fingerprint, err := approvedCampaignDeduction(ctx, db, calculation, campaign.ID)
@@ -641,6 +667,19 @@ func emptySmartTargetingAllocationFingerprint() string {
 	return hashSmartTargetingCapacityString("v3|bundle=0|allocations=")
 }
 
+func smartTargetingCapacityAudienceQuery(calculation *models.CampaignTargetingCapacityCalculation) repository.SmartTargetingAudienceQuery {
+	if calculation == nil {
+		return repository.SmartTargetingAudienceQuery{}
+	}
+	return repository.SmartTargetingAudienceQuery{
+		BundleID:                      calculation.BundleID,
+		ApplyBundleAudienceExclusions: calculation.ApplyBundleAudienceExclusions,
+		TagIDs:                        []int64(calculation.SelectedTagIDs),
+		ScoreClasses:                  []string(calculation.SelectedScoreClasses),
+		AllowedColors:                 models.SmartTargetingAllowedColors(calculation.Platform),
+	}
+}
+
 func (f *SmartTargetingCapacityFlowImpl) ExecuteCampaignTargetingCapacityCalculation(ctx context.Context, calculationID int64, leaseStartedAt time.Time) (err error) {
 	calculation, err := f.calculationRepo.ByID(ctx, calculationID)
 	if err != nil {
@@ -684,11 +723,7 @@ func (f *SmartTargetingCapacityFlowImpl) ExecuteCampaignTargetingCapacityCalcula
 		if err := repository.LockBundleForShare(txCtx, current.BundleID); err != nil {
 			return err
 		}
-		capacity, err := repository.NewSmartTargetingAudienceRepository(txDB).CalculateCapacity(txCtx, repository.SmartTargetingAudienceQuery{
-			BundleID:     current.BundleID,
-			TagIDs:       []int64(current.SelectedTagIDs),
-			ScoreClasses: []string(current.SelectedScoreClasses),
-		})
+		capacity, err := repository.NewSmartTargetingAudienceRepository(txDB).CalculateCapacity(txCtx, smartTargetingCapacityAudienceQuery(&current))
 		if err != nil {
 			return err
 		}
