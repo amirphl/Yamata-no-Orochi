@@ -68,15 +68,18 @@ func TestNormalizeSmartTargetingQueryDefaults(t *testing.T) {
 	tests := []struct {
 		name      string
 		evaluated bool
+		execution bool
 		wantSort  string
 		wantDir   string
 	}{
+		{name: "execution with Test CTR fallback ordering", evaluated: true, execution: true, wantSort: "execution_default", wantDir: "desc"},
+		{name: "execution without evaluation", evaluated: false, execution: true, wantSort: "execution_default", wantDir: "desc"},
 		{name: "evaluated", evaluated: true, wantSort: "bundle_persona_fit_score", wantDir: "desc"},
 		{name: "not evaluated", evaluated: false, wantSort: "database_order", wantDir: "asc"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			search, sortBy, direction, err := normalizeSmartTargetingQuery("  فارسی  ", "", "", tt.evaluated)
+			search, sortBy, direction, err := normalizeSmartTargetingQuery("  فارسی  ", "", "", tt.evaluated, tt.execution)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -88,20 +91,23 @@ func TestNormalizeSmartTargetingQueryDefaults(t *testing.T) {
 }
 
 func TestNormalizeSmartTargetingQueryValidation(t *testing.T) {
-	if _, _, _, err := normalizeSmartTargetingQuery("", "bundle_persona_fit_score", "desc", false); !errors.Is(err, ErrSmartTargetingScoreUnavailable) {
+	if _, _, _, err := normalizeSmartTargetingQuery("", "bundle_persona_fit_score", "desc", false, false); !errors.Is(err, ErrSmartTargetingScoreUnavailable) {
 		t.Fatalf("expected score unavailable, got %v", err)
 	}
-	if _, _, _, err := normalizeSmartTargetingQuery("", "display_title", "asc", true); !errors.Is(err, ErrSmartTargetingSortInvalid) {
+	if _, _, _, err := normalizeSmartTargetingQuery("", "display_title", "asc", true, false); !errors.Is(err, ErrSmartTargetingSortInvalid) {
 		t.Fatalf("expected invalid sort, got %v", err)
 	}
-	if _, _, _, err := normalizeSmartTargetingQuery("", "database_order", "asc", false); !errors.Is(err, ErrSmartTargetingSortInvalid) {
+	if _, _, _, err := normalizeSmartTargetingQuery("", "database_order", "asc", false, false); !errors.Is(err, ErrSmartTargetingSortInvalid) {
 		t.Fatalf("expected internal database order to be rejected, got %v", err)
 	}
-	if _, _, _, err := normalizeSmartTargetingQuery("", "tag_capacity", "sideways", true); !errors.Is(err, ErrSmartTargetingSortInvalid) {
+	if _, _, _, err := normalizeSmartTargetingQuery("", "tag_capacity", "sideways", true, false); !errors.Is(err, ErrSmartTargetingSortInvalid) {
 		t.Fatalf("expected invalid direction, got %v", err)
 	}
-	if _, _, _, err := normalizeSmartTargetingQuery(strings.Repeat("ی", 201), "", "", false); !errors.Is(err, ErrSmartTargetingSearchTooLong) {
+	if _, _, _, err := normalizeSmartTargetingQuery(strings.Repeat("ی", 201), "", "", false, false); !errors.Is(err, ErrSmartTargetingSearchTooLong) {
 		t.Fatalf("expected search-too-long, got %v", err)
+	}
+	if _, _, _, err := normalizeSmartTargetingQuery("", "execution_default", "desc", true, true); !errors.Is(err, ErrSmartTargetingSortInvalid) {
+		t.Fatalf("expected internal execution default to be rejected, got %v", err)
 	}
 }
 
