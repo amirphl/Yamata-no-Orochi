@@ -24,7 +24,7 @@ type smartTargetingTestSample struct {
 	effective uint64
 }
 
-const smartTargetingTestSamplingCalculationVersion = 2
+const smartTargetingTestSamplingCalculationVersion = 3
 
 type smartTargetingTestSamplingInput struct {
 	order         []uint
@@ -37,6 +37,7 @@ type smartTargetingTestSamplingInput struct {
 type smartTargetingTestSamplingIntent struct {
 	satisfied []uint
 	effective uint64
+	seed      string
 }
 
 func checkedSmartTargetingTestAudienceCount(satisfiedTagCount int, sampleSizePerTag uint64) (uint64, error) {
@@ -55,7 +56,7 @@ func smartTargetingTestSamplingHash(campaign *models.Campaign, orderedTagIDs []u
 		parts[i] = strconv.FormatUint(uint64(id), 10)
 	}
 	allowedColors := models.SmartTargetingAllowedColors(campaign.Spec.Platform)
-	value := "feature4-v2|campaign=" + strconv.FormatUint(uint64(campaign.ID), 10) +
+	value := "feature4-v3|campaign=" + strconv.FormatUint(uint64(campaign.ID), 10) +
 		"|bundle=" + strconv.FormatUint(uint64(*campaign.BundleID), 10) +
 		"|sample=" + strconv.FormatUint(*campaign.SampleSizePerTag, 10) +
 		"|tags=" + strings.Join(parts, ",") +
@@ -147,15 +148,18 @@ func currentSmartTargetingTestSamplingIntent(ctx context.Context, selectedTagRep
 	return &smartTargetingTestSamplingIntent{
 		satisfied: satisfied,
 		effective: effective,
+		seed:      input.hash,
 	}, nil
 }
 
 func smartTargetingTestSamplingAudienceQuery(bundleID uint, tagIDs []int64, input *smartTargetingTestSamplingInput) repository.SmartTargetingAudienceQuery {
 	return repository.SmartTargetingAudienceQuery{
-		BundleID:      bundleID,
-		TagIDs:        tagIDs,
-		ScoreClasses:  input.classes,
-		AllowedColors: input.allowedColors,
+		BundleID:                      bundleID,
+		ApplyBundleAudienceExclusions: true,
+		TagIDs:                        tagIDs,
+		ScoreClasses:                  input.classes,
+		AllowedColors:                 input.allowedColors,
+		SamplingSeed:                  input.hash,
 	}
 }
 
