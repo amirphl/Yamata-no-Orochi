@@ -50,6 +50,13 @@ func (f *AdminLineNumberFlowImpl) Create(ctx context.Context, req *dto.AdminCrea
 	if req.PriceFactor <= 0 {
 		return nil, NewBusinessError("PRICE_FACTOR_INVALID", "Price factor must be greater than zero", ErrPriceFactorInvalid)
 	}
+	provider := models.SMSProvider(strings.ToLower(strings.TrimSpace(req.Provider)))
+	if provider == "" {
+		provider = models.SMSProviderPayamSMS
+	}
+	if !models.IsValidSMSProvider(provider) {
+		return nil, NewBusinessError("LINE_NUMBER_PROVIDER_INVALID", "Line number provider is invalid", ErrLineNumberNotFound)
+	}
 
 	// Uniqueness check
 	existing, err := f.lineRepo.ByValue(ctx, value)
@@ -58,6 +65,7 @@ func (f *AdminLineNumberFlowImpl) Create(ctx context.Context, req *dto.AdminCrea
 	}
 	if existing != nil {
 		existing.Name = req.Name
+		existing.Provider = provider
 		existing.PriceFactor = req.PriceFactor
 		existing.Priority = req.Priority
 		existing.IsActive = req.IsActive
@@ -84,6 +92,7 @@ func (f *AdminLineNumberFlowImpl) Create(ctx context.Context, req *dto.AdminCrea
 		UUID:        uuid.New(),
 		Name:        req.Name,
 		LineNumber:  value,
+		Provider:    provider,
 		PriceFactor: req.PriceFactor,
 		Priority:    req.Priority,
 		IsActive:    req.IsActive,
@@ -133,12 +142,20 @@ func (f *AdminLineNumberFlowImpl) UpdateBatch(ctx context.Context, req *dto.Admi
 			return NewBusinessError("LINE_NUMBER_UPDATE_VALIDATION_FAILED", "Line number ID is required", ErrLineNumberValueRequired)
 		}
 
-		updates = append(updates, &models.LineNumber{
+		line := &models.LineNumber{
 			ID:        item.ID,
 			Priority:  item.Priority,
 			IsActive:  item.IsActive,
 			UpdatedAt: utils.UTCNow(),
-		})
+		}
+		if item.Provider != nil {
+			provider := models.SMSProvider(strings.ToLower(strings.TrimSpace(*item.Provider)))
+			if !models.IsValidSMSProvider(provider) {
+				return NewBusinessError("LINE_NUMBER_PROVIDER_INVALID", "Line number provider is invalid", ErrLineNumberNotFound)
+			}
+			line.Provider = provider
+		}
+		updates = append(updates, line)
 	}
 	// Persist
 	if err := f.lineRepo.UpdateBatch(ctx, updates); err != nil {
