@@ -86,12 +86,13 @@ func (s *SmartTargetingFlowImpl) evaluationAvailable(ctx context.Context, bundle
 
 // normalizeSmartTargetingQuery validates user-controlled search/sort input and
 // resolves deterministic defaults:
-//   - evaluated bundles default to persona-fit score descending;
+//   - Execution Campaigns default to Test CTR, then persona-fit score;
+//   - other evaluated bundles default to persona-fit score descending;
 //   - unevaluated bundles default to database/tag ID order ascending.
 //
 // database_order is internal-only, while persona-fit sorting is rejected when
 // the bundle has no current score rows.
-func normalizeSmartTargetingQuery(search, sortBy, direction string, evaluationAvailable bool) (string, string, string, error) {
+func normalizeSmartTargetingQuery(search, sortBy, direction string, evaluationAvailable, executionPhase bool) (string, string, string, error) {
 	search = strings.TrimSpace(search)
 	if utf8.RuneCountInString(search) > 200 {
 		return "", "", "", ErrSmartTargetingSearchTooLong
@@ -100,7 +101,10 @@ func normalizeSmartTargetingQuery(search, sortBy, direction string, evaluationAv
 	direction = strings.TrimSpace(strings.ToLower(direction))
 	defaultSort := sortBy == ""
 	if sortBy == "" {
-		if evaluationAvailable {
+		if executionPhase {
+			sortBy = "execution_default"
+			direction = "desc"
+		} else if evaluationAvailable {
 			sortBy = "bundle_persona_fit_score"
 			direction = "desc"
 		} else {
@@ -110,6 +114,10 @@ func normalizeSmartTargetingQuery(search, sortBy, direction string, evaluationAv
 	}
 	switch sortBy {
 	case "tag_capacity", "test_phase_avg_ctr", "overall_avg_ctr":
+	case "execution_default":
+		if !defaultSort || !executionPhase {
+			return "", "", "", ErrSmartTargetingSortInvalid
+		}
 	case "bundle_persona_fit_score":
 		if !evaluationAvailable {
 			return "", "", "", ErrSmartTargetingScoreUnavailable
@@ -145,7 +153,13 @@ func (s *SmartTargetingFlowImpl) ListTags(ctx context.Context, req *dto.ListSmar
 	if err != nil {
 		return nil, NewBusinessError("SMART_TARGETING_EVALUATION_LOOKUP_FAILED", "Failed to lookup bundle evaluation", err)
 	}
-	search, sortBy, direction, err := normalizeSmartTargetingQuery(req.Search, req.SortBy, req.SortDirection, evaluated)
+	search, sortBy, direction, err := normalizeSmartTargetingQuery(
+		req.Search,
+		req.SortBy,
+		req.SortDirection,
+		evaluated,
+		campaign.Spec.UsesSmartTargeting() && campaign.Phase == models.CampaignPhaseExecution,
+	)
 	if err != nil {
 		return nil, NewBusinessError("SMART_TARGETING_QUERY_INVALID", err.Error(), err)
 	}
@@ -210,7 +224,7 @@ func (s *SmartTargetingFlowImpl) ListBundleTags(ctx context.Context, req *dto.Li
 	if err != nil {
 		return nil, NewBusinessError("SMART_TARGETING_EVALUATION_LOOKUP_FAILED", "Failed to lookup bundle evaluation", err)
 	}
-	search, sortBy, direction, err := normalizeSmartTargetingQuery(req.Search, req.SortBy, req.SortDirection, evaluated)
+	search, sortBy, direction, err := normalizeSmartTargetingQuery(req.Search, req.SortBy, req.SortDirection, evaluated, false)
 	if err != nil {
 		return nil, NewBusinessError("SMART_TARGETING_QUERY_INVALID", err.Error(), err)
 	}
@@ -386,7 +400,13 @@ func (s *SmartTargetingFlowImpl) AutoSelect(ctx context.Context, req *dto.AutoSe
 	if err != nil {
 		return nil, NewBusinessError("SMART_TARGETING_EVALUATION_LOOKUP_FAILED", "Failed to lookup bundle evaluation", err)
 	}
-	search, sortBy, direction, err := normalizeSmartTargetingQuery(req.Search, req.SortBy, req.SortDirection, evaluated)
+	search, sortBy, direction, err := normalizeSmartTargetingQuery(
+		req.Search,
+		req.SortBy,
+		req.SortDirection,
+		evaluated,
+		campaign.Spec.UsesSmartTargeting() && campaign.Phase == models.CampaignPhaseExecution,
+	)
 	if err != nil {
 		return nil, NewBusinessError("SMART_TARGETING_QUERY_INVALID", err.Error(), err)
 	}
