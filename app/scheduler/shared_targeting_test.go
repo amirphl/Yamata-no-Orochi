@@ -123,21 +123,6 @@ func TestCampaignExecutionTagsKeepsSmartTagsSeparate(t *testing.T) {
 	}
 }
 
-func TestCampaignIgnoresAudienceGradesOnlyForTag17358(t *testing.T) {
-	if !campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{"17358"}}) {
-		t.Fatal("tag 17358 must bypass audience grades")
-	}
-	if !campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{" 17358 ", "17358"}}) {
-		t.Fatal("duplicate tag 17358 values must bypass audience grades")
-	}
-	if campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{"17358", "9"}}) {
-		t.Fatal("grade bypass must not leak to campaigns targeting other tags")
-	}
-	if campaignIgnoresAudienceGrades(dto.BotGetCampaignResponse{Tags: []string{"9"}}) {
-		t.Fatal("tags other than 17358 must retain audience grades")
-	}
-}
-
 func TestParseCampaignTagIDsRejectsInvalidAndDeduplicates(t *testing.T) {
 	_, ids, err := parseCampaignTagIDs(dto.BotGetCampaignResponse{ID: 10, Tags: []string{"7", "7", "9"}})
 	if err != nil {
@@ -257,9 +242,11 @@ func TestStandardScoreResolutionOnlyRequiresStatisticsForRestrictedGrades(t *tes
 	logger := log.New(io.Discard, "", 0)
 	bypassCampaigns := []dto.BotGetCampaignResponse{
 		{ID: 812, Tags: []string{"7"}, AudienceGrades: []string{"A", "B", "C"}},
-		{ID: 813, Tags: []string{"17358"}, AudienceGrades: []string{"A"}},
 	}
-	restricted := dto.BotGetCampaignResponse{ID: 814, Tags: []string{"7"}, AudienceGrades: []string{"A"}}
+	restrictedCampaigns := []dto.BotGetCampaignResponse{
+		{ID: 813, Tags: []string{"17358"}, AudienceGrades: []string{"A"}},
+		{ID: 814, Tags: []string{"7"}, AudienceGrades: []string{"A"}},
+	}
 
 	resolvers := []struct {
 		name    string
@@ -280,11 +267,46 @@ func TestStandardScoreResolutionOnlyRequiresStatisticsForRestrictedGrades(t *tes
 					t.Fatalf("campaign %d: no score filter should be required, constraint=%v err=%v", campaign.ID, constraint, err)
 				}
 			}
-			if _, err := tc.resolve(context.Background(), restricted); err == nil || !strings.Contains(err.Error(), "statistics are missing") {
-				t.Fatalf("restricted grades without statistics must fail, got %v", err)
+			for _, restricted := range restrictedCampaigns {
+				if _, err := tc.resolve(context.Background(), restricted); err == nil || !strings.Contains(err.Error(), "statistics are missing") {
+					t.Fatalf("campaign %d: restricted grades without statistics must fail, got %v", restricted.ID, err)
+				}
 			}
 		})
 	}
+}
+
+func TestStandardTargetingUsesDisjointSmartTargetingGradeBoundaries(t *testing.T) {
+	p33, p66 := 24.0, 29.6
+	tests := []struct {
+		grades   []string
+		wantGT   *float64
+		wantLTE  *float64
+		wantOrGT *float64
+	}{
+		{grades: []string{"A"}, wantGT: &p66},
+		{grades: []string{"B"}, wantGT: &p33, wantLTE: &p66},
+		{grades: []string{"C"}, wantLTE: &p33},
+		{grades: []string{"A", "B"}, wantGT: &p33},
+		{grades: []string{"A", "C"}, wantLTE: &p33, wantOrGT: &p66},
+		{grades: []string{"B", "C"}, wantLTE: &p66},
+	}
+	for _, tt := range tests {
+		got := gradesToScoreConstraint(tt.grades, p33, p66)
+		if got == nil || !sameOptionalFloat(got.GT, tt.wantGT) || !sameOptionalFloat(got.LTE, tt.wantLTE) || !sameOptionalFloat(got.OrGT, tt.wantOrGT) || got.GTE != nil || got.OrGTE != nil {
+			t.Fatalf("grades %v constraint = %#v", tt.grades, got)
+		}
+	}
+	if got := gradesToScoreConstraint([]string{"A", "B", "C"}, p33, p66); got != nil {
+		t.Fatalf("all grades constraint = %#v, want nil", got)
+	}
+}
+
+func sameOptionalFloat(got, want *float64) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return *got == *want
 }
 
 func TestBundleSelectionIDFromAudienceResult(t *testing.T) {
