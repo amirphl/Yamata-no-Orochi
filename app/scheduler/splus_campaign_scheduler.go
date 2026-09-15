@@ -612,10 +612,6 @@ func (s *SplusCampaignScheduler) resolveScoreConstraint(ctx context.Context, c d
 	if usesSmartAudienceTargeting(c) {
 		return nil, nil
 	}
-	if campaignIgnoresAudienceGrades(c) {
-		s.logger.Printf("resolveScoreConstraint: campaign id=%d tag_id=%d bypasses audience grade filter", c.ID, audienceGradeExemptTagID)
-		return nil, nil
-	}
 	if !gradesNeedScoreFilter(c.AudienceGrades) {
 		return nil, nil
 	}
