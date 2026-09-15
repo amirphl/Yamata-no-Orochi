@@ -14,7 +14,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const schedulerSmartTargetingCapacityVersion = 2
+const schedulerSmartTargetingCapacityVersion = 3
 
 // selectAndReserveExactSmartTargetingCandidates performs selection only after
 // the scheduler has claimed a campaign for execution. Capacity generations
@@ -85,7 +85,19 @@ func selectAndReserveExactSmartTargetingCandidates(
 		capacityTagIDs := append([]int64(nil), tagIDs...)
 		sort.Slice(capacityTagIDs, func(i, j int) bool { return capacityTagIDs[i] < capacityTagIDs[j] })
 		calculationRepo := repository.NewCampaignTargetingCapacityRepository(txDB)
-		calculation, err := calculationRepo.CurrentForExecution(txCtx, campaign.ID, *campaign.BundleID, capacityTagIDs, classes, schedulerSmartTargetingCapacityVersion, time.Now().UTC())
+		platform := strings.ToLower(strings.TrimSpace(campaign.Platform))
+		applyBundleAudienceExclusions := isSmartTargetingTestCampaign(campaign)
+		calculation, err := calculationRepo.CurrentForExecution(
+			txCtx,
+			campaign.ID,
+			*campaign.BundleID,
+			platform,
+			applyBundleAudienceExclusions,
+			capacityTagIDs,
+			classes,
+			schedulerSmartTargetingCapacityVersion,
+			time.Now().UTC(),
+		)
 		if err != nil {
 			return err
 		}
@@ -116,9 +128,8 @@ func selectAndReserveExactSmartTargetingCandidates(
 			if campaign.SampleSizePerTag == nil || *campaign.SampleSizePerTag == 0 || *campaign.SampleSizePerTag > math.MaxInt64 {
 				return fmt.Errorf("Smart Targeting Test campaign %d has invalid sample_size_per_tag", campaign.ID)
 			}
-			// Keep the established persisted enum value for reporting/schema
-			// compatibility. Candidate SQL no longer performs the global random
-			// sort; Feature 4 still selects an arbitrary eligible set per tag.
+			// Test candidates are shuffled independently inside each satisfied tag;
+			// score classes restrict eligibility but do not prioritize rows.
 			selectionMethod = "random_per_tag"
 			bounds, boundsErr := audienceRepo.CalculateScoreBounds(txCtx, query)
 			if boundsErr != nil {
@@ -144,7 +155,8 @@ func selectAndReserveExactSmartTargetingCandidates(
 			if err != nil {
 				return err
 			}
-			// TODO: Ensure tag order
+			// Attribute after score-based selection so tag order cannot affect the
+			// audience priority. tagIDs retains persisted selection order.
 			assignedTags = assignFirstMatchingTags(rows, tagIDs)
 		}
 		phones, ids, uids = audienceProfileRows(rows)
@@ -237,6 +249,7 @@ func smartTargetingSchedulerAudienceQuery(campaign dto.BotGetCampaignResponse, b
 	}
 	if isSmartTargetingTestCampaign(campaign) {
 		query.ApplyBundleAudienceExclusions = true
+		query.SamplingSeed = campaign.SmartTargetingTestSamplingInputHash
 	}
 	return query
 }
