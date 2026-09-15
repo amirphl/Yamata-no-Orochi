@@ -16,9 +16,10 @@ const (
 	tagTestPerformanceRetryMax      = time.Hour
 )
 
-// TagTestPerformanceScheduler discovers Test Campaigns touched by new clicks,
-// send progress, or delivery-status jobs and recomputes only those durable
-// report jobs. Each recomputation still reads the Campaign's full history.
+// TagTestPerformanceScheduler discovers attributable Smart Targeting Test and
+// Execution Campaigns touched by new clicks, send progress, or delivery-status
+// jobs. The historical name is retained for configuration compatibility. Each
+// recomputation reads the Campaign's complete source history.
 type TagTestPerformanceScheduler struct {
 	repo         repository.TagTestPerformanceRepository
 	logger       *log.Logger
@@ -121,7 +122,7 @@ func (s *TagTestPerformanceScheduler) failReport(ctx context.Context, report *mo
 		retryAt = &nextAttempt
 		message += "; it will be retried"
 	} else {
-		message = "Campaign is not an attributable Smart Targeting Test Campaign"
+		message = "Campaign is not an attributable Smart Targeting Campaign"
 	}
 	err := s.repo.Fail(
 		ctx,
