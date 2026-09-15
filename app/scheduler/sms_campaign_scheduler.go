@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,6 +34,7 @@ const (
 type SMSCampaignScheduler struct {
 	audRepo   repository.AudienceProfileRepository
 	tagRepo   repository.TagRepository
+	lineRepo  repository.LineNumberRepository
 	sentRepo  repository.SentSMSRepository
 	pcRepo    repository.ProcessedCampaignRepository
 	jobRepo   repository.CampaignStatusJobRepository
@@ -47,6 +50,7 @@ type SMSCampaignScheduler struct {
 
 	botClient BotClient
 	smsClient PayamSMSClient
+	providers *SMSProviderRegistry
 
 	logFile *os.File
 
@@ -65,6 +69,7 @@ type NotificationSender interface {
 func NewCampaignScheduler(
 	audRepo repository.AudienceProfileRepository,
 	tagRepo repository.TagRepository,
+	lineRepo repository.LineNumberRepository,
 	sentRepo repository.SentSMSRepository,
 	pcRepo repository.ProcessedCampaignRepository,
 	jobRepo repository.CampaignStatusJobRepository,
@@ -75,6 +80,7 @@ func NewCampaignScheduler(
 	logger *log.Logger,
 	interval time.Duration,
 	payamSMSCfg config.PayamSMSConfig,
+	candooSMSCfg config.CandooSMSConfig,
 	botCfg config.BotConfig,
 	adminCfg config.AdminConfig,
 	messageSendMockEnabled bool,
@@ -87,9 +93,15 @@ func NewCampaignScheduler(
 		botCfg.APIDomain = defaultBotAPIDomain
 	}
 
+	payamClient := maybeMockPayamSMSClient(newHTTPPayamSMSClient(payamSMSCfg), messageSendMockEnabled)
+	candooProvider := NewCandooSMSProvider(candooSMSCfg)
+	if messageSendMockEnabled {
+		candooProvider = maybeMockSMSProvider(candooProvider, true)
+	}
 	s := &SMSCampaignScheduler{
 		audRepo:             audRepo,
 		tagRepo:             tagRepo,
+		lineRepo:            lineRepo,
 		sentRepo:            sentRepo,
 		pcRepo:              pcRepo,
 		jobRepo:             jobRepo,
@@ -102,7 +114,8 @@ func NewCampaignScheduler(
 		adminCfg:            adminCfg,
 		botCfg:              botCfg,
 		botClient:           newHTTPBotClient(botCfg),
-		smsClient:           maybeMockPayamSMSClient(newHTTPPayamSMSClient(payamSMSCfg), messageSendMockEnabled),
+		smsClient:           payamClient,
+		providers:           NewSMSProviderRegistry(newPayamSMSProvider(payamClient), candooProvider),
 		bundleAudienceCache: NewBundleAudienceCache(repository.NewBundleAudienceSelectionRepository(db)),
 		schedulerName:       "sms",
 	}
@@ -266,6 +279,15 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		return err
 	}
 	sender := *c.LineNumber
+	providerName, provider, err := s.resolveCampaignSMSProvider(ctx, sender)
+	if err != nil {
+		return fmt.Errorf("resolve SMS provider for campaign id=%d: %w", c.ID, err)
+	}
+	if readiness, ok := provider.(SMSProviderReadinessChecker); ok {
+		if err := readiness.Validate(); err != nil {
+			return fmt.Errorf("validate SMS provider %q for campaign id=%d: %w", providerName, c.ID, err)
+		}
+	}
 
 	if err := s.botClient.MoveCampaignToRunning(ctx, jazzAccessToken, c.ID); err != nil {
 		return fmt.Errorf("move campaign id=%d to running: %w", c.ID, err)
@@ -390,23 +412,28 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 
 	if len(unmatchedUID) > 0 {
 		s.logger.Printf("SMS scheduler: campaign id=%d creating %d unmatched sent rows for processed_campaign_id=%d", c.ID, len(unmatchedUID), pc.ID)
-		if err := s.createUnmatchedSentSMSRows(ctx, pc.ID, unmatchedUID); err != nil {
+		if err := s.createUnmatchedSentSMSRows(ctx, pc.ID, unmatchedUID, providerName); err != nil {
 			return fmt.Errorf("create unmatched sent rows for campaign id=%d: %w", c.ID, err)
 		}
 	}
 
-	for start := 0; start < len(phones); start += smsSendBatchSize {
+	providerBatchSize := provider.MaxBatchSize()
+	if providerBatchSize <= 0 {
+		return fmt.Errorf("SMS provider %q returned an invalid batch size %d", providerName, providerBatchSize)
+	}
+	providerBatchSize = min(smsSendBatchSize, providerBatchSize)
+	for start := 0; start < len(phones); start += providerBatchSize {
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("context expired at batch start=%d for campaign id=%d: %w", start, c.ID, err)
 		}
 
-		end := min(start+smsSendBatchSize, len(phones))
+		end := min(start+providerBatchSize, len(phones))
 		batchPhones := phones[start:end]
 		batchIDs := ids[start:end]
 		batchUIDs := uids[start:end]
 		batchCodes := codes[start:end]
 
-		items := make([]PayamSMSItem, 0, len(batchPhones))
+		items := make([]SMSProviderMessage, 0, len(batchPhones))
 		rows := make([]*models.SentSMS, 0, len(batchPhones))
 
 		s.logger.Printf("SMS scheduler: campaign id=%d allocating tracking ids for batch [%d,%d)", c.ID, start, end)
@@ -414,14 +441,26 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		if err != nil {
 			return fmt.Errorf("allocate tracking ids for batch [%d,%d) campaign id=%d: %w", start, end, c.ID, err)
 		}
+		var providerCustomerIDs []int64
+		if providerName == models.SMSProviderCandoo {
+			providerCustomerIDs, err = allocateCandooCustomerIDs(ctx, s.db, len(batchPhones))
+			if err != nil {
+				return fmt.Errorf("allocate Candoo customer ids for batch [%d,%d) campaign id=%d: %w", start, end, c.ID, err)
+			}
+		}
 
 		for i, p := range batchPhones {
 			body := s.buildSMSBody(c, batchCodes[i], batchUIDs[i])
 			trackingID := trackingIDs[i]
-			items = append(items, PayamSMSItem{
-				Recipient:  p,
-				Body:       body,
-				TrackingID: trackingID,
+			var providerCustomerID *int64
+			if len(providerCustomerIDs) > 0 {
+				providerCustomerID = utils.ToPtr(providerCustomerIDs[i])
+			}
+			items = append(items, SMSProviderMessage{
+				Recipient:          p,
+				Body:               body,
+				TrackingID:         trackingID,
+				ProviderCustomerID: providerCustomerID,
 			})
 			rows = append(rows, &models.SentSMS{
 				ProcessedCampaignID: pc.ID,
@@ -429,6 +468,8 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 				PartsDelivered:      0,
 				Status:              models.SMSSendStatusPending,
 				TrackingID:          trackingID,
+				Provider:            providerName,
+				ProviderCustomerID:  providerCustomerID,
 			})
 		}
 
@@ -450,17 +491,28 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 		}
 		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) saved, sending to SMS provider", c.ID, start, end)
 
-		batchResult, batchErr := s.smsClient.SendBatch(ctx, sender, items)
+		batchResult, batchErr := provider.SendBatch(ctx, sender, items)
 		if batchErr != nil {
-			s.logger.Printf("SMS scheduler: send batch [%d,%d) failed for campaign id=%d: %v", start, end, c.ID, batchErr)
-			// TODO: How to handle this error? Retry sending? Skip to next batch?
+			s.logger.Printf("SMS scheduler: provider=%s send batch [%d,%d) failed for campaign id=%d: %v", providerName, start, end, c.ID, batchErr)
+			smsProviderSendBatchesTotal.WithLabelValues(string(providerName), "error").Inc()
+			if providerName == models.SMSProviderCandoo {
+				s.notifyAdmin(fmt.Sprintf("SMS Scheduler: Candoo send batch failed for campaign id=%d: %v", c.ID, batchErr))
+			}
+		} else {
+			smsProviderSendBatchesTotal.WithLabelValues(string(providerName), "success").Inc()
 		}
-		if auditErr := s.persistPayamSMSSendResponse(ctx, pc.ID, items, batchResult, batchErr); auditErr != nil {
-			s.logger.Printf("SMS scheduler: failed to persist PayamSMS send response for campaign id=%d batch [%d,%d): %v", c.ID, start, end, auditErr)
-			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: failed to persist PayamSMS send response for campaign id=%d: %v", c.ID, auditErr))
+		if auditErr := s.persistSMSProviderSendAttempt(ctx, pc.ID, providerName, items, batchResult, batchErr); auditErr != nil {
+			s.logger.Printf("SMS scheduler: failed to persist %s send response for campaign id=%d batch [%d,%d): %v", providerName, c.ID, start, end, auditErr)
+			s.notifyAdmin(fmt.Sprintf("SMS Scheduler: failed to persist %s send response for campaign id=%d: %v", providerName, c.ID, auditErr))
+		}
+		if providerName == models.SMSProviderPayamSMS {
+			payamItems, payamResult := payamAuditInput(items, batchResult)
+			if auditErr := s.persistPayamSMSSendResponse(ctx, pc.ID, payamItems, payamResult, batchErr); auditErr != nil {
+				s.logger.Printf("SMS scheduler: failed to persist PayamSMS compatibility audit for campaign id=%d batch [%d,%d): %v", c.ID, start, end, auditErr)
+			}
 		}
 
-		responseByTrackingID := make(map[string]*PayamSMSResponseItem, len(batchResult.Items))
+		responseByTrackingID := make(map[string]*SMSProviderSendItem, len(batchResult.Items))
 		for i := range batchResult.Items {
 			resp := batchResult.Items[i]
 			trackingID := strings.TrimSpace(resp.TrackingID)
@@ -470,15 +522,38 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			respCopy := resp
 			responseByTrackingID[trackingID] = &respCopy
 		}
-		s.logger.Printf("SMS scheduler: campaign id=%d batch [%d,%d) SMS provider responded: sent=%d responses=%d", c.ID, start, end, len(items), len(batchResult.Items))
+		s.logger.Printf("SMS scheduler: campaign id=%d provider=%s batch [%d,%d) responded: sent=%d responses=%d", c.ID, providerName, start, end, len(items), len(batchResult.Items))
 
 		sendUpdates := make([]repository.SentSMSProviderUpdate, 0, len(items))
+		statusTrackingIDs := make([]string, 0, len(items))
+		immediateOutcomes := make([]SMSProviderSendItem, 0, len(items))
 		for _, item := range items {
 			trackingID := strings.TrimSpace(item.TrackingID)
 			if trackingID == "" {
 				continue
 			}
-			sendUpdates = append(sendUpdates, buildSMSProviderUpdate(trackingID, responseByTrackingID[trackingID], batchErr))
+			outcome := responseByTrackingID[trackingID]
+			update := buildGenericSMSProviderUpdate(providerName, trackingID, item.ProviderCustomerID, outcome, batchErr)
+			update.ProcessedCampaignID = utils.ToPtr(pc.ID)
+			sendUpdates = append(sendUpdates, update)
+			if providerName == models.SMSProviderPayamSMS || (outcome != nil && outcome.TrackDeliveryStatus) {
+				statusTrackingIDs = append(statusTrackingIDs, trackingID)
+			} else {
+				if outcome == nil {
+					missing := genericMissingSMSOutcome(trackingID, item.ProviderCustomerID, batchErr)
+					outcome = &missing
+				}
+				immediateOutcomes = append(immediateOutcomes, *outcome)
+			}
+			if outcome == nil {
+				smsProviderMessageOutcomesTotal.WithLabelValues(string(providerName), "unknown").Inc()
+			} else if outcome.InternalStatus == models.SMSSendStatusUnsuccessful {
+				smsProviderMessageOutcomesTotal.WithLabelValues(string(providerName), "rejected").Inc()
+			} else if outcome.TrackDeliveryStatus {
+				smsProviderMessageOutcomesTotal.WithLabelValues(string(providerName), "accepted").Inc()
+			} else {
+				smsProviderMessageOutcomesTotal.WithLabelValues(string(providerName), "unknown").Inc()
+			}
 		}
 		if len(sendUpdates) > 0 {
 			if updateErr := s.sentRepo.UpdateProviderFieldsByTrackingIDs(ctx, sendUpdates); updateErr != nil {
@@ -487,7 +562,10 @@ func (s *SMSCampaignScheduler) processSMSCampaign(ctx context.Context, jazzAcces
 			}
 		}
 
-		if err := s.scheduleStatusCheckJobs(ctx, pc.ID, trackingIDs); err != nil {
+		if err := s.recordImmediateSMSOutcomes(ctx, pc.ID, providerName, immediateOutcomes); err != nil {
+			s.logger.Printf("SMS scheduler: failed to record immediate outcomes for campaign id=%d: %v", c.ID, err)
+		}
+		if err := s.scheduleStatusCheckJobs(ctx, pc.ID, providerName, statusTrackingIDs); err != nil {
 			s.logger.Printf("SMS scheduler: failed to schedule status jobs for campaign id=%d: %v", c.ID, err)
 			// NOTE: Error silent here; not returning to avoid blocking further processing
 		}
@@ -548,16 +626,47 @@ func (s *SMSCampaignScheduler) validateSMSCampaign(c dto.BotGetCampaignResponse)
 	return nil
 }
 
+func (s *SMSCampaignScheduler) resolveCampaignSMSProvider(ctx context.Context, sender string) (models.SMSProvider, SMSProvider, error) {
+	if s.lineRepo == nil {
+		provider, err := s.providers.Provider(models.SMSProviderPayamSMS)
+		if err != nil {
+			return "", nil, err
+		}
+		s.logger.Printf("SMS scheduler: line number repository is unavailable; defaulting sender=%q to PayamSMS", sender)
+		return models.SMSProviderPayamSMS, provider, nil
+	}
+	line, err := s.lineRepo.ByValue(ctx, strings.TrimSpace(sender))
+	if err != nil {
+		return "", nil, err
+	}
+	if line == nil {
+		// The legacy scheduler only knew the sender string. Preserve that
+		// behavior for an old campaign whose line configuration was removed:
+		// missing configuration must not silently become a Candoo send.
+		provider, providerErr := s.providers.Provider(models.SMSProviderPayamSMS)
+		if providerErr != nil {
+			return "", nil, providerErr
+		}
+		s.logger.Printf("SMS scheduler: sender=%q has no line-number configuration; defaulting to PayamSMS", sender)
+		return models.SMSProviderPayamSMS, provider, nil
+	}
+	providerName, err := normalizeSMSProvider(line.Provider)
+	if err != nil {
+		return "", nil, err
+	}
+	provider, err := s.providers.Provider(providerName)
+	if err != nil {
+		return "", nil, err
+	}
+	return providerName, provider, nil
+}
+
 // resolveScoreConstraint looks up the percentile thresholds from src_layer_all_stats
 // for the campaign's levels and converts AudienceGrades into a score filter.
 // Returns nil when no filter is needed (grades are empty or [A,B,C]). A
 // restricted grade set fails closed when percentile statistics are missing.
 func (s *SMSCampaignScheduler) resolveScoreConstraint(ctx context.Context, c dto.BotGetCampaignResponse) (*models.NormalizedScoreConstraint, error) {
 	if usesSmartAudienceTargeting(c) {
-		return nil, nil
-	}
-	if campaignIgnoresAudienceGrades(c) {
-		s.logger.Printf("resolveScoreConstraint: campaign id=%d tag_id=%d bypasses audience grade filter", c.ID, audienceGradeExemptTagID)
 		return nil, nil
 	}
 	if !gradesNeedScoreFilter(c.AudienceGrades) {
@@ -791,7 +900,7 @@ func (s *SMSCampaignScheduler) buildSMSBody(c dto.BotGetCampaignResponse, code s
 	return strings.ReplaceAll(content, "{YOUR_LINK}", "") + "\n" + "لغو۱۱"
 }
 
-func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, processedCampaignID uint, unmatchedUIDs []string) error {
+func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, processedCampaignID uint, unmatchedUIDs []string, provider models.SMSProvider) error {
 	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
 	if err != nil {
 		return err
@@ -817,6 +926,7 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 			TrackingID:          trackingIDs[i],
 			PartsDelivered:      0,
 			Status:              models.SMSSendStatusUnsuccessful,
+			Provider:            provider,
 			ServerID:            nil,
 			ErrorCode:           &code,
 			Description:         &desc,
@@ -838,6 +948,7 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       uuid.NewString(),
 			Platform:            models.CampaignPlatformSMS,
+			Provider:            &provider,
 			TrackingIDs:         pq.StringArray(trackingIDs),
 			RetryCount:          0,
 			ScheduledAt:         now,
@@ -859,6 +970,8 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 				ProcessedCampaignID:   fakeJob.ProcessedCampaignID,
 				TrackingID:            trackingID,
 				ServerID:              nil,
+				Provider:              provider,
+				InternalStatus:        utils.ToPtr(models.SMSSendStatusUnsuccessful),
 				TotalParts:            zero,
 				TotalDeliveredParts:   zero,
 				TotalUndeliveredParts: zero,
@@ -888,7 +1001,7 @@ func (s *SMSCampaignScheduler) createUnmatchedSentSMSRows(ctx context.Context, p
 	return nil
 }
 
-func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, trackingIDs []string) error {
+func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, processedCampaignID uint, provider models.SMSProvider, trackingIDs []string) error {
 	if len(trackingIDs) == 0 || s.jobRepo == nil {
 		return nil
 	}
@@ -911,6 +1024,7 @@ func (s *SMSCampaignScheduler) scheduleStatusCheckJobs(ctx context.Context, proc
 			ProcessedCampaignID: processedCampaignID,
 			CorrelationID:       corrID,
 			Platform:            models.CampaignPlatformSMS,
+			Provider:            &provider,
 			TrackingIDs:         pq.StringArray(filteredTrackingIDs),
 			RetryCount:          0,
 			ScheduledAt:         now.Add(off),
@@ -945,22 +1059,39 @@ func (s *SMSCampaignScheduler) startStatusJobWorker(parent context.Context) {
 				continue
 			}
 
-			tokenCtx, tokenCancel := context.WithTimeout(parent, 30*time.Second)
-			atiehAccessToken, err := s.smsClient.GetToken(tokenCtx)
-			tokenCancel()
-			if err != nil {
-				s.logger.Printf("SMS scheduler: payamsms token for status jobs failed: %v", err)
-				continue
-			}
+			var (
+				payamToken    string
+				payamTokenErr error
+				payamLoaded   bool
+			)
 
 			for i, job := range jobs {
 				if parent.Err() != nil {
 					return
 				}
 
-				jobCtx, jobCancel := context.WithTimeout(parent, 2*time.Minute)
-				err := s.handleStatusJob(jobCtx, job, atiehAccessToken)
-				jobCancel()
+				providerName, providerErr := statusJobProvider(job)
+				if providerErr != nil {
+					err = providerErr
+				} else if providerName == models.SMSProviderPayamSMS {
+					if !payamLoaded {
+						tokenCtx, tokenCancel := context.WithTimeout(parent, 30*time.Second)
+						payamToken, payamTokenErr = s.smsClient.GetToken(tokenCtx)
+						tokenCancel()
+						payamLoaded = true
+					}
+					if payamTokenErr != nil {
+						err = fmt.Errorf("PayamSMS token for status jobs: %w", payamTokenErr)
+					} else {
+						jobCtx, jobCancel := context.WithTimeout(parent, 2*time.Minute)
+						err = s.handleStatusJob(jobCtx, job, payamToken)
+						jobCancel()
+					}
+				} else {
+					jobCtx, jobCancel := context.WithTimeout(parent, 2*time.Minute)
+					err = s.handleStatusJob(jobCtx, job, "")
+					jobCancel()
+				}
 
 				if err != nil {
 					s.logger.Printf("SMS scheduler: handle status job id=%d failed: %v", job.ID, err)
@@ -982,6 +1113,13 @@ func (s *SMSCampaignScheduler) startStatusJobWorker(parent context.Context) {
 }
 
 func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.CampaignStatusJob, jazzAccessToken string) error {
+	providerName, err := statusJobProvider(job)
+	if err != nil {
+		return err
+	}
+	if providerName != models.SMSProviderPayamSMS {
+		return s.handleExternalSMSStatusJob(ctx, job, providerName)
+	}
 	statusResult, fetchErr := s.smsClient.FetchStatus(ctx, jazzAccessToken, []string(job.TrackingIDs))
 	job.RawProviderResponse = statusResult.RawResponse
 	if fetchErr != nil {
@@ -1020,11 +1158,14 @@ func (s *SMSCampaignScheduler) handleStatusJob(ctx context.Context, job *models.
 				ProcessedCampaignID:   job.ProcessedCampaignID,
 				TrackingID:            trackingID,
 				ServerID:              item.ServerID,
+				Provider:              models.SMSProviderPayamSMS,
+				ProviderStatusText:    utils.ToPtr(strings.TrimSpace(item.Status)),
 				TotalParts:            &item.TotalParts,
 				TotalDeliveredParts:   &item.TotalDeliveredParts,
 				TotalUndeliveredParts: &item.TotalUndeliveredParts,
 				TotalUnknownParts:     &item.TotalUnknownParts,
 				Status:                &item.Status,
+				Metadata:              json.RawMessage(`{}`),
 			})
 		}
 		if err := s.resRepo.SaveBatch(txCtx, statusRows); err != nil {
@@ -1246,4 +1387,461 @@ func buildSMSProviderUpdate(trackingID string, resp *PayamSMSResponseItem, sendE
 	update.ErrorCode = resp.ErrorCode
 	update.Description = resp.Desc
 	return update
+}
+
+func buildGenericSMSProviderUpdate(
+	provider models.SMSProvider,
+	trackingID string,
+	providerCustomerID *int64,
+	resp *SMSProviderSendItem,
+	sendErr error,
+) repository.SentSMSProviderUpdate {
+	update := repository.SentSMSProviderUpdate{
+		TrackingID:         trackingID,
+		Provider:           &provider,
+		ProviderCustomerID: providerCustomerID,
+	}
+	if resp == nil {
+		missing := genericMissingSMSOutcome(trackingID, providerCustomerID, sendErr)
+		resp = &missing
+	}
+	update.ServerID = resp.ProviderMessageID
+	update.ErrorCode = resp.ErrorCode
+	update.Description = resp.Description
+	if provider != models.SMSProviderPayamSMS {
+		status := resp.InternalStatus
+		update.Status = &status
+		partsDelivered := 0
+		if status == models.SMSSendStatusSuccessful {
+			partsDelivered = 1
+		}
+		update.PartsDelivered = &partsDelivered
+	}
+	return update
+}
+
+func genericMissingSMSOutcome(trackingID string, providerCustomerID *int64, sendErr error) SMSProviderSendItem {
+	code := "MISSING_SEND_RESPONSE"
+	description := fmt.Sprintf("missing provider send response for tracking_id=%s", trackingID)
+	if sendErr != nil {
+		code = "SEND_BATCH_FAILED"
+		description = sendErr.Error()
+	}
+	return SMSProviderSendItem{
+		TrackingID:         trackingID,
+		ProviderCustomerID: providerCustomerID,
+		InternalStatus:     models.SMSSendStatusPending,
+		ErrorCode:          &code,
+		Description:        &description,
+	}
+}
+
+func payamAuditInput(items []SMSProviderMessage, result SMSProviderSendResult) ([]PayamSMSItem, PayamSMSSendResult) {
+	payamItems := make([]PayamSMSItem, 0, len(items))
+	for _, item := range items {
+		payamItems = append(payamItems, PayamSMSItem{
+			Recipient:  item.Recipient,
+			Body:       item.Body,
+			TrackingID: item.TrackingID,
+		})
+	}
+	payamResult := PayamSMSSendResult{
+		RawResponse:     result.RawResponse,
+		ResponseHeaders: result.ResponseHeaders,
+		HTTPStatusCode:  result.HTTPStatusCode,
+		AttemptCount:    result.AttemptCount,
+		Items:           make([]PayamSMSResponseItem, 0, len(result.Items)),
+	}
+	for _, item := range result.Items {
+		payamResult.Items = append(payamResult.Items, PayamSMSResponseItem{
+			TrackingID: item.TrackingID,
+			ServerID:   item.ProviderMessageID,
+			ErrorCode:  item.ErrorCode,
+			Desc:       item.Description,
+		})
+	}
+	return payamItems, payamResult
+}
+
+func (s *SMSCampaignScheduler) persistSMSProviderSendAttempt(
+	ctx context.Context,
+	processedCampaignID uint,
+	provider models.SMSProvider,
+	items []SMSProviderMessage,
+	result SMSProviderSendResult,
+	sendErr error,
+) error {
+	trackingIDs := make(pq.StringArray, 0, len(items))
+	for _, item := range items {
+		if trackingID := strings.TrimSpace(item.TrackingID); trackingID != "" {
+			trackingIDs = append(trackingIDs, trackingID)
+		}
+	}
+	headers := result.ResponseHeaders
+	if headers == nil {
+		headers = make(http.Header)
+	}
+	headerJSON, err := json.Marshal(headers)
+	if err != nil {
+		return fmt.Errorf("marshal SMS provider response headers: %w", err)
+	}
+	var errorMessage *string
+	if sendErr != nil {
+		message := sendErr.Error()
+		errorMessage = &message
+	}
+	row := &models.SMSProviderSendAttempt{
+		ProcessedCampaignID: processedCampaignID,
+		Provider:            provider,
+		TrackingIDs:         trackingIDs,
+		HTTPStatusCode:      result.HTTPStatusCode,
+		ResponseHeaders:     headerJSON,
+		ResponseBody:        result.RawResponse,
+		Error:               errorMessage,
+		AttemptCount:        result.AttemptCount,
+	}
+	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	return s.db.WithContext(persistCtx).Create(row).Error
+}
+
+func (s *SMSCampaignScheduler) recordImmediateSMSOutcomes(
+	ctx context.Context,
+	processedCampaignID uint,
+	provider models.SMSProvider,
+	outcomes []SMSProviderSendItem,
+) error {
+	if len(outcomes) == 0 || s.jobRepo == nil || s.resRepo == nil {
+		return nil
+	}
+	trackingIDs := make(pq.StringArray, 0, len(outcomes))
+	for _, outcome := range outcomes {
+		if trackingID := strings.TrimSpace(outcome.TrackingID); trackingID != "" {
+			trackingIDs = append(trackingIDs, trackingID)
+		}
+	}
+	if len(trackingIDs) == 0 {
+		return nil
+	}
+
+	return repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		now := utils.UTCNow()
+		job := &models.CampaignStatusJob{
+			ProcessedCampaignID: processedCampaignID,
+			CorrelationID:       uuid.NewString(),
+			Platform:            models.CampaignPlatformSMS,
+			Provider:            &provider,
+			TrackingIDs:         trackingIDs,
+			ScheduledAt:         now,
+			ExecutedAt:          &now,
+			CreatedAt:           now,
+			UpdatedAt:           now,
+		}
+		if err := s.jobRepo.Save(txCtx, job); err != nil {
+			return err
+		}
+		rows := make([]*models.SMSStatusResult, 0, len(outcomes))
+		for _, outcome := range outcomes {
+			trackingID := strings.TrimSpace(outcome.TrackingID)
+			if trackingID == "" {
+				continue
+			}
+			total, delivered, undelivered, unknown := immediateSMSStatusParts(outcome.InternalStatus)
+			providerStatus := outcome.ProviderStatusText
+			if providerStatus == nil || strings.TrimSpace(*providerStatus) == "" {
+				providerStatus = outcome.Description
+			}
+			legacyStatus := providerStatus
+			rows = append(rows, &models.SMSStatusResult{
+				JobID:                 job.ID,
+				ProcessedCampaignID:   processedCampaignID,
+				TrackingID:            trackingID,
+				ServerID:              outcome.ProviderMessageID,
+				Provider:              provider,
+				ProviderStatusCode:    outcome.ProviderStatusCode,
+				ProviderStatusText:    providerStatus,
+				InternalStatus:        utils.ToPtr(outcome.InternalStatus),
+				TotalParts:            &total,
+				TotalDeliveredParts:   &delivered,
+				TotalUndeliveredParts: &undelivered,
+				TotalUnknownParts:     &unknown,
+				Status:                legacyStatus,
+				Metadata:              json.RawMessage(`{}`),
+			})
+		}
+		return s.resRepo.SaveBatch(txCtx, rows)
+	})
+}
+
+func immediateSMSStatusParts(status models.SMSSendStatus) (total, delivered, undelivered, unknown int64) {
+	switch status {
+	case models.SMSSendStatusSuccessful:
+		return 1, 1, 0, 0
+	case models.SMSSendStatusUnsuccessful:
+		return 1, 0, 1, 0
+	default:
+		return 1, 0, 0, 1
+	}
+}
+
+func statusJobProvider(job *models.CampaignStatusJob) (models.SMSProvider, error) {
+	if job == nil {
+		return "", fmt.Errorf("SMS status job is nil")
+	}
+	if job.Provider == nil {
+		return models.SMSProviderPayamSMS, nil
+	}
+	return normalizeSMSProvider(*job.Provider)
+}
+
+func (s *SMSCampaignScheduler) handleExternalSMSStatusJob(ctx context.Context, job *models.CampaignStatusJob, providerName models.SMSProvider) error {
+	provider, err := s.providers.Provider(providerName)
+	if err != nil {
+		return err
+	}
+	rows, err := s.sentRepo.ListByTrackingIDs(ctx, job.ProcessedCampaignID, []string(job.TrackingIDs))
+	if err != nil {
+		return err
+	}
+	byLookupID := make(map[string]*models.SentSMS, len(rows))
+	lookupIDs := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row == nil || row.Provider != providerName {
+			continue
+		}
+		lookupID, ok := externalSMSStatusRequestID(providerName, row)
+		if !ok {
+			continue
+		}
+		if _, exists := byLookupID[lookupID]; exists {
+			continue
+		}
+		byLookupID[lookupID] = row
+		lookupIDs = append(lookupIDs, lookupID)
+	}
+	if len(lookupIDs) == 0 {
+		return s.markSMSStatusJobExecuted(ctx, job, nil)
+	}
+
+	statusResult, fetchErr := provider.FetchStatus(ctx, lookupIDs)
+	job.RawProviderResponse = statusResult.RawResponse
+	if fetchErr != nil {
+		return s.markSMSStatusJobFailure(ctx, job, fetchErr)
+	}
+	missingLookupIDs := missingExternalSMSStatusLookupIDs(providerName, lookupIDs, statusResult.Items)
+	var partialStatusErr error
+	if len(missingLookupIDs) > 0 {
+		partialStatusErr = fmt.Errorf("provider %q omitted delivery status for %d of %d lookup IDs", providerName, len(missingLookupIDs), len(lookupIDs))
+	}
+
+	if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		now := utils.UTCNow()
+		statusRows := make([]*models.SMSStatusResult, 0, len(statusResult.Items))
+		updates := make([]repository.SentSMSProviderUpdate, 0, len(statusResult.Items))
+		processedLookupIDs := make(map[string]struct{}, len(statusResult.Items))
+		for _, item := range statusResult.Items {
+			lookupID := externalSMSStatusResponseID(providerName, item)
+			if lookupID == "" {
+				continue
+			}
+			if _, duplicate := processedLookupIDs[lookupID]; duplicate {
+				continue
+			}
+			row := byLookupID[lookupID]
+			if row == nil {
+				continue
+			}
+			processedLookupIDs[lookupID] = struct{}{}
+			statusText := item.ProviderStatusText
+			legacyStatus := statusText
+			if legacyStatus == nil || strings.TrimSpace(*legacyStatus) == "" {
+				legacyStatus = item.ProviderStatusCode
+			}
+			metadata := item.Metadata
+			if len(metadata) == 0 || !json.Valid(metadata) {
+				metadata = json.RawMessage(`{}`)
+			}
+			status := item.InternalStatus
+			if status == models.SMSSendStatusPending && item.UnknownParts > 0 {
+				smsProviderStatusUnknownTotal.WithLabelValues(string(providerName)).Inc()
+			}
+			deliveredParts := int(item.DeliveredParts)
+			statusRows = append(statusRows, &models.SMSStatusResult{
+				JobID:                 job.ID,
+				ProcessedCampaignID:   job.ProcessedCampaignID,
+				TrackingID:            row.TrackingID,
+				ServerID:              row.ServerID,
+				Provider:              providerName,
+				ProviderStatusCode:    item.ProviderStatusCode,
+				ProviderStatusText:    statusText,
+				InternalStatus:        &status,
+				TotalParts:            &item.TotalParts,
+				TotalDeliveredParts:   &item.DeliveredParts,
+				TotalUndeliveredParts: &item.UndeliveredParts,
+				TotalUnknownParts:     &item.UnknownParts,
+				Status:                legacyStatus,
+				Metadata:              metadata,
+			})
+			updates = append(updates, repository.SentSMSProviderUpdate{
+				ProcessedCampaignID: utils.ToPtr(job.ProcessedCampaignID),
+				TrackingID:          row.TrackingID,
+				Provider:            &providerName,
+				ServerID:            row.ServerID,
+				Status:              &status,
+				PartsDelivered:      &deliveredParts,
+			})
+		}
+		if err := s.sentRepo.UpdateProviderFieldsByTrackingIDs(txCtx, updates); err != nil {
+			return err
+		}
+		if err := s.resRepo.SaveBatch(txCtx, statusRows); err != nil {
+			return err
+		}
+		if partialStatusErr != nil {
+			job.RetryCount++
+			message := partialStatusErr.Error()
+			job.Error = &message
+			if job.RetryCount >= smsStatusJobMaxRetry {
+				job.ExecutedAt = &now
+			} else {
+				job.ExecutedAt = nil
+			}
+		} else {
+			job.ExecutedAt = &now
+			job.Error = nil
+		}
+		job.UpdatedAt = now
+		return s.jobRepo.Update(txCtx, job)
+	}); err != nil {
+		return err
+	}
+	statisticsErr := s.publishSMSStatusStatistics(ctx, job.ProcessedCampaignID)
+	if partialStatusErr != nil {
+		smsProviderStatusJobFailuresTotal.WithLabelValues(string(providerName)).Inc()
+		if statisticsErr != nil {
+			return fmt.Errorf("%v; publish known partial SMS statistics: %w", partialStatusErr, statisticsErr)
+		}
+		return partialStatusErr
+	}
+	return statisticsErr
+}
+
+func externalSMSStatusRequestID(provider models.SMSProvider, row *models.SentSMS) (string, bool) {
+	if row == nil {
+		return "", false
+	}
+	if provider == models.SMSProviderCandoo {
+		if row.ProviderCustomerID == nil || *row.ProviderCustomerID <= 0 {
+			return "", false
+		}
+		return strconv.FormatInt(*row.ProviderCustomerID, 10), true
+	}
+	if row.ServerID == nil {
+		return "", false
+	}
+	messageID := strings.TrimSpace(*row.ServerID)
+	return messageID, messageID != ""
+}
+
+func externalSMSStatusResponseID(provider models.SMSProvider, item SMSProviderStatusItem) string {
+	if provider == models.SMSProviderCandoo {
+		if item.ProviderCustomerID == nil || *item.ProviderCustomerID <= 0 {
+			return ""
+		}
+		return strconv.FormatInt(*item.ProviderCustomerID, 10)
+	}
+	return strings.TrimSpace(item.ProviderMessageID)
+}
+
+func missingExternalSMSStatusLookupIDs(provider models.SMSProvider, lookupIDs []string, statusItems []SMSProviderStatusItem) []string {
+	expected := make(map[string]struct{}, len(lookupIDs))
+	for _, lookupID := range lookupIDs {
+		if lookupID = strings.TrimSpace(lookupID); lookupID != "" {
+			expected[lookupID] = struct{}{}
+		}
+	}
+	for _, item := range statusItems {
+		delete(expected, externalSMSStatusResponseID(provider, item))
+	}
+	missing := make([]string, 0, len(expected))
+	for _, lookupID := range lookupIDs {
+		lookupID = strings.TrimSpace(lookupID)
+		if _, exists := expected[lookupID]; exists {
+			missing = append(missing, lookupID)
+			delete(expected, lookupID)
+		}
+	}
+	return missing
+}
+
+func (s *SMSCampaignScheduler) markSMSStatusJobFailure(ctx context.Context, job *models.CampaignStatusJob, fetchErr error) error {
+	if provider, err := statusJobProvider(job); err == nil {
+		smsProviderStatusJobFailuresTotal.WithLabelValues(string(provider)).Inc()
+	}
+	now := utils.UTCNow()
+	job.RetryCount++
+	message := fetchErr.Error()
+	job.Error = &message
+	job.UpdatedAt = now
+	if job.RetryCount >= smsStatusJobMaxRetry {
+		job.ExecutedAt = &now
+	} else {
+		job.ExecutedAt = nil
+	}
+	if err := s.jobRepo.Update(ctx, job); err != nil {
+		return err
+	}
+	return fetchErr
+}
+
+func (s *SMSCampaignScheduler) markSMSStatusJobExecuted(ctx context.Context, job *models.CampaignStatusJob, errText *string) error {
+	now := utils.UTCNow()
+	job.ExecutedAt = &now
+	job.Error = errText
+	job.UpdatedAt = now
+	return s.jobRepo.Update(ctx, job)
+}
+
+func (s *SMSCampaignScheduler) publishSMSStatusStatistics(ctx context.Context, processedCampaignID uint) error {
+	stats, err := s.updateProcessedCampaignStats(ctx, processedCampaignID)
+	if err != nil || stats == nil {
+		return err
+	}
+	pc, err := s.pcRepo.ByID(ctx, processedCampaignID)
+	if err != nil {
+		return err
+	}
+	if pc == nil {
+		return fmt.Errorf("processed campaign not found for processed campaign id=%d", processedCampaignID)
+	}
+	if shouldPushCurrentProcessedCampaignStatistics(pc, stats) {
+		return s.botClient.PushCampaignStatistics(ctx, pc.CampaignID, stats)
+	}
+	return nil
+}
+
+func allocateCandooCustomerIDs(ctx context.Context, db *gorm.DB, count int) ([]int64, error) {
+	if count <= 0 {
+		return nil, nil
+	}
+	type sequenceValue struct {
+		Value int64 `gorm:"column:value"`
+	}
+	values := make([]sequenceValue, 0, count)
+	if err := db.WithContext(ctx).
+		Raw("SELECT nextval('candoo_customer_id_seq') AS value FROM generate_series(1, ?)", count).
+		Scan(&values).Error; err != nil {
+		return nil, err
+	}
+	if len(values) != count {
+		return nil, fmt.Errorf("Candoo customer ID allocation returned %d IDs, want %d", len(values), count)
+	}
+	ids := make([]int64, len(values))
+	for i, value := range values {
+		if value.Value <= 0 {
+			return nil, fmt.Errorf("Candoo customer ID allocation returned non-positive ID")
+		}
+		ids[i] = value.Value
+	}
+	return ids, nil
 }
