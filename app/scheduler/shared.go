@@ -57,10 +57,6 @@ const (
 	// reclaim only after a larger hard-crash recovery window.
 	campaignExecutionTimeout    = 8 * time.Hour
 	campaignExecutionStaleAfter = campaignExecutionTimeout + 2*time.Hour
-
-	// Campaigns targeting this tag must not be constrained by audience grades.
-	// The tag predicate itself still applies, and the tag must exist and be active.
-	audienceGradeExemptTagID uint = 17358
 )
 
 type AudiencePhonesResult struct {
@@ -322,18 +318,6 @@ func requireAllTagsActive(campaignID uint, requestedIDs []uint, activeTags []*mo
 	}
 
 	return resolved, nil
-}
-
-func campaignIgnoresAudienceGrades(c dto.BotGetCampaignResponse) bool {
-	tagFound := false
-	for _, rawTagID := range campaignExecutionTags(c) {
-		tagID, err := strconv.ParseUint(strings.TrimSpace(rawTagID), 10, 31)
-		if err != nil || uint(tagID) != audienceGradeExemptTagID {
-			return false
-		}
-		tagFound = true
-	}
-	return tagFound
 }
 
 // requireExactAudienceCount fails closed when targeting cannot satisfy the
@@ -782,12 +766,12 @@ func gradesNeedScoreFilter(grades []string) bool {
 // gradesToScoreConstraint converts a grade set plus resolved percentiles into a
 // NormalizedScoreConstraint. Grade semantics:
 //
-//	A         → score >= p66
-//	B         → p33 <= score <= p66
+//	A         → score > p66
+//	B         → p33 < score <= p66
 //	C         → score <= p33
-//	A+B       → score >= p33
+//	A+B       → score > p33
 //	B+C       → score <= p66
-//	A+C       → score <= p33 OR score >= p66
+//	A+C       → score <= p33 OR score > p66
 //	A+B+C / ∅ → no constraint
 func gradesToScoreConstraint(grades []string, p33, p66 float64) *models.NormalizedScoreConstraint {
 	set := make(map[string]struct{}, len(grades))
@@ -803,19 +787,19 @@ func gradesToScoreConstraint(grades []string, p33, p66 float64) *models.Normaliz
 		return nil
 	case hasA && hasB:
 		v := p33
-		return &models.NormalizedScoreConstraint{GTE: &v}
+		return &models.NormalizedScoreConstraint{GT: &v}
 	case hasB && hasC:
 		v := p66
 		return &models.NormalizedScoreConstraint{LTE: &v}
 	case hasA && hasC:
-		lte, gte := p33, p66
-		return &models.NormalizedScoreConstraint{LTE: &lte, OrGTE: &gte}
+		lte, gt := p33, p66
+		return &models.NormalizedScoreConstraint{LTE: &lte, OrGT: &gt}
 	case hasA:
 		v := p66
-		return &models.NormalizedScoreConstraint{GTE: &v}
+		return &models.NormalizedScoreConstraint{GT: &v}
 	case hasB:
 		lo, hi := p33, p66
-		return &models.NormalizedScoreConstraint{GTE: &lo, LTE: &hi}
+		return &models.NormalizedScoreConstraint{GT: &lo, LTE: &hi}
 	case hasC:
 		v := p33
 		return &models.NormalizedScoreConstraint{LTE: &v}
