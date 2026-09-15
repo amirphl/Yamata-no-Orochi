@@ -4,7 +4,62 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+
+	"github.com/amirphl/Yamata-no-Orochi/models"
 )
+
+func maybeMockSMSProvider(provider SMSProvider, enabled bool) SMSProvider {
+	if !enabled {
+		return provider
+	}
+	return &mockSMSProvider{SMSProvider: provider}
+}
+
+// mockSMSProvider keeps provider selection and durable scheduler paths intact
+// while avoiding both Candoo send and status HTTP calls in mock mode.
+type mockSMSProvider struct {
+	SMSProvider
+}
+
+// Validate intentionally succeeds in mock mode so test/staging campaign runs
+// do not require live Candoo credentials or a production status-code map.
+func (c *mockSMSProvider) Validate() error { return nil }
+
+func (c *mockSMSProvider) SendBatch(_ context.Context, _ string, items []SMSProviderMessage) (SMSProviderSendResult, error) {
+	responses := make([]SMSProviderSendItem, 0, len(items))
+	for _, item := range items {
+		messageID := nextMockMessageID(string(c.Name()))
+		status := "ACCEPTED"
+		code := "200"
+		responses = append(responses, SMSProviderSendItem{
+			TrackingID:          item.TrackingID,
+			ProviderCustomerID:  item.ProviderCustomerID,
+			ProviderMessageID:   &messageID,
+			ProviderStatusCode:  &code,
+			ProviderStatusText:  &status,
+			InternalStatus:      models.SMSSendStatusPending,
+			TrackDeliveryStatus: true,
+		})
+	}
+	return SMSProviderSendResult{Items: responses}, nil
+}
+
+func (c *mockSMSProvider) FetchStatus(_ context.Context, messageIDs []string) (SMSProviderStatusResult, error) {
+	items := make([]SMSProviderStatusItem, 0, len(messageIDs))
+	for _, messageID := range messageIDs {
+		status := "DELIVERED"
+		code := "200"
+		items = append(items, SMSProviderStatusItem{
+			ProviderMessageID:  messageID,
+			ProviderStatusCode: &code,
+			ProviderStatusText: &status,
+			InternalStatus:     models.SMSSendStatusSuccessful,
+			TotalParts:         1,
+			DeliveredParts:     1,
+		})
+	}
+	return SMSProviderStatusResult{Items: items}, nil
+}
 
 const mockSendDescription = "mocked successful send"
 
