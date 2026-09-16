@@ -4319,7 +4319,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a page of tags for an owned bundle before a campaign exists, including materialized Bundle/tag Test totals and CTR. When current score rows exist, their tag and score snapshots are authoritative; otherwise the endpoint falls back to active live tags with null evaluation fields. selected_tag_ids and the selection summary are empty; submit chosen IDs with campaign creation.",
+                "description": "Returns a page of tags for an owned bundle before a campaign exists, including materialized Bundle/tag Test totals and CTR plus global overall CTR. When current score rows exist, their tag and score snapshots are authoritative; otherwise the endpoint falls back to active live tags with null evaluation fields. selected_tag_ids and the selection summary are empty; submit chosen IDs with campaign creation.",
                 "produces": [
                     "application/json"
                 ],
@@ -6076,7 +6076,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Returns a page of tags for an owned campaign, each row's selected state, materialized Bundle/tag Test totals and CTR, nullable per-Campaign Test totals and CTR, the complete selected_tag_ids set across all pages, and the complete selection capacity summary. When the bundle has current score rows, tag names, display titles, personas, capacities, fit scores, and score explanations come from that completed evaluation snapshot. Otherwise active live tags are returned and evaluation fields are null.",
+                "description": "Returns a page of tags for an owned campaign, each row's selected state, materialized Bundle/tag Test CTR, global overall CTR, nullable per-Campaign Test totals and CTR, the complete selected_tag_ids set across all pages, and the complete selection capacity summary. Execution Campaigns default to Test CTR descending, then persona-fit score descending, then database order. When the bundle has current score rows, tag names, display titles, personas, capacities, fit scores, and score explanations come from that completed evaluation snapshot. Otherwise active live tags are returned and evaluation fields are null.",
                 "produces": [
                     "application/json"
                 ],
@@ -8890,6 +8890,13 @@ const docTemplate = `{
                 },
                 "priority": {
                     "type": "integer"
+                },
+                "provider": {
+                    "type": "string",
+                    "enum": [
+                        "payamsms",
+                        "candoo"
+                    ]
                 }
             }
         },
@@ -9560,6 +9567,9 @@ const docTemplate = `{
                 "priority": {
                     "type": "integer"
                 },
+                "provider": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -10151,6 +10161,13 @@ const docTemplate = `{
                 },
                 "priority": {
                     "type": "integer"
+                },
+                "provider": {
+                    "type": "string",
+                    "enum": [
+                        "payamsms",
+                        "candoo"
+                    ]
                 }
             }
         },
@@ -13043,6 +13060,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "overall_avg_ctr": {
+                    "description": "OverallAvgCTR is global across attributable Test and Execution Campaigns\nand remains null when no attributed audience has been delivered.",
                     "type": "number"
                 },
                 "relation_type": {
