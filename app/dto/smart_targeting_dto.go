@@ -45,6 +45,8 @@ type SmartTargetingTagItem struct {
 	ClickCount      *int64   `json:"click_count"`
 	TestCampaignCTR *float64 `json:"test_campaign_ctr"`
 
+	// OverallAvgCTR is global across attributable Test and Execution Campaigns
+	// and remains null when no attributed audience has been delivered.
 	OverallAvgCTR *float64 `json:"overall_avg_ctr"`
 	Selected      bool     `json:"selected"`
 }
