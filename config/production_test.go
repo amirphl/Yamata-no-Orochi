@@ -146,6 +146,63 @@ func TestLoadSchedulerConfigReadsMessageSendMockFlag(t *testing.T) {
 	})
 }
 
+func TestLoadProductionConfigReadsCandooSMSSettings(t *testing.T) {
+	t.Setenv("CANDOO_SMS_ENABLED", "true")
+	t.Setenv("CANDOO_SMS_API_KEY", "candoo-key")
+	t.Setenv("CANDOO_SMS_MESSAGE_TYPE", "2")
+	t.Setenv("CANDOO_SMS_RETRY_COUNT", "4")
+	t.Setenv("CANDOO_SMS_VALIDITY_PERIOD", "300")
+	t.Setenv("CANDOO_SMS_MAX_REQUESTS_PER_SECOND", "7")
+	t.Setenv("CANDOO_SMS_STATUS_MAP", "-1:pending,100:successful,200:unsuccessful")
+
+	cfg := loadCandooSMSConfig()
+	if !cfg.Enabled || cfg.APIKey != "candoo-key" || cfg.MessageType != 2 || cfg.RetryCount != 4 || cfg.ValidityPeriod != 300 || cfg.MaxRequestsPerSecond != 7 || cfg.StatusCodeMap["100"] != "successful" {
+		t.Fatalf("Candoo config = %+v", cfg)
+	}
+}
+
+func TestValidateProductionConfigRejectsInvalidEnabledCandooSettings(t *testing.T) {
+	cfg := &ProductionConfig{CandooSMS: CandooSMSConfig{
+		Enabled:              true,
+		MessageType:          5,
+		RetryCount:           11,
+		ValidityPeriod:       172801,
+		Timeout:              0,
+		MaxRequestsPerSecond: 0,
+		HTTPMaxAttempts:      0,
+	}}
+	err := ValidateProductionConfig(cfg)
+	if err == nil {
+		t.Fatal("invalid Candoo configuration unexpectedly passed validation")
+	}
+	for _, want := range []string{"CANDOO_SMS_API_KEY", "CANDOO_SMS_MESSAGE_TYPE", "CANDOO_SMS_RETRY_COUNT", "CANDOO_SMS_VALIDITY_PERIOD", "CANDOO_SMS_TIMEOUT", "CANDOO_SMS_MAX_REQUESTS_PER_SECOND", "CANDOO_SMS_HTTP_MAX_ATTEMPTS", "CANDOO_SMS_STATUS_MAP"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("validation error %q does not include %q", err, want)
+		}
+	}
+}
+
+func TestValidateProductionConfigRejectsInvalidCandooStatusCodeMap(t *testing.T) {
+	cfg := &ProductionConfig{CandooSMS: CandooSMSConfig{
+		Enabled:              true,
+		APIKey:               "candoo-key",
+		MessageType:          0,
+		RetryCount:           0,
+		ValidityPeriod:       0,
+		Timeout:              time.Second,
+		MaxRequestsPerSecond: 1,
+		HTTPMaxAttempts:      1,
+		StatusCodeMap: map[string]string{
+			"not-a-code": "delivered",
+			"-1":         "pending",
+		},
+	}}
+	err := ValidateProductionConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "CANDOO_SMS_STATUS_MAP") {
+		t.Fatalf("validation error = %v, want invalid CANDOO_SMS_STATUS_MAP", err)
+	}
+}
+
 func TestValidateCryptoConfigAllowsDisabledCryptoWithoutProviderCredentials(t *testing.T) {
 	if errors := validateCryptoConfig(CryptoConfig{Enabled: false}); len(errors) != 0 {
 		t.Fatalf("validateCryptoConfig() errors = %v, want none", errors)
@@ -160,5 +217,39 @@ func TestValidateCryptoConfigRequiresOxapayKeyWhenCryptoEnabled(t *testing.T) {
 	})
 	if len(errors) != 1 || !strings.Contains(errors[0], "OXA_API_KEY is required") {
 		t.Fatalf("validateCryptoConfig() errors = %v, want missing OXA_API_KEY error", errors)
+	}
+}
+
+func TestValidateExternalShortLinkConfig(t *testing.T) {
+	valid := ExternalShortLinkConfig{
+		Enabled:             true,
+		BaseURL:             "https://links.example.com",
+		APIToken:            strings.Repeat("x", 32),
+		RequestTimeout:      30 * time.Second,
+		MappingSyncInterval: time.Minute,
+		ClickSyncInterval:   5 * time.Minute,
+		MappingBatchSize:    5000,
+		ClickPageSize:       10000,
+		MaxClickPagesPerRun: 100,
+	}
+	if errors := validateExternalShortLinkConfig(valid); len(errors) != 0 {
+		t.Fatalf("valid external short-link config errors = %v", errors)
+	}
+
+	invalid := valid
+	invalid.BaseURL = "http://links.example.com"
+	invalid.APIToken = "short"
+	errors := validateExternalShortLinkConfig(invalid)
+	if len(errors) != 2 {
+		t.Fatalf("invalid external short-link config errors = %v, want HTTPS and token errors", errors)
+	}
+	if errors := validateExternalShortLinkConfig(ExternalShortLinkConfig{}); len(errors) != 0 {
+		t.Fatalf("disabled external short-link config errors = %v", errors)
+	}
+
+	invalidOrigin := valid
+	invalidOrigin.BaseURL = "https://links.example.com/api?token=leak"
+	if errors := validateExternalShortLinkConfig(invalidOrigin); len(errors) != 1 || !strings.Contains(errors[0], "origin URL") {
+		t.Fatalf("invalid origin errors = %v, want one origin URL error", errors)
 	}
 }
