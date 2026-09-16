@@ -427,6 +427,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 	bundleRepo := repository.NewBundleRepository(db)
 	shortLinkRepo := repository.NewShortLinkRepository(db)
 	shortLinkClickRepo := repository.NewShortLinkClickRepository(db)
+	externalShortLinkSyncRepo := repository.NewExternalShortLinkSyncRepository(db)
 	tagTestPerformanceRepo := repository.NewTagTestPerformanceRepository(db)
 	segmentPriceFactorRepo := repository.NewSegmentPriceFactorRepository(db)
 	platformBasePriceRepo := repository.NewPlatformBasePriceRepository(db)
@@ -444,6 +445,16 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 
 	// Initialize services
 	notificationService := initializeNotificationService(cfg)
+
+	var externalShortLinkClient *scheduler.HTTPExternalShortLinkClient
+	var shortLinkPublishers []businessflow.ShortLinkMappingPublisher
+	if cfg.ExternalShortLink.Enabled {
+		externalShortLinkClient, err = scheduler.NewExternalShortLinkClient(cfg.ExternalShortLink)
+		if err != nil {
+			return nil, fmt.Errorf("initialize external short-link client: %w", err)
+		}
+		shortLinkPublishers = append(shortLinkPublishers, externalShortLinkClient)
+	}
 
 	// Captcha service for admin
 	captchaSvc, err := services.NewCaptchaServiceRotate(2*time.Minute, 15, 300)
@@ -531,10 +542,12 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cfg.Cache,
 		cfg.Bot,
 		cfg.PayamSMS,
+		cfg.CandooSMS,
 		cfg.Bale,
 		cfg.Rubika,
 		cfg.Splus,
 		cfg.IRHTTPSProxy,
+		shortLinkPublishers...,
 	)
 	smartTargetingFlow := businessflow.NewSmartTargetingFlow(
 		campaignRepo,
@@ -683,7 +696,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		db,
 		rc,
 	)
-	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db)
+	botShortLinkFlow := businessflow.NewBotShortLinkFlow(shortLinkRepo, db, shortLinkPublishers...)
 
 	ticketFlow := businessflow.NewTicketFlow(customerRepo, ticketRepo, notificationService, cfg.Admin)
 	multimediaFlow := businessflow.NewMultimediaFlow(customerRepo, multimediaRepo)
@@ -797,11 +810,33 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 		cfg.Server,
 	)
 
+	if cfg.ExternalShortLink.Enabled {
+		mappingScheduler := scheduler.NewExternalShortLinkMappingScheduler(
+			shortLinkRepo,
+			externalShortLinkClient,
+			log.Default(),
+			cfg.ExternalShortLink.MappingSyncInterval,
+			cfg.ExternalShortLink.MappingBatchSize,
+		)
+		stopFuncs = append(stopFuncs, mappingScheduler.Start(context.Background()))
+
+		clickScheduler := scheduler.NewExternalShortLinkClickScheduler(
+			externalShortLinkSyncRepo,
+			externalShortLinkClient,
+			log.Default(),
+			cfg.ExternalShortLink.ClickSyncInterval,
+			cfg.ExternalShortLink.ClickPageSize,
+			cfg.ExternalShortLink.MaxClickPagesPerRun,
+		)
+		stopFuncs = append(stopFuncs, clickScheduler.Start(context.Background()))
+	}
+
 	if cfg.Scheduler.CampaignExecutionEnabled {
 		// Start SMS campaign scheduler.
 		smsSched := scheduler.NewCampaignScheduler(
 			audienceProfileRepo,
 			tagRepo,
+			lineNumberRepo,
 			sentSMSRepo,
 			processedCampaignRepo,
 			campaignStatusJobRepo,
@@ -812,6 +847,7 @@ func initializeApplication(cfg *config.ProductionConfig) (*Application, error) {
 			log.Default(),
 			cfg.Scheduler.CampaignExecutionInterval,
 			cfg.PayamSMS,
+			cfg.CandooSMS,
 			cfg.Bot,
 			cfg.Admin,
 			cfg.Scheduler.MessageSendMockEnabled,
