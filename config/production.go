@@ -4,11 +4,13 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/amirphl/Yamata-no-Orochi/models"
 	"github.com/amirphl/Yamata-no-Orochi/utils"
 	"github.com/google/uuid"
 )
@@ -30,11 +32,13 @@ type ProductionConfig struct {
 	Admin              AdminConfig              `json:"admin"`
 	System             SystemConfig             `json:"system"`
 	PayamSMS           PayamSMSConfig           `json:"payam_sms"`
+	CandooSMS          CandooSMSConfig          `json:"candoo_sms"`
 	Bale               BaleConfig               `json:"bale"`
 	Rubika             RubikaConfig             `json:"rubika"`
 	Splus              SplusConfig              `json:"splus"`
 	Bot                BotConfig                `json:"bot"`
 	Scheduler          SchedulerConfig          `json:"scheduler"`
+	ExternalShortLink  ExternalShortLinkConfig  `json:"external_short_link"`
 	Crypto             CryptoConfig             `json:"crypto"`
 	Message            MessageConfig            `json:"message"`
 	SmartTagEvaluation SmartTagEvaluationConfig `json:"smart_tag_evaluation"`
@@ -380,6 +384,40 @@ type PayamSMSConfig struct {
 	RootAccessToken string `json:"root_access_token"`
 }
 
+// CandooSMSConfig holds the campaign-scheduler settings for Candoo. It is
+// separate from SMSConfig because a sender line chooses its campaign provider
+// while OTP/notification routing remains globally configured.
+type CandooSMSConfig struct {
+	Enabled              bool          `json:"enabled"`
+	BaseURL              string        `json:"base_url"`
+	APIKey               string        `json:"api_key"`
+	MessageType          int           `json:"message_type"`
+	RetryCount           int           `json:"retry_count"`
+	ValidityPeriod       int           `json:"validity_period"`
+	Timeout              time.Duration `json:"timeout"`
+	MaxRequestsPerSecond int           `json:"max_requests_per_second"`
+	HTTPMaxAttempts      int           `json:"http_max_attempts"`
+	// StatusCodeMap maps Candoo's integer delivery states to the internal SMS
+	// model. The vendor's status-code definitions must be supplied by the
+	// deployment, for example: "-1:pending,100:successful,200:unsuccessful".
+	StatusCodeMap map[string]string `json:"status_code_map"`
+}
+
+func loadCandooSMSConfig() CandooSMSConfig {
+	return CandooSMSConfig{
+		Enabled:              getEnvBool("CANDOO_SMS_ENABLED", false),
+		BaseURL:              getEnvString("CANDOO_SMS_BASE_URL", "https://api.candoosms.com"),
+		APIKey:               getEnvString("CANDOO_SMS_API_KEY", ""),
+		MessageType:          getEnvInt("CANDOO_SMS_MESSAGE_TYPE", 0),
+		RetryCount:           getEnvInt("CANDOO_SMS_RETRY_COUNT", 0),
+		ValidityPeriod:       getEnvInt("CANDOO_SMS_VALIDITY_PERIOD", 0),
+		Timeout:              getEnvDuration("CANDOO_SMS_TIMEOUT", 30*time.Second),
+		MaxRequestsPerSecond: getEnvInt("CANDOO_SMS_MAX_REQUESTS_PER_SECOND", 1),
+		HTTPMaxAttempts:      getEnvInt("CANDOO_SMS_HTTP_MAX_ATTEMPTS", 3),
+		StatusCodeMap:        getEnvStringMap("CANDOO_SMS_STATUS_MAP", map[string]string{}),
+	}
+}
+
 // BaleConfig holds credentials for Bale Safir messaging API.
 type BaleConfig struct {
 	APIAccessKey string `json:"api_access_key"`
@@ -410,6 +448,23 @@ type SchedulerConfig struct {
 	TagTestPerformanceSchedulerEnabled         bool          `json:"tag_test_performance_scheduler_enabled"`
 	TagTestPerformanceSchedulerInterval        time.Duration `json:"tag_test_performance_scheduler_interval"`
 	TagTestPerformanceSchedulerBatchSize       int           `json:"tag_test_performance_scheduler_batch_size"`
+}
+
+// ExternalShortLinkConfig controls outbound mapping publication and inbound click synchronization.
+type ExternalShortLinkConfig struct {
+	Enabled             bool          `json:"enabled"`
+	BaseURL             string        `json:"base_url"`
+	APIToken            string        `json:"api_token"`
+	ClientCertFile      string        `json:"client_cert_file"`
+	ClientKeyFile       string        `json:"client_key_file"`
+	CAFile              string        `json:"ca_file"`
+	AllowInsecureHTTP   bool          `json:"allow_insecure_http"`
+	RequestTimeout      time.Duration `json:"request_timeout"`
+	MappingSyncInterval time.Duration `json:"mapping_sync_interval"`
+	ClickSyncInterval   time.Duration `json:"click_sync_interval"`
+	MappingBatchSize    int           `json:"mapping_batch_size"`
+	ClickPageSize       int           `json:"click_page_size"`
+	MaxClickPagesPerRun int           `json:"max_click_pages_per_run"`
 }
 
 func loadSchedulerConfig() SchedulerConfig {
@@ -711,6 +766,7 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			GrantType:       getEnvString("PAYAM_SMS_GRANT_TYPE", "password"),
 			RootAccessToken: getEnvString("PAYAM_SMS_ROOT_ACCESS_TOKEN", ""),
 		},
+		CandooSMS: loadCandooSMSConfig(),
 		Bale: BaleConfig{
 			APIAccessKey: getEnvString("BALE_API_ACCESS_KEY", ""),
 			Provider:     getEnvString("BALE_PROVIDER", "najva"),
@@ -731,6 +787,21 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			APIDomain: getEnvString("BOT_API_DOMAIN", ""),
 		},
 		Scheduler: loadSchedulerConfig(),
+		ExternalShortLink: ExternalShortLinkConfig{
+			Enabled:             getEnvBool("EXTERNAL_SHORTLINK_ENABLED", false),
+			BaseURL:             getEnvString("EXTERNAL_SHORTLINK_BASE_URL", ""),
+			APIToken:            getEnvString("EXTERNAL_SHORTLINK_API_TOKEN", ""),
+			ClientCertFile:      getEnvString("EXTERNAL_SHORTLINK_CLIENT_CERT_FILE", ""),
+			ClientKeyFile:       getEnvString("EXTERNAL_SHORTLINK_CLIENT_KEY_FILE", ""),
+			CAFile:              getEnvString("EXTERNAL_SHORTLINK_CA_FILE", ""),
+			AllowInsecureHTTP:   getEnvBool("EXTERNAL_SHORTLINK_ALLOW_INSECURE_HTTP", false),
+			RequestTimeout:      getEnvDuration("EXTERNAL_SHORTLINK_REQUEST_TIMEOUT", 30*time.Second),
+			MappingSyncInterval: getEnvDuration("EXTERNAL_SHORTLINK_MAPPING_SYNC_INTERVAL", time.Minute),
+			ClickSyncInterval:   getEnvDuration("EXTERNAL_SHORTLINK_CLICK_SYNC_INTERVAL", 5*time.Minute),
+			MappingBatchSize:    getEnvInt("EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE", 5000),
+			ClickPageSize:       getEnvInt("EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE", 10000),
+			MaxClickPagesPerRun: getEnvInt("EXTERNAL_SHORTLINK_MAX_CLICK_PAGES_PER_RUN", 1000),
+		},
 		Crypto: CryptoConfig{
 			Enabled:         getEnvBool("CRYPTO_ENABLED", true),
 			DefaultPlatform: getEnvString("CRYPTO_DEFAULT_PLATFORM", "oxapay"),
@@ -1045,6 +1116,50 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 			errors = append(errors, "SMS_SOURCE_NUMBER is required for SMS provider")
 		}
 	}
+	if cfg.CandooSMS.Enabled {
+		if strings.TrimSpace(cfg.CandooSMS.APIKey) == "" {
+			errors = append(errors, "CANDOO_SMS_API_KEY is required when CANDOO_SMS_ENABLED is true")
+		}
+		if cfg.CandooSMS.MessageType < 0 || cfg.CandooSMS.MessageType > 4 {
+			errors = append(errors, "CANDOO_SMS_MESSAGE_TYPE must be between 0 and 4")
+		}
+		if cfg.CandooSMS.RetryCount < 0 || cfg.CandooSMS.RetryCount > 10 {
+			errors = append(errors, "CANDOO_SMS_RETRY_COUNT must be between 0 and 10")
+		}
+		if cfg.CandooSMS.ValidityPeriod < 0 || cfg.CandooSMS.ValidityPeriod > 172800 {
+			errors = append(errors, "CANDOO_SMS_VALIDITY_PERIOD must be between 0 and 172800")
+		}
+		if cfg.CandooSMS.Timeout <= 0 {
+			errors = append(errors, "CANDOO_SMS_TIMEOUT must be positive")
+		}
+		if cfg.CandooSMS.MaxRequestsPerSecond <= 0 {
+			errors = append(errors, "CANDOO_SMS_MAX_REQUESTS_PER_SECOND must be positive")
+		}
+		if cfg.CandooSMS.HTTPMaxAttempts <= 0 {
+			errors = append(errors, "CANDOO_SMS_HTTP_MAX_ATTEMPTS must be positive")
+		}
+		if len(cfg.CandooSMS.StatusCodeMap) == 0 {
+			errors = append(errors, "CANDOO_SMS_STATUS_MAP is required when CANDOO_SMS_ENABLED is true")
+		} else {
+			hasTerminalStatus := false
+			for code, mappedStatus := range cfg.CandooSMS.StatusCodeMap {
+				if _, err := strconv.Atoi(strings.TrimSpace(code)); err != nil {
+					errors = append(errors, fmt.Sprintf("CANDOO_SMS_STATUS_MAP has a non-integer Candoo status code %q", code))
+					continue
+				}
+				switch models.SMSSendStatus(strings.ToLower(strings.TrimSpace(mappedStatus))) {
+				case models.SMSSendStatusPending:
+				case models.SMSSendStatusSuccessful, models.SMSSendStatusUnsuccessful:
+					hasTerminalStatus = true
+				default:
+					errors = append(errors, fmt.Sprintf("CANDOO_SMS_STATUS_MAP maps code %q to invalid internal status %q", code, mappedStatus))
+				}
+			}
+			if !hasTerminalStatus {
+				errors = append(errors, "CANDOO_SMS_STATUS_MAP must include at least one successful or unsuccessful terminal mapping")
+			}
+		}
+	}
 
 	// Validate email configuration if enabled
 	if cfg.Email.Host != "" {
@@ -1099,6 +1214,8 @@ func ValidateProductionConfig(cfg *ProductionConfig) error {
 			errors = append(errors, "TAG_TEST_PERFORMANCE_SCHEDULER_BATCH_SIZE must be positive")
 		}
 	}
+
+	errors = append(errors, validateExternalShortLinkConfig(cfg.ExternalShortLink)...)
 
 	if cfg.SmartTagEvaluation.Enabled {
 		if cfg.SmartTagEvaluation.OpenAI.Model == "" {
@@ -1205,6 +1322,43 @@ func validateCryptoConfig(cfg CryptoConfig) []string {
 		if cfg.Oxapay.APIKey == "" {
 			errors = append(errors, "OXA_API_KEY is required when oxapay is default platform")
 		}
+	}
+	return errors
+}
+
+func validateExternalShortLinkConfig(cfg ExternalShortLinkConfig) []string {
+	if !cfg.Enabled {
+		return nil
+	}
+	var errors []string
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		errors = append(errors, "EXTERNAL_SHORTLINK_BASE_URL is required when external short links are enabled")
+	} else {
+		parsed, err := url.Parse(baseURL)
+		validScheme := err == nil && (parsed.Scheme == "https" || (cfg.AllowInsecureHTTP && parsed.Scheme == "http"))
+		if !validScheme || parsed.Hostname() == "" || parsed.User != nil ||
+			(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+			errors = append(errors, "EXTERNAL_SHORTLINK_BASE_URL must be an origin URL using HTTPS")
+		}
+	}
+	if len(cfg.APIToken) < 32 || strings.TrimSpace(cfg.APIToken) != cfg.APIToken || strings.ContainsAny(cfg.APIToken, " \t\r\n") {
+		errors = append(errors, "EXTERNAL_SHORTLINK_API_TOKEN must contain at least 32 characters")
+	}
+	if (cfg.ClientCertFile == "") != (cfg.ClientKeyFile == "") {
+		errors = append(errors, "EXTERNAL_SHORTLINK_CLIENT_CERT_FILE and CLIENT_KEY_FILE must be configured together")
+	}
+	if cfg.RequestTimeout <= 0 || cfg.MappingSyncInterval <= 0 || cfg.ClickSyncInterval <= 0 {
+		errors = append(errors, "external short-link timeouts and intervals must be positive")
+	}
+	if cfg.MappingBatchSize <= 0 || cfg.MappingBatchSize > 10000 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE must be between 1 and 10000")
+	}
+	if cfg.ClickPageSize <= 0 || cfg.ClickPageSize > 10000 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE must be between 1 and 10000")
+	}
+	if cfg.MaxClickPagesPerRun <= 0 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_MAX_CLICK_PAGES_PER_RUN must be positive")
 	}
 	return errors
 }
