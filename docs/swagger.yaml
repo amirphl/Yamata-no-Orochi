@@ -220,6 +220,11 @@ definitions:
         type: number
       priority:
         type: integer
+      provider:
+        enum:
+        - payamsms
+        - candoo
+        type: string
     required:
     - line_number
     - price_factor
@@ -667,6 +672,8 @@ definitions:
         type: number
       priority:
         type: integer
+      provider:
+        type: string
       updated_at:
         type: string
       uuid:
@@ -1059,6 +1066,11 @@ definitions:
         type: boolean
       priority:
         type: integer
+      provider:
+        enum:
+        - payamsms
+        - candoo
+        type: string
     required:
     - id
     type: object
@@ -3012,6 +3024,9 @@ definitions:
       fit_level:
         type: string
       overall_avg_ctr:
+        description: |-
+          OverallAvgCTR is global across attributable Test and Execution Campaigns
+          and remains null when no attributed audience has been delivered.
         type: number
       relation_type:
         type: string
@@ -6175,10 +6190,11 @@ paths:
   /api/v1/bundles/{id}/smart-targeting/tags:
     get:
       description: Returns a page of tags for an owned bundle before a campaign exists,
-        including materialized Bundle/tag Test totals and CTR. When current score
-        rows exist, their tag and score snapshots are authoritative; otherwise the
-        endpoint falls back to active live tags with null evaluation fields. selected_tag_ids
-        and the selection summary are empty; submit chosen IDs with campaign creation.
+        including materialized Bundle/tag Test totals and CTR plus global overall
+        CTR. When current score rows exist, their tag and score snapshots are authoritative;
+        otherwise the endpoint falls back to active live tags with null evaluation
+        fields. selected_tag_ids and the selection summary are empty; submit chosen
+        IDs with campaign creation.
       parameters:
       - description: Owned bundle ID
         in: path
@@ -6989,12 +7005,13 @@ paths:
   /api/v1/campaigns/{uuid}/smart-targeting/tags:
     get:
       description: Returns a page of tags for an owned campaign, each row's selected
-        state, materialized Bundle/tag Test totals and CTR, nullable per-Campaign
+        state, materialized Bundle/tag Test CTR, global overall CTR, nullable per-Campaign
         Test totals and CTR, the complete selected_tag_ids set across all pages, and
-        the complete selection capacity summary. When the bundle has current score
-        rows, tag names, display titles, personas, capacities, fit scores, and score
-        explanations come from that completed evaluation snapshot. Otherwise active
-        live tags are returned and evaluation fields are null.
+        the complete selection capacity summary. Execution Campaigns default to Test
+        CTR descending, then persona-fit score descending, then database order. When
+        the bundle has current score rows, tag names, display titles, personas, capacities,
+        fit scores, and score explanations come from that completed evaluation snapshot.
+        Otherwise active live tags are returned and evaluation fields are null.
       parameters:
       - description: Owned campaign UUID
         format: uuid
