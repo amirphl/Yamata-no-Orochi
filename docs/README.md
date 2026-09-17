@@ -45,6 +45,7 @@ Use these files when documentation and implementation differ:
 | [Multi-server deployment](MULTI_SERVER_DEPLOYMENT.md) | Supported one-stack-per-host model and promotion/cutover guidance |
 | [Selective PostgreSQL backup/restore](SELECTIVE_POSTGRES_BACKUP_RESTORE_README.md) | Four-table local dataset export with phone-number anonymization |
 | [Smart Targeting API](smart-targeting-api.md) | Tag selection, exact capacity, Test sampling, and Execution ordering |
+| [Normal-targeting campaign diagnostics](normal-targeting-campaign-diagnostics/) | Reporting and validation queries for standard campaign selection and delivery |
 | [Bale integration](bale.md) | Implemented Najva v2/Safir v3 client, batching, uploads, status, and retries |
 | [Migration guide](../migrations/README.md) | Current schema head, migration groups, execution, rollback, and known gaps |
 | [Pitch and architecture index](../pitch/README.md) | Board-facing and technical Mermaid documents |
