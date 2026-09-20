@@ -128,8 +128,9 @@ func selectAndReserveExactSmartTargetingCandidates(
 			if campaign.SampleSizePerTag == nil || *campaign.SampleSizePerTag == 0 || *campaign.SampleSizePerTag > math.MaxInt64 {
 				return fmt.Errorf("Smart Targeting Test campaign %d has invalid sample_size_per_tag", campaign.ID)
 			}
-			// Test candidates are shuffled independently inside each satisfied tag;
-			// score classes restrict eligibility but do not prioritize rows.
+			// Test candidates are read independently for each satisfied tag without
+			// explicit ordering; score classes only restrict eligibility. Keep the
+			// legacy persisted label for compatibility with the existing constraint.
 			selectionMethod = "random_per_tag"
 			bounds, boundsErr := audienceRepo.CalculateScoreBounds(txCtx, query)
 			if boundsErr != nil {
@@ -249,7 +250,6 @@ func smartTargetingSchedulerAudienceQuery(campaign dto.BotGetCampaignResponse, b
 	}
 	if isSmartTargetingTestCampaign(campaign) {
 		query.ApplyBundleAudienceExclusions = true
-		query.SamplingSeed = campaign.SmartTargetingTestSamplingInputHash
 	}
 	return query
 }
