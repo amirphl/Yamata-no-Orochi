@@ -5,9 +5,6 @@
 
 \echo 'Starting database rollback...'
 
-\echo 'Running 0139_create_indexed_audience_tag_sampling_down.sql...'
-\i migrations/0139_create_indexed_audience_tag_sampling_down.sql
-
 \echo 'Running 0138_extend_tag_performance_to_execution_down.sql...'
 \i migrations/0138_extend_tag_performance_to_execution_down.sql
 
