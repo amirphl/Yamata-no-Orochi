@@ -425,8 +425,5 @@
 \echo 'Running 0138_extend_tag_performance_to_execution.sql...'
 \i migrations/0138_extend_tag_performance_to_execution.sql
 
-\echo 'Running 0139_create_indexed_audience_tag_sampling.sql...'
-\i migrations/0139_create_indexed_audience_tag_sampling.sql
-
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
