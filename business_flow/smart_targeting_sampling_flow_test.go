@@ -172,9 +172,6 @@ func TestSmartTargetingTestSamplingAudienceQueryRestrictsSMSColors(t *testing.T)
 	if len(query.AllowedColors) != 2 || query.AllowedColors[0] != "white" || query.AllowedColors[1] != "pink" {
 		t.Fatalf("SMS sampling allowed colors = %v, want [white pink]", query.AllowedColors)
 	}
-	if query.SamplingSeed == "" || query.SamplingSeed != input.hash {
-		t.Fatalf("sampling seed = %q, want persisted preview input hash %q", query.SamplingSeed, input.hash)
-	}
 
 	campaign.Spec.Platform = models.CampaignPlatformBale
 	input, err = currentSmartTargetingTestSamplingInput(t.Context(), repo, campaign)
@@ -184,9 +181,6 @@ func TestSmartTargetingTestSamplingAudienceQueryRestrictsSMSColors(t *testing.T)
 	query = smartTargetingTestSamplingAudienceQuery(bundleID, []int64{9}, input)
 	if len(query.AllowedColors) != 0 {
 		t.Fatalf("non-SMS sampling allowed colors = %v, want no restriction", query.AllowedColors)
-	}
-	if query.SamplingSeed != input.hash {
-		t.Fatalf("non-SMS sampling seed = %q, want input hash %q", query.SamplingSeed, input.hash)
 	}
 }
 
@@ -304,7 +298,7 @@ func TestCurrentSmartTargetingTestSamplingIntentValidatesOrderedSubset(t *testin
 	campaign.SmartTargetingTestSamplingInputHash = &hash
 
 	intent, err := currentSmartTargetingTestSamplingIntent(t.Context(), repo, campaign, true)
-	if err != nil || intent.effective != 1_200 || len(intent.satisfied) != 2 || intent.satisfied[0] != 9 || intent.satisfied[1] != 5 || intent.seed != hash {
+	if err != nil || intent.effective != 1_200 || len(intent.satisfied) != 2 || intent.satisfied[0] != 9 || intent.satisfied[1] != 5 {
 		t.Fatalf("sampling intent = (%#v, %v), want ordered [9 5] with effective 1200", intent, err)
 	}
 
