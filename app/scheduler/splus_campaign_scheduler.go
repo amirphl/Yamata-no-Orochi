@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strconv"
@@ -109,7 +108,7 @@ func NewSplusCampaignScheduler(
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
-		s.logger = log.New(io.Discard, "splus_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		s.logger = log.New(log.Default().Writer(), "splus_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
 		s.logger.Printf("Splus scheduler: failed to initialize file logger: %v", err)
 	}
 	return s
