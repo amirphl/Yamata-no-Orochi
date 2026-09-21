@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -121,7 +120,7 @@ func NewCampaignScheduler(
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
-		s.logger = log.New(io.Discard, "sms_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		s.logger = log.New(log.Default().Writer(), "sms_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
 		s.logger.Printf("SMS scheduler: failed to initialize file logger: %v", err)
 	}
 
