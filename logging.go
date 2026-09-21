@@ -54,7 +54,10 @@ func setupLogging(cfg config.LoggingConfig) (io.Closer, error) {
 		writers = append(writers, os.Stdout)
 	}
 
-	if sentryWriter := observability.SentryLogWriter(cfg.Level); sentryWriter != nil {
+	// Sentry is an additional destination for every application log entry. Its
+	// threshold is deliberately independent of LOG_LEVEL, which controls the
+	// application's normal log destinations.
+	if sentryWriter := observability.SentryLogWriter("trace"); sentryWriter != nil {
 		writers = append(writers, sentryWriter)
 	}
 
