@@ -198,10 +198,11 @@ func initSchedulerLogger(name string) (*log.Logger, *os.File, error) {
 			continue
 		}
 
-		// BUG FIX 5: io.MultiWriter(f) with a single argument is a no-op wrapper and,
-		// critically, omits os.Stdout — so log lines were silently dropped from the
-		// console/container output. Fixed by fanning out to both Stdout and the file.
-		mw := io.MultiWriter(os.Stdout, f)
+		// Keep a scheduler-specific file, but also use the application's configured
+		// log writer. The latter includes Sentry when it is enabled, so scheduler
+		// failures are reported consistently with the rest of the application.
+		// It also preserves the configured stdout/file logging destinations.
+		mw := io.MultiWriter(log.Default().Writer(), f)
 		l := log.New(mw, fmt.Sprintf("%s ", clean), log.LstdFlags|log.Lmicroseconds|log.LUTC)
 		return l, f, nil
 	}
