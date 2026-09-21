@@ -318,7 +318,7 @@ func NewRubikaCampaignScheduler(
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
-		s.logger = log.New(io.Discard, "rubika_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		s.logger = log.New(log.Default().Writer(), "rubika_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
 		s.logger.Printf("rubika scheduler: failed to initialize file logger: %v", err)
 	}
 	return s
