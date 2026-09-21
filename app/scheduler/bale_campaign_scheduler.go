@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strconv"
@@ -106,7 +105,7 @@ func NewBaleCampaignScheduler(
 	}
 
 	if err := s.initSchedulerLogger(); err != nil {
-		s.logger = log.New(io.Discard, "bale_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
+		s.logger = log.New(log.Default().Writer(), "bale_scheduler ", log.LstdFlags|log.Lmicroseconds|log.LUTC)
 		s.logger.Printf("Bale scheduler: failed to initialize file logger: %v", err)
 	}
 	return s
