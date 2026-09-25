@@ -18,6 +18,9 @@ import (
 	"github.com/amirphl/Yamata-no-Orochi/models"
 )
 
+const maxExternalMappingBodyBytes = 12 * 1024 * 1024
+const maxExternalMappingBatchSize = 500
+
 type ExternalShortLinkClickPage struct {
 	Clicks      []models.ExternalShortLinkClick `json:"clicks"`
 	NextAfterID int64                           `json:"next_after_id"`
@@ -95,15 +98,23 @@ func (c *HTTPExternalShortLinkClient) request(ctx context.Context, method, path 
 		if err != nil {
 			return fmt.Errorf("marshal external short-link request: %w", err)
 		}
-		reader = bytes.NewReader(payload)
+		return c.requestPayload(ctx, method, path, payload, out)
 	}
+	return c.requestReader(ctx, method, path, reader, false, out)
+}
+
+func (c *HTTPExternalShortLinkClient) requestPayload(ctx context.Context, method, path string, payload []byte, out any) error {
+	return c.requestReader(ctx, method, path, bytes.NewReader(payload), true, out)
+}
+
+func (c *HTTPExternalShortLinkClient) requestReader(ctx context.Context, method, path string, reader io.Reader, hasJSONBody bool, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.endpoint(path), reader)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
-	if body != nil {
+	if hasJSONBody {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	resp, err := c.client.Do(req)
@@ -149,46 +160,73 @@ func (c *HTTPExternalShortLinkClient) UploadMappings(ctx context.Context, links 
 		return nil
 	}
 	batchSize := c.mappingBatchSize
-	if batchSize <= 0 || batchSize > 10000 {
-		batchSize = 5000
+	if batchSize <= 0 || batchSize > maxExternalMappingBatchSize {
+		batchSize = maxExternalMappingBatchSize
 	}
 	for start := 0; start < len(links); start += batchSize {
 		end := min(start+batchSize, len(links))
-		payload := externalMappingUpload{Links: make([]externalMapping, 0, end-start)}
-		for _, link := range links[start:end] {
-			if link == nil {
-				return fmt.Errorf("external mapping at offset %d is nil", start)
+		payload, encoded, err := externalMappingPayload(links[start:end])
+		if err != nil {
+			return fmt.Errorf("build external mapping chunk [%d,%d): %w", start, end, err)
+		}
+		for len(encoded) > maxExternalMappingBodyBytes && len(payload.Links) > 1 {
+			end = start + (end-start+1)/2
+			payload, encoded, err = externalMappingPayload(links[start:end])
+			if err != nil {
+				return fmt.Errorf("build external mapping chunk [%d,%d): %w", start, end, err)
 			}
-			mapping := externalMapping{
-				Code:         link.UID,
-				LongURL:      link.LongLink,
-				ShortURL:     link.ShortLink,
-				SourceLinkID: link.ID,
-				CampaignID:   link.CampaignID,
-				ClientID:     link.ClientID,
-				ScenarioID:   link.ScenarioID,
-				ScenarioName: link.ScenarioName,
-				PhoneNumber:  link.PhoneNumber,
-			}
-			if !link.CreatedAt.IsZero() {
-				mapping.SourceCreatedAt = link.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
-			}
-			if !link.UpdatedAt.IsZero() {
-				mapping.SourceUpdatedAt = link.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
-			}
-			payload.Links = append(payload.Links, mapping)
+		}
+		if len(encoded) > maxExternalMappingBodyBytes {
+			return fmt.Errorf("external mapping at offset %d exceeds the %d-byte request limit", start, maxExternalMappingBodyBytes)
 		}
 		var response struct {
 			Persisted int `json:"persisted"`
 		}
-		if err := c.request(ctx, http.MethodPost, "/api/v1/links/batch", payload, &response); err != nil {
+		if err := c.requestPayload(ctx, http.MethodPost, "/api/v1/links/batch", encoded, &response); err != nil {
 			return fmt.Errorf("upload mapping chunk [%d,%d): %w", start, end, err)
 		}
 		if response.Persisted != len(payload.Links) {
 			return fmt.Errorf("upload mapping chunk [%d,%d): acknowledged %d of %d mappings", start, end, response.Persisted, len(payload.Links))
 		}
+		batchSize = end - start
 	}
 	return nil
+}
+
+func externalMappingPayload(links []*models.ShortLink) (externalMappingUpload, []byte, error) {
+	payload := externalMappingUpload{Links: make([]externalMapping, 0, len(links))}
+	for offset, link := range links {
+		if link == nil {
+			return externalMappingUpload{}, nil, fmt.Errorf("external mapping at offset %d is nil", offset)
+		}
+		payload.Links = append(payload.Links, externalMappingFromShortLink(link))
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return externalMappingUpload{}, nil, fmt.Errorf("marshal external short-link request: %w", err)
+	}
+	return payload, encoded, nil
+}
+
+func externalMappingFromShortLink(link *models.ShortLink) externalMapping {
+	mapping := externalMapping{
+		Code:         link.UID,
+		LongURL:      link.LongLink,
+		ShortURL:     link.ShortLink,
+		SourceLinkID: link.ID,
+		CampaignID:   link.CampaignID,
+		ClientID:     link.ClientID,
+		ScenarioID:   link.ScenarioID,
+		ScenarioName: link.ScenarioName,
+		PhoneNumber:  link.PhoneNumber,
+	}
+	if !link.CreatedAt.IsZero() {
+		mapping.SourceCreatedAt = link.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	}
+	if !link.UpdatedAt.IsZero() {
+		mapping.SourceUpdatedAt = link.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	}
+	return mapping
 }
 
 func (c *HTTPExternalShortLinkClient) FetchClicks(ctx context.Context, afterID int64, limit int) (*ExternalShortLinkClickPage, error) {
