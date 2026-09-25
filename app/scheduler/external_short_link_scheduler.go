@@ -11,6 +11,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+const defaultExternalShortLinkClickPageSize = 1_000
+
 var (
 	externalMappingLastSuccess = prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: "yamata_external_shortlink_last_mapping_upload_timestamp_seconds",
@@ -56,7 +58,7 @@ func NewExternalShortLinkMappingScheduler(
 		interval = time.Minute
 	}
 	if batchSize <= 0 {
-		batchSize = 5000
+		batchSize = 500
 	}
 	return &ExternalShortLinkMappingScheduler{repo: repo, client: client, logger: logger, interval: interval, batchSize: batchSize}
 }
@@ -64,6 +66,7 @@ func NewExternalShortLinkMappingScheduler(
 func (s *ExternalShortLinkMappingScheduler) Start(parent context.Context) func() {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
+	s.logger.Printf("external short-link mapping scheduler: started interval=%s batch_size=%d", s.interval, s.batchSize)
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(s.interval)
@@ -105,6 +108,7 @@ func (s *ExternalShortLinkMappingScheduler) runOnce(ctx context.Context) {
 			return
 		}
 		externalMappingLastSuccess.Set(float64(publishedAt.Unix()))
+		s.logger.Printf("external short-link mapping scheduler: published batch count=%d", len(links))
 		if len(links) < s.batchSize {
 			return
 		}
@@ -135,7 +139,7 @@ func NewExternalShortLinkClickScheduler(
 		interval = 5 * time.Minute
 	}
 	if pageSize <= 0 {
-		pageSize = 10000
+		pageSize = defaultExternalShortLinkClickPageSize
 	}
 	if maxPagesPerRun <= 0 {
 		maxPagesPerRun = 1000
@@ -148,6 +152,7 @@ func NewExternalShortLinkClickScheduler(
 func (s *ExternalShortLinkClickScheduler) Start(parent context.Context) func() {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
+	s.logger.Printf("external short-link click scheduler: started interval=%s page_size=%d max_pages_per_run=%d", s.interval, s.pageSize, s.maxPagesPerRun)
 	go func() {
 		defer close(done)
 		ticker := time.NewTicker(s.interval)
@@ -210,6 +215,12 @@ func (s *ExternalShortLinkClickScheduler) runOnce(ctx context.Context) {
 			// run retries this cumulative acknowledgement, including on an empty page.
 			s.logger.Printf("external short-link click scheduler: acknowledge through_click_id=%d failed: %v", cursor, err)
 		}
+		s.logger.Printf(
+			"external short-link click scheduler: imported page count=%d through_click_id=%d has_more=%t",
+			len(page.Clicks),
+			cursor,
+			page.HasMore,
+		)
 		if !page.HasMore {
 			return
 		}
