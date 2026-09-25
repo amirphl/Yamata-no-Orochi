@@ -2,10 +2,13 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -45,6 +48,43 @@ func TestExternalShortLinkClientUploadsCompleteAcknowledgedBatch(t *testing.T) {
 	}
 }
 
+func TestExternalShortLinkClientCapsRequestBatchesForRustService(t *testing.T) {
+	var sizes []int
+	client := &HTTPExternalShortLinkClient{
+		baseURL:          "https://links.example",
+		token:            "secret",
+		mappingBatchSize: 10000,
+		client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+			if request.Header.Get("Content-Type") != "application/json" {
+				t.Fatalf("Content-Type = %q", request.Header.Get("Content-Type"))
+			}
+			var payload externalMappingUpload
+			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode upload payload: %v", err)
+			}
+			sizes = append(sizes, len(payload.Links))
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"persisted":` + strconv.Itoa(len(payload.Links)) + `}`)),
+				Request:    request,
+			}, nil
+		})},
+	}
+	links := make([]*models.ShortLink, maxExternalMappingBatchSize+1)
+	for index := range links {
+		links[index] = &models.ShortLink{
+			ID: uint(index + 1), UID: fmt.Sprintf("code-%d", index), LongLink: "https://example.com/destination",
+		}
+	}
+	if err := client.UploadMappings(context.Background(), links); err != nil {
+		t.Fatalf("UploadMappings() error = %v", err)
+	}
+	if got, want := fmt.Sprint(sizes), "[500 1]"; got != want {
+		t.Fatalf("upload sizes = %s, want %s", got, want)
+	}
+}
+
 func TestExternalShortLinkClientRejectsPartialMappingAcknowledgement(t *testing.T) {
 	client := &HTTPExternalShortLinkClient{
 		baseURL:          "https://links.example",
@@ -73,6 +113,13 @@ func TestNewExternalShortLinkClientRejectsNonOriginBaseURL(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("NewExternalShortLinkClient() error = nil for non-origin base URL")
+	}
+}
+
+func TestNewExternalShortLinkClickSchedulerDefaultsToSupportedPageSize(t *testing.T) {
+	scheduler := NewExternalShortLinkClickScheduler(nil, nil, log.New(io.Discard, "", 0), time.Minute, 0, 1)
+	if got, want := scheduler.pageSize, 1000; got != want {
+		t.Fatalf("page size = %d, want %d", got, want)
 	}
 }
 
