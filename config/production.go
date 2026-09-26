@@ -798,8 +798,8 @@ func LoadProductionConfig() (*ProductionConfig, error) {
 			RequestTimeout:      getEnvDuration("EXTERNAL_SHORTLINK_REQUEST_TIMEOUT", 30*time.Second),
 			MappingSyncInterval: getEnvDuration("EXTERNAL_SHORTLINK_MAPPING_SYNC_INTERVAL", time.Minute),
 			ClickSyncInterval:   getEnvDuration("EXTERNAL_SHORTLINK_CLICK_SYNC_INTERVAL", 5*time.Minute),
-			MappingBatchSize:    getEnvInt("EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE", 5000),
-			ClickPageSize:       getEnvInt("EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE", 10000),
+			MappingBatchSize:    getEnvInt("EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE", 500),
+			ClickPageSize:       getEnvInt("EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE", 1000),
 			MaxClickPagesPerRun: getEnvInt("EXTERNAL_SHORTLINK_MAX_CLICK_PAGES_PER_RUN", 1000),
 		},
 		Crypto: CryptoConfig{
@@ -1351,11 +1351,11 @@ func validateExternalShortLinkConfig(cfg ExternalShortLinkConfig) []string {
 	if cfg.RequestTimeout <= 0 || cfg.MappingSyncInterval <= 0 || cfg.ClickSyncInterval <= 0 {
 		errors = append(errors, "external short-link timeouts and intervals must be positive")
 	}
-	if cfg.MappingBatchSize <= 0 || cfg.MappingBatchSize > 10000 {
-		errors = append(errors, "EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE must be between 1 and 10000")
+	if cfg.MappingBatchSize <= 0 || cfg.MappingBatchSize > 500 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE must be between 1 and 500")
 	}
-	if cfg.ClickPageSize <= 0 || cfg.ClickPageSize > 10000 {
-		errors = append(errors, "EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE must be between 1 and 10000")
+	if cfg.ClickPageSize <= 0 || cfg.ClickPageSize > 2000 {
+		errors = append(errors, "EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE must be between 1 and 2000")
 	}
 	if cfg.MaxClickPagesPerRun <= 0 {
 		errors = append(errors, "EXTERNAL_SHORTLINK_MAX_CLICK_PAGES_PER_RUN must be positive")
