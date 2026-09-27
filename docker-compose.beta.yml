@@ -5,6 +5,31 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  # Only the dedicated pgAdmin Nginx proxy and pgAdmin join this network.
+  # pgAdmin listens exclusively on this address, so no other service can reach
+  # its HTTP UI.
+  pgadmin-network-beta:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/28
+  # The dedicated pgAdmin proxy needs an egress-capable interface solely to
+  # receive Docker's published host port. It shares no network with app services.
+  pgadmin-edge-network-beta:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/28
+  # Only pgAdmin and PostgreSQL join this network. Keeping it separate from
+  # yamata-network-beta prevents a compromised pgAdmin UI from reaching the
+  # application, Redis, observability, or host-facing services.
+  pgadmin-postgres-network-beta:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.0.0/28
 
 volumes:
   postgres_data_beta:
@@ -12,6 +37,8 @@ volumes:
   redi_data_beta:
     driver: local
   nginx_logs_beta:
+    driver: local
+  pgadmin_nginx_logs_beta:
     driver: local
   app_logs_beta:
     driver: local
@@ -29,6 +56,16 @@ volumes:
     driver: local
   sentry_redis_data_beta:
     driver: local
+  pgadmin_data_beta:
+    driver: local
+
+secrets:
+  # The source files are protected, host-managed files referenced by .env.beta.
+  # Secrets are mounted only into the service that needs each one.
+  pgadmin_default_password:
+    file: ${PGADMIN_DEFAULT_PASSWORD_FILE:?PGADMIN_DEFAULT_PASSWORD_FILE must point to the pgAdmin password secret}
+  pgadmin_nginx_htpasswd:
+    file: ${PGADMIN_NGINX_HTPASSWD_FILE:?PGADMIN_NGINX_HTPASSWD_FILE must point to the pgAdmin Basic Auth htpasswd file}
 
 services:
   # PostgreSQL Database
@@ -55,6 +92,12 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.10
+      pgadmin-postgres-network-beta:
+        ipv4_address: 172.29.0.2
+        aliases:
+          # This alias exists only on the pgAdmin-to-PostgreSQL network. Do
+          # not use the application-network postgres-beta hostname in pgAdmin.
+          - pgadmin-postgres
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
@@ -576,6 +619,118 @@ services:
       - /tmp
       - /var/cache
     user: "appuser"
+
+  # pgAdmin is reachable from nginx only. Its only other network path is the
+  # dedicated internal link to PostgreSQL.
+  pgadmin-beta:
+    # Pin the 9.17 multi-architecture release by OCI index digest. Review and
+    # update this reference with the pgAdmin security-release process.
+    image: dpage/pgadmin4:9.17@sha256:2f4ce946ddf8360680d7eff4eaba1d91859eb6b4003e6623bad5c63a322c2f4d
+    container_name: yamata-pgadmin-beta
+    restart: unless-stopped
+    depends_on:
+      postgres-beta:
+        condition: service_healthy
+    env_file:
+      - ${PGADMIN_ENV_FILE:?PGADMIN_ENV_FILE must point to the protected pgAdmin environment file}
+    environment:
+      # The email is in PGADMIN_ENV_FILE; the password is a Docker secret.
+      PGADMIN_DEFAULT_PASSWORD_FILE: /run/secrets/pgadmin_default_password
+      PGADMIN_CUSTOM_CONFIG_DISTRO_FILE: /pgadmin4/config_distro.py
+      PGADMIN_ALLOWED_HOST: ${PGADMIN_DOMAIN:?PGADMIN_DOMAIN must be set}
+      PGADMIN_LISTEN_ADDRESS: 172.31.0.10
+      PGADMIN_LISTEN_PORT: "5050"
+      PGADMIN_DISABLE_POSTFIX: "1"
+    secrets:
+      - source: pgadmin_default_password
+        target: pgadmin_default_password
+        # Compose file-backed secrets preserve source-file ownership and mode;
+        # deploy-beta.sh verifies the host file is root:root, mode 0640.
+    volumes:
+      - pgadmin_data_beta:/var/lib/pgadmin
+      - ./docker/pgadmin/config_distro.py:/pgadmin4/config_distro.py:ro
+    networks:
+      pgadmin-network-beta:
+        ipv4_address: 172.31.0.10
+      pgadmin-postgres-network-beta:
+        ipv4_address: 172.29.0.3
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c 'import os, urllib.request;
+          request=urllib.request.Request("http://172.31.0.10:5050/misc/ping",
+          headers={"Host": os.environ["PGADMIN_ALLOWED_HOST"]});
+          urllib.request.urlopen(request, timeout=3)'
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:uid=5050,gid=5050,mode=1777
+
+  # Dedicated proxy for the administrator UI. It is deliberately separate from
+  # nginx-beta: pgAdmin may reach this proxy, but this proxy has no route to the
+  # application network and can proxy only to pgAdmin.
+  pgadmin-nginx-beta:
+    build:
+      context: docker/nginx
+      dockerfile: Dockerfile.edge
+    image: yamata-pgadmin-nginx-beta
+    container_name: yamata-pgadmin-nginx-beta
+    restart: unless-stopped
+    depends_on:
+      pgadmin-beta:
+        condition: service_healthy
+    volumes:
+      - ./docker/nginx/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      - ./docker/nginx/sites-available/generated/pgadmin:/etc/nginx/sites-available:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+      - ./docker/nginx/security.conf:/etc/nginx/security.conf:ro
+      - ./docker/nginx/gzip.conf:/etc/nginx/gzip.conf:ro
+      - ./docker/nginx/proxy.conf:/etc/nginx/proxy.conf:ro
+      - pgadmin_nginx_logs_beta:/var/log/nginx
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    secrets:
+      - source: pgadmin_nginx_htpasswd
+        target: pgadmin_nginx_htpasswd
+        # Compose file-backed secrets preserve source-file ownership and mode;
+        # deploy-beta.sh verifies the host file is root:65534, mode 0640.
+    ports:
+      # Bind only the selected host interface. Never use 0.0.0.0 here:
+      # pgAdmin is an administrator-only endpoint.
+      - "${PGADMIN_LISTEN_BIND_IP:?PGADMIN_LISTEN_BIND_IP must be a selected host interface address}:14433:14433"
+    networks:
+      pgadmin-edge-network-beta:
+        ipv4_address: 172.28.0.2
+      pgadmin-network-beta:
+        ipv4_address: 172.31.0.2
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # nginx.conf has defensive default servers on 80/443; this is the only
+      # capability needed to bind those internal, unpublished listeners.
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:uid=65534,gid=65534,mode=0750
+      - /var/run
+      - /tmp
 
   # Nginx Reverse Proxy
   nginx-beta:
