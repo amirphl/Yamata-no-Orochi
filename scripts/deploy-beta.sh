@@ -12,6 +12,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 ENV_FILE="$PROJECT_ROOT/.env.beta"
 NGINX_CONF_DIR="$PROJECT_ROOT/docker/nginx/sites-available"
 NGINX_TEMPLATE="$NGINX_CONF_DIR/yamata-beta.conf"
+PGADMIN_NGINX_TEMPLATE="$NGINX_CONF_DIR/pgadmin-beta.conf"
 
 # Colors for output
 RED='\033[0;31m'
@@ -61,6 +62,7 @@ export_beta_nginx_template_vars() {
 	export API_DOMAIN="api.$domain"
 	export MONITORING_DOMAIN="monitoring.$domain"
 	export SENTRY_UI_DOMAIN="sentry.$domain"
+	export PGADMIN_DOMAIN="pg.$domain"
 	export HSTS_MAX_AGE="31536000"
 	export GLOBAL_RATE_LIMIT="1000"
 	export AUTH_RATE_LIMIT="10"
@@ -78,7 +80,7 @@ validate_nginx_certificates() {
 
 	export_beta_nginx_template_vars "$domain"
 
-	if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$tmp_conf"; then
+	if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $PGADMIN_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$tmp_conf"; then
 		rm -f "$tmp_conf"
 		print_error "Failed to render nginx template for certificate validation"
 		exit 1
@@ -93,28 +95,65 @@ validate_nginx_certificates() {
 	print_success "All referenced certificates exist and are valid"
 }
 
+# The pgAdmin virtual host intentionally shares DOMAIN's certificate paths.
+# Verify that the existing certificate also covers pg.DOMAIN before Nginx is
+# started, rather than discovering the missing SAN/wildcard in a browser.
+validate_pgadmin_certificate_hostname() {
+	local domain=$1
+	local certificate="/etc/letsencrypt/live/$domain/fullchain.pem"
+	local pgadmin_domain="pg.$domain"
+	local privileged=()
+
+	if [[ $EUID -ne 0 ]]; then
+		command_exists sudo || {
+			print_error "sudo is required to verify the pgAdmin certificate hostname"
+			return 1
+		}
+		sudo -v
+		privileged=(sudo)
+	fi
+
+	"${privileged[@]}" openssl x509 -in "$certificate" \
+		-checkhost "$pgadmin_domain" -noout >/dev/null 2>&1 || {
+		print_error "The existing certificate at $certificate does not cover $pgadmin_domain"
+		print_error "Issue a certificate with pg.$domain as a SAN or use a wildcard certificate before deploying"
+		return 1
+	}
+	print_success "Existing certificate covers $pgadmin_domain"
+}
+
 # Function to generate nginx configuration from template
 generate_nginx_config() {
 	local domain=$1
 	local generated_dir="$NGINX_CONF_DIR/generated/beta"
-	local temporary_config
+	local pgadmin_generated_dir="$NGINX_CONF_DIR/generated/pgadmin"
+	local temporary_config temporary_pgadmin_config
 	
 	print_status "Generating nginx configuration for domain: $domain"
 	
-	# Create generated directory if it doesn't exist
+	# Create generated directories if they don't exist.
 	mkdir -p "$generated_dir"
+	mkdir -p "$pgadmin_generated_dir"
 	temporary_config=$(mktemp "$generated_dir/.yamata.conf.XXXXXX")
+	temporary_pgadmin_config=$(mktemp "$pgadmin_generated_dir/.pgadmin.conf.XXXXXX")
 
 	# Set environment variables for template processing
 	export_beta_nginx_template_vars "$domain"
 	
 	# Read the template and replace environment variables
-	if [ -f "$NGINX_TEMPLATE" ]; then
+	if [ -f "$NGINX_TEMPLATE" ] && [ -f "$PGADMIN_NGINX_TEMPLATE" ]; then
 		# Process the template with only specific environment variable substitution
 		# Use envsubst with specific variables to avoid interfering with Nginx variables
-		if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$temporary_config"; then
+		if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $PGADMIN_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$NGINX_TEMPLATE" > "$temporary_config"; then
 			rm -f -- "$temporary_config"
+			rm -f -- "$temporary_pgadmin_config"
 			print_error "Failed to render nginx configuration"
+			return 1
+		fi
+		if ! envsubst '$DOMAIN $API_DOMAIN $MONITORING_DOMAIN $SENTRY_UI_DOMAIN $PGADMIN_DOMAIN $HSTS_MAX_AGE $GLOBAL_RATE_LIMIT $AUTH_RATE_LIMIT' < "$PGADMIN_NGINX_TEMPLATE" > "$temporary_pgadmin_config"; then
+			rm -f -- "$temporary_config"
+			rm -f -- "$temporary_pgadmin_config"
+			print_error "Failed to render pgAdmin Nginx configuration"
 			return 1
 		fi
 		
@@ -124,11 +163,15 @@ generate_nginx_config() {
 		sed -i "s|server app:8080 max_fails=3 fail_timeout=30s;|server app-beta:8080 max_fails=3 fail_timeout=30s;|g" "$temporary_config"
 		sed -i "s|server app:9090 max_fails=3 fail_timeout=30s;|server app-beta:9090 max_fails=3 fail_timeout=30s;|g" "$temporary_config"
 		chmod 644 "$temporary_config"
+		chmod 644 "$temporary_pgadmin_config"
 		mv -f -- "$temporary_config" "$generated_dir/yamata.conf"
+		mv -f -- "$temporary_pgadmin_config" "$pgadmin_generated_dir/pgadmin.conf"
 
-		print_success "Nginx configuration generated from template"
+		print_success "Nginx and isolated pgAdmin-proxy configurations generated from templates"
 	else
-		print_error "Nginx template not found: $NGINX_TEMPLATE"
+		rm -f -- "$temporary_config"
+		rm -f -- "$temporary_pgadmin_config"
+		print_error "Nginx template not found: $NGINX_TEMPLATE or $PGADMIN_NGINX_TEMPLATE"
 		exit 1
 	fi
 }
@@ -184,11 +227,99 @@ create_beta_env() {
 	exit 1
 }
 
+validate_pgadmin_secret_files() {
+	local path username password_hash
+	local has_bcrypt_entry=false invalid_bcrypt_entry=false
+
+	validate_pgadmin_secret_metadata() {
+		local variable=$1 expected_uid=$2 expected_gid=$3 expected_mode=$4
+		local secret_path="${!variable:-}" uid gid mode
+
+		[[ -n "$secret_path" ]] || { print_error "$variable is required"; return 1; }
+		[[ -f "$secret_path" && ! -L "$secret_path" ]] || {
+			print_error "$variable must name a regular, non-symlink file: $secret_path"
+			return 1
+		}
+		uid=$(stat -c '%u' "$secret_path")
+		gid=$(stat -c '%g' "$secret_path")
+		mode=$(stat -c '%a' "$secret_path")
+		[[ "$uid" == "$expected_uid" && "$gid" == "$expected_gid" && "$mode" == "$expected_mode" ]] || {
+			print_error "$secret_path must be owned by $expected_uid:$expected_gid with mode $expected_mode (found $uid:$gid mode $mode)"
+			return 1
+		}
+	}
+
+	# Compose file-backed secrets preserve the source file's ownership and mode.
+	# pgAdmin runs as UID 5050 with primary GID 0; Nginx workers use 65534:65534.
+	validate_pgadmin_secret_metadata PGADMIN_ENV_FILE 0 0 600
+	validate_pgadmin_secret_metadata PGADMIN_DEFAULT_PASSWORD_FILE 0 0 640
+	validate_pgadmin_secret_metadata PGADMIN_NGINX_HTPASSWD_FILE 0 65534 640
+
+	path="$PGADMIN_DEFAULT_PASSWORD_FILE"
+	[[ -s "$path" ]] || {
+		print_error "$path must contain a non-empty initial pgAdmin password"
+		return 1
+	}
+
+	while IFS=: read -r username password_hash || [[ -n "$username" || -n "$password_hash" ]]; do
+		[[ -z "$username" || "$username" == \#* ]] && continue
+		if [[ "$password_hash" =~ ^\$2[aby]\$([0-9]{2})\$ ]] &&
+			(( 10#${BASH_REMATCH[1]} >= 12 )); then
+			has_bcrypt_entry=true
+		else
+			invalid_bcrypt_entry=true
+		fi
+	done < "$PGADMIN_NGINX_HTPASSWD_FILE"
+	[[ "$has_bcrypt_entry" == true && "$invalid_bcrypt_entry" == false ]] || {
+		print_error "$PGADMIN_NGINX_HTPASSWD_FILE must contain only bcrypt htpasswd entries with cost 12 or higher"
+		return 1
+	}
+
+	# The env file is intentionally restricted to the initial pgAdmin email.
+	# Configuration settings belong in the reviewed, read-only distro config.
+	awk '
+		/^[[:space:]]*($|#)/ { next }
+		/^[[:space:]]*PGADMIN_DEFAULT_EMAIL[[:space:]]*=[[:space:]]*[^[:space:]#]/ { emails++; next }
+		{ invalid = 1 }
+		END { exit invalid || emails != 1 }
+	' "$PGADMIN_ENV_FILE" || {
+		print_error "$PGADMIN_ENV_FILE must contain only one non-empty PGADMIN_DEFAULT_EMAIL assignment"
+		return 1
+	}
+
+	print_success "pgAdmin secret files have the required ownership, modes, and bcrypt cost"
+}
+
+# The pgAdmin Nginx listener is deliberately bound to one explicit host
+# interface. Compose would otherwise publish it on every host interface.
+validate_pgadmin_listener_bind_ip() {
+	local bind_ip="${PGADMIN_LISTEN_BIND_IP:-}" octet
+	local -a octets=()
+
+	[[ "$bind_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || {
+		print_error "PGADMIN_LISTEN_BIND_IP must be the IPv4 address of the selected host interface"
+		return 1
+	}
+	IFS=. read -r -a octets <<< "$bind_ip"
+	for octet in "${octets[@]}"; do
+		(( 10#$octet <= 255 )) || {
+			print_error "PGADMIN_LISTEN_BIND_IP is not a valid IPv4 address: $bind_ip"
+			return 1
+		}
+	done
+	[[ "$bind_ip" != "0.0.0.0" && "$bind_ip" != 127.* ]] || {
+		print_error "PGADMIN_LISTEN_BIND_IP must not be a wildcard or loopback address"
+		return 1
+	}
+
+	print_success "pgAdmin listener is restricted to $bind_ip:14433"
+}
+
 # Function to check prerequisites
 check_prerequisites() {
 	print_status "Checking prerequisites..."
 	local required_command
-	for required_command in python3 envsubst openssl sed find mktemp; do
+	for required_command in python3 envsubst openssl sed find mktemp stat awk; do
 		if ! command_exists "$required_command"; then
 			print_error "Required command is not installed: $required_command"
 			exit 1
@@ -298,6 +429,8 @@ start_services() {
 		frontend-beta \
 		postgres-backup-beta \
 		postgres-exporter-beta \
+		pgadmin-beta \
+		pgadmin-nginx-beta \
 		node-exporter-beta \
 		cadvisor-beta
 
@@ -317,7 +450,7 @@ wait_for_services() {
 	local containers=(
 		yamata-postgres-beta yamata-redis-beta yamata-sentry-postgres-beta
 		yamata-sentry-redis-beta yamata-sentry-beta yamata-prometheus-beta
-		yamata-grafana-beta frontend-beta yamata-postgres-backup-beta
+		yamata-grafana-beta frontend-beta yamata-postgres-backup-beta yamata-pgadmin-beta yamata-pgadmin-nginx-beta
 		yamata-postgres-exporter-beta yamata-node-exporter-beta yamata-cadvisor-beta
 	)
 	
@@ -404,6 +537,7 @@ show_deployment_info() {
 	echo "  API: https://api.$domain"
 	echo "  Monitoring: https://monitoring.$domain"
 	echo "  Sentry: https://sentry.$domain"
+	echo "  pgAdmin: https://pg.$domain:14433 (HTTP Basic Auth + pgAdmin login required)"
 	echo ""
 	echo "⚠️  Important Notes:"
 	echo "  - SSL certificates must already exist and be valid"
@@ -503,6 +637,7 @@ main() {
 
 	# Validate certificate files referenced by nginx config
 	validate_nginx_certificates "$domain"
+	validate_pgadmin_certificate_hostname "$domain"
 	
 	# Generate nginx configuration from template
 	generate_nginx_config "$domain"
@@ -522,6 +657,8 @@ main() {
 	fi
 	# Keep Compose and the generated Nginx configuration on the same explicit domain.
 	export_beta_nginx_template_vars "$domain"
+	validate_pgadmin_secret_files
+	validate_pgadmin_listener_bind_ip
 
 	if [ "${CAMPAIGN_EXECUTION_ENABLED:-}" != "false" ]; then
 		print_error "CAMPAIGN_EXECUTION_ENABLED must remain false in .env.beta"
