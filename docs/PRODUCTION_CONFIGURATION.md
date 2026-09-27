@@ -70,7 +70,7 @@ values after deployment.
 | Edge/security | `TLS_*`, `HSTS_*`, `CORS_*`, rate-limit and header variables | Several values are parsed but the current Fiber middleware and rendered nginx template contain their own settings; see “Runtime caveats.” |
 | Logging/observability | `LOG_*`, `METRICS_*`, `SENTRY_*` | Metrics default to port 9090 and path `/metrics`. |
 | Redis/cache | `CACHE_*`, `REDIS_PASSWORD` | Compose injects `redis://redis-beta:6379` for the app. |
-| Deployment | `DOMAIN`, `API_DOMAIN`, `MONITORING_DOMAIN`, `SENTRY_*_DOMAIN`, `CERTBOT_EMAIL`, `GRAFANA_ADMIN_PASSWORD`, backup variables | The deployment script renders nginx from the explicit domain argument. |
+| Deployment | `DOMAIN`, `API_DOMAIN`, `MONITORING_DOMAIN`, `SENTRY_*_DOMAIN`, `PGADMIN_*`, `CERTBOT_EMAIL`, `GRAFANA_ADMIN_PASSWORD`, backup variables | The deployment script renders nginx from the explicit domain argument. pgAdmin credential paths refer to protected host files; they are not credential values. |
 | Business identities | `ADMIN_*`, `SYSTEM_*`, `TAX_*` | UUIDs must match the database identities and wallets. |
 | Messaging | `SMS_*`, `PAYAM_SMS_*`, `BALE_*`, `RUBIKA_*`, `SPLUS_*`, `MESSAGE_*` | Bale provider behavior is documented in [`bale.md`](bale.md). |
 | Payments | `ATIPAY_*`, `CRYPTO_*`, `OXA_*` | Set `CRYPTO_ENABLED=false` to disable crypto payments; only OxaPay is accepted when enabled. |
@@ -144,6 +144,13 @@ variable, not the prompt files, with the credential.
   media and bot audience uploads and 50 MiB for admin short-link CSV uploads.
 - The public health endpoint is `/api/v1/health`; nginx also maps `/health` to
   it on the main domain.
+- pgAdmin is served only at `https://pg.<domain>:14433`, behind Nginx Basic Auth
+  and pgAdmin internal authentication. Nginx binds that port only to
+  `PGADMIN_LISTEN_BIND_IP`, the selected host interface address. Its password
+  and htpasswd sources are Docker secrets
+  referenced by protected files outside the repository. Follow
+  [PGADMIN_DEPLOYMENT.md](PGADMIN_DEPLOYMENT.md) for the required permissions,
+  firewall rule, certificate SAN/wildcard check, and credential rotation rules.
 
 ## Verification
 
