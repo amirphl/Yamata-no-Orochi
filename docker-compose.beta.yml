@@ -256,7 +256,8 @@ services:
   sentry-beta:
     # Pin the tested patch release so routine deploys cannot silently upgrade
     # GlitchTip and its database/frontend assets through the mutable latest tag.
-    image: glitchtip/glitchtip:6.2.2
+    # image: glitchtip/glitchtip:6.2.2
+    image: glitchtip/glitchtip:latest
     container_name: yamata-sentry-beta
     restart: unless-stopped
     depends_on:
@@ -625,7 +626,8 @@ services:
   pgadmin-beta:
     # Pin the 9.17 multi-architecture release by OCI index digest. Review and
     # update this reference with the pgAdmin security-release process.
-    image: dpage/pgadmin4:9.17@sha256:2f4ce946ddf8360680d7eff4eaba1d91859eb6b4003e6623bad5c63a322c2f4d
+    # image: dpage/pgadmin4:9.17@sha256:2f4ce946ddf8360680d7eff4eaba1d91859eb6b4003e6623bad5c63a322c2f4d
+    image: dpage/pgadmin4:9.17
     container_name: yamata-pgadmin-beta
     restart: unless-stopped
     depends_on:

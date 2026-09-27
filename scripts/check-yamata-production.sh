@@ -173,12 +173,13 @@ postgres_database_ip="$(
 [[ "$postgres_database_ip" == "172.29.0.2" ]] ||
 	die "PostgreSQL must use its dedicated pgAdmin network address"
 pgadmin_listener_binding="$(
-	"${DOCKER[@]}" inspect -f '{{range $port, $bindings := .HostConfig.PortBindings}}{{if eq $port "14433/tcp"}}{{range $bindings}}{{printf "%s|%s\\n" .HostIp .HostPort}}{{end}}{{end}}{{end}}' \
+	"${DOCKER[@]}" inspect -f '{{range $port, $bindings := .HostConfig.PortBindings}}{{if eq $port "14433/tcp"}}{{range $bindings}}{{println .HostIp .HostPort}}{{end}}{{end}}{{end}}' \
 		yamata-pgadmin-nginx-beta
 )"
-[[ "$(wc -l <<<"$pgadmin_listener_binding")" -eq 1 ]] ||
+pgadmin_listener_count="$(printf '%s\n' "$pgadmin_listener_binding" | awk 'NF { count++ } END { print count + 0 }')"
+[[ "$pgadmin_listener_count" -eq 1 ]] ||
 	die "Nginx must publish exactly one pgAdmin listener on 14433/tcp"
-IFS='|' read -r pgadmin_listener_ip pgadmin_listener_port <<<"$pgadmin_listener_binding"
+read -r pgadmin_listener_ip pgadmin_listener_port <<<"$pgadmin_listener_binding"
 [[ "$pgadmin_listener_port" == "14433" && -n "$pgadmin_listener_ip" && \
 	"$pgadmin_listener_ip" != "0.0.0.0" && "$pgadmin_listener_ip" != "::" && \
 	"$pgadmin_listener_ip" != 127.* ]] ||
