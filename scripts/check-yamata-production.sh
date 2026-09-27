@@ -34,7 +34,7 @@ env_value() {
 
 for container in \
 	yamata-postgres-beta yamata-redis-beta yamata-app-beta yamata-nginx-beta \
-	yamata-campaign-scheduler-beta; do
+	yamata-pgadmin-beta yamata-pgadmin-nginx-beta yamata-campaign-scheduler-beta; do
 	"${DOCKER[@]}" container inspect "$container" >/dev/null 2>&1 || die "Missing container: $container"
 	state="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "$container")"
 	[[ "$state" == running ]] || die "$container is $state"
@@ -110,6 +110,105 @@ scheduler_network="$(
 [[ -n "$app_network" && "$app_network" == "$scheduler_network" ]] ||
 	die "API and scheduler are not attached to the same Docker network"
 log "shared network: $app_network"
+
+# pgAdmin is an Nginx-only service: it must not publish a host port. Its
+# dedicated Nginx proxy is the sole listener, bound to the selected host
+# interface on 14433, while pgAdmin stays on two internal-only networks.
+[[ "$("${DOCKER[@]}" inspect -f '{{len .HostConfig.PortBindings}}' yamata-pgadmin-beta)" == 0 ]] ||
+	die "pgAdmin must not publish ports"
+[[ "$("${DOCKER[@]}" inspect -f '{{len .HostConfig.PortBindings}}' yamata-postgres-beta)" == 0 ]] ||
+	die "PostgreSQL must not publish ports"
+pgadmin_networks="$(
+	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
+		yamata-pgadmin-beta | awk 'NF { print }' | sort
+)"
+pgadmin_proxy_networks="$(
+	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
+		yamata-pgadmin-nginx-beta | awk 'NF { print }' | sort
+)"
+main_nginx_networks="$(
+	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
+		yamata-nginx-beta | awk 'NF { print }' | sort
+)"
+postgres_networks="$(
+	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
+		yamata-postgres-beta | awk 'NF { print }' | sort
+)"
+expected_pgadmin_networks=$'yamata-no-orochi_pgadmin-network-beta\nyamata-no-orochi_pgadmin-postgres-network-beta'
+[[ "$pgadmin_networks" == "$expected_pgadmin_networks" ]] ||
+	die "pgAdmin must join only the Nginx and PostgreSQL internal networks"
+expected_pgadmin_proxy_networks=$'yamata-no-orochi_pgadmin-edge-network-beta\nyamata-no-orochi_pgadmin-network-beta'
+[[ "$pgadmin_proxy_networks" == "$expected_pgadmin_proxy_networks" ]] ||
+	die "The dedicated pgAdmin Nginx proxy must join only its edge and pgAdmin networks"
+if grep -qx 'yamata-no-orochi_pgadmin-network-beta' <<<"$main_nginx_networks"; then
+	die "The application Nginx must not join the pgAdmin network"
+fi
+if grep -qx 'yamata-no-orochi_yamata-network-beta' <<<"$pgadmin_proxy_networks"; then
+	die "The dedicated pgAdmin Nginx proxy must not join the application network"
+fi
+if grep -qx 'yamata-no-orochi_pgadmin-postgres-network-beta' <<<"$pgadmin_proxy_networks"; then
+	die "The dedicated pgAdmin Nginx proxy must not join the PostgreSQL network"
+fi
+grep -qx 'yamata-no-orochi_pgadmin-postgres-network-beta' <<<"$postgres_networks" ||
+	die "PostgreSQL is not attached to the dedicated pgAdmin network"
+if grep -qx 'yamata-no-orochi_yamata-network-beta' <<<"$pgadmin_networks"; then
+	die "pgAdmin must not join the application network"
+fi
+pgadmin_proxy_ip="$(
+	"${DOCKER[@]}" inspect -f '{{with index .NetworkSettings.Networks "yamata-no-orochi_pgadmin-network-beta"}}{{.IPAddress}}{{end}}' \
+		yamata-pgadmin-beta
+)"
+[[ "$pgadmin_proxy_ip" == "172.31.0.10" ]] ||
+	die "pgAdmin must listen behind Nginx at 172.31.0.10"
+pgadmin_database_ip="$(
+	"${DOCKER[@]}" inspect -f '{{with index .NetworkSettings.Networks "yamata-no-orochi_pgadmin-postgres-network-beta"}}{{.IPAddress}}{{end}}' \
+		yamata-pgadmin-beta
+)"
+[[ "$pgadmin_database_ip" == "172.29.0.3" ]] ||
+	die "pgAdmin must use its dedicated PostgreSQL network address"
+postgres_database_ip="$(
+	"${DOCKER[@]}" inspect -f '{{with index .NetworkSettings.Networks "yamata-no-orochi_pgadmin-postgres-network-beta"}}{{.IPAddress}}{{end}}' \
+		yamata-postgres-beta
+)"
+[[ "$postgres_database_ip" == "172.29.0.2" ]] ||
+	die "PostgreSQL must use its dedicated pgAdmin network address"
+pgadmin_listener_binding="$(
+	"${DOCKER[@]}" inspect -f '{{range $port, $bindings := .HostConfig.PortBindings}}{{if eq $port "14433/tcp"}}{{range $bindings}}{{printf "%s|%s\\n" .HostIp .HostPort}}{{end}}{{end}}{{end}}' \
+		yamata-pgadmin-nginx-beta
+)"
+[[ "$(wc -l <<<"$pgadmin_listener_binding")" -eq 1 ]] ||
+	die "Nginx must publish exactly one pgAdmin listener on 14433/tcp"
+IFS='|' read -r pgadmin_listener_ip pgadmin_listener_port <<<"$pgadmin_listener_binding"
+[[ "$pgadmin_listener_port" == "14433" && -n "$pgadmin_listener_ip" && \
+	"$pgadmin_listener_ip" != "0.0.0.0" && "$pgadmin_listener_ip" != "::" && \
+	"$pgadmin_listener_ip" != 127.* ]] ||
+	die "Nginx pgAdmin listener must be bound to a specific host interface"
+[[ "$(env_value yamata-pgadmin-beta PGADMIN_LISTEN_ADDRESS)" == "172.31.0.10" ]] ||
+	die "pgAdmin listener is not restricted to its private Nginx network address"
+[[ "$(env_value yamata-pgadmin-beta PGADMIN_LISTEN_PORT)" == "5050" ]] ||
+	die "pgAdmin must listen on its private port 5050"
+pgadmin_allowed_host="$(env_value yamata-pgadmin-beta PGADMIN_ALLOWED_HOST)"
+[[ "$pgadmin_allowed_host" =~ ^pg\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$ ]] ||
+	die "pgAdmin must restrict Host headers to a pg.<domain> name"
+"${DOCKER[@]}" exec yamata-pgadmin-nginx-beta sh -ec \
+	'nginx -T 2>&1 | grep -Fq "auth_basic_user_file /run/secrets/pgadmin_nginx_htpasswd;"' ||
+	die "Dedicated Nginx pgAdmin virtual host is missing its Basic Auth secret"
+"${DOCKER[@]}" exec yamata-pgadmin-nginx-beta sh -ec \
+	'nginx -T 2>&1 | grep -Fq "server 172.31.0.10:5050"' ||
+	die "Dedicated Nginx is not proxying pgAdmin over the dedicated internal address"
+"${DOCKER[@]}" exec yamata-pgadmin-nginx-beta sh -ec \
+	'nginx -T 2>&1 | grep -Fq "listen 14433 ssl;" && nginx -T 2>&1 | grep -Fq "proxy_send_timeout 300s;" && nginx -T 2>&1 | grep -Fq "proxy_read_timeout 300s;"' ||
+	die "Dedicated Nginx pgAdmin virtual host must listen on 14433 with five-minute upstream timeouts"
+"${DOCKER[@]}" exec --user 5050:0 yamata-pgadmin-beta sh -ec \
+	'test -r /run/secrets/pgadmin_default_password && test ! -w /run/secrets/pgadmin_default_password' ||
+	die "pgAdmin cannot safely read its password secret"
+"${DOCKER[@]}" exec --user 65534:65534 yamata-pgadmin-nginx-beta sh -ec \
+	'test -r /run/secrets/pgadmin_nginx_htpasswd && test ! -w /run/secrets/pgadmin_nginx_htpasswd' ||
+	die "Dedicated Nginx workers cannot safely read the pgAdmin Basic Auth secret"
+"${DOCKER[@]}" exec yamata-postgres-beta sh -ec \
+	'grep -Fq "172.29.0.0/28  scram-sha-256" /etc/postgresql/pg_hba.conf' ||
+	die "PostgreSQL pg_hba.conf must allow SCRAM only from the dedicated pgAdmin network"
+log "pgAdmin is isolated, private, and protected by Nginx Basic Auth"
 
 "${DOCKER[@]}" exec yamata-campaign-scheduler-beta \
 	curl -fsS --noproxy app-beta http://app-beta:8080/api/v1/health >/dev/null ||
