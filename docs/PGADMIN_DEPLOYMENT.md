@@ -120,9 +120,10 @@ file and rerunning the normal deployment so Nginx is recreated.
   no-new-privileges is enabled. Its persistent data is the dedicated Docker
   volume only; its required runtime and application-log directories are
   non-persistent tmpfs mounts.
-- The dedicated Nginx proxy also uses non-persistent sticky tmpfs storage for
-  request-body and upstream temporary files, allowing its restricted master
-  process to create them before workers run as an unprivileged user.
+- The dedicated Nginx proxy uses non-persistent request-body and upstream
+  temporary storage. Its otherwise capability-restricted master retains only
+  the `CHOWN` capability needed to hand these directories to its unprivileged
+  workers during startup.
 - pgAdmin joins only two internal networks: one with Nginx and one with
   PostgreSQL. The Nginx listener is the only published path, on TCP/14433 and
   bound to the explicit interface selected by `PGADMIN_LISTEN_BIND_IP`.

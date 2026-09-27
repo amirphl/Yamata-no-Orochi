@@ -725,15 +725,18 @@ services:
       - ALL
     cap_add:
       # nginx.conf has defensive default servers on 80/443; this is the only
-      # capability needed to bind those internal, unpublished listeners.
+      # set needed to bind its listeners and initialise request-temp paths.
       - NET_BIND_SERVICE
       - SETGID
       - SETUID
+      # Nginx creates each temp directory as master, then assigns it to the
+      # unprivileged worker user before serving requests.
+      - CHOWN
     read_only: true
     tmpfs:
-      # The capability-restricted master process creates the request-temp
-      # directories here before it drops to the unprivileged worker user.
-      - /var/cache/nginx:mode=1777
+      # Keep the parent writable only by the master; Nginx creates and chowns
+      # the child request-temp directories to its unprivileged workers.
+      - /var/cache/nginx:uid=0,gid=0,mode=0755
       - /var/run
       - /tmp
 
@@ -784,9 +787,7 @@ services:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      # Nginx creates request-temp directories here during startup. The
-      # sticky tmpfs supports both its root master and unprivileged workers.
-      - /var/cache/nginx:mode=1777
+      - /var/cache/nginx:uid=65534,gid=65534,mode=0750
       - /var/run
       - /tmp
 
