@@ -673,6 +673,9 @@ services:
     read_only: true
     tmpfs:
       - /tmp:uid=5050,gid=5050,mode=1777
+      # pgAdmin's default LOG_FILE is under this directory. Keep it writable
+      # without weakening the read-only root filesystem or persisting logs.
+      - /var/log/pgadmin:uid=5050,gid=0,mode=0750
 
   # Dedicated proxy for the administrator UI. It is deliberately separate from
   # nginx-beta: pgAdmin may reach this proxy, but this proxy has no route to the

@@ -118,7 +118,8 @@ file and rerunning the normal deployment so Nginx is recreated.
   advance the reference for new upstream security releases.
 - pgAdmin's root filesystem is read-only, Linux capabilities are dropped, and
   no-new-privileges is enabled. Its persistent data is the dedicated Docker
-  volume only.
+  volume only; its required runtime and application-log directories are
+  non-persistent tmpfs mounts.
 - pgAdmin joins only two internal networks: one with Nginx and one with
   PostgreSQL. The Nginx listener is the only published path, on TCP/14433 and
   bound to the explicit interface selected by `PGADMIN_LISTEN_BIND_IP`.

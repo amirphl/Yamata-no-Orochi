@@ -188,7 +188,7 @@ normalize_docker_bind_mount_permissions() {
 	find "$PROJECT_ROOT/docker" -type d -exec chmod 755 {} +
 	find "$PROJECT_ROOT/docker" -type f \( \
 		-name '*.conf' -o -name '*.yml' -o -name '*.yaml' -o -name '*.json' -o \
-		-name '*.html' -o -name '*.sql' -o -name 'Dockerfile*' \
+		-name '*.html' -o -name '*.sql' -o -name '*.py' -o -name 'Dockerfile*' \
 	\) -exec chmod 644 {} +
 
 	if [ -f "$PROJECT_ROOT/docker/postgres/process-init-beta.sh" ]; then
