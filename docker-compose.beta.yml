@@ -60,7 +60,7 @@ volumes:
     driver: local
 
 secrets:
-  # The source files are protected, host-managed files referenced by .env.beta.
+  # The source files are protected, Git-ignored files referenced by .env.beta.
   # Secrets are mounted only into the service that needs each one.
   pgadmin_default_password:
     file: ${PGADMIN_DEFAULT_PASSWORD_FILE:?PGADMIN_DEFAULT_PASSWORD_FILE must point to the pgAdmin password secret}
@@ -645,7 +645,7 @@ services:
       - source: pgadmin_default_password
         target: pgadmin_default_password
         # Compose file-backed secrets preserve source-file ownership and mode;
-        # deploy-beta.sh verifies the host file is root:root, mode 0640.
+        # deploy-beta.sh verifies deployment-user:root, mode 0640.
     volumes:
       - pgadmin_data_beta:/var/lib/pgadmin
       - ./docker/pgadmin/config_distro.py:/pgadmin4/config_distro.py:ro
@@ -700,7 +700,7 @@ services:
       - source: pgadmin_nginx_htpasswd
         target: pgadmin_nginx_htpasswd
         # Compose file-backed secrets preserve source-file ownership and mode;
-        # deploy-beta.sh verifies the host file is root:65534, mode 0640.
+        # deploy-beta.sh verifies deployment-user:65534, mode 0640.
     ports:
       # Bind only the selected host interface. Never use 0.0.0.0 here:
       # pgAdmin is an administrator-only endpoint.

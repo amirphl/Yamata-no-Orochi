@@ -228,8 +228,10 @@ create_beta_env() {
 }
 
 validate_pgadmin_secret_files() {
-	local path username password_hash
+	local path username password_hash deploy_uid deploy_gid
 	local has_bcrypt_entry=false invalid_bcrypt_entry=false
+	deploy_uid=$(id -u)
+	deploy_gid=$(id -g)
 
 	validate_pgadmin_secret_metadata() {
 		local variable=$1 expected_uid=$2 expected_gid=$3 expected_mode=$4
@@ -249,11 +251,13 @@ validate_pgadmin_secret_files() {
 		}
 	}
 
-	# Compose file-backed secrets preserve the source file's ownership and mode.
-	# pgAdmin runs as UID 5050 with primary GID 0; Nginx workers use 65534:65534.
-	validate_pgadmin_secret_metadata PGADMIN_ENV_FILE 0 0 600
-	validate_pgadmin_secret_metadata PGADMIN_DEFAULT_PASSWORD_FILE 0 0 640
-	validate_pgadmin_secret_metadata PGADMIN_NGINX_HTPASSWD_FILE 0 65534 640
+	# The deployment user owns these source files, so Compose can read them
+	# without the deployment itself requiring root. Compose file-backed secrets
+	# preserve the source-file ownership and mode: pgAdmin runs with primary GID
+	# 0 and the Nginx workers use GID 65534.
+	validate_pgadmin_secret_metadata PGADMIN_ENV_FILE "$deploy_uid" "$deploy_gid" 600
+	validate_pgadmin_secret_metadata PGADMIN_DEFAULT_PASSWORD_FILE "$deploy_uid" 0 640
+	validate_pgadmin_secret_metadata PGADMIN_NGINX_HTPASSWD_FILE "$deploy_uid" 65534 640
 
 	path="$PGADMIN_DEFAULT_PASSWORD_FILE"
 	[[ -s "$path" ]] || {

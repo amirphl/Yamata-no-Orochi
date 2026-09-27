@@ -17,13 +17,16 @@ PostgreSQL remains private: Compose does not publish a PostgreSQL host port.
 
 ## Prepare credentials
 
-Create the secret directory outside the repository. The deployment script
-rejects symlinks and unsafe permissions for these files.
+Create the Git-ignored secret directory in the checkout as the same unprivileged
+user that runs deployments. The deployment script rejects symlinks and unsafe
+permissions for these files. Do not run deployment with `sudo` when using this
+layout.
 
 ```bash
-sudo install -d -m 0700 -o root -g root /etc/yamata/secrets
-sudo install -m 0600 -o root -g root /dev/null /etc/yamata/secrets/pgadmin.env
-sudoedit /etc/yamata/secrets/pgadmin.env
+cd /srv/yamata
+install -d -m 0700 .secrets
+install -m 0600 /dev/null .secrets/pgadmin.env
+${EDITOR:-vi} .secrets/pgadmin.env
 ```
 
 The environment file must contain the pgAdmin administrator email only:
@@ -34,35 +37,35 @@ PGADMIN_DEFAULT_EMAIL=database-admin@example.com
 
 Create a long random initial pgAdmin password in its own file. Compose
 file-backed secrets retain the host file's ownership and mode. The pgAdmin
-image runs as UID `5050` with primary GID `0`, so this file must be
-`root:root`, mode `0640`. Store the value in the organisation's password
-manager before deployment.
+image runs as UID `5050` with primary GID `0`, so the deployment user must own
+this file, its group must be `root`, and its mode must be `0640`. Store the
+value in the organisation's password manager before deployment.
 
 ```bash
-sudo sh -c 'umask 077; openssl rand -base64 48 > /etc/yamata/secrets/pgadmin-default-password'
-sudo chown root:root /etc/yamata/secrets/pgadmin-default-password
-sudo chmod 0640 /etc/yamata/secrets/pgadmin-default-password
+(umask 077; openssl rand -base64 48 > .secrets/pgadmin-default-password)
+sudo chgrp root .secrets/pgadmin-default-password
+chmod 0640 .secrets/pgadmin-default-password
 ```
 
 Create a separate Nginx Basic Auth identity. `htpasswd` prompts for the
 password and stores a bcrypt hash, never the clear-text value. Nginx workers
-run as UID/GID 65534, so the hash file must be group-readable by that numeric
-group but inaccessible to other users. Confirm that host group `65534` has no
-untrusted local members.
+run as UID/GID 65534, so the deployment user must own the hash file and it
+must be group-readable by numeric group `65534`, but inaccessible to other
+users. Confirm that host group `65534` has no untrusted local members.
 
 ```bash
-sudo htpasswd -B -C 12 -c /etc/yamata/secrets/pgadmin-nginx.htpasswd pgadmin-edge-admin
-sudo chown root:65534 /etc/yamata/secrets/pgadmin-nginx.htpasswd
-sudo chmod 0640 /etc/yamata/secrets/pgadmin-nginx.htpasswd
+htpasswd -B -C 12 -c .secrets/pgadmin-nginx.htpasswd pgadmin-edge-admin
+sudo chgrp 65534 .secrets/pgadmin-nginx.htpasswd
+chmod 0640 .secrets/pgadmin-nginx.htpasswd
 ```
 
 Set these path references in `.env.beta` (the template already provides these
 values). They are file paths only, not credentials:
 
 ```env
-PGADMIN_ENV_FILE=/etc/yamata/secrets/pgadmin.env
-PGADMIN_DEFAULT_PASSWORD_FILE=/etc/yamata/secrets/pgadmin-default-password
-PGADMIN_NGINX_HTPASSWD_FILE=/etc/yamata/secrets/pgadmin-nginx.htpasswd
+PGADMIN_ENV_FILE=./.secrets/pgadmin.env
+PGADMIN_DEFAULT_PASSWORD_FILE=./.secrets/pgadmin-default-password
+PGADMIN_NGINX_HTPASSWD_FILE=./.secrets/pgadmin-nginx.htpasswd
 # The IPv4 address of the host interface intended for administrator access.
 PGADMIN_LISTEN_BIND_IP=10.8.0.1
 ```

@@ -147,8 +147,8 @@ variable, not the prompt files, with the credential.
 - pgAdmin is served only at `https://pg.<domain>:14433`, behind Nginx Basic Auth
   and pgAdmin internal authentication. Nginx binds that port only to
   `PGADMIN_LISTEN_BIND_IP`, the selected host interface address. Its password
-  and htpasswd sources are Docker secrets
-  referenced by protected files outside the repository. Follow
+  and htpasswd sources are Docker secrets referenced by protected, Git-ignored
+  files in the checkout's `.secrets` directory. Follow
   [PGADMIN_DEPLOYMENT.md](PGADMIN_DEPLOYMENT.md) for the required permissions,
   firewall rule, certificate SAN/wildcard check, and credential rotation rules.
 
