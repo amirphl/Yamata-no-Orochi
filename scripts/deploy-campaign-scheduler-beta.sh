@@ -80,6 +80,13 @@ MAIN_TAG_SCHEDULER_SETTING="$(source_env_value SMART_TAG_EVALUATION_SCHEDULER_EN
 [[ "${MAIN_TAG_SCHEDULER_SETTING,,}" == "true" ]] ||
 	die "$SOURCE_CONTAINER must have SMART_TAG_EVALUATION_SCHEDULER_ENABLED=true (found: ${MAIN_TAG_SCHEDULER_SETTING:-unset})"
 
+# The scheduler is a separate process, so it must receive its own DSN instead
+# of relying on the API container's Sentry initialization.
+SCHEDULER_SENTRY_DSN="$(source_env_value SENTRY_DSN)"
+[[ -n "$SCHEDULER_SENTRY_DSN" ]] ||
+	die "$SOURCE_CONTAINER must have SENTRY_DSN configured so scheduler errors are reported"
+readonly SCHEDULER_SENTRY_DSN
+
 NETWORK="$(
 	"${DOCKER[@]}" inspect -f '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' \
 		"$SOURCE_CONTAINER" | awk 'NF { print; exit }'
@@ -178,6 +185,7 @@ trap cleanup EXIT
 			override["LOG_AUDIT_PATH"] = 1
 			override["LOG_SECURITY_PATH"] = 1
 			override["SENTRY_SERVER_NAME"] = 1
+			override["SENTRY_DSN"] = 1
 			override["NO_PROXY"] = 1
 			override["no_proxy"] = 1
 			omit["GRAFANA_ADMIN_PASSWORD"] = 1
@@ -236,6 +244,7 @@ LOG_AUDIT_PATH=/var/log/yamata/campaign-scheduler-audit.log
 LOG_SECURITY_PATH=/var/log/yamata/campaign-scheduler-security.log
 SENTRY_SERVER_NAME=yamata-campaign-scheduler-beta
 EOF
+printf 'SENTRY_DSN=%s\n' "$SCHEDULER_SENTRY_DSN" >>"$RUNTIME_ENV"
 printf 'BOT_API_DOMAIN=%s\n' "$INTERNAL_BOT_API_DOMAIN" >>"$RUNTIME_ENV"
 cat >>"$RUNTIME_ENV" <<'EOF'
 NO_PROXY=localhost,127.0.0.1,app-beta,yamata-app-beta,postgres-beta,yamata-postgres-beta,redis-beta,yamata-redis-beta,172.30.0.0/24
