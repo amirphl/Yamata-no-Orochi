@@ -451,6 +451,7 @@ wait_for_services() {
 	
 	local max_attempts=30
 	local attempt=1
+	local last_blocker=""
 	local containers=(
 		yamata-postgres-beta yamata-redis-beta yamata-sentry-postgres-beta
 		yamata-sentry-redis-beta yamata-sentry-beta yamata-prometheus-beta
@@ -471,6 +472,7 @@ wait_for_services() {
 				{ [ "$container" != yamata-postgres-backup-beta ] || [ "$health" != starting ]; }; \
 			}; then
 				all_running=false
+				last_blocker="$container (state: $state, health: $health)"
 				break
 			fi
 		done
@@ -479,12 +481,12 @@ wait_for_services() {
 			return 0
 		fi
 		
-		echo "Attempt $attempt/$max_attempts - Waiting for services..."
+		echo "Attempt $attempt/$max_attempts - Waiting for $last_blocker..."
 		sleep 10
 		attempt=$((attempt + 1))
 	done
 	
-	print_error "Services failed to start within expected time"
+	print_error "Services failed to start within expected time (last blocker: ${last_blocker:-unknown})"
 	return 1
 }
 

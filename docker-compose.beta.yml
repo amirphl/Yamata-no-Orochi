@@ -731,7 +731,9 @@ services:
       - SETUID
     read_only: true
     tmpfs:
-      - /var/cache/nginx:uid=65534,gid=65534,mode=0750
+      # The capability-restricted master process creates the request-temp
+      # directories here before it drops to the unprivileged worker user.
+      - /var/cache/nginx:mode=1777
       - /var/run
       - /tmp
 
@@ -782,7 +784,9 @@ services:
       - no-new-privileges:true
     read_only: true
     tmpfs:
-      - /var/cache/nginx:uid=65534,gid=65534,mode=0750
+      # Nginx creates request-temp directories here during startup. The
+      # sticky tmpfs supports both its root master and unprivileged workers.
+      - /var/cache/nginx:mode=1777
       - /var/run
       - /tmp
 
