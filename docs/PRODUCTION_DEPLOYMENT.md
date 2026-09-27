@@ -16,15 +16,22 @@ and downtime rules take precedence over this fresh-deployment guide.
 - PostgreSQL 15 and Redis 8 for the application;
 - a PostgreSQL backup container;
 - the Go API and nginx edge proxy;
+- pgAdmin behind a dedicated hardened Nginx proxy, with HTTP Basic Auth and
+  pgAdmin's own login as separate authentication layers;
 - GlitchTip with a separate PostgreSQL and Redis;
 - an nginx-to-Sentry forwarder and certificate monitor;
 - Prometheus, Grafana, PostgreSQL exporter, node exporter, and cAdvisor;
 - the frontend image.
 
-Only nginx publishes host ports 80 and 443. The API, databases, Redis,
-monitoring services, and standalone campaign scheduler stay on the private
-Docker network. The checked-in network uses `172.30.0.0/24`, so that subnet must
-be available on the host.
+The Nginx edge containers publish host ports: 80 and 443 for the public
+application, plus 14433 bound exclusively to the selected host interface for
+the dedicated pgAdmin proxy. The API, databases, Redis,
+monitoring services, pgAdmin, and standalone campaign scheduler stay on private
+Docker networks. The checked-in networks use `172.28.0.0/28` for the dedicated
+pgAdmin proxy edge, `172.29.0.0/28` for the pgAdmin-to-PostgreSQL link,
+`172.30.0.0/24` for the application, and `172.31.0.0/28` for the
+proxy-to-pgAdmin link, so all four subnets must be available on the host. See
+[PGADMIN_DEPLOYMENT.md](PGADMIN_DEPLOYMENT.md) before the first deployment.
 
 ## Prerequisites
 
@@ -32,9 +39,11 @@ be available on the host.
 - Git, Python 3, `envsubst` (usually from `gettext-base`), OpenSSL, `sed`,
   `find`, and `mktemp`.
 - DNS records for the main, API, monitoring, and Sentry hostnames.
-- Existing, valid certificates at the paths referenced by
-  `docker/nginx/sites-available/yamata-beta.conf`. Deployment validates
-  certificates but never issues or renews them.
+- A DNS record for `pg.<domain>`, an existing main-domain certificate that
+  covers it (SAN or wildcard), and the selected host-interface IPv4 address for
+  `PGADMIN_LISTEN_BIND_IP` in `.env.beta`.
+- Existing, valid certificates at the paths referenced by the Nginx templates.
+  Deployment validates certificates but never issues or renews them.
 - Enough memory and disk for both PostgreSQL services, Redis services,
   observability services, images, uploads, logs, backups, and WAL. Size these
   from measured data; the repository does not claim a universal minimum.
@@ -110,6 +119,7 @@ docker compose --env-file .env.beta -f docker-compose.beta.yml ps
 ./scripts/check-yamata-production.sh /srv/yamata
 curl --fail https://example.com/api/v1/health
 curl --fail https://api.example.com/api/v1/health
+curl -I https://pg.example.com:14433 # expected: 401 HTTP Basic challenge
 docker logs --tail 100 yamata-app-beta
 docker logs --tail 100 yamata-campaign-scheduler-beta
 ```
