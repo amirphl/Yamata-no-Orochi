@@ -238,6 +238,12 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.12
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
 
@@ -250,6 +256,12 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.13
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     security_opt:
       - no-new-privileges:true
 
@@ -261,8 +273,10 @@ services:
     container_name: yamata-sentry-beta
     restart: unless-stopped
     depends_on:
-      - sentry-postgres-beta
-      - sentry-redis-beta
+      sentry-postgres-beta:
+        condition: service_healthy
+      sentry-redis-beta:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://${SENTRY_POSTGRES_USER}:${SENTRY_POSTGRES_PASSWORD}@sentry-postgres-beta:5432/${SENTRY_POSTGRES_DB}
       REDIS_URL: redis://sentry-redis-beta:6379/0
@@ -270,6 +284,8 @@ services:
       PORT: 8000
       GLITCHTIP_DOMAIN: ${SENTRY_URL_PREFIX}
       ALLOWED_HOSTS: ${SENTRY_ALLOWED_HOSTS}
+      # Used by the local health probe as the accepted Django Host header.
+      SENTRY_UI_DOMAIN: ${SENTRY_UI_DOMAIN}
       CSRF_TRUSTED_ORIGINS: ${SENTRY_URL_PREFIX}
       DEFAULT_FROM_EMAIL: ${SENTRY_DEFAULT_FROM_EMAIL}
       ENABLE_USER_REGISTRATION: ${SENTRY_ENABLE_USER_REGISTRATION}
@@ -285,6 +301,16 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.14
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/', headers={'Host': os.environ['SENTRY_UI_DOMAIN']}); urllib.request.urlopen(request, timeout=5).close()"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
     security_opt:
       - no-new-privileges:true
 
@@ -928,6 +954,12 @@ services:
       - "--web.console.templates=/etc/prometheus/consoles"
       - "--storage.tsdb.retention.time=15d"
       - "--web.enable-lifecycle"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
     user: "65534:65534" # nobody user
@@ -960,7 +992,14 @@ services:
       yamata-network-beta:
         ipv4_address: 172.30.0.50
     depends_on:
-      - prometheus-beta
+      prometheus-beta:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     security_opt:
       - no-new-privileges:true
     user: "472:472" # grafana user
@@ -982,6 +1021,12 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.61
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9187/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   # Node Exporter for host metrics
   node-exporter-beta:
@@ -999,6 +1044,12 @@ services:
     networks:
       yamata-network-beta:
         ipv4_address: 172.30.0.70
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9100/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   # cAdvisor for container metrics
   cadvisor-beta:
