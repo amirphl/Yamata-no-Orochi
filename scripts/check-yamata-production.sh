@@ -41,6 +41,20 @@ for container in \
 	log "$container: running"
 done
 
+# A running process is not sufficient for the stateful and monitoring services:
+# each has a Compose healthcheck that verifies its local listener or dependency.
+for container in \
+	yamata-sentry-postgres-beta yamata-sentry-redis-beta yamata-sentry-beta \
+	yamata-prometheus-beta yamata-grafana-beta yamata-postgres-exporter-beta \
+	yamata-node-exporter-beta; do
+	"${DOCKER[@]}" container inspect "$container" >/dev/null 2>&1 || die "Missing container: $container"
+	state="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "$container")"
+	[[ "$state" == running ]] || die "$container is $state"
+	health="$("${DOCKER[@]}" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container")"
+	[[ "$health" == healthy ]] || die "$container health is $health"
+	log "$container: healthy"
+done
+
 # PostgreSQL parallel queries allocate POSIX dynamic shared-memory segments.
 # Reject Docker's 64 MiB default (and other undersized deployments) before a
 # large audience query discovers the problem in production.
