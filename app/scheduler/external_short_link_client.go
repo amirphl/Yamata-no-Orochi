@@ -49,8 +49,8 @@ func NewExternalShortLinkClient(cfg config.ExternalShortLinkConfig) (*HTTPExtern
 		(parsedBaseURL.Path != "" && parsedBaseURL.Path != "/") || parsedBaseURL.RawQuery != "" || parsedBaseURL.Fragment != "" {
 		return nil, fmt.Errorf("external short-link base URL is invalid or insecure")
 	}
-	if len(cfg.APIToken) < 32 || strings.TrimSpace(cfg.APIToken) != cfg.APIToken || strings.ContainsAny(cfg.APIToken, " \t\r\n") {
-		return nil, fmt.Errorf("external short-link API token is invalid")
+	if !isURLSafeExternalShortLinkToken(cfg.APIToken) {
+		return nil, fmt.Errorf("external short-link API token must be a URL-safe secret with at least 32 characters")
 	}
 	if cfg.RequestTimeout <= 0 {
 		return nil, fmt.Errorf("external short-link request timeout must be positive")
@@ -85,6 +85,22 @@ func NewExternalShortLinkClient(cfg config.ExternalShortLinkConfig) (*HTTPExtern
 		mappingBatchSize: cfg.MappingBatchSize,
 		client:           &http.Client{Timeout: cfg.RequestTimeout, Transport: transport},
 	}, nil
+}
+
+func isURLSafeExternalShortLinkToken(token string) bool {
+	if len(token) < 32 {
+		return false
+	}
+	for _, character := range token {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '.' || character == '_' || character == '~' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (c *HTTPExternalShortLinkClient) endpoint(path string) string {
