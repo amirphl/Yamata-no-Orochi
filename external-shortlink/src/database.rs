@@ -271,15 +271,15 @@ impl Database {
         sqlx::query(&mapping_sql(
             "
             UPDATE links AS existing
-            SET short_url = COALESCE(incoming.short_url, existing.short_url),
-                source_link_id = COALESCE(incoming.source_link_id, existing.source_link_id),
-                campaign_id = COALESCE(incoming.campaign_id, existing.campaign_id),
-                client_id = COALESCE(incoming.client_id, existing.client_id),
-                scenario_id = COALESCE(incoming.scenario_id, existing.scenario_id),
-                scenario_name = COALESCE(incoming.scenario_name, existing.scenario_name),
-                phone_number = COALESCE(incoming.phone_number, existing.phone_number),
-                source_created_at = COALESCE(incoming.source_created_at, existing.source_created_at),
-                source_updated_at = COALESCE(incoming.source_updated_at, existing.source_updated_at)
+            SET short_url = incoming.short_url,
+                source_link_id = incoming.source_link_id,
+                campaign_id = incoming.campaign_id,
+                client_id = incoming.client_id,
+                scenario_id = incoming.scenario_id,
+                scenario_name = incoming.scenario_name,
+                phone_number = incoming.phone_number,
+                source_created_at = incoming.source_created_at,
+                source_updated_at = incoming.source_updated_at
             FROM incoming
             WHERE existing.code = incoming.code
               AND existing.long_url = incoming.long_url
