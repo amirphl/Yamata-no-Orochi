@@ -74,6 +74,26 @@ async fn postgres_mapping_click_cursor_and_idempotency() {
         .await
         .unwrap();
     assert_eq!((existing.created, existing.existing), (0, 1));
+
+    let cleared_metadata = LinkInput {
+        code: code.clone(),
+        long_url: mapping.long_url.clone(),
+        short_url: None,
+        source_link_id: None,
+        campaign_id: None,
+        client_id: None,
+        scenario_id: None,
+        scenario_name: None,
+        phone_number: None,
+        source_created_at: None,
+        source_updated_at: None,
+    };
+    database.upload_links(&[cleared_metadata]).await.unwrap();
+    let cleared = database.lookup_link(&code).await.unwrap().unwrap();
+    assert!(cleared.short_url.is_none());
+    assert!(cleared.source_link_id.is_none());
+    assert!(cleared.campaign_id.is_none());
+    assert!(cleared.source_created_at.is_none());
     assert!(matches!(
         database
             .upload_links(&[LinkInput {
