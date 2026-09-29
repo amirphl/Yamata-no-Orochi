@@ -1342,8 +1342,8 @@ func validateExternalShortLinkConfig(cfg ExternalShortLinkConfig) []string {
 			errors = append(errors, "EXTERNAL_SHORTLINK_BASE_URL must be an origin URL using HTTPS")
 		}
 	}
-	if len(cfg.APIToken) < 32 || strings.TrimSpace(cfg.APIToken) != cfg.APIToken || strings.ContainsAny(cfg.APIToken, " \t\r\n") {
-		errors = append(errors, "EXTERNAL_SHORTLINK_API_TOKEN must contain at least 32 characters")
+	if !isURLSafeExternalShortLinkToken(cfg.APIToken) {
+		errors = append(errors, "EXTERNAL_SHORTLINK_API_TOKEN must be a URL-safe secret with at least 32 characters")
 	}
 	if (cfg.ClientCertFile == "") != (cfg.ClientKeyFile == "") {
 		errors = append(errors, "EXTERNAL_SHORTLINK_CLIENT_CERT_FILE and CLIENT_KEY_FILE must be configured together")
@@ -1361,4 +1361,20 @@ func validateExternalShortLinkConfig(cfg ExternalShortLinkConfig) []string {
 		errors = append(errors, "EXTERNAL_SHORTLINK_MAX_CLICK_PAGES_PER_RUN must be positive")
 	}
 	return errors
+}
+
+func isURLSafeExternalShortLinkToken(token string) bool {
+	if len(token) < 32 {
+		return false
+	}
+	for _, character := range token {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '.' || character == '_' || character == '~' || character == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
