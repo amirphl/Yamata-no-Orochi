@@ -24,6 +24,7 @@ readonly NGINX_ENABLED='/etc/nginx/sites-enabled/external-shortlink'
 readonly NGINX_BOOTSTRAP_SITE='/etc/nginx/sites-available/external-shortlink-bootstrap'
 readonly NGINX_BOOTSTRAP_ENABLED='/etc/nginx/sites-enabled/external-shortlink-bootstrap'
 readonly ACME_WEBROOT='/var/www/external-shortlink-acme'
+readonly CERTBOT_RENEWAL_HOOK='/etc/letsencrypt/renewal-hooks/deploy/external-shortlink-reload-nginx'
 readonly LOG_DIR='/var/log/external-shortlink'
 readonly DEPLOY_LOG="$LOG_DIR/deploy.log"
 readonly RUST_TOOLCHAIN='1.85.0'
@@ -116,8 +117,8 @@ deployment account "debian", and a source checkout below
 /opt/external-shortlink and the service itself runs as external-shortlink.
 
 Deploy requirements:
-  --production-ip   Fixed IPv4 or IPv6 address allowed to call /api/.
-  --api-token-file  One-line root-only file containing the shared 32+ character API token.
+  --production-ip   Fixed, globally routable IPv4 or IPv6 address allowed to call /api/.
+  --api-token-file  One-line root-only file containing the shared 32+ character URL-safe API token.
 
 Deploy options:
   --acme-email      Required only when /etc/letsencrypt/live/jzbe.ir is absent.
@@ -224,6 +225,8 @@ verify_debian_host() {
     require_command df
     require_command awk
     require_command getent
+    require_command git
+    require_command grep
     require_command stat
     [[ -d /run/systemd/system ]] || die 'systemd is not the active init system'
     [[ -r /etc/os-release ]] || die 'cannot identify the operating system'
@@ -278,7 +281,27 @@ verify_source_tree() {
     for file in "${required_files[@]}"; do
         [[ -f "$SOURCE_DIR/$file" ]] || die "source tree is missing $file"
     done
+    [[ "$(grep -Fxc '        allow 203.0.113.10;' "$SOURCE_DIR/deploy/nginx.conf")" == '1' ]] ||
+        die 'Nginx template must contain exactly one production-IP placeholder'
     log "source tree verified: $SOURCE_DIR"
+}
+
+verify_source_integrity() {
+    local relative_source
+    relative_source="${SOURCE_DIR#"$PROJECT_DIR"/}"
+    [[ "$relative_source" != "$SOURCE_DIR" && -n "$relative_source" ]] ||
+        die 'source directory is not inside the project checkout'
+
+    git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+        die "project checkout is not a valid Git work tree: $PROJECT_DIR"
+    git -C "$PROJECT_DIR" ls-files --error-unmatch -- "$relative_source/Cargo.toml" >/dev/null ||
+        die 'source Cargo.toml is not tracked by Git'
+    if ! git -C "$PROJECT_DIR" diff --quiet -- "$relative_source" ||
+        ! git -C "$PROJECT_DIR" diff --cached --quiet -- "$relative_source" ||
+        [[ -n "$(git -C "$PROJECT_DIR" status --porcelain=v1 --untracked-files=all -- "$relative_source")" ]]; then
+        die 'source directory has tracked, staged, or untracked changes; deploy a clean reviewed commit'
+    fi
+    log "source integrity verified: $(git -C "$PROJECT_DIR" rev-parse --verify HEAD)"
 }
 
 verify_production_ip() {
@@ -289,11 +312,13 @@ import ipaddress
 import sys
 
 try:
-    ipaddress.ip_address(sys.argv[1])
+    address = ipaddress.ip_address(sys.argv[1])
 except ValueError:
     raise SystemExit(1)
+if not address.is_global:
+    raise SystemExit(1)
 PY
-    log 'production egress IP verified'
+    log 'globally routable production egress IP verified'
 }
 
 verify_api_token() {
@@ -311,7 +336,7 @@ verify_api_token() {
     mapfile -t token_lines < "$API_TOKEN_FILE"
     [[ "${#token_lines[@]}" -eq 1 ]] || die 'API token file must contain exactly one line'
     API_TOKEN="${token_lines[0]%$'\r'}"
-    [[ "$API_TOKEN" =~ ^[^[:space:]]{32,}$ ]] || die 'API token must contain at least 32 non-whitespace characters'
+    valid_url_safe_secret "$API_TOKEN" || die 'API token must be a 32+ character URL-safe secret'
     log 'shared API token file verified'
 }
 
@@ -389,7 +414,7 @@ validate_deployed_environment() {
 
     validate_env_file "$SERVICE_ENV" EXTERNAL_SHORTLINK_DATABASE_URL EXTERNAL_SHORTLINK_API_TOKEN
     verify_file_owner_and_mode "$SERVICE_ENV" "root:$SERVICE_GROUP" '640' 'service environment file'
-    [[ "$(read_env_value "$SERVICE_ENV" 'EXTERNAL_SHORTLINK_API_TOKEN')" =~ ^[^[:space:]]{32,}$ ]] || die 'deployed API token is invalid'
+    valid_url_safe_secret "$(read_env_value "$SERVICE_ENV" 'EXTERNAL_SHORTLINK_API_TOKEN')" || die 'deployed API token is invalid'
     local expected_database_url
     expected_database_url="postgresql://external_shortlink_runtime:$(read_env_value "$POSTGRES_ENV" 'EXTERNAL_SHORTLINK_RUNTIME_PASSWORD')@127.0.0.1:5433/external_shortlink"
     [[ "$(read_env_value "$SERVICE_ENV" 'EXTERNAL_SHORTLINK_DATABASE_URL')" == "$expected_database_url" ]] || die 'service database URL does not match the private PostgreSQL configuration'
@@ -585,6 +610,7 @@ ensure_certificate() {
     local key="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
     if [[ -f "$certificate" && -f "$key" ]]; then
         openssl x509 -checkend 0 -noout -in "$certificate" >/dev/null || die "existing certificate for $DOMAIN is expired"
+        install_certbot_renewal_hook
         systemctl enable --now certbot.timer
         log "existing TLS certificate verified for $DOMAIN"
         return
@@ -595,6 +621,7 @@ ensure_certificate() {
     activate_nginx_site "$NGINX_BOOTSTRAP_SITE" "$NGINX_BOOTSTRAP_ENABLED"
     log "requesting TLS certificate for $DOMAIN"
     certbot certonly --webroot --webroot-path "$ACME_WEBROOT" --non-interactive --agree-tos --email "$ACME_EMAIL" --keep-until-expiring -d "$DOMAIN"
+    install_certbot_renewal_hook
     systemctl enable --now certbot.timer
     rm -f -- "$NGINX_BOOTSTRAP_ENABLED" "$NGINX_BOOTSTRAP_SITE"
 }
@@ -603,9 +630,22 @@ configure_nginx() {
     local temporary
     temporary="$(mktemp /etc/nginx/sites-available/.external-shortlink.XXXXXX)"
     sed "s|203.0.113.10|$PRODUCTION_IP|g" "$INSTALL_DIR/app/deploy/nginx.conf" > "$temporary"
+    ! grep -Fq '203.0.113.10' "$temporary" || die 'Nginx production IP placeholder was not replaced'
     install -o root -g root -m 0644 "$temporary" "$NGINX_SITE"
     rm -f -- "$temporary"
     activate_nginx_site "$NGINX_SITE" "$NGINX_ENABLED"
+}
+
+install_certbot_renewal_hook() {
+    local temporary hook_directory
+    hook_directory="$(dirname "$CERTBOT_RENEWAL_HOOK")"
+    install -d -o root -g root -m 0755 "$hook_directory"
+    temporary="$(mktemp "$hook_directory/.external-shortlink-reload-nginx.XXXXXX")"
+    {
+        printf '%s\n' '#!/bin/sh' 'set -eu' 'systemctl reload nginx'
+    } > "$temporary"
+    install -o root -g root -m 0755 "$temporary" "$CERTBOT_RENEWAL_HOOK"
+    rm -f -- "$temporary"
 }
 
 configure_firewall() {
@@ -658,6 +698,7 @@ run_deploy() {
     verify_debian_host
     verify_deployment_account_and_capacity
     verify_source_tree
+    verify_source_integrity
     verify_api_token
     verify_tls_input
     verify_existing_deployment_inputs
