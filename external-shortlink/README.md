@@ -18,8 +18,8 @@ sudo ./scripts/deploy-debian-12.sh \
   --configure-ufw
 ```
 
-The token file is mode `0600`, contains the exact token configured on the
-production host, and is never printed by the script. The script verifies the
+The token file is mode `0600`, contains the exact 32+-character URL-safe token
+configured on the production host, and is never printed by the script. The script verifies the
 Debian release, `debian` deployment account, checkout location, and host
 capacity before making deployment changes.
 
@@ -96,8 +96,9 @@ Copy [deploy/external-shortlink.env.example](deploy/external-shortlink.env.examp
 to `/etc/external-shortlink.env` on the external host. The required values are:
 
 - `EXTERNAL_SHORTLINK_DATABASE_URL` — local, private PostgreSQL URL.
-- `EXTERNAL_SHORTLINK_API_TOKEN` — at least 32 random non-whitespace
-  characters; this must exactly match the production application's token.
+- `EXTERNAL_SHORTLINK_API_TOKEN` — at least 32 URL-safe characters
+  (`A-Z`, `a-z`, `0-9`, `.`, `_`, `~`, `-`); this must exactly match the
+  production application's token.
 
 All remaining variables in the example retain the former service’s names and
 defaults. `EXTERNAL_SHORTLINK_BIND_ADDR` defaults to `127.0.0.1:8081`; do not
@@ -120,8 +121,10 @@ EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE=1000
 ```
 
 The production server needs egress to the external host on `443`. The external
-host must allow `/api/` only from production's fixed egress address (and
-optionally use mTLS); the supplied Nginx configuration provides the IP layer.
+host must allow `/api/` only from production's fixed egress address; the
+supplied Nginx configuration provides that IP layer. Client-certificate
+settings on the production client require a separately configured Nginx mTLS
+policy and are not enabled by this deployment script.
 Never expose the external PostgreSQL port, its API token, or its SQLite spool
 to the public internet.
 
