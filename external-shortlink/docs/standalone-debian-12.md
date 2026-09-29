@@ -9,7 +9,8 @@ on the dedicated Debian 12 VM. The project checkout must be owned by the
 ```
 
 The public short-link domain is **`jzbe.ir`**. The production application's
-fixed egress IP is the only remote address allowed to use `/api/`.
+fixed, globally routable egress IP is the only remote address allowed to use
+`/api/`.
 
 ## Deploy
 
@@ -30,9 +31,10 @@ sudo ./scripts/deploy-debian-12.sh deploy \
   --configure-ufw
 ```
 
-The token file must contain the exact 32+-character token configured on the
-production application. It must contain one non-whitespace value and never be
-added to the repository or passed on the command line.
+The token file must contain the exact 32+-character URL-safe token configured
+on the production application. It must contain one value using only letters,
+numbers, `.`, `_`, `~`, or `-`; never add it to the repository or pass it on
+the command line. `openssl rand -hex 32` generates an appropriate value.
 
 Before making changes, the script validates root access, Debian 12, systemd,
 the `debian` account and project ownership, x86_64/aarch64, at least 4 vCPUs,
@@ -58,7 +60,9 @@ It is safe to rerun the same `deploy` command after a recoverable failure. The
 script preserves existing database passwords, refuses to silently change the
 API token, validates both environment files before use, reapplies the schema
 and runtime-role grants idempotently, and uses `docker compose up -d`, managed
-systemd units, and Nginx symlinks that can be applied repeatedly.
+systemd units, and Nginx symlinks that can be applied repeatedly. It also
+refuses a dirty or untracked external-service source tree, so the installed
+release always comes from the reviewed Git commit.
 
 Every non-log command writes console output and failure diagnostics to the
 root-only file:
