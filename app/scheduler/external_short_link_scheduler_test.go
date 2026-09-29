@@ -116,6 +116,17 @@ func TestNewExternalShortLinkClientRejectsNonOriginBaseURL(t *testing.T) {
 	}
 }
 
+func TestNewExternalShortLinkClientRejectsNonURLSafeToken(t *testing.T) {
+	_, err := NewExternalShortLinkClient(config.ExternalShortLinkConfig{
+		BaseURL:        "https://links.example",
+		APIToken:       strings.Repeat("x", 31) + "!",
+		RequestTimeout: time.Second,
+	})
+	if err == nil || !strings.Contains(err.Error(), "URL-safe") {
+		t.Fatalf("NewExternalShortLinkClient() error = %v, want URL-safe token error", err)
+	}
+}
+
 func TestNewExternalShortLinkClickSchedulerDefaultsToSupportedPageSize(t *testing.T) {
 	scheduler := NewExternalShortLinkClickScheduler(nil, nil, log.New(io.Discard, "", 0), time.Minute, 0, 1)
 	if got, want := scheduler.pageSize, 1000; got != want {
