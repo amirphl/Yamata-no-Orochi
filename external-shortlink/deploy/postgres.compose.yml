@@ -32,7 +32,7 @@ services:
       - ../schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
       - ./postgres-init/20-runtime-role.sh:/docker-entrypoint-initdb.d/20-runtime-role.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U external_shortlink -d external_shortlink"]
+      test: ["CMD-SHELL", "pg_isready -U external_shortlink_admin -d external_shortlink"]
       interval: 10s
       timeout: 5s
       retries: 5
