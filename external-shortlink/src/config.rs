@@ -30,11 +30,8 @@ impl Settings {
     pub fn from_env() -> Result<Self> {
         let database_url = required("EXTERNAL_SHORTLINK_DATABASE_URL")?;
         let api_token = required("EXTERNAL_SHORTLINK_API_TOKEN")?;
-        if api_token.len() < 32
-            || api_token.trim() != api_token
-            || api_token.contains(char::is_whitespace)
-        {
-            bail!("EXTERNAL_SHORTLINK_API_TOKEN must contain at least 32 non-whitespace characters")
+        if !is_url_safe_secret(&api_token) {
+            bail!("EXTERNAL_SHORTLINK_API_TOKEN must be a 32+ character URL-safe secret")
         }
 
         let bind_addr: SocketAddr = value("EXTERNAL_SHORTLINK_BIND_ADDR", "127.0.0.1:8081")
@@ -144,6 +141,13 @@ impl Settings {
     }
 }
 
+fn is_url_safe_secret(value: &str) -> bool {
+    value.len() >= 32
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'~' | b'-'))
+}
+
 fn value(name: &str, default: &str) -> String {
     env::var(name)
         .unwrap_or_else(|_| default.to_owned())
@@ -196,5 +200,11 @@ mod tests {
     #[test]
     fn unsigned_enforces_upper_bound() {
         assert!(unsigned("EXTERNAL_SHORTLINK_TEST_UNSIGNED", 10, 1, 5).is_err());
+    }
+
+    #[test]
+    fn url_safe_secret_rejects_environment_file_syntax() {
+        assert!(is_url_safe_secret(&"x".repeat(32)));
+        assert!(!is_url_safe_secret(&("x".repeat(31) + "!")));
     }
 }
