@@ -238,10 +238,10 @@ func TestValidateExternalShortLinkConfig(t *testing.T) {
 
 	invalid := valid
 	invalid.BaseURL = "http://links.example.com"
-	invalid.APIToken = "short"
+	invalid.APIToken = strings.Repeat("x", 31) + "!"
 	errors := validateExternalShortLinkConfig(invalid)
 	if len(errors) != 2 {
-		t.Fatalf("invalid external short-link config errors = %v, want HTTPS and token errors", errors)
+		t.Fatalf("invalid external short-link config errors = %v, want HTTPS and URL-safe token errors", errors)
 	}
 	if errors := validateExternalShortLinkConfig(ExternalShortLinkConfig{}); len(errors) != 0 {
 		t.Fatalf("disabled external short-link config errors = %v", errors)
