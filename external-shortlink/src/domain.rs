@@ -123,13 +123,13 @@ pub fn unique_validated_links(inputs: Vec<LinkInput>) -> Result<Vec<LinkInput>, 
     let mut unique: HashMap<String, LinkInput> = HashMap::with_capacity(inputs.len());
     for input in inputs {
         let input = input.validate_and_normalize()?;
-        if let Some(previous) = unique.get(&input.code)
-            && previous.long_url != input.long_url
-        {
-            return Err(ValidationError::new(format!(
-                "code {:?} appears with different destinations",
-                input.code
-            )));
+        if let Some(previous) = unique.get(&input.code) {
+            if previous.long_url != input.long_url {
+                return Err(ValidationError::new(format!(
+                    "code {:?} appears with different destinations",
+                    input.code
+                )));
+            }
         }
         unique.insert(input.code.clone(), input);
     }
