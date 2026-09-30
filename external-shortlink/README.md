@@ -12,11 +12,15 @@ For `jzbe.ir`, use the guarded deployment script from the checked-out source:
 
 ```sh
 sudo ./scripts/deploy-debian-12.sh \
-  --production-ip 'THE_PRODUCTION_EGRESS_IP' \
   --api-token-file /root/external-shortlink-api-token \
   --acme-email 'ops@example.com' \
   --configure-ufw
 ```
+
+`--production-ip 'THE_PRODUCTION_EGRESS_IP'` is optional. Supply it when the
+production host has a fixed egress IP to restrict `/api/` at Nginx; omit it
+when that address changes, in which case `/api/` relies on bearer-token
+authentication alone.
 
 The token file is mode `0600`, contains the exact 32+-character URL-safe token
 configured on the production host, and is never printed by the script. The script verifies the
@@ -120,11 +124,12 @@ EXTERNAL_SHORTLINK_MAPPING_BATCH_SIZE=500
 EXTERNAL_SHORTLINK_CLICK_PAGE_SIZE=1000
 ```
 
-The production server needs egress to the external host on `443`. The external
-host must allow `/api/` only from production's fixed egress address; the
-supplied Nginx configuration provides that IP layer. Client-certificate
-settings on the production client require a separately configured Nginx mTLS
-policy and are not enabled by this deployment script.
+The production server needs egress to the external host on `443`. When
+`--production-ip` is supplied, the Nginx configuration allows `/api/` only
+from that fixed egress address. Without it, the bearer token is the API's only
+access control. Client-certificate settings on the production client require a
+separately configured Nginx mTLS policy and are not enabled by this deployment
+script.
 Never expose the external PostgreSQL port, its API token, or its SQLite spool
 to the public internet.
 
