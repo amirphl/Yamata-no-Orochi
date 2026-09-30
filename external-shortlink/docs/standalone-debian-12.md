@@ -8,9 +8,10 @@ on the dedicated Debian 12 VM. The project checkout must be owned by the
 /home/debian/Yamata-no-Orochi/
 ```
 
-The public short-link domain is **`jzbe.ir`**. The production application's
-fixed, globally routable egress IP is the only remote address allowed to use
-`/api/`.
+The public short-link domain is **`jzbe.ir`**. Supplying the production
+application's fixed, globally routable egress IP restricts `/api/` to that
+address. It is optional; without it, `/api/` relies on bearer-token
+authentication alone.
 
 ## Deploy
 
@@ -25,11 +26,15 @@ sudo install -o root -g root -m 0600 /dev/null /root/external-shortlink-api-toke
 sudoedit /root/external-shortlink-api-token
 
 sudo ./scripts/deploy-debian-12.sh deploy \
-  --production-ip 'THE_PRODUCTION_EGRESS_IP' \
   --api-token-file /root/external-shortlink-api-token \
   --acme-email 'ops@example.com' \
   --configure-ufw
 ```
+
+If the production host has a fixed egress address, add
+`--production-ip 'THE_PRODUCTION_EGRESS_IP'` to apply an Nginx source-IP
+allowlist to `/api/`. Otherwise omit it; the API remains protected by its
+bearer token, but accepts connections from any source address.
 
 The token file must contain the exact 32+-character URL-safe token configured
 on the production application. It must contain one value using only letters,
@@ -38,8 +43,8 @@ the command line. `openssl rand -hex 32` generates an appropriate value.
 
 Before making changes, the script validates root access, Debian 12, systemd,
 the `debian` account and project ownership, x86_64/aarch64, at least 4 vCPUs,
-4 GB RAM, 60 GiB free on `/`, the locked source tree, production egress IP,
-and required environment values. It then installs any missing Debian packages
+4 GB RAM, 60 GiB free on `/`, the locked source tree, an optional production
+egress IP, and required environment values. It then installs any missing Debian packages
 (`nginx`, `certbot`, Docker Compose, Rust build prerequisites, and so on),
 installs Rust 1.85 for `debian`, and builds the release binary as that account.
 
