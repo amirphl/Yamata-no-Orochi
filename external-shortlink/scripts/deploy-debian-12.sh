@@ -102,9 +102,9 @@ usage() {
     cat <<'USAGE'
 Usage:
   sudo ./scripts/deploy-debian-12.sh deploy \
-    --production-ip <production-egress-ip> \
     --api-token-file <root-only-token-file> \
-    [--acme-email <email>] [--configure-ufw] [--source-dir <directory>]
+    [--production-ip <production-egress-ip>] [--acme-email <email>] \
+    [--configure-ufw] [--source-dir <directory>]
   sudo ./scripts/deploy-debian-12.sh start
   sudo ./scripts/deploy-debian-12.sh stop
   sudo ./scripts/deploy-debian-12.sh restart
@@ -117,10 +117,11 @@ deployment account "debian", and a source checkout below
 /opt/external-shortlink and the service itself runs as external-shortlink.
 
 Deploy requirements:
-  --production-ip   Fixed, globally routable IPv4 or IPv6 address allowed to call /api/.
   --api-token-file  One-line root-only file containing the shared 32+ character URL-safe API token.
 
 Deploy options:
+  --production-ip   Optional fixed, globally routable IPv4 or IPv6 address allowed to call /api/.
+                    When omitted, /api/ is reachable from any address and relies on bearer-token authentication.
   --acme-email      Required only when /etc/letsencrypt/live/jzbe.ir is absent.
   --configure-ufw   Allow the current SSH port plus HTTP/HTTPS and enable UFW.
   --source-dir      Source directory under the required project checkout.
@@ -281,8 +282,10 @@ verify_source_tree() {
     for file in "${required_files[@]}"; do
         [[ -f "$SOURCE_DIR/$file" ]] || die "source tree is missing $file"
     done
-    [[ "$(grep -Fxc '        allow 203.0.113.10;' "$SOURCE_DIR/deploy/nginx.conf")" == '1' ]] ||
-        die 'Nginx template must contain exactly one production-IP placeholder'
+    [[ "$(grep -Fxc '        # EXTERNAL_SHORTLINK_API_SOURCE_RULE' "$SOURCE_DIR/deploy/nginx.conf")" == '1' ]] ||
+        die 'Nginx template must contain exactly one API source-rule placeholder'
+    [[ "$(grep -Fxc '        # EXTERNAL_SHORTLINK_API_DENY_RULE' "$SOURCE_DIR/deploy/nginx.conf")" == '1' ]] ||
+        die 'Nginx template must contain exactly one API deny-rule placeholder'
     log "source tree verified: $SOURCE_DIR"
 }
 
@@ -305,7 +308,10 @@ verify_source_integrity() {
 }
 
 verify_production_ip() {
-    [[ -n "$PRODUCTION_IP" ]] || die '--production-ip is required for deploy'
+    if [[ -z "$PRODUCTION_IP" ]]; then
+        log 'no production egress IP supplied; /api/ will rely on bearer-token authentication without an Nginx source-IP allowlist'
+        return
+    fi
     require_command python3
     python3 - "$PRODUCTION_IP" <<'PY'
 import ipaddress
@@ -318,7 +324,7 @@ except ValueError:
 if not address.is_global:
     raise SystemExit(1)
 PY
-    log 'globally routable production egress IP verified'
+    log 'globally routable production egress IP verified; /api/ will use an Nginx source-IP allowlist'
 }
 
 verify_api_token() {
@@ -627,10 +633,21 @@ ensure_certificate() {
 }
 
 configure_nginx() {
-    local temporary
+    local temporary api_source_rule api_deny_rule
+    if [[ -n "$PRODUCTION_IP" ]]; then
+        api_source_rule="allow $PRODUCTION_IP;"
+        api_deny_rule='deny all;'
+    else
+        api_source_rule='allow all;'
+        api_deny_rule='# No source-IP allowlist: authenticated API access is permitted from any address.'
+    fi
     temporary="$(mktemp /etc/nginx/sites-available/.external-shortlink.XXXXXX)"
-    sed "s|203.0.113.10|$PRODUCTION_IP|g" "$INSTALL_DIR/app/deploy/nginx.conf" > "$temporary"
-    ! grep -Fq '203.0.113.10' "$temporary" || die 'Nginx production IP placeholder was not replaced'
+    sed \
+        -e "s|# EXTERNAL_SHORTLINK_API_SOURCE_RULE|$api_source_rule|" \
+        -e "s|# EXTERNAL_SHORTLINK_API_DENY_RULE|$api_deny_rule|" \
+        "$INSTALL_DIR/app/deploy/nginx.conf" > "$temporary"
+    ! grep -Fq 'EXTERNAL_SHORTLINK_API_SOURCE_RULE' "$temporary" || die 'Nginx API source-rule placeholder was not replaced'
+    ! grep -Fq 'EXTERNAL_SHORTLINK_API_DENY_RULE' "$temporary" || die 'Nginx API deny-rule placeholder was not replaced'
     install -o root -g root -m 0644 "$temporary" "$NGINX_SITE"
     rm -f -- "$temporary"
     activate_nginx_site "$NGINX_SITE" "$NGINX_ENABLED"
