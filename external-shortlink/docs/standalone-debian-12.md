@@ -44,9 +44,15 @@ the command line. `openssl rand -hex 32` generates an appropriate value.
 Before making changes, the script validates root access, Debian 12, systemd,
 the `debian` account and project ownership, x86_64/aarch64, at least 4 vCPUs,
 4 GB RAM, 60 GiB free on `/`, the locked source tree, an optional production
-egress IP, and required environment values. It then installs any missing Debian packages
-(`nginx`, `certbot`, Docker Compose, Rust build prerequisites, and so on),
-installs Rust 1.85 for `debian`, and builds the release binary as that account.
+egress IP, and required environment values. It then installs any missing Debian packages,
+configures Docker's official Debian repository, installs Docker Engine with
+Compose v2, installs Rust 1.85 for `debian`, and builds the release binary as
+that account.
+
+The host must not already have conflicting Debian Docker packages installed:
+`docker.io`, `docker-compose`, `docker-doc`, `docker-buildx`, `podman-docker`,
+`containerd`, or `runc`. The script stops with the package names instead of
+removing them, because they may belong to another workload.
 
 The script stores root-owned release files in `/opt/external-shortlink` and
 runs the public service as the separate unprivileged `external-shortlink`

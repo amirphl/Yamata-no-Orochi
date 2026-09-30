@@ -25,6 +25,8 @@ readonly NGINX_BOOTSTRAP_SITE='/etc/nginx/sites-available/external-shortlink-boo
 readonly NGINX_BOOTSTRAP_ENABLED='/etc/nginx/sites-enabled/external-shortlink-bootstrap'
 readonly ACME_WEBROOT='/var/www/external-shortlink-acme'
 readonly CERTBOT_RENEWAL_HOOK='/etc/letsencrypt/renewal-hooks/deploy/external-shortlink-reload-nginx'
+readonly DOCKER_APT_KEYRING='/etc/apt/keyrings/external-shortlink-docker.asc'
+readonly DOCKER_APT_SOURCE='/etc/apt/sources.list.d/external-shortlink-docker.sources'
 readonly LOG_DIR='/var/log/external-shortlink'
 readonly DEPLOY_LOG="$LOG_DIR/deploy.log"
 readonly RUST_TOOLCHAIN='1.85.0'
@@ -448,6 +450,56 @@ verify_existing_deployment_inputs() {
     log 'existing deployment inputs verified'
 }
 
+verify_no_conflicting_docker_packages() {
+    require_command dpkg-query
+
+    local package installed_packages=''
+    local packages=(
+        docker.io docker-compose docker-doc docker-buildx podman-docker containerd runc
+    )
+    for package in "${packages[@]}"; do
+        if dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | grep -Fxq 'installed'; then
+            installed_packages+="$package, "
+        fi
+    done
+    [[ -z "$installed_packages" ]] ||
+        die "Docker's official packages conflict with installed packages: ${installed_packages%, }. Remove them before deploying."
+}
+
+configure_docker_apt_repository() {
+    local temporary architecture
+    require_command dpkg
+    architecture="$(dpkg --print-architecture)"
+    case "$architecture" in
+        amd64|arm64) ;;
+        *) die "Docker's official Debian repository does not support architecture: $architecture" ;;
+    esac
+
+    install -d -o root -g root -m 0755 /etc/apt/keyrings /etc/apt/sources.list.d
+
+    temporary="$(mktemp /etc/apt/keyrings/.external-shortlink-docker.XXXXXX)"
+    curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+        https://download.docker.com/linux/debian/gpg -o "$temporary"
+    install -o root -g root -m 0644 "$temporary" "$DOCKER_APT_KEYRING"
+    rm -f -- "$temporary"
+
+    temporary="$(mktemp /etc/apt/sources.list.d/.external-shortlink-docker.XXXXXX)"
+    {
+        printf '%s\n' \
+            'Types: deb' \
+            'URIs: https://download.docker.com/linux/debian' \
+            'Suites: bookworm' \
+            'Components: stable' \
+            "Architectures: $architecture" \
+            "Signed-By: $DOCKER_APT_KEYRING"
+    } > "$temporary"
+    install -o root -g root -m 0644 "$temporary" "$DOCKER_APT_SOURCE"
+    rm -f -- "$temporary"
+
+    apt-get update
+    log "Docker's official APT repository configured for Debian 12 ($architecture)"
+}
+
 install_dependencies() {
     log 'checking and installing Debian 12 runtime and build dependencies'
     require_command apt-get
@@ -455,15 +507,26 @@ install_dependencies() {
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
 
-    local packages=(
+    local base_packages=(
         ca-certificates curl git python3 build-essential pkg-config libssl-dev
-        nginx certbot docker.io docker-compose-plugin ufw
+        nginx certbot ufw
     )
     local package
-    for package in "${packages[@]}"; do
+    for package in "${base_packages[@]}"; do
         apt-cache show "$package" >/dev/null 2>&1 || die "required Debian package is unavailable: $package"
     done
-    apt-get install -y --no-install-recommends "${packages[@]}"
+    apt-get install -y --no-install-recommends "${base_packages[@]}"
+
+    verify_no_conflicting_docker_packages
+    configure_docker_apt_repository
+
+    local docker_packages=(
+        docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    )
+    for package in "${docker_packages[@]}"; do
+        apt-cache show "$package" >/dev/null 2>&1 || die "required Docker package is unavailable: $package"
+    done
+    apt-get install -y --no-install-recommends "${docker_packages[@]}"
     systemctl enable --now docker
 
     require_command docker
@@ -472,7 +535,7 @@ install_dependencies() {
     require_command certbot
     require_command openssl
     require_command curl
-    log 'Debian dependencies verified'
+    log 'runtime and build dependencies verified'
 }
 
 as_deployment_user() {
