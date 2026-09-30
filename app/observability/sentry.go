@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"runtime/debug"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/requestid"
 )
 
 type SentryConfig struct {
@@ -217,23 +219,43 @@ func buildHTTPEvent(
 	event.Tags["http.status_code"] = fmt.Sprintf("%d", status)
 	event.Tags["http.method"] = c.Method()
 	event.Tags["error.source"] = source
+
+	route, pathParams := requestRoute(c)
+	path := c.Path()
+	queryString, queryParams := redactedQuery(c)
+	requestID := requestid.FromContext(c)
+
+	// Route templates are intentionally tags: unlike the concrete path, they
+	// remain low-cardinality and make it possible to identify the handler from
+	// GlitchTip without creating a tag value for every resource ID.
+	event.Tags["http.route"] = route
 	event.Request = &sentry.Request{
 		URL:         requestURL(c),
 		Method:      c.Method(),
-		QueryString: string(c.Request().URI().QueryString()),
+		QueryString: queryString,
 		Headers:     filteredHeaders(c),
 		Data:        truncate(string(c.Body()), 4096),
 	}
+	event.Contexts["request"] = sentry.Context{
+		"id":          requestID,
+		"path":        path,
+		"route":       route,
+		"is_complete": hasCompleteHTTPRequest(c),
+	}
+	if len(pathParams) > 0 {
+		event.Contexts["request"]["path_params"] = pathParams
+	}
+	if len(queryParams) > 0 {
+		event.Contexts["request"]["query_params"] = queryParams
+	}
 	event.Contexts["response"] = sentry.Context{
 		"body":        truncate(string(c.Response().Body()), 4096),
-		"request_id":  fmt.Sprintf("%v", c.Locals("requestid")),
+		"request_id":  requestID,
 		"source":      source,
 		"status_code": status,
 	}
 
-	if route := c.Route(); route != nil && route.Path != "" {
-		event.Transaction = route.Path
-	}
+	event.Transaction = route
 
 	if capturedErr != nil {
 		event.SetException(capturedErr, 10)
@@ -427,7 +449,91 @@ func requestURL(c fiber.Ctx) string {
 	if proto == "" {
 		proto = "http"
 	}
-	return fmt.Sprintf("%s://%s%s", proto, c.Host(), c.OriginalURL())
+
+	if !hasCompleteHTTPRequest(c) {
+		return ""
+	}
+	path := c.Path()
+	if host := c.Host(); host != "" {
+		return fmt.Sprintf("%s://%s%s", proto, host, path)
+	}
+
+	// A parser-level error can have a request path but no Host header. Preserve
+	// the useful path rather than emitting the misleading "http:///" URL.
+	return path
+}
+
+func requestRoute(c fiber.Ctx) (string, map[string]string) {
+	if !hasCompleteHTTPRequest(c) {
+		// Fiber did not finish parsing the request. No application handler can
+		// be associated with this event.
+		return "<unavailable>", nil
+	}
+
+	route := c.Route()
+	if route == nil || route.Path == "" || len(route.Handlers) == 0 || c.IsMiddleware() {
+		return "<unmatched>", nil
+	}
+
+	params := make(map[string]string, len(route.Params))
+	for _, name := range route.Params {
+		if value := c.Params(name); value != "" {
+			params[name] = redactRequestValue(name, value)
+		}
+	}
+	return route.Path, params
+}
+
+func hasCompleteHTTPRequest(c fiber.Ctx) bool {
+	// fasthttp initializes a fresh request context as GET / with no Host. That
+	// is also the shape Fiber gives its error handler after a client times out
+	// before sending a complete request, as in the reported 408 events.
+	return c.Host() != "" || c.OriginalURL() != "/"
+}
+
+func redactedQuery(c fiber.Ctx) (string, map[string][]string) {
+	rawQuery := string(c.Request().URI().QueryString())
+	if rawQuery == "" {
+		return "", nil
+	}
+
+	values, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return "[unparseable]", map[string][]string{"[unparseable]": {"[redacted]"}}
+	}
+
+	redactedValues := make(url.Values, len(values))
+	queryParams := make(map[string][]string, len(values))
+	for name, values := range values {
+		redacted := make([]string, len(values))
+		for index, value := range values {
+			redacted[index] = redactRequestValue(name, value)
+		}
+		redactedValues[name] = redacted
+		queryParams[name] = redacted
+	}
+
+	return redactedValues.Encode(), queryParams
+}
+
+func redactRequestValue(name, value string) string {
+	if isSensitiveRequestField(name) {
+		return "[redacted]"
+	}
+	return truncate(value, 512)
+}
+
+func isSensitiveRequestField(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	return strings.Contains(name, "authorization") ||
+		strings.Contains(name, "credential") ||
+		strings.Contains(name, "password") ||
+		strings.Contains(name, "secret") ||
+		strings.Contains(name, "token") ||
+		strings.Contains(name, "api_key") ||
+		strings.Contains(name, "api-key") ||
+		strings.Contains(name, "apikey") ||
+		strings.Contains(name, "signature")
 }
 
 func filteredHeaders(c fiber.Ctx) map[string]string {
