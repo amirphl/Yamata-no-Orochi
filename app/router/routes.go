@@ -627,9 +627,14 @@ func (r *FiberRouter) setupMiddleware() {
 
 	// Advanced logging middleware
 	r.app.Use(logger.New(logger.Config{
-		Format:     `{"time":"${time}","pid":"${pid}","request_id":"${locals:requestid}","level":"info","method":"${method}","path":"${path}","protocol":"${protocol}","ip":"${ip}","user_agent":"${ua}","status":${status},"latency":"${latency}","bytes_in":${bytesReceived},"bytes_out":${bytesSent},"referer":"${referer}"}` + "\n",
+		Format:     `{"time":"${time}","pid":"${pid}","request_id":"${request_id}","level":"info","method":"${method}","path":"${path}","protocol":"${protocol}","ip":"${ip}","user_agent":"${ua}","status":${status},"latency":"${latency}","bytes_in":${bytesReceived},"bytes_out":${bytesSent},"referer":"${referer}"}` + "\n",
 		TimeFormat: time.RFC3339,
 		TimeZone:   "UTC",
+		CustomTags: map[string]logger.LogFunc{
+			"request_id": func(output logger.Buffer, c fiber.Ctx, _ *logger.Data, _ string) (int, error) {
+				return output.WriteString(jsonLogString(requestid.FromContext(c)))
+			},
+		},
 		Next: func(c fiber.Ctx) bool {
 			// Skip logging for health checks in production
 			return c.Path() == "/api/v1/health"
@@ -649,7 +654,7 @@ func (r *FiberRouter) setupMiddleware() {
 			// Log panic with request context
 			log.Printf(`{"time":"%s","level":"error","request_id":"%s","event":"panic","error":"%v","path":"%s","method":"%s","ip":"%s"}`,
 				utils.UTCNow().Format(time.RFC3339),
-				c.Locals("requestid"),
+				requestid.FromContext(c),
 				e,
 				c.Path(),
 				c.Method(),
@@ -873,7 +878,7 @@ func (r *FiberRouter) serveStandaloneSwaggerUI(c fiber.Ctx) error {
 
 // Not found handler
 func (r *FiberRouter) notFoundHandler(c fiber.Ctx) error {
-	requestID := c.Locals("requestid")
+	requestID := requestid.FromContext(c)
 
 	return c.Status(fiber.StatusNotFound).JSON(dto.APIResponse{
 		Success: false,
@@ -910,7 +915,7 @@ func errorHandler(c fiber.Ctx, err error) error {
 	observability.CaptureError(c, code, err, "fiber_error_handler")
 
 	// Get RequestID for tracing
-	requestID := c.Locals("requestid")
+	requestID := requestid.FromContext(c)
 
 	// Return JSON error response
 	return c.Status(code).JSON(dto.APIResponse{
@@ -935,6 +940,14 @@ func generateRequestID() string {
 		return hex.EncodeToString([]byte(time.Now().Format("150405.000000")))
 	}
 	return hex.EncodeToString(bytes)
+}
+
+func jsonLogString(value string) string {
+	encoded, err := json.Marshal(value)
+	if err != nil || len(encoded) < 2 {
+		return ""
+	}
+	return string(encoded[1 : len(encoded)-1])
 }
 
 // contains checks if a string contains a substring
