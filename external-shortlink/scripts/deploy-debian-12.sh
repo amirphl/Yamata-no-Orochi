@@ -647,7 +647,7 @@ ensure_installed_deployment() {
 wait_for_postgres() {
     local attempt
     for attempt in $(seq 1 45); do
-        if compose exec -T postgres pg_isready -U external_shortlink_admin -d external_shortlink >/dev/null 2>&1; then
+        if compose exec -T postgres pg_isready --host 127.0.0.1 --port 5432 -U external_shortlink_admin -d external_shortlink >/dev/null 2>&1; then
             return 0
         fi
         sleep 1
@@ -660,8 +660,13 @@ deploy_postgres() {
     compose config --quiet
     compose up -d
     wait_for_postgres
-    compose exec -T postgres psql -v ON_ERROR_STOP=1 -U external_shortlink_admin -d external_shortlink -f /docker-entrypoint-initdb.d/10-schema.sql >/dev/null
-    compose exec -T postgres /docker-entrypoint-initdb.d/20-runtime-role.sh >/dev/null
+    compose exec -T postgres sh -ceu '
+        PGPASSWORD="$POSTGRES_PASSWORD" psql --set=ON_ERROR_STOP=1 \
+            --host 127.0.0.1 --port 5432 \
+            --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+            -f /opt/external-shortlink-schema.sql
+    ' >/dev/null
+    compose exec -T postgres /opt/external-shortlink-runtime-role.sh >/dev/null
     log 'PostgreSQL schema and least-privilege runtime role verified'
 }
 

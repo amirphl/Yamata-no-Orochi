@@ -29,10 +29,13 @@ services:
       - no-new-privileges:true
     volumes:
       - external_shortlink_postgres:/var/lib/postgresql/data
-      - ../schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
-      - ./postgres-init/20-runtime-role.sh:/docker-entrypoint-initdb.d/20-runtime-role.sh:ro
+      # The deployment script applies these only after PostgreSQL is ready.
+      # Do not mount them below /docker-entrypoint-initdb.d: its automatic
+      # first-boot execution conflicts with the deployment's idempotent setup.
+      - ../schema.sql:/opt/external-shortlink-schema.sql:ro
+      - ./postgres-init/20-runtime-role.sh:/opt/external-shortlink-runtime-role.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U external_shortlink_admin -d external_shortlink"]
+      test: ["CMD-SHELL", "pg_isready --host 127.0.0.1 --port 5432 -U external_shortlink_admin -d external_shortlink"]
       interval: 10s
       timeout: 5s
       retries: 5

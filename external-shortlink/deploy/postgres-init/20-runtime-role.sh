@@ -2,8 +2,13 @@
 set -euo pipefail
 
 : "${EXTERNAL_SHORTLINK_RUNTIME_PASSWORD:?EXTERNAL_SHORTLINK_RUNTIME_PASSWORD is required}"
+: "${POSTGRES_USER:?POSTGRES_USER is required}"
+: "${POSTGRES_DB:?POSTGRES_DB is required}"
+: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
 
-psql --set=ON_ERROR_STOP=1 \
+PGPASSWORD="$POSTGRES_PASSWORD" psql --set=ON_ERROR_STOP=1 \
+  --host 127.0.0.1 \
+  --port 5432 \
   --username "$POSTGRES_USER" \
   --dbname "$POSTGRES_DB" \
   --set=runtime_password="$EXTERNAL_SHORTLINK_RUNTIME_PASSWORD" <<'SQL'
