@@ -512,6 +512,29 @@ wait_for_app_health() {
 	return 1
 }
 
+wait_for_nginx_sentry_forwarder_health() {
+	print_status "Waiting for nginx-sentry-forwarder-beta health..."
+	local docker_cmd
+	docker_cmd=$(get_docker_cmd)
+	local max_attempts=24
+	local attempt=1
+	local state="unknown"
+	local health="unknown"
+	while [ $attempt -le $max_attempts ]; do
+		state=$($docker_cmd inspect -f '{{.State.Status}}' yamata-nginx-sentry-forwarder-beta 2>/dev/null || echo "unknown")
+		health=$($docker_cmd inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' yamata-nginx-sentry-forwarder-beta 2>/dev/null || echo "unknown")
+		if [ "$state" = running ] && [ "$health" = healthy ]; then
+			print_success "nginx-sentry-forwarder-beta is healthy"
+			return 0
+		fi
+		print_status "Attempt $attempt/$max_attempts - nginx-sentry-forwarder-beta state: $state, health: $health"
+		sleep 5
+		attempt=$((attempt + 1))
+	done
+	print_error "nginx-sentry-forwarder-beta did not become healthy (state: $state, health: $health)"
+	return 1
+}
+
 # Function to start app-beta (and nginx-beta after)
 start_app_service() {
 	print_status "Starting app-beta and nginx-beta services..."
@@ -713,6 +736,7 @@ main() {
 	
 	# Wait for app-beta to report healthy status
 	wait_for_app_health
+	wait_for_nginx_sentry_forwarder_health
 	
 	# Show deployment information
 	show_deployment_info "$domain"
