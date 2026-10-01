@@ -158,7 +158,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Copy the backend's exact effective environment without exposing its secrets.
+# Copy the backend's effective environment by default, so new application
+# settings (including external-shortlink settings) are automatically available
+# to the scheduler. The explicit omit list below is limited to credentials and
+# settings for components the scheduler never runs.
 "${DOCKER[@]}" inspect -f '{{json .Config.Env}}' "$SOURCE_CONTAINER" |
 	python3 -c 'import json,sys; values=json.load(sys.stdin); bad=[v.split("=",1)[0] for v in values if "\n" in v or "\r" in v or "\0" in v]; sys.exit("container environment contains unsupported control characters: " + ", ".join(bad) if bad else 0)'
 "${DOCKER[@]}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SOURCE_CONTAINER" |
@@ -251,6 +254,26 @@ NO_PROXY=localhost,127.0.0.1,app-beta,yamata-app-beta,postgres-beta,yamata-postg
 no_proxy=localhost,127.0.0.1,app-beta,yamata-app-beta,postgres-beta,yamata-postgres-beta,redis-beta,yamata-redis-beta,172.30.0.0/24
 EOF
 
+verify_runtime_environment() {
+	local expected key actual
+	while IFS= read -r expected; do
+		[[ -n "$expected" ]] || continue
+		[[ "$expected" == *=* ]] || {
+			printf '[campaign-scheduler] ERROR: generated environment entry is invalid: %s\n' "${expected%%=*}" >&2
+			return 1
+		}
+		key="${expected%%=*}"
+		actual="$(
+			"${DOCKER[@]}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER_NAME" |
+				awk -F= -v key="$key" '$1 == key { entry=$0 } END { print entry }'
+		)"
+		if [[ "$actual" != "$expected" ]]; then
+			printf '[campaign-scheduler] ERROR: scheduler environment did not retain %s\n' "$key" >&2
+			return 1
+		fi
+	done <"$RUNTIME_ENV"
+}
+
 "${DOCKER[@]}" volume create "$LOG_VOLUME" >/dev/null
 
 if "${DOCKER[@]}" container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
@@ -283,6 +306,11 @@ log "Starting $CONTAINER_NAME from $IMAGE on $NETWORK"
 	--log-opt max-file=5 \
 	--label com.yamata.role=campaign-scheduler \
 	"$IMAGE" >/dev/null
+
+if ! verify_runtime_environment; then
+	"${DOCKER[@]}" rm --force "$CONTAINER_NAME" >/dev/null 2>&1 || true
+	die "Refusing a scheduler with an incomplete runtime environment"
+fi
 
 log "Waiting for the isolated instance to become healthy"
 deadline=$((SECONDS + 90))

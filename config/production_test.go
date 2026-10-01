@@ -1,12 +1,166 @@
 package config
 
 import (
+	"bufio"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 )
+
+var (
+	productionConfigEnvCallPattern = regexp.MustCompile(`get(?:Optional)?Env(?:StringSlice|StringMap|Float64|Duration|String|Bool|Int)\("([A-Z0-9_]+)"`)
+	composeEnvironmentKeyPattern   = regexp.MustCompile(`^      ([A-Z][A-Z0-9_]*)\s*:`)
+	schedulerOmitPattern           = regexp.MustCompile(`omit\["([A-Z0-9_]+)"\]`)
+	schedulerOverridePattern       = regexp.MustCompile(`override\["([A-Z0-9_]+)"\]`)
+
+	schedulerIntentionalProductionConfigOmissions = map[string]struct{}{
+		"ADMIN_2FA_MOBILES":              {},
+		"ADMIN_DEPOSIT_REVIEWER":         {},
+		"ADMIN_LOGIN_OTP_FORWARD_MOBILE": {},
+		"ADMIN_OTP_BYPASS_MOBILES":       {},
+		"ATIPAY_API_KEY":                 {},
+		"ATIPAY_TERMINAL":                {},
+		"BACKUP_S3_ACCESS_KEY":           {},
+		"BACKUP_S3_BUCKET":               {},
+		"BACKUP_S3_SECRET_KEY":           {},
+		"CERTBOT_EMAIL":                  {},
+		"GRAFANA_ADMIN_PASSWORD":         {},
+		"OXA_API_KEY":                    {}, // CRYPTO_ENABLED is false in the scheduler.
+		"REDIS_PASSWORD":                 {},
+	}
+)
+
+func TestAppBetaComposePassesEveryProductionConfigEnvironmentVariable(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test file path")
+	}
+	testDirectory := filepath.Dir(testFile)
+
+	productionConfig, err := os.ReadFile(filepath.Join(testDirectory, "production.go"))
+	if err != nil {
+		t.Fatalf("read production configuration: %v", err)
+	}
+	compose, err := os.ReadFile(filepath.Join(testDirectory, "..", "docker-compose.beta.yml"))
+	if err != nil {
+		t.Fatalf("read beta Compose file: %v", err)
+	}
+
+	appEnvironment, err := appBetaComposeEnvironmentKeys(compose)
+	if err != nil {
+		t.Fatalf("read app-beta environment: %v", err)
+	}
+
+	missing := make(map[string]struct{})
+	for _, match := range productionConfigEnvCallPattern.FindAllStringSubmatch(string(productionConfig), -1) {
+		if _, found := appEnvironment[match[1]]; !found {
+			missing[match[1]] = struct{}{}
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	variables := make([]string, 0, len(missing))
+	for variable := range missing {
+		variables = append(variables, variable)
+	}
+	sort.Strings(variables)
+	t.Fatalf("app-beta is missing production configuration environment variables: %s", strings.Join(variables, ", "))
+}
+
+func TestSchedulerDeploymentInheritsProductionConfigEnvironmentVariables(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test file path")
+	}
+	testDirectory := filepath.Dir(testFile)
+
+	productionConfig, err := os.ReadFile(filepath.Join(testDirectory, "production.go"))
+	if err != nil {
+		t.Fatalf("read production configuration: %v", err)
+	}
+	schedulerDeployment, err := os.ReadFile(filepath.Join(testDirectory, "..", "scripts", "deploy-campaign-scheduler-beta.sh"))
+	if err != nil {
+		t.Fatalf("read scheduler deployment script: %v", err)
+	}
+
+	omitted := sourceEnvironmentKeys(schedulerOmitPattern, schedulerDeployment)
+	overridden := sourceEnvironmentKeys(schedulerOverridePattern, schedulerDeployment)
+	missing := make(map[string]struct{})
+	for _, match := range productionConfigEnvCallPattern.FindAllStringSubmatch(string(productionConfig), -1) {
+		variable := match[1]
+		if _, isIntentionallyOmitted := schedulerIntentionalProductionConfigOmissions[variable]; isIntentionallyOmitted {
+			continue
+		}
+		if _, isOmitted := omitted[variable]; isOmitted {
+			missing[variable] = struct{}{}
+		}
+		if strings.HasPrefix(variable, "EXTERNAL_SHORTLINK_") {
+			if _, isOverridden := overridden[variable]; isOverridden {
+				missing[variable] = struct{}{}
+			}
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	variables := make([]string, 0, len(missing))
+	for variable := range missing {
+		variables = append(variables, variable)
+	}
+	sort.Strings(variables)
+	t.Fatalf("scheduler deployment does not preserve production configuration environment variables: %s", strings.Join(variables, ", "))
+}
+
+func sourceEnvironmentKeys(pattern *regexp.Regexp, source []byte) map[string]struct{} {
+	keys := make(map[string]struct{})
+	for _, match := range pattern.FindAllStringSubmatch(string(source), -1) {
+		keys[match[1]] = struct{}{}
+	}
+	return keys
+}
+
+func appBetaComposeEnvironmentKeys(compose []byte) (map[string]struct{}, error) {
+	keys := make(map[string]struct{})
+	scanner := bufio.NewScanner(strings.NewReader(string(compose)))
+	inAppService := false
+	inEnvironment := false
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "  app-beta:" {
+			inAppService = true
+			continue
+		}
+		if !inAppService {
+			continue
+		}
+		if line == "    environment:" {
+			inEnvironment = true
+			continue
+		}
+		if inEnvironment && strings.HasPrefix(line, "    ") && !strings.HasPrefix(line, "      ") {
+			break
+		}
+		if !inEnvironment {
+			continue
+		}
+		if match := composeEnvironmentKeyPattern.FindStringSubmatch(line); match != nil {
+			keys[match[1]] = struct{}{}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
 
 func TestLoadSchedulerConfigReadsTagTestPerformanceSettings(t *testing.T) {
 	t.Setenv("TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED", "true")
