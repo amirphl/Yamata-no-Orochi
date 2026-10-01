@@ -854,7 +854,11 @@ services:
         - python
         - -c
         - "import os,time; path=os.environ['NGINX_SENTRY_FORWARDER_HEALTHCHECK_FILE']; assert time.time()-os.path.getmtime(path) < 90"
-      interval: 30s
+      # The deployment script gates completion on this health state. Use a
+      # short interval so Engines that do not support `start_interval` do not
+      # leave a ready forwarder in `starting` for the 30-second default probe
+      # cadence. The probe only stats the local health marker.
+      interval: 5s
       timeout: 5s
       retries: 3
       start_period: 30s

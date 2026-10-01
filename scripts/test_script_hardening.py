@@ -292,6 +292,15 @@ exit 1
         content = deploy.read_text(encoding="utf-8")
         self.assertIn("wait_for_nginx_sentry_forwarder_health", content)
 
+    def test_nginx_sentry_forwarder_healthcheck_is_prompt(self):
+        compose = Path(__file__).resolve().parents[1] / "docker-compose.beta.yml"
+        content = compose.read_text(encoding="utf-8")
+        forwarder = content.split("  nginx-sentry-forwarder-beta:\n", 1)[1].split(
+            "  cert-monitor-beta:\n", 1
+        )[0]
+        self.assertIn("interval: 5s", forwarder)
+        self.assertIn("start_period: 30s", forwarder)
+
     def test_required_schema_helper_is_read_only_by_default(self):
         project_root, helper, _ = self._paths()
         with tempfile.TemporaryDirectory() as directory:
