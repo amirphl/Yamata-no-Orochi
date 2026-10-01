@@ -11,6 +11,7 @@ import urllib.request
 
 MAX_LOG_LINE_CHARS = 1024 * 1024
 MAX_LINES_PER_POLL = 1000
+DEFAULT_HEALTHCHECK_FILE = "/tmp/nginx-sentry-forwarder-last-success"
 
 
 def getenv(name: str, default: str = "") -> str:
@@ -141,10 +142,22 @@ class Tailer:
         self._inode: int | None = None
 
     def open(self) -> None:
-        self.handle = open(self.path, "r", encoding="utf-8", errors="replace")
-        if self.handle.seekable():
-            self.handle.seek(0, os.SEEK_END)
-        self._inode = os.fstat(self.handle.fileno()).st_ino
+        handle = open(self.path, "r", encoding="utf-8", errors="replace")
+        try:
+            if handle.seekable():
+                handle.seek(0, os.SEEK_END)
+            inode = os.fstat(handle.fileno()).st_ino
+        except Exception:
+            handle.close()
+            raise
+        self.handle = handle
+        self._inode = inode
+
+    def close(self) -> None:
+        if self.handle is not None:
+            self.handle.close()
+        self.handle = None
+        self._inode = None
 
     def _rotated(self) -> bool:
         try:
@@ -153,13 +166,15 @@ class Tailer:
                 self.handle is not None and info.st_size < self.handle.tell()
             )
         except FileNotFoundError:
-            return False
+            # A deleted log must not keep the forwarder healthy merely because
+            # it still has an open descriptor for the old file.
+            return True
 
     def poll(self) -> list[str]:
         if self.handle is None:
             self.open()
         elif self._rotated():
-            self.handle.close()
+            self.close()
             self.open()
 
         lines = []
@@ -180,6 +195,13 @@ def parse_request(raw_request: str) -> tuple[str, str]:
     if len(parts) < 2:
         return "", ""
     return parts[0], parts[1]
+
+
+def record_healthcheck_success(path: str) -> None:
+    """Record that both configured log files were successfully polled."""
+    with open(path, "a", encoding="utf-8"):
+        pass
+    os.utime(path, None)
 
 
 SENSITIVE_VALUE_RE = re.compile(
@@ -320,6 +342,9 @@ def handle_error_line(client: SentryStoreClient, line: str) -> None:
 def main() -> int:
     access_log = getenv("NGINX_ACCESS_LOG", "/var/log/nginx/access.log")
     error_log = getenv("NGINX_ERROR_LOG", "/var/log/nginx/error.log")
+    healthcheck_file = getenv(
+        "NGINX_SENTRY_FORWARDER_HEALTHCHECK_FILE", DEFAULT_HEALTHCHECK_FILE
+    )
     try:
         poll_interval = float(getenv("NGINX_LOG_POLL_INTERVAL_SECONDS", "0.5"))
     except ValueError:
@@ -340,9 +365,13 @@ def main() -> int:
 
     while True:
         try:
-            for line in access_tailer.poll():
+            access_lines = access_tailer.poll()
+            error_lines = error_tailer.poll()
+            record_healthcheck_success(healthcheck_file)
+
+            for line in access_lines:
                 handle_access_line(client, line)
-            for line in error_tailer.poll():
+            for line in error_lines:
                 handle_error_line(client, line)
         except FileNotFoundError:
             time.sleep(poll_interval)
