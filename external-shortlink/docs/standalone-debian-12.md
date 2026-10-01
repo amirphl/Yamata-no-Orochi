@@ -1,12 +1,15 @@
 # Running external-shortlink on the standalone Debian 12 server
 
 This runbook deploys the redirect service and its private PostgreSQL database
-on the dedicated Debian 12 VM. The project checkout must be owned by the
+on the dedicated Debian 12 VM. The project directory must be owned by the
 `debian` account and located at:
 
 ```text
 /home/debian/Yamata-no-Orochi/
 ```
+
+The external-shortlink source can be either the `external-shortlink/`
+subdirectory of that checkout or its own clean Git repository at that path.
 
 The public short-link domain is **`jzbe.ir`**. Supplying the production
 application's fixed, globally routable egress IP restricts `/api/` to that

@@ -251,7 +251,6 @@ verify_deployment_account_and_capacity() {
     id -u "$DEPLOYMENT_USER" >/dev/null 2>&1 || die "required deployment user is missing: $DEPLOYMENT_USER"
     account_home="$(getent passwd "$DEPLOYMENT_USER" | awk -F: '{ print $6 }')"
     [[ "$account_home" == "$DEPLOYMENT_HOME" ]] || die "deployment user $DEPLOYMENT_USER must have home $DEPLOYMENT_HOME"
-    [[ -d "$PROJECT_DIR/.git" ]] || die "project checkout is missing: $PROJECT_DIR"
     project_owner="$(stat -c '%U' "$PROJECT_DIR")"
     [[ "$project_owner" == "$DEPLOYMENT_USER" ]] || die "$PROJECT_DIR must be owned by $DEPLOYMENT_USER"
     source_owner="$(stat -c '%U' "$SOURCE_DIR")"
@@ -292,21 +291,32 @@ verify_source_tree() {
 }
 
 verify_source_integrity() {
-    local relative_source
-    relative_source="${SOURCE_DIR#"$PROJECT_DIR"/}"
-    [[ "$relative_source" != "$SOURCE_DIR" && -n "$relative_source" ]] ||
-        die 'source directory is not inside the project checkout'
+    local git_root relative_source cargo_path
+    git_root="$(git -C "$SOURCE_DIR" rev-parse --show-toplevel 2>/dev/null)" ||
+        die "source directory is not a valid Git work tree: $SOURCE_DIR"
+    git_root="$(cd -- "$git_root" && pwd -P)"
+    case "$SOURCE_DIR" in
+        "$git_root")
+            relative_source='.'
+            cargo_path='Cargo.toml'
+            ;;
+        "$git_root"/*)
+            relative_source="${SOURCE_DIR#"$git_root"/}"
+            cargo_path="$relative_source/Cargo.toml"
+            ;;
+        *)
+            die 'source directory is outside its Git work tree'
+            ;;
+    esac
 
-    git -C "$PROJECT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
-        die "project checkout is not a valid Git work tree: $PROJECT_DIR"
-    git -C "$PROJECT_DIR" ls-files --error-unmatch -- "$relative_source/Cargo.toml" >/dev/null ||
+    git -C "$git_root" ls-files --error-unmatch -- "$cargo_path" >/dev/null ||
         die 'source Cargo.toml is not tracked by Git'
-    if ! git -C "$PROJECT_DIR" diff --quiet -- "$relative_source" ||
-        ! git -C "$PROJECT_DIR" diff --cached --quiet -- "$relative_source" ||
-        [[ -n "$(git -C "$PROJECT_DIR" status --porcelain=v1 --untracked-files=all -- "$relative_source")" ]]; then
+    if ! git -C "$git_root" diff --quiet -- "$relative_source" ||
+        ! git -C "$git_root" diff --cached --quiet -- "$relative_source" ||
+        [[ -n "$(git -C "$git_root" status --porcelain=v1 --untracked-files=all -- "$relative_source")" ]]; then
         die 'source directory has tracked, staged, or untracked changes; deploy a clean reviewed commit'
     fi
-    log "source integrity verified: $(git -C "$PROJECT_DIR" rev-parse --verify HEAD)"
+    log "source integrity verified: $(git -C "$git_root" rev-parse --verify HEAD)"
 }
 
 verify_production_ip() {
