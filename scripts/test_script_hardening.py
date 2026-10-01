@@ -305,6 +305,17 @@ exit 1
         self.assertIn("interval: 5s", forwarder)
         self.assertIn("start_period: 30s", forwarder)
 
+    def test_production_check_only_warns_for_degraded_sentry_forwarding(self):
+        production_check = (
+            Path(__file__).resolve().parents[1] / "scripts/check-yamata-production.sh"
+        )
+        content = production_check.read_text(encoding="utf-8")
+        required_health_checks = content.split(
+            "for container in \\\n", 2
+        )[2].split("done\n", 1)[0]
+        self.assertNotIn("yamata-nginx-sentry-forwarder-beta", required_health_checks)
+        self.assertIn("Nginx errors may not reach Sentry", content)
+
     def test_required_schema_helper_is_read_only_by_default(self):
         project_root, helper, _ = self._paths()
         with tempfile.TemporaryDirectory() as directory:

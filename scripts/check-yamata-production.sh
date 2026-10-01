@@ -46,7 +46,7 @@ done
 for container in \
 	yamata-sentry-postgres-beta yamata-sentry-redis-beta yamata-sentry-beta \
 	yamata-prometheus-beta yamata-grafana-beta yamata-postgres-exporter-beta \
-	yamata-node-exporter-beta yamata-nginx-sentry-forwarder-beta; do
+	yamata-node-exporter-beta; do
 	"${DOCKER[@]}" container inspect "$container" >/dev/null 2>&1 || die "Missing container: $container"
 	state="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "$container")"
 	[[ "$state" == running ]] || die "$container is $state"
@@ -54,6 +54,22 @@ for container in \
 	[[ "$health" == healthy ]] || die "$container health is $health"
 	log "$container: healthy"
 done
+
+# Nginx-to-Sentry forwarding is observability-only. Keep reporting its state,
+# but do not reject an otherwise healthy application deployment when it is
+# temporarily unavailable.
+readonly NGINX_SENTRY_FORWARDER=yamata-nginx-sentry-forwarder-beta
+if ! "${DOCKER[@]}" container inspect "$NGINX_SENTRY_FORWARDER" >/dev/null 2>&1; then
+	log "WARNING: $NGINX_SENTRY_FORWARDER is missing; Nginx errors are not being forwarded to Sentry"
+else
+	state="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "$NGINX_SENTRY_FORWARDER")"
+	health="$("${DOCKER[@]}" inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$NGINX_SENTRY_FORWARDER")"
+	if [[ "$state" == running && "$health" == healthy ]]; then
+		log "$NGINX_SENTRY_FORWARDER: healthy"
+	else
+		log "WARNING: $NGINX_SENTRY_FORWARDER state is $state, health is $health; Nginx errors may not reach Sentry"
+	fi
+fi
 
 # PostgreSQL parallel queries allocate POSIX dynamic shared-memory segments.
 # Reject Docker's 64 MiB default (and other undersized deployments) before a
