@@ -158,10 +158,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Copy the backend's effective environment by default, so new application
-# settings (including external-shortlink settings) are automatically available
-# to the scheduler. The explicit omit list below is limited to credentials and
-# settings for components the scheduler never runs.
+# Copy the backend's effective environment by default. The API is the sole
+# external-short-link sync owner; the scheduler explicitly disables that
+# feature below so mapping publication and click ingestion have one worker.
+# The explicit omit list is limited to credentials and settings for components
+# the scheduler never runs.
 "${DOCKER[@]}" inspect -f '{{json .Config.Env}}' "$SOURCE_CONTAINER" |
 	python3 -c 'import json,sys; values=json.load(sys.stdin); bad=[v.split("=",1)[0] for v in values if "\n" in v or "\r" in v or "\0" in v]; sys.exit("container environment contains unsupported control characters: " + ", ".join(bad) if bad else 0)'
 "${DOCKER[@]}" inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SOURCE_CONTAINER" |
@@ -170,6 +171,7 @@ trap cleanup EXIT
 			override["BOT_API_DOMAIN"] = 1
 			override["CAMPAIGN_EXECUTION_ENABLED"] = 1
 			override["CRYPTO_ENABLED"] = 1
+			override["EXTERNAL_SHORTLINK_ENABLED"] = 1
 			override["SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED"] = 1
 			override["SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED"] = 1
 			override["TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED"] = 1
@@ -228,6 +230,7 @@ trap cleanup EXIT
 cat >>"$RUNTIME_ENV" <<'EOF'
 CAMPAIGN_EXECUTION_ENABLED=true
 CRYPTO_ENABLED=false
+EXTERNAL_SHORTLINK_ENABLED=false
 SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED=false
 SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED=false
 TAG_TEST_PERFORMANCE_SCHEDULER_ENABLED=false

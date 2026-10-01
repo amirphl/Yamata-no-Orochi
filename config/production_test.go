@@ -92,6 +92,12 @@ func TestSchedulerDeploymentInheritsProductionConfigEnvironmentVariables(t *test
 
 	omitted := sourceEnvironmentKeys(schedulerOmitPattern, schedulerDeployment)
 	overridden := sourceEnvironmentKeys(schedulerOverridePattern, schedulerDeployment)
+	if _, isOverridden := overridden["EXTERNAL_SHORTLINK_ENABLED"]; !isOverridden {
+		t.Fatal("scheduler deployment must override EXTERNAL_SHORTLINK_ENABLED")
+	}
+	if !strings.Contains(string(schedulerDeployment), "EXTERNAL_SHORTLINK_ENABLED=false\n") {
+		t.Fatal("scheduler deployment must disable EXTERNAL_SHORTLINK_ENABLED")
+	}
 	missing := make(map[string]struct{})
 	for _, match := range productionConfigEnvCallPattern.FindAllStringSubmatch(string(productionConfig), -1) {
 		variable := match[1]
@@ -101,7 +107,7 @@ func TestSchedulerDeploymentInheritsProductionConfigEnvironmentVariables(t *test
 		if _, isOmitted := omitted[variable]; isOmitted {
 			missing[variable] = struct{}{}
 		}
-		if strings.HasPrefix(variable, "EXTERNAL_SHORTLINK_") {
+		if strings.HasPrefix(variable, "EXTERNAL_SHORTLINK_") && variable != "EXTERNAL_SHORTLINK_ENABLED" {
 			if _, isOverridden := overridden[variable]; isOverridden {
 				missing[variable] = struct{}{}
 			}

@@ -86,6 +86,8 @@ log "yamata-postgres-beta /dev/shm: $((postgres_shm_bytes / 1024 / 1024 / 1024))
 	die "yamata-app-beta must have CAMPAIGN_EXECUTION_ENABLED=false"
 [[ "$(env_value yamata-campaign-scheduler-beta CAMPAIGN_EXECUTION_ENABLED)" == true ]] ||
 	die "yamata-campaign-scheduler-beta must have CAMPAIGN_EXECUTION_ENABLED=true"
+[[ "$(env_value yamata-campaign-scheduler-beta EXTERNAL_SHORTLINK_ENABLED)" == false ]] ||
+	die "External short-link sync must be disabled in the campaign scheduler; app-beta is the sole sync owner"
 [[ "$(env_value yamata-app-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == true ]] ||
 	die "Exact Smart Targeting capacity scheduling must be enabled in yamata-app-beta"
 [[ "$(env_value yamata-campaign-scheduler-beta SMART_TARGETING_CAPACITY_SCHEDULER_ENABLED)" == false ]] ||
