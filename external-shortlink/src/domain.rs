@@ -91,14 +91,7 @@ impl LinkInput {
         if self.long_url.len() > 4096 || self.long_url.chars().any(char::is_whitespace) {
             return Err(ValidationError::new("long_url is invalid or too long"));
         }
-        let url = Url::parse(&self.long_url).map_err(|_| {
-            ValidationError::new("long_url must be an absolute http:// or https:// URL")
-        })?;
-        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-            return Err(ValidationError::new(
-                "long_url must be an absolute http:// or https:// URL",
-            ));
-        }
+        self.long_url = normalize_long_url(&self.long_url)?;
 
         self.short_url = clean_optional(self.short_url, "short_url", 4096)?;
         self.scenario_name = clean_optional(self.scenario_name, "scenario_name", 512)?;
@@ -117,6 +110,44 @@ impl LinkInput {
         }
         Ok(self)
     }
+}
+
+// The production service keeps the user-supplied destination unchanged. The
+// redirect service stores an absolute HTTP(S) URL, adding HTTPS only when the
+// supplied value has no scheme, so browsers can follow it correctly.
+fn normalize_long_url(long_url: &str) -> Result<String, ValidationError> {
+    let parsed = Url::parse(long_url);
+    let normalized = match parsed {
+        Ok(url) if matches!(url.scheme(), "http" | "https") && url.host_str().is_some() => {
+            long_url.to_owned()
+        }
+        Ok(_) => {
+            return Err(ValidationError::new(
+                "long_url must be an absolute http:// or https:// URL",
+            ));
+        }
+        Err(url::ParseError::RelativeUrlWithoutBase) if long_url.starts_with("//") => {
+            format!("https:{long_url}")
+        }
+        Err(url::ParseError::RelativeUrlWithoutBase) => format!("https://{long_url}"),
+        Err(_) => {
+            return Err(ValidationError::new(
+                "long_url must be an absolute http:// or https:// URL",
+            ));
+        }
+    };
+    if normalized.len() > 4096 {
+        return Err(ValidationError::new("long_url is invalid or too long"));
+    }
+    let url = Url::parse(&normalized).map_err(|_| {
+        ValidationError::new("long_url must be an absolute http:// or https:// URL")
+    })?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(ValidationError::new(
+            "long_url must be an absolute http:// or https:// URL",
+        ));
+    }
+    Ok(normalized)
 }
 
 pub fn unique_validated_links(inputs: Vec<LinkInput>) -> Result<Vec<LinkInput>, ValidationError> {
@@ -254,5 +285,43 @@ mod tests {
             },
         ];
         assert!(unique_validated_links(links).is_err());
+    }
+
+    #[test]
+    fn scheme_less_destination_is_stored_as_https() {
+        let link = LinkInput {
+            code: "campaign-1".into(),
+            long_url: "example.com/offer".into(),
+            short_url: None,
+            source_link_id: None,
+            campaign_id: None,
+            client_id: None,
+            scenario_id: None,
+            scenario_name: None,
+            phone_number: None,
+            source_created_at: None,
+            source_updated_at: None,
+        };
+        let validated = link.validate_and_normalize().unwrap();
+        assert_eq!(validated.long_url, "https://example.com/offer");
+    }
+
+    #[test]
+    fn protocol_relative_destination_uses_https() {
+        let link = LinkInput {
+            code: "campaign-1".into(),
+            long_url: "//example.com/offer".into(),
+            short_url: None,
+            source_link_id: None,
+            campaign_id: None,
+            client_id: None,
+            scenario_id: None,
+            scenario_name: None,
+            phone_number: None,
+            source_created_at: None,
+            source_updated_at: None,
+        };
+        let validated = link.validate_and_normalize().unwrap();
+        assert_eq!(validated.long_url, "https://example.com/offer");
     }
 }

@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/amirphl/Yamata-no-Orochi/models"
@@ -97,14 +99,18 @@ func (r *ExternalShortLinkSyncRepositoryImpl) ImportPage(
 			if !exists {
 				return fmt.Errorf("production short link for external code %q does not exist", external.ShortCode)
 			}
-			if link.LongLink != external.LongURL {
+			expectedLongURL, err := externalStoredLongURL(link.LongLink)
+			if err != nil || expectedLongURL != external.LongURL {
 				return fmt.Errorf("external code %q destination does not match the immutable production mapping", external.ShortCode)
 			}
 			if external.SourceLinkID != nil && (*external.SourceLinkID <= 0 || uint64(*external.SourceLinkID) != uint64(link.ID)) {
 				return fmt.Errorf("external code %q source link ID does not match production", external.ShortCode)
 			}
 			uid := external.ShortCode
-			longURL := external.LongURL
+			// Preserve the exact value supplied to Yamata in its click history. The
+			// external redirect service may have added HTTPS solely for its own
+			// browser-facing mapping storage.
+			longURL := link.LongLink
 			shortURL := external.ShortURL
 			if shortURL == nil {
 				shortURL = &link.ShortLink
@@ -183,4 +189,26 @@ func (r *ExternalShortLinkSyncRepositoryImpl) ImportPage(
 		}
 		return nil
 	})
+}
+
+// externalStoredLongURL derives the external service's persisted destination
+// for comparison only. It never changes Yamata's stored long link.
+func externalStoredLongURL(longLink string) (string, error) {
+	parsed, err := url.Parse(longLink)
+	if err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) && parsed.Hostname() != "" {
+		return longLink, nil
+	}
+	if err == nil && parsed.Scheme != "" {
+		return "", fmt.Errorf("long link must use http or https")
+	}
+	if strings.HasPrefix(longLink, "//") {
+		longLink = "https:" + longLink
+	} else {
+		longLink = "https://" + longLink
+	}
+	parsed, err = url.Parse(longLink)
+	if err != nil || !(strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) || parsed.Hostname() == "" {
+		return "", fmt.Errorf("long link cannot be converted to an absolute http or https URL")
+	}
+	return longLink, nil
 }
