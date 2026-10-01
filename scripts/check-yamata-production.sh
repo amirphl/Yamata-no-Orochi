@@ -46,7 +46,7 @@ done
 for container in \
 	yamata-sentry-postgres-beta yamata-sentry-redis-beta yamata-sentry-beta \
 	yamata-prometheus-beta yamata-grafana-beta yamata-postgres-exporter-beta \
-	yamata-node-exporter-beta; do
+	yamata-node-exporter-beta yamata-nginx-sentry-forwarder-beta; do
 	"${DOCKER[@]}" container inspect "$container" >/dev/null 2>&1 || die "Missing container: $container"
 	state="$("${DOCKER[@]}" inspect -f '{{.State.Status}}' "$container")"
 	[[ "$state" == running ]] || die "$container is $state"
