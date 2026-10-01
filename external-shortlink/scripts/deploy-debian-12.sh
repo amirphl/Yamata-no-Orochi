@@ -292,8 +292,8 @@ verify_source_tree() {
 
 verify_source_integrity() {
     local git_root relative_source cargo_path
-    git_root="$(git -C "$SOURCE_DIR" rev-parse --show-toplevel 2>/dev/null)" ||
-        die "source directory is not a valid Git work tree: $SOURCE_DIR"
+    git_root="$(as_deployment_user git -C "$SOURCE_DIR" rev-parse --show-toplevel 2>/dev/null)" ||
+        die "source directory is not a valid Git work tree for $DEPLOYMENT_USER: $SOURCE_DIR"
     git_root="$(cd -- "$git_root" && pwd -P)"
     case "$SOURCE_DIR" in
         "$git_root")
@@ -309,14 +309,14 @@ verify_source_integrity() {
             ;;
     esac
 
-    git -C "$git_root" ls-files --error-unmatch -- "$cargo_path" >/dev/null ||
+    as_deployment_user git -C "$git_root" ls-files --error-unmatch -- "$cargo_path" >/dev/null ||
         die 'source Cargo.toml is not tracked by Git'
-    if ! git -C "$git_root" diff --quiet -- "$relative_source" ||
-        ! git -C "$git_root" diff --cached --quiet -- "$relative_source" ||
-        [[ -n "$(git -C "$git_root" status --porcelain=v1 --untracked-files=all -- "$relative_source")" ]]; then
+    if ! as_deployment_user git -C "$git_root" diff --quiet -- "$relative_source" ||
+        ! as_deployment_user git -C "$git_root" diff --cached --quiet -- "$relative_source" ||
+        [[ -n "$(as_deployment_user git -C "$git_root" status --porcelain=v1 --untracked-files=all -- "$relative_source")" ]]; then
         die 'source directory has tracked, staged, or untracked changes; deploy a clean reviewed commit'
     fi
-    log "source integrity verified: $(git -C "$git_root" rev-parse --verify HEAD)"
+    log "source integrity verified: $(as_deployment_user git -C "$git_root" rev-parse --verify HEAD)"
 }
 
 verify_production_ip() {
