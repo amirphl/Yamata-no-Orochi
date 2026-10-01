@@ -17,6 +17,11 @@ PROXY_X_HOST_COUNT = 1
 PROXY_X_PORT_COUNT = 1
 PROXY_X_PREFIX_COUNT = 0
 
+# This isolated administrative service intentionally has no outbound Internet
+# route. Avoid an otherwise harmless but user-visible 500 when the web UI
+# checks pgAdmin's public update feed.
+UPGRADE_CHECK_ENABLED = False
+
 # Keep pgAdmin's own, local user/password authentication enabled.
 AUTHENTICATION_SOURCES = ["internal"]
 SECURITY_PASSWORD_HASH = "pbkdf2_sha512"
