@@ -845,6 +845,7 @@ services:
       NGINX_ACCESS_LOG: /var/log/nginx/access.log
       NGINX_ERROR_LOG: /var/log/nginx/error.log
       NGINX_LOG_POLL_INTERVAL_SECONDS: 0.5
+      NGINX_SENTRY_FORWARDER_HEALTHCHECK_FILE: /tmp/nginx-sentry-forwarder-last-success
     volumes:
       - nginx_logs_beta:/var/log/nginx:ro
     healthcheck:
@@ -852,7 +853,7 @@ services:
         - CMD
         - python
         - -c
-        - "import os; assert all(os.path.isfile(os.environ[name]) for name in ('NGINX_ACCESS_LOG','NGINX_ERROR_LOG'))"
+        - "import os,time; path=os.environ['NGINX_SENTRY_FORWARDER_HEALTHCHECK_FILE']; assert time.time()-os.path.getmtime(path) < 90"
       interval: 30s
       timeout: 5s
       retries: 3
@@ -1045,7 +1046,10 @@ services:
       yamata-network-beta:
         ipv4_address: 172.30.0.70
     healthcheck:
-      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9100/metrics"]
+      # Do not probe /metrics here. wget --spider closes that streaming
+      # response early, which makes node_exporter log misleading broken pipes.
+      # The landing page verifies its HTTP listener without collecting metrics.
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:9100/"]
       interval: 30s
       timeout: 5s
       retries: 3
