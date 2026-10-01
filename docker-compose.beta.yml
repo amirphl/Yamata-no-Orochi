@@ -604,6 +604,17 @@ services:
       MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE: ${MESSAGE_INVOICE_ISSUE_REQUEST_TEMPLATE}
 
       HTTPS_PROXY: ''
+
+      CANDOO_SMS_ENABLED: ${CANDOO_SMS_ENABLED}
+      CANDOO_SMS_BASE_URL: ${CANDOO_SMS_BASE_URL}
+      CANDOO_SMS_API_KEY: ${CANDOO_SMS_API_KEY}
+      CANDOO_SMS_MESSAGE_TYPE: ${CANDOO_SMS_MESSAGE_TYPE}
+      CANDOO_SMS_RETRY_COUNT: ${CANDOO_SMS_RETRY_COUNT}
+      CANDOO_SMS_VALIDITY_PERIOD: ${CANDOO_SMS_VALIDITY_PERIOD}
+      CANDOO_SMS_TIMEOUT: ${CANDOO_SMS_TIMEOUT}
+      CANDOO_SMS_MAX_REQUESTS_PER_SECOND: ${CANDOO_SMS_MAX_REQUESTS_PER_SECOND}
+      CANDOO_SMS_HTTP_MAX_ATTEMPTS: ${CANDOO_SMS_HTTP_MAX_ATTEMPTS}
+      CANDOO_SMS_STATUS_MAP: ${CANDOO_SMS_STATUS_MAP}
     volumes:
       - app_logs_beta:/var/log/yamata
       - uploads_beta:/data
@@ -665,6 +676,10 @@ services:
       # The email is in PGADMIN_ENV_FILE; the password is a Docker secret.
       PGADMIN_DEFAULT_PASSWORD_FILE: /run/secrets/pgadmin_default_password
       PGADMIN_CUSTOM_CONFIG_DISTRO_FILE: /pgadmin4/config_distro.py
+      # Apply the reviewed pgAdmin UI defaults when its data volume is first
+      # initialized. deploy-beta.sh reapplies these preferences for existing
+      # installations as well.
+      PGADMIN_PREFERENCES_JSON_FILE: /pgadmin4/preferences.json
       PGADMIN_ALLOWED_HOST: ${PGADMIN_DOMAIN:?PGADMIN_DOMAIN must be set}
       PGADMIN_LISTEN_ADDRESS: 172.31.0.10
       PGADMIN_LISTEN_PORT: "5050"
@@ -677,6 +692,7 @@ services:
     volumes:
       - pgadmin_data_beta:/var/lib/pgadmin
       - ./docker/pgadmin/config_distro.py:/pgadmin4/config_distro.py:ro
+      - ./docker/pgadmin/preferences.json:/pgadmin4/preferences.json:ro
     networks:
       pgadmin-network-beta:
         ipv4_address: 172.31.0.10

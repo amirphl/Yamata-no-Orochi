@@ -490,6 +490,23 @@ wait_for_services() {
 	return 1
 }
 
+# pgAdmin stores editor settings per user in its persistent configuration
+# database. The image loads preferences.json only when that database is first
+# initialized, so explicitly apply the supported setting on every deployment
+# for both new and existing installations.
+configure_pgadmin_query_autocomplete() {
+	print_status "Enabling pgAdmin Query Tool autocomplete..."
+	local docker_cmd
+	docker_cmd=$(get_docker_cmd)
+
+	$docker_cmd exec --user 5050:0 yamata-pgadmin-beta sh -ec '
+		cd /pgadmin4
+		exec /venv/bin/python3 setup.py set-prefs "$PGADMIN_DEFAULT_EMAIL" \
+			"sqleditor:auto_completion:autocomplete_on_key_press=true"
+	'
+	print_success "pgAdmin Query Tool autocomplete enabled"
+}
+
 # Wait for app-beta container to become healthy
 wait_for_app_health() {
 	print_status "Waiting for app-beta health..."
@@ -697,6 +714,7 @@ main() {
 	stop_application_writers
 	start_services
 	wait_for_services
+	configure_pgadmin_query_autocomplete
 	
 	# Initialize database and apply migrations
 	print_status "Initializing database and applying migrations..."

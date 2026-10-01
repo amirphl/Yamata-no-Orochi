@@ -305,6 +305,32 @@ exit 1
         self.assertIn("interval: 5s", forwarder)
         self.assertIn("start_period: 30s", forwarder)
 
+    def test_pgadmin_query_autocomplete_is_provisioned_and_enforced(self):
+        root = Path(__file__).resolve().parents[1]
+        preferences = json.loads(
+            (root / "docker/pgadmin/preferences.json").read_text(encoding="utf-8")
+        )
+        self.assertTrue(
+            preferences["preferences"][
+                "sqleditor:auto_completion:autocomplete_on_key_press"
+            ]
+        )
+
+        compose = (root / "docker-compose.beta.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "PGADMIN_PREFERENCES_JSON_FILE: /pgadmin4/preferences.json", compose
+        )
+        self.assertIn(
+            "./docker/pgadmin/preferences.json:/pgadmin4/preferences.json:ro",
+            compose,
+        )
+
+        deploy = (root / "scripts/deploy-beta.sh").read_text(encoding="utf-8")
+        self.assertIn("configure_pgadmin_query_autocomplete", deploy)
+        self.assertIn(
+            "sqleditor:auto_completion:autocomplete_on_key_press=true", deploy
+        )
+
     def test_production_check_only_warns_for_degraded_sentry_forwarding(self):
         production_check = (
             Path(__file__).resolve().parents[1] / "scripts/check-yamata-production.sh"

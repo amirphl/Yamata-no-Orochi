@@ -111,6 +111,19 @@ is first initialized. Rotating that password later must be done through the
 pgAdmin UI; rotating the Nginx credential requires regenerating the htpasswd
 file and rerunning the normal deployment so Nginx is recreated.
 
+The Query Tool is configured to show autocomplete suggestions as you type. The
+deployment applies this setting to the configured pgAdmin administrator on
+every run, including an existing pgAdmin data volume. Close and reopen any
+Query Tool tabs after deployment for the preference to take effect. It can also
+be triggered manually on a deployed host:
+
+```bash
+docker exec --user 5050:0 yamata-pgadmin-beta sh -ec \
+  'cd /pgadmin4 && exec /venv/bin/python3 setup.py set-prefs \
+  "$PGADMIN_DEFAULT_EMAIL" \
+  "sqleditor:auto_completion:autocomplete_on_key_press=true"'
+```
+
 ## Security controls
 
 - `dpage/pgadmin4:9.17@sha256:2f4ce946ddf8360680d7eff4eaba1d91859eb6b4003e6623bad5c63a322c2f4d`
