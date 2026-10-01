@@ -79,6 +79,34 @@ class SentryForwarderTests(unittest.TestCase):
             "https://api.example.com/health",
         )
 
+    def test_healthcheck_marker_is_created_and_refreshed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "forwarder-health"
+            nginx_sentry_forwarder.record_healthcheck_success(str(marker))
+            first_mtime = marker.stat().st_mtime_ns
+            nginx_sentry_forwarder.record_healthcheck_success(str(marker))
+            self.assertTrue(marker.is_file())
+            self.assertGreaterEqual(marker.stat().st_mtime_ns, first_mtime)
+
+    def test_tailer_retries_when_a_rotated_log_is_temporarily_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "access.log"
+            log.write_text("old entry\n", encoding="utf-8")
+            tailer = nginx_sentry_forwarder.Tailer(str(log))
+            self.addCleanup(tailer.close)
+            self.assertEqual(tailer.poll(), [])
+
+            log.unlink()
+            with self.assertRaises(FileNotFoundError):
+                tailer.poll()
+            self.assertIsNone(tailer.handle)
+
+            log.write_text("replacement entry\n", encoding="utf-8")
+            self.assertEqual(tailer.poll(), [])
+            with log.open("a", encoding="utf-8") as handle:
+                handle.write("new entry\n")
+            self.assertEqual(tailer.poll(), ["new entry"])
+
 
 class EnvironmentLoaderTests(unittest.TestCase):
     def test_dotenv_values_are_data_and_reserved_shell_variables_are_rejected(self):
@@ -258,6 +286,11 @@ exit 1
         _, _, deploy = self._paths()
         content = deploy.read_text(encoding="utf-8")
         self.assertIn("up -d --force-recreate nginx-beta", content)
+
+    def test_routine_deploy_waits_for_the_nginx_sentry_forwarder(self):
+        _, _, deploy = self._paths()
+        content = deploy.read_text(encoding="utf-8")
+        self.assertIn("wait_for_nginx_sentry_forwarder_health", content)
 
     def test_required_schema_helper_is_read_only_by_default(self):
         project_root, helper, _ = self._paths()
