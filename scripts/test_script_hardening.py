@@ -287,10 +287,14 @@ exit 1
         content = deploy.read_text(encoding="utf-8")
         self.assertIn("up -d --force-recreate nginx-beta", content)
 
-    def test_routine_deploy_waits_for_the_nginx_sentry_forwarder(self):
+    def test_routine_deploy_does_not_gate_on_the_nginx_sentry_forwarder(self):
         _, _, deploy = self._paths()
         content = deploy.read_text(encoding="utf-8")
-        self.assertIn("wait_for_nginx_sentry_forwarder_health", content)
+        self.assertNotIn("wait_for_nginx_sentry_forwarder_health", content)
+        self.assertIn(
+            "nginx-sentry-forwarder-beta health check continues in background",
+            content,
+        )
 
     def test_nginx_sentry_forwarder_healthcheck_is_prompt(self):
         compose = Path(__file__).resolve().parents[1] / "docker-compose.beta.yml"
