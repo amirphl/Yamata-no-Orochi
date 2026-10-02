@@ -5,6 +5,12 @@
 
 \echo 'Starting database rollback...'
 
+\echo 'Running 0140_persist_smart_targeting_test_sample_selections_down.sql...'
+\i migrations/0140_persist_smart_targeting_test_sample_selections_down.sql
+
+\echo 'Running 0139_normalize_short_links_and_exclude_test_clicks_down.sql...'
+\i migrations/0139_normalize_short_links_and_exclude_test_clicks_down.sql
+
 \echo 'Running 0138_extend_tag_performance_to_execution_down.sql...'
 \i migrations/0138_extend_tag_performance_to_execution_down.sql
 
