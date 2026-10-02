@@ -425,5 +425,11 @@
 \echo 'Running 0138_extend_tag_performance_to_execution.sql...'
 \i migrations/0138_extend_tag_performance_to_execution.sql
 
+\echo 'Running 0139_normalize_short_links_and_exclude_test_clicks.sql...'
+\i migrations/0139_normalize_short_links_and_exclude_test_clicks.sql
+
+\echo 'Running 0140_persist_smart_targeting_test_sample_selections.sql...'
+\i migrations/0140_persist_smart_targeting_test_sample_selections.sql
+
 \echo 'All migrations completed successfully!'
 \echo 'Database schema is now ready for the Yamata no Orochi wallet, and payment system with comprehensive audit logging and tax collection.' 
