@@ -31,6 +31,8 @@ pub struct LinkInput {
     #[serde(default)]
     pub phone_number: Option<String>,
     #[serde(default)]
+    pub is_test: bool,
+    #[serde(default)]
     pub source_created_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub source_updated_at: Option<DateTime<Utc>>,
@@ -48,6 +50,7 @@ pub struct LinkRecord {
     pub scenario_id: Option<i64>,
     pub scenario_name: Option<String>,
     pub phone_number: Option<String>,
+    pub is_test: bool,
     pub source_created_at: Option<DateTime<Utc>>,
     pub source_updated_at: Option<DateTime<Utc>>,
 }
@@ -65,6 +68,7 @@ pub struct ClickEvent {
     pub scenario_id: Option<i64>,
     pub scenario_name: Option<String>,
     pub phone_number: Option<String>,
+    pub is_test: bool,
     pub link_created_at: Option<DateTime<Utc>>,
     pub link_updated_at: Option<DateTime<Utc>>,
     pub clicked_at: DateTime<Utc>,
@@ -196,6 +200,7 @@ pub fn click_from_link(
         scenario_id: link.scenario_id,
         scenario_name: link.scenario_name.clone(),
         phone_number: link.phone_number.clone(),
+        is_test: link.is_test,
         link_created_at: link.source_created_at,
         link_updated_at: link.source_updated_at,
         clicked_at: Utc::now(),
@@ -267,6 +272,7 @@ mod tests {
                 scenario_id: None,
                 scenario_name: None,
                 phone_number: None,
+                is_test: false,
                 source_created_at: None,
                 source_updated_at: None,
             },
@@ -280,6 +286,7 @@ mod tests {
                 scenario_id: None,
                 scenario_name: None,
                 phone_number: None,
+                is_test: false,
                 source_created_at: None,
                 source_updated_at: None,
             },
@@ -299,6 +306,7 @@ mod tests {
             scenario_id: None,
             scenario_name: None,
             phone_number: None,
+            is_test: false,
             source_created_at: None,
             source_updated_at: None,
         };
@@ -318,10 +326,31 @@ mod tests {
             scenario_id: None,
             scenario_name: None,
             phone_number: None,
+            is_test: false,
             source_created_at: None,
             source_updated_at: None,
         };
         let validated = link.validate_and_normalize().unwrap();
         assert_eq!(validated.long_url, "https://example.com/offer");
+    }
+
+    #[test]
+    fn click_events_preserve_test_mapping_status() {
+        let link = LinkRecord {
+            link_id: 1,
+            code: "test1".into(),
+            long_url: "https://example.com/offer".into(),
+            short_url: Some("https://jzbe.ir/test1".into()),
+            source_link_id: None,
+            campaign_id: Some(1),
+            client_id: None,
+            scenario_id: None,
+            scenario_name: None,
+            phone_number: None,
+            is_test: true,
+            source_created_at: None,
+            source_updated_at: None,
+        };
+        assert!(click_from_link(&link, None, None, None).is_test);
     }
 }
