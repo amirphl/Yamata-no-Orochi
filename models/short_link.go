@@ -17,6 +17,7 @@ type ShortLink struct {
 	PhoneNumber         *string    `gorm:"size:20;index:idx_short_links_phone_number" json:"phone_number,omitempty"`
 	LongLink            string     `gorm:"type:text;not null" json:"long_link"`
 	ShortLink           string     `gorm:"type:text;not null" json:"short_link"`
+	IsTest              bool       `gorm:"not null;default:false;index:idx_short_links_test" json:"is_test"`
 	ExternalPublishedAt *time.Time `gorm:"index:idx_short_links_external_unpublished,where:external_published_at IS NULL" json:"external_published_at,omitempty"`
 
 	CreatedAt time.Time `gorm:"default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_short_links_created_at" json:"created_at"`
