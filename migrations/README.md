@@ -28,15 +28,15 @@ number—is the migration identity:
 - `0104_create_sent_rubika_messages`
 - `0104_create_splus_status_results`
 
-New changes should use the next unused ordinal (`0139` after the current head),
+New changes should use the next unused ordinal (`0140` after the current head),
 include a down file whenever rollback is safe, and update both aggregate
 manifests. Do not edit a migration that may already have been deployed; add a
 corrective migration so every environment retains the same append-only history.
 
 ## Aggregate manifests
 
-[`run_all_up.sql`](run_all_up.sql) includes all 140 up files in filename order.
-[`run_all_down.sql`](run_all_down.sql) includes all 139 available down files
+[`run_all_up.sql`](run_all_up.sql) includes all 141 up files in filename order.
+[`run_all_down.sql`](run_all_down.sql) includes all 140 available down files
 once. Its order is the reverse filename order except for the existing
 `0034`/`0035` swap; treat the checked-in manifest order as canonical and review
 dependencies before changing it.
@@ -242,6 +242,8 @@ every production change.
 | `0136` | Versioned exact-capacity eligibility with platform colors and Test Bundle exclusions |
 | `0137` | Auditable SMS-provider selection and send-attempt persistence |
 | `0138` | Smart Targeting Execution tag attribution metrics and global delivered-based tag CTR summaries |
+| `0139` | Canonical public short-link metadata and explicit campaign test-click exclusion from reporting |
+| `0140` | Immutable Smart Targeting Test sample snapshots and releasable pre-execution audience reservations |
 
 ## Current schema areas
 
