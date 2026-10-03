@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS links (
     scenario_id BIGINT,
     scenario_name VARCHAR(512),
     phone_number VARCHAR(32),
+    is_test BOOLEAN NOT NULL DEFAULT FALSE,
     source_created_at TIMESTAMPTZ,
     source_updated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS clicks (
     scenario_id BIGINT,
     scenario_name VARCHAR(512),
     phone_number VARCHAR(32),
+    is_test BOOLEAN NOT NULL DEFAULT FALSE,
     link_created_at TIMESTAMPTZ,
     link_updated_at TIMESTAMPTZ,
     clicked_at TIMESTAMPTZ NOT NULL,
@@ -47,6 +49,32 @@ CREATE INDEX IF NOT EXISTS idx_clicks_clicked_at ON clicks (clicked_at);
 CREATE INDEX IF NOT EXISTS idx_clicks_acknowledged_at
     ON clicks (acknowledged_at)
     WHERE acknowledged_at IS NOT NULL;
+ALTER TABLE links
+    ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE clicks
+    ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Backfill campaign-test links created before the explicit flag existed.
+UPDATE links
+SET is_test = TRUE
+WHERE is_test = FALSE
+  AND long_url ~ '(^|[^[:alnum:]_-])test-[0-9a-f]{8}([^[:alnum:]_-]|$)';
+
+UPDATE clicks AS click
+SET is_test = TRUE
+FROM links AS link
+WHERE click.link_id = link.link_id
+  AND link.is_test = TRUE
+  AND click.is_test = FALSE;
+
+UPDATE links
+SET short_url = 'https://' || short_url
+WHERE short_url ~ '^(jzbe\.ir|jo1n\.ir|joinsahel\.ir)/';
+
+UPDATE clicks
+SET short_url = 'https://' || short_url
+WHERE short_url ~ '^(jzbe\.ir|jo1n\.ir|joinsahel\.ir)/';
 
 CREATE TABLE IF NOT EXISTS click_acknowledgements (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
