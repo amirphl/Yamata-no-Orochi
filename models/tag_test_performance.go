@@ -11,9 +11,9 @@ const (
 	TagTestReportStatusFailed      TagTestReportStatus = "failed"
 )
 
-// Version 2 extends the Feature 5 materialization to both attributable Smart
-// Targeting phases and derives the Feature 6 global tag summary from it.
-const TagTestPerformanceCalculationVersion = 2
+// Version 3 excludes campaign test-message clicks from all tag performance
+// materializations. It supersedes version 2, which added Execution phase data.
+const TagTestPerformanceCalculationVersion = 3
 
 // CampaignTagTestReport is the durable, retryable calculation state for one
 // attributable Smart Targeting Campaign. The historical name is retained for
