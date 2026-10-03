@@ -16,6 +16,7 @@ type ShortLinkClick struct {
 	PhoneNumber        *string    `gorm:"size:20;index:idx_short_link_clicks_phone_number" json:"phone_number,omitempty"`
 	LongLink           *string    `gorm:"type:text" json:"long_link,omitempty"`
 	ShortLink          *string    `gorm:"type:text" json:"short_link,omitempty"`
+	IsTest             bool       `gorm:"not null;default:false;index:idx_short_link_clicks_test" json:"is_test"`
 	ShortLinkCreatedAt *time.Time `gorm:"column:short_link_created_at" json:"short_link_created_at,omitempty"`
 	ShortLinkUpdatedAt *time.Time `gorm:"column:short_link_updated_at" json:"short_link_updated_at,omitempty"`
 	UserAgent          *string    `gorm:"type:text" json:"user_agent,omitempty"`
@@ -54,6 +55,7 @@ type ExternalShortLinkClick struct {
 	ScenarioID    *uint      `json:"scenario_id,omitempty"`
 	ScenarioName  *string    `json:"scenario_name,omitempty"`
 	PhoneNumber   *string    `json:"phone_number,omitempty"`
+	IsTest        bool       `json:"is_test"`
 	LinkCreatedAt *time.Time `json:"link_created_at,omitempty"`
 	LinkUpdatedAt *time.Time `json:"link_updated_at,omitempty"`
 	ClickedAt     time.Time  `json:"clicked_at"`
