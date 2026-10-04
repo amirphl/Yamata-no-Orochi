@@ -167,6 +167,7 @@ type externalMapping struct {
 	ScenarioID      *uint   `json:"scenario_id,omitempty"`
 	ScenarioName    *string `json:"scenario_name,omitempty"`
 	PhoneNumber     *string `json:"phone_number,omitempty"`
+	IsTest          bool    `json:"is_test"`
 	SourceCreatedAt string  `json:"source_created_at,omitempty"`
 	SourceUpdatedAt string  `json:"source_updated_at,omitempty"`
 }
@@ -235,6 +236,7 @@ func externalMappingFromShortLink(link *models.ShortLink) externalMapping {
 		ScenarioID:   link.ScenarioID,
 		ScenarioName: link.ScenarioName,
 		PhoneNumber:  link.PhoneNumber,
+		IsTest:       link.IsTest,
 	}
 	if !link.CreatedAt.IsZero() {
 		mapping.SourceCreatedAt = link.CreatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
