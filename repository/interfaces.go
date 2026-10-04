@@ -518,7 +518,6 @@ type ShortLinkRepository interface {
 	ByID(ctx context.Context, id uint) (*models.ShortLink, error)
 	ByUID(ctx context.Context, uid string) (*models.ShortLink, error)
 	ByUIDs(ctx context.Context, uids []string) ([]*models.ShortLink, error)
-	DeleteTestLinksOlderThan(ctx context.Context, age time.Duration) error
 	ListPendingExternalPublication(ctx context.Context, limit int) ([]*models.ShortLink, error)
 	MarkExternallyPublished(ctx context.Context, uids []string, publishedAt time.Time) error
 	ListByScenarioWithClicks(ctx context.Context, scenarioID uint, orderBy string) ([]*models.ShortLink, error)
