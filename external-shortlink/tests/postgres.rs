@@ -45,6 +45,7 @@ fn link(code: String) -> LinkInput {
         scenario_id: None,
         scenario_name: None,
         phone_number: None,
+        is_test: false,
         source_created_at: Some(Utc::now()),
         source_updated_at: Some(Utc::now()),
     }
@@ -85,6 +86,7 @@ async fn postgres_mapping_click_cursor_and_idempotency() {
         scenario_id: None,
         scenario_name: None,
         phone_number: None,
+        is_test: false,
         source_created_at: None,
         source_updated_at: None,
     };
