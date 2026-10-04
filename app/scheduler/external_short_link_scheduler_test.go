@@ -22,13 +22,18 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
 func TestExternalShortLinkClientUploadsCompleteAcknowledgedBatch(t *testing.T) {
+	t.Parallel()
 	var authorization string
+	var uploaded externalMappingUpload
 	client := &HTTPExternalShortLinkClient{
 		baseURL:          "https://links.example",
 		token:            "secret",
 		mappingBatchSize: 100,
 		client: &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 			authorization = request.Header.Get("Authorization")
+			if err := json.NewDecoder(request.Body).Decode(&uploaded); err != nil {
+				t.Fatalf("decode upload payload: %v", err)
+			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
 				Header:     make(http.Header),
@@ -38,13 +43,16 @@ func TestExternalShortLinkClientUploadsCompleteAcknowledgedBatch(t *testing.T) {
 		})},
 	}
 	err := client.UploadMappings(context.Background(), []*models.ShortLink{{
-		ID: 42, UID: "abc1", LongLink: "https://example.com/long", ShortLink: "https://links.example/abc1",
+		ID: 42, UID: "abc1", LongLink: "https://example.com/long", ShortLink: "https://links.example/abc1", IsTest: true,
 	}})
 	if err != nil {
 		t.Fatalf("UploadMappings() error = %v", err)
 	}
 	if authorization != "Bearer secret" {
 		t.Fatalf("Authorization = %q", authorization)
+	}
+	if len(uploaded.Links) != 1 || !uploaded.Links[0].IsTest {
+		t.Fatalf("uploaded test marker = %#v", uploaded.Links)
 	}
 }
 
