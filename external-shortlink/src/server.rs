@@ -407,7 +407,6 @@ async fn redirect_inner(state: &AppState, code: String, headers: &HeaderMap) -> 
             }
         }
     };
-
     let event = click_from_link(
         &link,
         client_ip(headers),
@@ -812,6 +811,7 @@ mod tests {
             scenario_id: None,
             scenario_name: None,
             phone_number: None,
+            is_test: false,
             source_created_at: None,
             source_updated_at: None,
         }
