@@ -20,6 +20,7 @@ fn event() -> ClickEvent {
         scenario_id: None,
         scenario_name: None,
         phone_number: None,
+        is_test: false,
         link_created_at: None,
         link_updated_at: None,
         clicked_at: Utc::now(),
