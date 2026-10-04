@@ -11,7 +11,7 @@ use crate::{
 
 const LINK_COLUMNS: &str = "
     link_id, code, long_url, short_url, source_link_id, campaign_id, client_id,
-    scenario_id, scenario_name, phone_number, source_created_at, source_updated_at
+    scenario_id, scenario_name, phone_number, is_test, source_created_at, source_updated_at
 ";
 
 // Mapping publication is infrequent, whereas a wrong destination is a permanent
@@ -121,7 +121,7 @@ impl Database {
         let mut builder = QueryBuilder::<Postgres>::new(
             "INSERT INTO clicks (\
                 event_id, short_code, link_id, long_url, short_url, source_link_id, campaign_id, client_id, \
-                scenario_id, scenario_name, phone_number, link_created_at, link_updated_at, clicked_at, \
+                scenario_id, scenario_name, phone_number, is_test, link_created_at, link_updated_at, clicked_at, \
                 client_ip, user_agent, referer\
             ) ",
         );
@@ -137,6 +137,7 @@ impl Database {
                 .push_bind(event.scenario_id)
                 .push_bind(&event.scenario_name)
                 .push_bind(&event.phone_number)
+                .push_bind(event.is_test)
                 .push_bind(event.link_created_at)
                 .push_bind(event.link_updated_at)
                 .push_bind(event.clicked_at)
@@ -189,6 +190,7 @@ impl Database {
             .iter()
             .map(|link| link.phone_number.clone())
             .collect::<Vec<_>>();
+        let is_tests = links.iter().map(|link| link.is_test).collect::<Vec<_>>();
         let source_created_ats = links
             .iter()
             .map(|link| link.source_created_at)
@@ -226,7 +228,7 @@ impl Database {
             "
             INSERT INTO links (
                 code, long_url, short_url, source_link_id, campaign_id, client_id,
-                scenario_id, scenario_name, phone_number, source_created_at, source_updated_at
+                scenario_id, scenario_name, phone_number, is_test, source_created_at, source_updated_at
             )
             SELECT * FROM incoming
             ON CONFLICT (code) DO NOTHING
@@ -242,6 +244,7 @@ impl Database {
         .bind(&scenario_ids)
         .bind(&scenario_names)
         .bind(&phone_numbers)
+        .bind(&is_tests)
         .bind(&source_created_ats)
         .bind(&source_updated_ats)
         .fetch_all(&mut *transaction)
@@ -278,6 +281,7 @@ impl Database {
                 scenario_id = incoming.scenario_id,
                 scenario_name = incoming.scenario_name,
                 phone_number = incoming.phone_number,
+                is_test = incoming.is_test,
                 source_created_at = incoming.source_created_at,
                 source_updated_at = incoming.source_updated_at
             FROM incoming
@@ -294,6 +298,7 @@ impl Database {
         .bind(&scenario_ids)
         .bind(&scenario_names)
         .bind(&phone_numbers)
+        .bind(&is_tests)
         .bind(&source_created_ats)
         .bind(&source_updated_ats)
         .execute(&mut *transaction)
@@ -324,7 +329,7 @@ impl Database {
                     "
                 SELECT
                     click_id, event_id, short_code, link_id, long_url, short_url, source_link_id,
-                    campaign_id, client_id, scenario_id, scenario_name, phone_number,
+                    campaign_id, client_id, scenario_id, scenario_name, phone_number, is_test,
                     link_created_at, link_updated_at, clicked_at, client_ip, user_agent, referer
                 FROM clicks
                 WHERE click_id > $1
@@ -450,10 +455,10 @@ fn insert_click_query(
         "
         INSERT INTO clicks (
             event_id, short_code, link_id, long_url, short_url, source_link_id, campaign_id, client_id,
-            scenario_id, scenario_name, phone_number, link_created_at, link_updated_at, clicked_at,
+            scenario_id, scenario_name, phone_number, is_test, link_created_at, link_updated_at, clicked_at,
             client_ip, user_agent, referer
         ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
         ) ON CONFLICT (event_id) DO NOTHING
         ",
     )
@@ -468,6 +473,7 @@ fn insert_click_query(
     .bind(event.scenario_id)
     .bind(&event.scenario_name)
     .bind(&event.phone_number)
+    .bind(event.is_test)
     .bind(event.link_created_at)
     .bind(event.link_updated_at)
     .bind(event.clicked_at)
@@ -481,10 +487,10 @@ fn mapping_sql(operation: &str) -> String {
         WITH incoming AS (
             SELECT * FROM UNNEST(
                 $1::varchar[], $2::varchar[], $3::varchar[], $4::bigint[], $5::bigint[], $6::bigint[],
-                $7::bigint[], $8::varchar[], $9::varchar[], $10::timestamptz[], $11::timestamptz[]
+                $7::bigint[], $8::varchar[], $9::varchar[], $10::boolean[], $11::timestamptz[], $12::timestamptz[]
             ) AS incoming_values(
                 code, long_url, short_url, source_link_id, campaign_id, client_id,
-                scenario_id, scenario_name, phone_number, source_created_at, source_updated_at
+                scenario_id, scenario_name, phone_number, is_test, source_created_at, source_updated_at
             )
         ) ";
     format!("{prefix}{operation}")
