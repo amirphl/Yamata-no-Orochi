@@ -61,7 +61,7 @@ func (s *BotShortLinkFlowImpl) CreateShortLink(ctx context.Context, req *dto.Bot
 		ScenarioID:  &newScenarioID,
 		PhoneNumber: req.PhoneNumber,
 		LongLink:    req.LongLink,
-		ShortLink:   req.ShortLink,
+		ShortLink:   canonicalShortLinkURL(req.ShortLink),
 	}
 	if err := s.shortRepo.Save(ctx, row); err != nil {
 		return nil, NewBusinessError("BOT_CREATE_SHORT_LINK_FAILED", "Failed to create short link", err)
@@ -102,7 +102,7 @@ func (s *BotShortLinkFlowImpl) CreateShortLinks(ctx context.Context, req *dto.Bo
 			ScenarioID:  &newScenarioID,
 			PhoneNumber: it.PhoneNumber,
 			LongLink:    it.LongLink,
-			ShortLink:   it.ShortLink,
+			ShortLink:   canonicalShortLinkURL(it.ShortLink),
 		})
 	}
 
