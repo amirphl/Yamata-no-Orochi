@@ -153,6 +153,7 @@ func (r *ExternalShortLinkSyncRepositoryImpl) ImportPage(
 				PhoneNumber:        phoneNumber,
 				LongLink:           &longURL,
 				ShortLink:          shortURL,
+				IsTest:             link.IsTest,
 				ShortLinkCreatedAt: linkCreatedAt,
 				ShortLinkUpdatedAt: linkUpdatedAt,
 				UserAgent:          external.UserAgent,
