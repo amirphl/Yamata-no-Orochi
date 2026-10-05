@@ -48,6 +48,7 @@ func (f *ShortLinkVisitFlowImpl) Visit(ctx context.Context, uid string, userAgen
 		PhoneNumber:        row.PhoneNumber,
 		LongLink:           &longLink,
 		ShortLink:          &shortLink,
+		IsTest:             row.IsTest,
 		ShortLinkCreatedAt: &shortLinkCreatedAt,
 		ShortLinkUpdatedAt: &shortLinkUpdatedAt,
 		UserAgent:          userAgent,
