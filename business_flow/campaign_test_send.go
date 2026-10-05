@@ -187,6 +187,17 @@ func buildCampaignShortLink(shortLinkDomain string, code string) string {
 	return domain + "/" + code
 }
 
+// canonicalShortLinkURL is used exclusively for stored link metadata. SMS
+// bodies intentionally retain the scheme-less form to preserve their exact
+// length and current provider behaviour.
+func canonicalShortLinkURL(shortLink string) string {
+	shortLink = strings.TrimSpace(shortLink)
+	if strings.HasPrefix(shortLink, "https://") || strings.HasPrefix(shortLink, "http://") {
+		return shortLink
+	}
+	return "https://" + strings.TrimPrefix(shortLink, "//")
+}
+
 func (s *CampaignFlowImpl) resolveCampaignTestLink(
 	ctx context.Context,
 	campaign models.Campaign,
@@ -213,13 +224,14 @@ func (s *CampaignFlowImpl) resolveCampaignTestLink(
 	if err != nil {
 		return nil, err
 	}
-	shortLink := buildCampaignShortLink(*campaign.Spec.ShortLinkDomain, fakeCode)
+	messageShortLink := buildCampaignShortLink(*campaign.Spec.ShortLinkDomain, fakeCode)
 	shortLinkRow := &models.ShortLink{
 		UID:         fakeCode,
 		CampaignID:  &campaign.ID,
 		PhoneNumber: utils.ToPtr(normalizedRecipient),
 		LongLink:    longLink,
-		ShortLink:   shortLink,
+		ShortLink:   canonicalShortLinkURL(messageShortLink),
+		IsTest:      true,
 	}
 	if err := s.shortLinkRepo.Save(ctx, shortLinkRow); err != nil {
 		return nil, err
@@ -228,7 +240,7 @@ func (s *CampaignFlowImpl) resolveCampaignTestLink(
 		return nil, fmt.Errorf("publish campaign test short link: %w", err)
 	}
 
-	return &shortLink, nil
+	return &messageShortLink, nil
 }
 
 func (s *CampaignFlowImpl) allocateNextCampaignTestShortCode(ctx context.Context) (string, error) {
