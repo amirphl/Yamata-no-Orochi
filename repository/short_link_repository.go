@@ -91,6 +91,7 @@ func (r *ShortLinkRepositoryImpl) copyInShortLinks(ctx context.Context, sqlDB *s
 		"phone_number",
 		"long_link",
 		"short_link",
+		"is_test",
 		"created_at",
 		"updated_at",
 	))
@@ -129,6 +130,7 @@ func (r *ShortLinkRepositoryImpl) copyInShortLinks(ctx context.Context, sqlDB *s
 			phone,
 			e.LongLink,
 			e.ShortLink,
+			e.IsTest,
 			e.CreatedAt,
 			e.UpdatedAt,
 		)
@@ -155,17 +157,6 @@ func (r *ShortLinkRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Sh
 		return nil, err
 	}
 	return &row, nil
-}
-
-// DeleteTestLinksOlderThan removes short links whose UID starts with the "tst"
-// prefix (created by campaign test-sends) and are older than age. Called
-// best-effort before each test-send to prevent unbounded table growth.
-func (r *ShortLinkRepositoryImpl) DeleteTestLinksOlderThan(ctx context.Context, age time.Duration) error {
-	cutoff := time.Now().UTC().Add(-age)
-	return r.getDB(ctx).
-		Where("uid LIKE ?", "tst%").
-		Where("created_at < ?", cutoff).
-		Delete(&models.ShortLink{}).Error
 }
 
 func (r *ShortLinkRepositoryImpl) ByUID(ctx context.Context, uid string) (*models.ShortLink, error) {
