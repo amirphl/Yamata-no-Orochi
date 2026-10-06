@@ -33,7 +33,8 @@ const statisticsWithoutTrackingResults = "campaigns.id, campaigns.uuid, campaign
 	"(campaigns.statistics - 'trackingResults') AS statistics, campaigns.num_audience, " +
 	"campaigns.bundle_id, campaigns.phase, campaigns.sample_size_per_tag, " +
 	"campaigns.smart_targeting_test_satisfied_tag_ids, campaigns.smart_targeting_test_sampling_input_hash, " +
-	"campaigns.smart_targeting_test_sampling_previewed_at"
+	"campaigns.smart_targeting_test_sampling_previewed_at, campaigns.smart_targeting_test_sampling_generation, " +
+	"campaigns.active_smart_targeting_test_selection_id"
 
 // ByID retrieves an campaign by ID
 func (r *CampaignRepositoryImpl) ByID(ctx context.Context, id uint) (*models.Campaign, error) {
@@ -325,6 +326,7 @@ func (r *CampaignRepositoryImpl) GetScheduledCampaigns(ctx context.Context, from
 
 func excludeAutomatedClickTraffic(db *gorm.DB) *gorm.DB {
 	return db.
+		Where("COALESCE(is_test, FALSE) = FALSE").
 		Where("COALESCE(ip, '') !~ ?", "^(66\\.249\\.|74\\.125\\.)").
 		Where(`NOT (
 			COALESCE(user_agent, '') ~ 'Chrome'
@@ -450,6 +452,7 @@ func (r *CampaignRepositoryImpl) AggregateClickCountsByCustomerIDs(ctx context.C
 			SELECT campaign_id, COUNT(DISTINCT uid) AS clicks
 			FROM short_link_clicks
 			WHERE campaign_id IS NOT NULL
+			  AND COALESCE(is_test, FALSE) = FALSE
 			  AND COALESCE(ip, '') !~ '^(66\\.249\\.|74\\.125\\.)'
 			  AND NOT (
 				COALESCE(user_agent, '') ~ 'Chrome'
@@ -598,6 +601,7 @@ func (r *CampaignRepositoryImpl) withClickRateOrdering(query *gorm.DB, descendin
 		SELECT campaign_id, COUNT(DISTINCT uid) AS clicks
 		FROM short_link_clicks
 		WHERE campaign_id IS NOT NULL
+		  AND COALESCE(is_test, FALSE) = FALSE
 		  AND COALESCE(ip, '') !~ '^(66\.249\.|74\.125\.)'
 		  AND NOT (
 			COALESCE(user_agent, '') ~ 'Chrome'
