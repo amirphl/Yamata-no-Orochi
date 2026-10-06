@@ -50,7 +50,8 @@ type CampaignHandlerInterface interface {
 }
 
 // PreviewSmartTargetingTestSampling queues ordered, all-or-nothing per-tag
-// sampling. It never persists audience IDs; scheduler preparation is final.
+// sampling. Completed jobs persist an immutable private audience snapshot;
+// scheduler preparation materializes that exact snapshot for delivery.
 // @Summary Request Smart Targeting Test sampling
 // @Tags Campaigns
 // @Produce json
