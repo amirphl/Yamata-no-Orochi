@@ -277,6 +277,11 @@ type Campaign struct {
 	// audience-color eligibility changes.
 	SmartTargetingTestSamplingInputHash   *string    `gorm:"type:char(64)" json:"-"`
 	SmartTargetingTestSamplingPreviewedAt *time.Time `json:"smart_targeting_test_sampling_previewed_at,omitempty"`
+	// The monotonically increasing request generation prevents an older worker
+	// from replacing a newer sample. The pointer identifies the sole snapshot
+	// eligible for finalization and runtime delivery.
+	SmartTargetingTestSamplingGeneration int64  `gorm:"not null;default:0" json:"-"`
+	ActiveSmartTargetingTestSelectionID   *int64 `json:"-"`
 
 	BundleID *uint         `gorm:"index:idx_campaigns_bundle_id" json:"bundle_id,omitempty"`
 	Phase    CampaignPhase `gorm:"type:campaign_phase;not null;default:'execution'" json:"phase"`
