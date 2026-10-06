@@ -466,6 +466,7 @@ type BotGetCampaignResponse struct {
 	Phase    *string `json:"phase,omitempty" validate:"omitempty"`
 
 	SmartTargetingTestSatisfiedTagIDs []uint `json:"smart_targeting_test_satisfied_tag_ids,omitempty"`
+	SmartTargetingTestSelectionID     *int64 `json:"smart_targeting_test_selection_id,omitempty"`
 
 	AudienceGrades []string `json:"audience_grades"`
 
