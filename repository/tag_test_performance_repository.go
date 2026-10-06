@@ -67,6 +67,7 @@ WHERE campaign.bundle_id IS NOT NULL
           SELECT 1
           FROM short_link_clicks AS click
           WHERE click.campaign_id = campaign.id
+            AND COALESCE(click.is_test, FALSE) = FALSE
             AND (
                 (click.id > ? AND click.id <= ?)
                 OR (click.created_at > ? AND click.created_at <= ?)
@@ -633,6 +634,7 @@ clicked_attributed AS (
       ON click.campaign_id = attributed.campaign_id
      AND click.phone_number = attributed.phone_number
     WHERE click.uid IS NOT NULL
+      AND COALESCE(click.is_test, FALSE) = FALSE
       AND COALESCE(click.ip, '') !~ '^(66\.249\.|74\.125\.)'
       AND NOT (
           COALESCE(click.user_agent, '') ~ 'Chrome'
