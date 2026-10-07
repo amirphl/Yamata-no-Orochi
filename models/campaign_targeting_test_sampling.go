@@ -18,8 +18,8 @@ const (
 )
 
 // CampaignTargetingTestSamplingCalculation snapshots every input required by
-// the worker. TagResults contains only aggregate per-tag availability; sampled
-// audience IDs are deliberately never persisted.
+// the worker. Its immutable concrete audience output is stored separately in
+// CampaignTargetingTestSampleSelection once the calculation completes.
 type CampaignTargetingTestSamplingCalculation struct {
 	ID                     int64                                          `gorm:"primaryKey;autoIncrement;type:bigserial" json:"id"`
 	CampaignID             uint                                           `gorm:"not null;index:idx_campaign_targeting_test_sampling_campaign_created,priority:1;index:idx_campaign_targeting_test_sampling_campaign_status,priority:1" json:"campaign_id"`
@@ -39,6 +39,7 @@ type CampaignTargetingTestSamplingCalculation struct {
 	AllocationFingerprint  string                                         `gorm:"type:char(64);not null" json:"-"`
 	Status                 CampaignTargetingTestSamplingCalculationStatus `gorm:"type:varchar(32);not null;index:idx_campaign_targeting_test_sampling_campaign_status,priority:2" json:"status"`
 	CalculationVersion     int                                            `gorm:"not null;default:2" json:"calculation_version"`
+	Generation             int64                                          `gorm:"not null;default:0" json:"generation"`
 	CreatedAt              time.Time                                      `gorm:"not null;default:(CURRENT_TIMESTAMP AT TIME ZONE 'UTC');index:idx_campaign_targeting_test_sampling_campaign_created,priority:2" json:"created_at"`
 	StartedAt              *time.Time                                     `json:"started_at,omitempty"`
 	FinishedAt             *time.Time                                     `json:"finished_at,omitempty"`
