@@ -72,7 +72,13 @@ WITH tagged_population AS (
     WHERE NOT EXISTS (
           SELECT 1
           FROM bundle_audience_selection_members AS used
-          WHERE used.bundle_id = ? AND used.audience_id = tagged.id
+      WHERE used.bundle_id = ? AND used.audience_id = tagged.id
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM campaign_targeting_test_sample_reservations AS reserved
+          WHERE reserved.bundle_id = ? AND reserved.audience_id = tagged.id
+            AND reserved.state = 'active'
       )
       AND (?::boolean OR NOT EXISTS (
           SELECT 1
@@ -99,7 +105,13 @@ WITH tagged_population AS (
     WHERE NOT EXISTS (
           SELECT 1
           FROM bundle_audience_selection_members AS used
-          WHERE used.bundle_id = ? AND used.audience_id = tagged.id
+      WHERE used.bundle_id = ? AND used.audience_id = tagged.id
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM campaign_targeting_test_sample_reservations AS reserved
+          WHERE reserved.bundle_id = ? AND reserved.audience_id = tagged.id
+            AND reserved.state = 'active'
       )
       AND (?::boolean OR NOT EXISTS (
           SELECT 1
@@ -146,6 +158,7 @@ func smartTargetingPopulationArgs(query SmartTargetingAudienceQuery) []any {
 		pq.Array(query.TagIDs),
 		len(colors) == 0,
 		pq.Array(colors),
+		query.BundleID,
 		query.BundleID,
 		!query.ApplyBundleAudienceExclusions,
 		query.BundleID,
@@ -219,9 +232,9 @@ func (r *smartTargetingAudienceRepository) CalculateScoreBounds(ctx context.Cont
 	return &bounds, nil
 }
 
-// SelectIDsForTag is the lightweight Test-preview path. Preview logic needs
-// only IDs to enforce cross-tag exclusion; profile delivery columns are loaded
-// only by the final campaign scheduler.
+// SelectIDsForTag remains available for count-only callers. Test preview
+// persistence uses SelectForTag so its immutable snapshot contains the exact
+// selected profile IDs and tag attribution.
 func (r *smartTargetingAudienceRepository) SelectIDsForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]int64, error) {
 	sql, args, err := smartTargetingPerTagSelectionQuery(query, bounds, tagID, excludeAudienceIDs, limit, true)
 	if err != nil {
@@ -234,7 +247,7 @@ func (r *smartTargetingAudienceRepository) SelectIDsForTag(ctx context.Context, 
 	return ids, nil
 }
 
-// SelectForTag is the final Smart Targeting Test scheduler path. Score classes
+// SelectForTag is the Smart Targeting Test sampling path. Score classes
 // restrict eligibility; no random, score, ID, or other ordering is imposed.
 func (r *smartTargetingAudienceRepository) SelectForTag(ctx context.Context, query SmartTargetingAudienceQuery, bounds *SmartTargetingScoreBounds, tagID int64, excludeAudienceIDs []int64, limit int64) ([]*models.AudienceProfile, error) {
 	sql, args, err := smartTargetingPerTagSelectionQuery(query, bounds, tagID, excludeAudienceIDs, limit, false)
@@ -266,10 +279,18 @@ FROM (
 		args = append(args, pq.Array(query.AllowedColors))
 	}
 	sql += `
-      AND NOT EXISTS (
+	  AND NOT EXISTS (
           SELECT 1
           FROM bundle_audience_selection_members AS used
           WHERE used.bundle_id = ? AND used.audience_id = ap.id
+      )`
+	args = append(args, query.BundleID)
+	sql += `
+      AND NOT EXISTS (
+          SELECT 1
+          FROM campaign_targeting_test_sample_reservations AS reserved
+          WHERE reserved.bundle_id = ? AND reserved.audience_id = ap.id
+            AND reserved.state = 'active'
       )`
 	args = append(args, query.BundleID)
 	if query.ApplyBundleAudienceExclusions {
@@ -321,10 +342,18 @@ WHERE ap.tags @> ARRAY[?]::integer[]
 		args = append(args, pq.Array(query.AllowedColors))
 	}
 	sql += `
-  AND NOT EXISTS (
+	  AND NOT EXISTS (
       SELECT 1
       FROM bundle_audience_selection_members AS used
       WHERE used.bundle_id = ? AND used.audience_id = ap.id
+  )`
+	args = append(args, query.BundleID)
+	sql += `
+  AND NOT EXISTS (
+      SELECT 1
+      FROM campaign_targeting_test_sample_reservations AS reserved
+      WHERE reserved.bundle_id = ? AND reserved.audience_id = ap.id
+        AND reserved.state = 'active'
   )`
 	args = append(args, query.BundleID)
 	if query.ApplyBundleAudienceExclusions {
