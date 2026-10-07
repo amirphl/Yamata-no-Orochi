@@ -75,6 +75,16 @@ type BundleCampaignAllocation struct {
 	Materialized bool                  `gorm:"column:materialized"`
 }
 
+// BundleActiveTestReservation is one immutable Test selection that currently
+// removes concrete audiences from a Bundle's candidate population. Selection
+// IDs are immutable, so the ID plus active member count is sufficient for the
+// capacity fingerprint without loading every reserved audience ID.
+type BundleActiveTestReservation struct {
+	CampaignID    uint  `gorm:"column:campaign_id"`
+	SelectionID   int64 `gorm:"column:selection_id"`
+	AudienceCount int64 `gorm:"column:audience_count"`
+}
+
 // ListBundleCampaignAllocations returns the stable, ordered standard/smart
 // reservations used by exact-capacity deductions and fingerprint validation.
 // Excel targeting is intentionally excluded: its recipients are explicitly
@@ -88,6 +98,29 @@ func ListBundleCampaignAllocations(ctx context.Context, db *gorm.DB, bundleID, e
 	err := bundleCampaignAllocationsQuery(queryDB, bundleID, excludedCampaignID).
 		Find(&rows).Error
 	return rows, err
+}
+
+// ListBundleActiveTestReservations returns active Test reservations owned by
+// other campaigns in the Bundle. They are already excluded by audience
+// candidate queries, so callers use this only to make old capacity snapshots
+// stale when the candidate population changes.
+func ListBundleActiveTestReservations(ctx context.Context, db *gorm.DB, bundleID, excludedCampaignID uint) ([]BundleActiveTestReservation, error) {
+	queryDB := db.WithContext(ctx)
+	if tx, ok := ctx.Value(TxContextKey).(*gorm.DB); ok && tx != nil {
+		queryDB = tx.WithContext(ctx)
+	}
+	var rows []BundleActiveTestReservation
+	err := bundleActiveTestReservationsQuery(queryDB, bundleID, excludedCampaignID).
+		Find(&rows).Error
+	return rows, err
+}
+
+func bundleActiveTestReservationsQuery(db *gorm.DB, bundleID, excludedCampaignID uint) *gorm.DB {
+	return db.Table("campaign_targeting_test_sample_reservations").
+		Select("campaign_id, selection_id, COUNT(*) AS audience_count").
+		Where("bundle_id = ? AND campaign_id <> ? AND state = 'active'", bundleID, excludedCampaignID).
+		Group("campaign_id, selection_id").
+		Order("campaign_id ASC, selection_id ASC")
 }
 
 func bundleCampaignAllocationsQuery(db *gorm.DB, bundleID, excludedCampaignID uint) *gorm.DB {
