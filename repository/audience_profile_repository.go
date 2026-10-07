@@ -137,6 +137,11 @@ func (r *AudienceProfileRepositoryImpl) campaignCandidatesQuery(
 			SELECT 1 FROM bundle_audience_selection_members AS used
 			WHERE used.bundle_id = ? AND used.audience_id = audience_profiles.id
 		)`, *filter.ExcludeBundleID)
+		query = query.Where(`NOT EXISTS (
+			SELECT 1 FROM campaign_targeting_test_sample_reservations AS reserved
+			WHERE reserved.bundle_id = ? AND reserved.audience_id = audience_profiles.id
+			  AND reserved.state = 'active'
+		)`, *filter.ExcludeBundleID)
 	}
 	return query.Order("id DESC").Limit(limit)
 }
