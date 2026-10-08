@@ -39,3 +39,23 @@ func TestBundleCampaignAllocationsExcludeExplicitAndLegacyExcelTargeting(t *test
 		t.Fatalf("Excel targeting bind count = %d, want 3", excelArgs)
 	}
 }
+
+func TestBundleActiveTestReservationsFingerprintQueryIsScopedAndStable(t *testing.T) {
+	t.Parallel()
+
+	db := newAudienceProfileDryRunDB(t)
+	var rows []BundleActiveTestReservation
+	statement := bundleActiveTestReservationsQuery(db, 44, 55).Find(&rows).Statement
+	if statement.Error != nil {
+		t.Fatalf("build active Test reservation fingerprint query: %v", statement.Error)
+	}
+	sql := strings.ToLower(statement.SQL.String())
+	for _, required := range []string{
+		"campaign_targeting_test_sample_reservations", "state = 'active'", "campaign_id <>",
+		"count(*) as audience_count", "group by campaign_id, selection_id", "order by campaign_id asc, selection_id asc",
+	} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("active Test reservation fingerprint query does not contain %q:\n%s", required, statement.SQL.String())
+		}
+	}
+}
