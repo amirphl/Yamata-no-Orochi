@@ -548,6 +548,18 @@ func (s *CampaignFlowImpl) UpdateCampaign(ctx context.Context, req *dto.UpdateCa
 			if intent.effective != cost.NumTargetAudience {
 				return ErrSmartTargetingTestPreviewRequired
 			}
+			if lockedCampaign.BundleID == nil || *lockedCampaign.BundleID == 0 {
+				return ErrBundleNotFound
+			}
+			if err := repository.LockBundleForUpdate(txCtx, *lockedCampaign.BundleID); err != nil {
+				return err
+			}
+			if err := repository.NewCampaignTargetingTestSampleSelectionRepository(s.db).ReserveForCampaign(txCtx, lockedCampaign); err != nil {
+				if errors.Is(err, repository.ErrSmartTargetingTestSelectionUnavailable) || errors.Is(err, repository.ErrSmartTargetingTestSelectionConflict) {
+					return ErrSmartTargetingTestPreviewRequired
+				}
+				return err
+			}
 		}
 		campaign = *lockedCampaign
 		campaign.Status = models.CampaignStatusWaitingForApproval
@@ -838,6 +850,9 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 	var campaign *models.Campaign
 
 	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		if err := repository.LockCampaignForUpdate(txCtx, req.CampaignID); err != nil {
+			return err
+		}
 		var err error
 		campaign, err = s.campaignRepo.ByID(txCtx, req.CampaignID)
 		if err != nil {
@@ -1108,6 +1123,9 @@ func (s *CampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.CancelCa
 			}
 		default:
 			return ErrCampaignNotWaitingForApproval
+		}
+		if err := repository.NewCampaignTargetingTestSampleSelectionRepository(s.db).ReleaseForCampaign(txCtx, campaign.ID); err != nil {
+			return err
 		}
 
 		campaign.Status = models.CampaignStatusCancelled
@@ -3300,6 +3318,9 @@ func (s *CampaignFlowImpl) expireCustomerCampaigns(ctx context.Context, customer
 		}
 
 		if err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+			if err := repository.LockCampaignForUpdate(txCtx, c.ID); err != nil {
+				return err
+			}
 			campaign, err := s.campaignRepo.ByID(txCtx, c.ID)
 			if err != nil {
 				return err
@@ -3438,6 +3459,9 @@ func (s *CampaignFlowImpl) expireCustomerCampaigns(ctx context.Context, customer
 			}
 
 			if err := s.campaignRepo.UpdateStatus(txCtx, campaign.ID, models.CampaignStatusExpired); err != nil {
+				return err
+			}
+			if err := repository.NewCampaignTargetingTestSampleSelectionRepository(s.db).ReleaseForCampaign(txCtx, campaign.ID); err != nil {
 				return err
 			}
 			return nil
