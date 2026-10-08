@@ -609,8 +609,9 @@ func isCurrentSmartTargetingCapacity(ctx context.Context, db *gorm.DB, selection
 }
 
 // smartTargetingBundleAllocationState computes the shared allocation
-// fingerprint used by capacity and Test sampling. It also returns the
-// unmaterialized reservation deduction needed only by exact capacity.
+// fingerprint used by capacity and Test sampling. Active Test reservations
+// alter the candidate population, but are not deducted here because the
+// audience query already excludes their concrete members.
 func smartTargetingBundleAllocationState(ctx context.Context, db *gorm.DB, bundleID, currentCampaignID uint) (int64, string, error) {
 	if bundleID == 0 {
 		return 0, "", ErrBundleNotFound
@@ -622,10 +623,18 @@ func smartTargetingBundleAllocationState(ctx context.Context, db *gorm.DB, bundl
 	if err != nil {
 		return 0, "", err
 	}
-	return smartTargetingBundleAllocationStateFromRows(bundleID, rows)
+	activeTestReservations, err := repository.ListBundleActiveTestReservations(ctx, db, bundleID, currentCampaignID)
+	if err != nil {
+		return 0, "", err
+	}
+	return smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(bundleID, rows, activeTestReservations)
 }
 
 func smartTargetingBundleAllocationStateFromRows(bundleID uint, rows []repository.BundleCampaignAllocation) (int64, string, error) {
+	return smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(bundleID, rows, nil)
+}
+
+func smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(bundleID uint, rows []repository.BundleCampaignAllocation, activeTestReservations []repository.BundleActiveTestReservation) (int64, string, error) {
 	if bundleID == 0 {
 		return 0, "", ErrBundleNotFound
 	}
@@ -648,6 +657,26 @@ func smartTargetingBundleAllocationStateFromRows(bundleID uint, rows []repositor
 		parts = append(parts, strconv.FormatUint(uint64(row.CampaignID), 10)+":"+strconv.FormatUint(amount, 10)+":"+string(row.Status)+":"+strconv.FormatBool(row.Materialized))
 	}
 	fingerprintInput := "v3|bundle=" + strconv.FormatUint(uint64(bundleID), 10) + "|allocations=" + strings.Join(parts, ",")
+	if len(activeTestReservations) > 0 {
+		reservations := append([]repository.BundleActiveTestReservation(nil), activeTestReservations...)
+		sort.Slice(reservations, func(i, j int) bool {
+			if reservations[i].CampaignID != reservations[j].CampaignID {
+				return reservations[i].CampaignID < reservations[j].CampaignID
+			}
+			return reservations[i].SelectionID < reservations[j].SelectionID
+		})
+		reservationParts := make([]string, 0, len(reservations))
+		for _, reservation := range reservations {
+			if reservation.CampaignID == 0 || reservation.SelectionID <= 0 || reservation.AudienceCount <= 0 {
+				return 0, "", fmt.Errorf("active Test reservation is invalid")
+			}
+			reservationParts = append(reservationParts,
+				strconv.FormatUint(uint64(reservation.CampaignID), 10)+":"+
+					strconv.FormatInt(reservation.SelectionID, 10)+":"+
+					strconv.FormatInt(reservation.AudienceCount, 10))
+		}
+		fingerprintInput += "|active_test_reservations=" + strings.Join(reservationParts, ",")
+	}
 	return total, hashSmartTargetingCapacityString(fingerprintInput), nil
 }
 
