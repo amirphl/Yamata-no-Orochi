@@ -217,4 +217,44 @@ func TestSmartTargetingBundleAllocationFingerprintTracksSamplingPopulationChange
 	}
 }
 
+func TestSmartTargetingBundleAllocationFingerprintTracksActiveTestReservationsWithoutDoubleDeduction(t *testing.T) {
+	audience := uint64(600)
+	allocations := []repository.BundleCampaignAllocation{
+		{CampaignID: 11, NumAudience: &audience, Status: models.CampaignStatusApproved, Materialized: false},
+	}
+	deduction, withoutReservation, err := smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(3, allocations, nil)
+	if err != nil || deduction != 600 {
+		t.Fatalf("allocation state without Test reservation = (%d, %q, %v), want deduction 600", deduction, withoutReservation, err)
+	}
+
+	deduction, withReservation, err := smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(3, allocations, []repository.BundleActiveTestReservation{
+		{CampaignID: 23, SelectionID: 41, AudienceCount: 600},
+	})
+	if err != nil || deduction != 600 {
+		t.Fatalf("allocation state with Test reservation = (%d, %q, %v), want unchanged deduction 600", deduction, withReservation, err)
+	}
+	if withoutReservation == withReservation {
+		t.Fatal("allocation fingerprint did not change when an active Test reservation changed the candidate population")
+	}
+
+	_, reordered, err := smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(3, allocations, []repository.BundleActiveTestReservation{
+		{CampaignID: 29, SelectionID: 45, AudienceCount: 200},
+		{CampaignID: 23, SelectionID: 41, AudienceCount: 600},
+	})
+	if err != nil {
+		t.Fatalf("build reservation fingerprint: %v", err)
+	}
+	_, reorderedAgain, err := smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(3, allocations, []repository.BundleActiveTestReservation{
+		{CampaignID: 23, SelectionID: 41, AudienceCount: 600},
+		{CampaignID: 29, SelectionID: 45, AudienceCount: 200},
+	})
+	if err != nil || reordered != reorderedAgain {
+		t.Fatalf("active Test reservation fingerprint must be deterministic: %q, %q, %v", reordered, reorderedAgain, err)
+	}
+
+	if _, _, err := smartTargetingBundleAllocationStateFromRowsAndActiveTestReservations(3, allocations, []repository.BundleActiveTestReservation{{CampaignID: 23, SelectionID: 41}}); err == nil {
+		t.Fatal("allocation fingerprint accepted an active Test reservation without members")
+	}
+}
+
 func floatPtr(value float64) *float64 { return &value }
