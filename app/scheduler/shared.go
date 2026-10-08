@@ -366,10 +366,17 @@ func loadReservedBundleAudience(ctx context.Context, repo repository.AudiencePro
 	if len(rows) != len(reserved) {
 		return nil, nil, nil, fmt.Errorf("persisted bundle audience allocation is incomplete: expected=%d available=%d", len(reserved), len(rows))
 	}
+	byID := make(map[int64]*models.AudienceProfile, len(rows))
+	for _, row := range rows {
+		if row != nil {
+			byID[int64(row.ID)] = row
+		}
+	}
 	phones := make([]string, 0, len(rows))
 	ids := make([]int64, 0, len(rows))
 	uids := make([]string, 0, len(rows))
-	for _, row := range rows {
+	for _, audienceID := range reserved {
+		row := byID[audienceID]
 		if row == nil || row.PhoneNumber == nil || strings.TrimSpace(*row.PhoneNumber) == "" {
 			return nil, nil, nil, errors.New("persisted bundle audience profile has no usable phone number")
 		}
