@@ -70,7 +70,7 @@ func TestSmartTargetingTestSamplingTagIDsPreservePersistedOrder(t *testing.T) {
 	}
 }
 
-func TestValidateSchedulerSelectedAudienceCountAllowsSmartTestBestEffort(t *testing.T) {
+func TestValidateSchedulerSelectedAudienceCountRequiresPersistedSmartTestCount(t *testing.T) {
 	phase := string(models.CampaignPhaseTest)
 	sampleSize := uint64(600)
 	campaign := dto.BotGetCampaignResponse{
@@ -79,12 +79,12 @@ func TestValidateSchedulerSelectedAudienceCountAllowsSmartTestBestEffort(t *test
 		Phase:            &phase,
 		SampleSizePerTag: &sampleSize,
 	}
-	for _, selected := range []int{0, 600, 1_200} {
+	for _, selected := range []int{1_200} {
 		if err := validateSchedulerSelectedAudienceCount(campaign, 1_200, selected); err != nil {
-			t.Fatalf("best-effort selected count %d was rejected: %v", selected, err)
+			t.Fatalf("persisted selected count %d was rejected: %v", selected, err)
 		}
 	}
-	for _, selected := range []int{599, 1_201, 1_800} {
+	for _, selected := range []int{0, 599, 600, 1_201, 1_800} {
 		if err := validateSchedulerSelectedAudienceCount(campaign, 1_200, selected); err == nil {
 			t.Fatalf("invalid selected count %d was accepted", selected)
 		}
