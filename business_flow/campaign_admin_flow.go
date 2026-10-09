@@ -546,6 +546,14 @@ func (s *AdminCampaignFlowImpl) ApproveCampaign(ctx context.Context, req *dto.Ad
 				if intentErr != nil {
 					return intentErr
 				}
+				if campaign.ActiveSmartTargetingTestSelectionID == nil {
+					return ErrSmartTargetingTestPreviewRequired
+				}
+				snapshot, selectionErr := repository.NewCampaignTargetingTestSampleSelectionRepository(s.db).
+					ActiveReservedForCampaign(txCtx, campaign.ID, *campaign.ActiveSmartTargetingTestSelectionID)
+				if selectionErr != nil || snapshot == nil || int64(len(snapshot.Members)) != int64(intent.effective) {
+					return ErrSmartTargetingTestPreviewRequired
+				}
 				requiredAudience = intent.effective
 				campaign.NumAudience = utils.ToPtr(requiredAudience)
 			} else if campaign.NumAudience != nil {
@@ -855,6 +863,9 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 	var customer models.Customer
 
 	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		if err := repository.LockCampaignForUpdate(txCtx, req.CampaignID); err != nil {
+			return err
+		}
 		var err error
 		campaign, err = s.campaignRepo.ByID(txCtx, req.CampaignID)
 		if err != nil {
@@ -977,6 +988,9 @@ func (s *AdminCampaignFlowImpl) RejectCampaign(ctx context.Context, req *dto.Adm
 		campaign.Status = models.CampaignStatusRejected
 		campaign.Comment = &req.Comment
 		campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+		if err := repository.NewCampaignTargetingTestSampleSelectionRepository(s.db).ReleaseForCampaign(txCtx, campaign.ID); err != nil {
+			return err
+		}
 		if err := s.campaignRepo.Update(txCtx, *campaign); err != nil {
 			return err
 		}
@@ -1097,6 +1111,9 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 	var customer models.Customer
 
 	err := repository.WithTransaction(ctx, s.db, func(txCtx context.Context) error {
+		if err := repository.LockCampaignForUpdate(txCtx, req.CampaignID); err != nil {
+			return err
+		}
 		var err error
 		campaign, err = s.campaignRepo.ByID(txCtx, req.CampaignID)
 		if err != nil {
@@ -1303,6 +1320,9 @@ func (s *AdminCampaignFlowImpl) CancelCampaign(ctx context.Context, req *dto.Adm
 		campaign.Status = models.CampaignStatusCancelledByAdmin
 		campaign.Comment = &req.Comment
 		campaign.UpdatedAt = utils.ToPtr(utils.UTCNow())
+		if err := repository.NewCampaignTargetingTestSampleSelectionRepository(s.db).ReleaseForCampaign(txCtx, campaign.ID); err != nil {
+			return err
+		}
 		if err := s.campaignRepo.Update(txCtx, *campaign); err != nil {
 			return err
 		}
