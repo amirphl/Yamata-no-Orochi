@@ -16,7 +16,7 @@ Bundle ownership. Routes use the `/api/v1` prefix and return the common
 | `POST /campaigns/{uuid}/smart-targeting/capacity-calculations` | Start or reuse an asynchronous exact-capacity generation. |
 | `GET /campaigns/{uuid}/smart-targeting/capacity-calculations` | Read the current/latest generation state. |
 | `GET /campaigns/{uuid}/smart-targeting/capacity-calculations/{calculation_id}` | Read one historical generation. |
-| `POST /campaigns/{uuid}/smart-targeting/test-sampling-preview` | Start or reuse an asynchronous Test-phase sampling job. |
+| `POST /campaigns/{uuid}/smart-targeting/test-sampling-preview` | Start a new immutable asynchronous Test-phase sampling generation. |
 | `GET /campaigns/{uuid}/smart-targeting/test-sampling-preview` | Read the current/latest sampling job state. |
 | `GET /campaigns/{uuid}/smart-targeting/test-sampling-preview/{calculation_id}` | Read one historical sampling job. |
 
@@ -181,10 +181,10 @@ A Smart Targeting campaign with `phase: "test"` requires a positive
 audience count do not override the derived Test count.
 
 Sampling can be requested before any exact-capacity generation exists. The
-POST endpoint responds with HTTP 202 after durably submitting the job. A
-process with `SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED=true` executes
-sampling asynchronously. Duplicate submissions for the same current inputs
-reuse the active or completed job.
+POST endpoint responds with HTTP 202 after durably submitting a new generation.
+A process with `SMART_TARGETING_TEST_SAMPLING_SCHEDULER_ENABLED=true` executes
+sampling asynchronously. A later request supersedes an in-flight prior request
+and becomes the only generation eligible to publish the active selection.
 
 Poll the collection GET for the current/latest job or the ID-scoped GET for a
 specific historical job. Status is `not_calculated`, `calculating`,
@@ -207,28 +207,33 @@ A current calculated response contains the complete sampling order, ordered
 satisfied and unsatisfied results, each tag’s display name and available count,
 sample size, effective count, and cost.
 
-Preview persists only satisfied tag IDs in user order, an input fingerprint,
-the preview timestamp, and the derived compatibility value `num_audience`.
-Audience IDs are never preview state. The input fingerprint covers the
-campaign, Bundle, ordered selection, sample size, score classes, and delivery
-color eligibility. Each completed job also stores its own Bundle-allocation
-fingerprint. Editing sampling inputs or changing Bundle allocation state makes
-the preview stale; starting an exact-capacity generation by itself does not.
+Every sampling request is an immutable, linearly ordered generation. A
+completed generation persists its exact ordered audience IDs and their selected
+tag attribution in a private sampling snapshot, as well as the public
+satisfied-tag summary, input fingerprint, preview timestamp, and derived
+compatibility value `num_audience`. The API never exposes those audience IDs.
+Only the newest requested generation may become the campaign's active sample;
+an older worker cannot replace it after a newer request. The input fingerprint
+covers the campaign, Bundle, ordered selection, sample size, score classes,
+and delivery color eligibility. Each completed job also stores its own
+Bundle-allocation fingerprint. Editing sampling inputs or changing Bundle
+allocation state makes the preview stale; starting an exact-capacity generation
+by itself does not.
 
 Finalization requires a current preview with at least one satisfied tag and a
-current exact-capacity generation. At
-scheduler time, only persisted satisfied tags are attempted, in the same order,
-and each is sampled again while holding the Bundle lock. A tag that no longer
-has a full sample is skipped. Delivery can therefore be lower than preview but
-never higher. Billing retains the finalized preview intent and existing
-sent-count reconciliation refunds the unsent difference; an all-skipped run
-records zero delivery for full reconciliation.
+current exact-capacity generation. Under the Bundle lock it activates a
+releasable reservation for the exact persisted snapshot. At scheduler time,
+that reservation is materialized into the normal Bundle audience allocation
+ledger and the scheduler sends those stored audiences in the saved order; it
+does not sample again or substitute candidates. Rejecting, cancelling, or
+expiring a campaign releases an unmaterialized reservation while retaining the
+immutable sampling history. Missing/unsafe persisted profiles fail safely and
+are never replaced with fresh candidates.
 
-Preview excludes audiences already materialized by earlier Bundle campaigns
-and audiences in the Bundle exclusion list. Approved campaigns do not yet have
-concrete audience IDs, so their future per-tag allocations cannot be reserved
-by preview; scheduler preparation under the Bundle lock is the final
-availability decision.
+Preview excludes audiences already materialized by earlier Bundle campaigns,
+active Test-sample reservations, and audiences in the Bundle exclusion list.
+An active reservation prevents another campaign from consuming a finalized
+sample before runtime, without making abandoned preview history permanent.
 
 ## Execution-phase ordering
 
