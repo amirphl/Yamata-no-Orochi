@@ -102,6 +102,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 			return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Failed to resolve campaign targeting tags", err)
 		}
 		var smartTestSatisfiedTagIDs []uint
+		var smartTestSelectionID *int64
 		numAudiences := c.NumAudience
 		if c.Spec.UsesSmartTargeting() && c.Phase == models.CampaignPhaseTest {
 			intent, intentErr := currentSmartTargetingTestSamplingIntent(ctx, s.selectedTagRepo, c, true)
@@ -109,6 +110,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 				return nil, NewBusinessError("BOT_LIST_READY_CAMPAIGNS_FAILED", "Smart Targeting Test sampling intent is invalid", intentErr)
 			}
 			smartTestSatisfiedTagIDs = append([]uint(nil), intent.satisfied...)
+			smartTestSelectionID = c.ActiveSmartTargetingTestSelectionID
 			numAudiences = utils.ToPtr(intent.effective)
 		}
 
@@ -156,6 +158,7 @@ func (s *BotCampaignFlowImpl) ListReadyCampaigns(ctx context.Context, platform *
 			NumAudiences:                      numAudiences,
 			SampleSizePerTag:                  c.SampleSizePerTag,
 			SmartTargetingTestSatisfiedTagIDs: smartTestSatisfiedTagIDs,
+			SmartTargetingTestSelectionID:     smartTestSelectionID,
 
 			BundleID: c.BundleID,
 			Phase:    campaignPhasePtr(c.Phase),
