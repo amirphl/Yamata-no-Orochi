@@ -16,9 +16,9 @@ import (
 
 const schedulerSmartTargetingCapacityVersion = 3
 
-// selectAndReserveExactSmartTargetingCandidates performs selection only after
-// the scheduler has claimed a campaign for execution. Capacity generations
-// contain counts, never preselected audience rows.
+// selectAndReserveExactSmartTargetingCandidates selects execution campaigns
+// after a scheduler claim. Test campaigns materialize their already persisted
+// snapshot; only execution-phase campaigns select new candidate rows here.
 func selectAndReserveExactSmartTargetingCandidates(
 	ctx context.Context,
 	db *gorm.DB,
@@ -44,8 +44,8 @@ func selectAndReserveExactSmartTargetingCandidates(
 			return err
 		}
 
-		selectionRepo := repository.NewBundleAudienceSelectionRepository(txDB)
-		existing, err := selectionRepo.ByCampaignID(txCtx, campaign.ID)
+		bundleSelectionRepo := repository.NewBundleAudienceSelectionRepository(txDB)
+		existing, err := bundleSelectionRepo.ByCampaignID(txCtx, campaign.ID)
 		if err != nil {
 			return err
 		}
@@ -60,6 +60,51 @@ func selectAndReserveExactSmartTargetingCandidates(
 				}
 			}
 			selectionID = existing.ID
+			return nil
+		}
+		if isTest {
+			if campaign.SmartTargetingTestSelectionID == nil || *campaign.SmartTargetingTestSelectionID <= 0 {
+				return fmt.Errorf("campaign id=%d has no persisted Smart Targeting Test audience selection", campaign.ID)
+			}
+			testSelectionRepo := repository.NewCampaignTargetingTestSampleSelectionRepository(txDB)
+			snapshot, err := testSelectionRepo.ActiveReservedForCampaign(txCtx, campaign.ID, *campaign.SmartTargetingTestSelectionID)
+			if err != nil {
+				return err
+			}
+			if int64(len(snapshot.Members)) != requested {
+				return fmt.Errorf("persisted Smart Targeting Test audience selection count mismatch for campaign %d", campaign.ID)
+			}
+			persistedIDs := make([]int64, 0, len(snapshot.Members))
+			for position, member := range snapshot.Members {
+				if member.AudienceID <= 0 || member.AssignedTagID == 0 || member.SelectionOrder != int64(position) {
+					return fmt.Errorf("persisted Smart Targeting Test audience selection is invalid for campaign %d", campaign.ID)
+				}
+				persistedIDs = append(persistedIDs, member.AudienceID)
+			}
+			selection, err := bundleSelectionRepo.InsertForCampaign(txCtx, campaign.CustomerID, *campaign.BundleID, campaign.ID, correlationID, persistedIDs)
+			if err != nil {
+				return err
+			}
+			phones, ids, uids, err = loadReservedBundleAudience(txCtx, repository.NewAudienceProfileRepository(txDB), persistedIDs)
+			if err != nil {
+				return err
+			}
+			attributions := make([]models.CampaignAudienceTagAttribution, 0, len(snapshot.Members))
+			for position, member := range snapshot.Members {
+				attributions = append(attributions, models.CampaignAudienceTagAttribution{
+					CampaignID: campaign.ID, BundleID: *campaign.BundleID, BundleAudienceSelectionID: selection.ID,
+					AudienceID: member.AudienceID, AssignedTagID: member.AssignedTagID, PhaseType: models.CampaignPhaseTest,
+					SelectionMethod: "random_per_tag", SelectionOrder: int64(position), AudienceScore: member.AudienceScore,
+					CreatedAt: time.Now().UTC(),
+				})
+			}
+			if err := txDB.WithContext(txCtx).CreateInBatches(&attributions, 1000).Error; err != nil {
+				return err
+			}
+			if err := testSelectionRepo.Materialize(txCtx, campaign.ID, snapshot.ID, int64(len(snapshot.Members))); err != nil {
+				return err
+			}
+			selectionID = selection.ID
 			return nil
 		}
 
@@ -166,7 +211,7 @@ func selectAndReserveExactSmartTargetingCandidates(
 				return err
 			}
 		}
-		selection, err := selectionRepo.InsertForCampaign(txCtx, campaign.CustomerID, *campaign.BundleID, campaign.ID, correlationID, ids)
+		selection, err := bundleSelectionRepo.InsertForCampaign(txCtx, campaign.CustomerID, *campaign.BundleID, campaign.ID, correlationID, ids)
 		if err != nil {
 			return err
 		}
@@ -367,7 +412,7 @@ func validateSchedulerSelectedAudienceCount(campaign dto.BotGetCampaignResponse,
 	if campaign.SampleSizePerTag == nil || *campaign.SampleSizePerTag == 0 {
 		return fmt.Errorf("Smart Targeting Test campaign %d has invalid sample_size_per_tag", campaign.ID)
 	}
-	if int64(selected) > intended || uint64(selected)%*campaign.SampleSizePerTag != 0 {
+	if int64(selected) != intended || uint64(selected)%*campaign.SampleSizePerTag != 0 {
 		return fmt.Errorf("Smart Targeting Test campaign %d prepared an invalid audience count: intended=%d selected=%d", campaign.ID, intended, selected)
 	}
 	return nil
